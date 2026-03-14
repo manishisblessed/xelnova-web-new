@@ -11,12 +11,12 @@ import { analyticsData, formatINR } from "@/lib/mock-data";
 
 const SalesChart = dynamic(
   () => import("@/components/charts/analytics-charts").then((m) => m.SalesChart),
-  { loading: () => <div className="h-72 bg-warm-100 rounded-xl animate-pulse" />, ssr: false }
+  { loading: () => <div className="h-72 bg-warm-100 rounded-xl animate-pulse" /> }
 );
 
 const CategoryChart = dynamic(
   () => import("@/components/charts/analytics-charts").then((m) => m.CategoryChart),
-  { loading: () => <div className="h-64 bg-warm-100 rounded-xl animate-pulse" />, ssr: false }
+  { loading: () => <div className="h-64 bg-warm-100 rounded-xl animate-pulse" /> }
 );
 
 export default function AnalyticsPage() {

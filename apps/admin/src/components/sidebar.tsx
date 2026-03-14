@@ -106,7 +106,7 @@ export function Sidebar() {
     <motion.aside
       initial={false}
       animate={{ width: collapsed ? 72 : 250 }}
-      transition={{ duration: 0.28, ease: [0.4, 0, 0.2, 1] }}
+      transition={{ duration: 0.28, ease: [0.4, 0, 0.2, 1] as const }}
       className="relative hidden h-screen shrink-0 flex-col border-r border-border bg-surface-0 lg:flex"
     >
       {/* Logo + Collapse */}

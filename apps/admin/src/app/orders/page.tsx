@@ -116,7 +116,7 @@ export default function OrdersPage() {
             <motion.div
               key={stat.label}
               variants={{ hidden: { opacity: 0, y: 12 }, visible: { opacity: 1, y: 0 } }}
-              transition={{ duration: 0.25, ease: [0.4, 0, 0.2, 1] }}
+              transition={{ duration: 0.25, ease: [0.4, 0, 0.2, 1] as const }}
               className="bg-card border border-border rounded-2xl shadow-card overflow-hidden transition-[transform,box-shadow,border-color] duration-200 ease-out hover:scale-[1.02] hover:shadow-[var(--shadow-card-hover)] hover:border-white/10"
             >
               <div className={stat.stripe} />
@@ -183,7 +183,7 @@ export default function OrdersPage() {
                   key={`${order.id}-${currentPage}`}
                   initial={{ opacity: 0, y: 6 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.22, delay: idx * 0.03, ease: [0.4, 0, 0.2, 1] }}
+                  transition={{ duration: 0.22, delay: idx * 0.03, ease: [0.4, 0, 0.2, 1] as const }}
                   className="transition-colors duration-150 hover:bg-white/[0.02]"
                 >
                   <td>

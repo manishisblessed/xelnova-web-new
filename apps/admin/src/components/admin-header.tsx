@@ -136,7 +136,7 @@ export function AdminHeader() {
                 initial={{ opacity: 0, y: 4, scale: 0.98 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: 4, scale: 0.98 }}
-                transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] }}
+                transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] as const }}
                 className="absolute right-0 top-12 z-50 w-48 overflow-hidden rounded-xl border border-border bg-surface-3 shadow-dropdown"
               >
                 <div className="border-b border-border px-4 py-3">

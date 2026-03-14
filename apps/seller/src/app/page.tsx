@@ -21,7 +21,6 @@ import {
 
 const RevenueChart = dynamic(() => import("@/components/charts/revenue-chart"), {
   loading: () => <div className="h-64 sm:h-72 bg-warm-100 rounded-xl animate-pulse" />,
-  ssr: false,
 });
 
 const statCards = [
