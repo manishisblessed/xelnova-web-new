@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { motion } from "framer-motion";
 import {
   Store,
   MapPin,
@@ -15,16 +14,6 @@ import {
   Upload,
 } from "lucide-react";
 import { sellerProfile } from "@/lib/mock-data";
-
-const container = {
-  hidden: { opacity: 0 },
-  show: { opacity: 1, transition: { staggerChildren: 0.06 } },
-};
-
-const item = {
-  hidden: { opacity: 0, y: 16 },
-  show: { opacity: 1, y: 0, transition: { duration: 0.35, ease: "easeOut" as const } },
-};
 
 const inputClasses =
   "w-full h-10 px-4 rounded-xl bg-warm-100 border border-warm-200 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-200 focus:border-amber-400 transition-all";
@@ -52,14 +41,14 @@ export default function StoreSettingsPage() {
   );
 
   return (
-    <motion.div variants={container} initial="hidden" animate="show" className="max-w-4xl mx-auto space-y-8 pb-8">
-      <motion.div variants={item}>
+    <div className="max-w-4xl mx-auto space-y-8 pb-8">
+      <div>
         <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 font-display tracking-tight">Store Settings</h1>
         <p className="text-sm text-slate-500 mt-1">Manage your store profile, payments, and preferences</p>
-      </motion.div>
+      </div>
 
       {/* Store profile */}
-      <motion.div variants={item} className="bg-white rounded-2xl border border-warm-200 shadow-soft p-6">
+      <div className="bg-white rounded-2xl border border-warm-200 shadow-soft p-6">
         <div className="flex items-center gap-3 mb-5">
           <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center text-amber-600">
             <Store size={20} />
@@ -97,10 +86,10 @@ export default function StoreSettingsPage() {
             </div>
           </div>
         </div>
-      </motion.div>
+      </div>
 
       {/* Contact */}
-      <motion.div variants={item} className="bg-white rounded-2xl border border-warm-200 shadow-soft p-6">
+      <div className="bg-white rounded-2xl border border-warm-200 shadow-soft p-6">
         <div className="flex items-center gap-3 mb-5">
           <div className="w-10 h-10 rounded-xl bg-sky-100 flex items-center justify-center text-sky-600">
             <Phone size={20} />
@@ -137,10 +126,10 @@ export default function StoreSettingsPage() {
             </div>
           </div>
         </div>
-      </motion.div>
+      </div>
 
       {/* Tax & verification */}
-      <motion.div variants={item} className="bg-white rounded-2xl border border-warm-200 shadow-soft p-6">
+      <div className="bg-white rounded-2xl border border-warm-200 shadow-soft p-6">
         <div className="flex items-center gap-3 mb-5">
           <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center text-emerald-600">
             <Shield size={20} />
@@ -163,10 +152,10 @@ export default function StoreSettingsPage() {
             Your store is <strong>verified</strong> and in good standing.
           </span>
         </div>
-      </motion.div>
+      </div>
 
       {/* Payment */}
-      <motion.div variants={item} className="bg-white rounded-2xl border border-warm-200 shadow-soft p-6">
+      <div className="bg-white rounded-2xl border border-warm-200 shadow-soft p-6">
         <div className="flex items-center gap-3 mb-5">
           <div className="w-10 h-10 rounded-xl bg-violet-100 flex items-center justify-center text-violet-600">
             <CreditCard size={20} />
@@ -191,10 +180,10 @@ export default function StoreSettingsPage() {
             <input type="text" defaultValue={sellerProfile.name} className={inputClasses} />
           </div>
         </div>
-      </motion.div>
+      </div>
 
       {/* Notifications */}
-      <motion.div variants={item} className="bg-white rounded-2xl border border-warm-200 shadow-soft p-6">
+      <div className="bg-white rounded-2xl border border-warm-200 shadow-soft p-6">
         <div className="flex items-center gap-3 mb-5">
           <div className="w-10 h-10 rounded-xl bg-rose-100 flex items-center justify-center text-rose-600">
             <Bell size={20} />
@@ -217,10 +206,10 @@ export default function StoreSettingsPage() {
             </div>
           ))}
         </div>
-      </motion.div>
+      </div>
 
       {/* Save */}
-      <motion.div variants={item} className="flex items-center justify-end gap-3 pb-4">
+      <div className="flex items-center justify-end gap-3 pb-4">
         <button className="px-5 py-2.5 rounded-xl border border-warm-200 text-sm font-medium text-slate-600 hover:bg-warm-100 transition-colors">
           Cancel
         </button>
@@ -228,7 +217,7 @@ export default function StoreSettingsPage() {
           <Save size={16} />
           Save Changes
         </button>
-      </motion.div>
-    </motion.div>
+      </div>
+    </div>
   );
 }

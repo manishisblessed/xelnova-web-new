@@ -16,16 +16,6 @@ import {
 import Link from "next/link";
 import { products, formatINR } from "@/lib/mock-data";
 
-const container = {
-  hidden: { opacity: 0 },
-  show: { opacity: 1, transition: { staggerChildren: 0.06 } },
-};
-
-const item = {
-  hidden: { opacity: 0, y: 16 },
-  show: { opacity: 1, y: 0, transition: { duration: 0.35 } },
-};
-
 const statusColors: Record<string, string> = {
   Active: "bg-emerald-100 text-emerald-800",
   "Pending Approval": "bg-amber-100 text-amber-800",
@@ -51,8 +41,8 @@ export default function ProductsPage() {
   });
 
   return (
-    <motion.div variants={container} initial="hidden" animate="show" className="space-y-6">
-      <motion.div variants={item} className="flex items-center justify-between">
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 font-display">My Products</h1>
           <p className="text-sm text-slate-500 mt-1">{products.length} products in your catalog</p>
@@ -64,9 +54,9 @@ export default function ProductsPage() {
           <Plus size={16} />
           Add New Product
         </Link>
-      </motion.div>
+      </div>
 
-      <motion.div variants={item} className="bg-white rounded-2xl border border-warm-200 shadow-soft p-4">
+      <div className="bg-white rounded-2xl border border-warm-200 shadow-soft p-4">
         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
           <div className="relative flex-1 w-full sm:max-w-sm">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -113,14 +103,13 @@ export default function ProductsPage() {
             </div>
           </div>
         </div>
-      </motion.div>
+      </div>
 
       {viewMode === "grid" ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {filteredProducts.map((product) => (
-            <motion.div
+            <div
               key={product.id}
-              variants={item}
               className="bg-white rounded-2xl border border-warm-200 shadow-soft overflow-hidden hover:shadow-card transition-all duration-200 hover:-translate-y-0.5 group"
             >
               <div className="relative aspect-square bg-warm-100">
@@ -188,11 +177,11 @@ export default function ProductsPage() {
                   </span>
                 </div>
               </div>
-            </motion.div>
+            </div>
           ))}
         </div>
       ) : (
-        <motion.div variants={item} className="bg-white rounded-2xl border border-warm-200 shadow-soft overflow-hidden">
+        <div className="bg-white rounded-2xl border border-warm-200 shadow-soft overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
@@ -252,7 +241,7 @@ export default function ProductsPage() {
               </tbody>
             </table>
           </div>
-        </motion.div>
+        </div>
       )}
 
       {filteredProducts.length === 0 && (
@@ -267,6 +256,6 @@ export default function ProductsPage() {
           </button>
         </div>
       )}
-    </motion.div>
+    </div>
   );
 }

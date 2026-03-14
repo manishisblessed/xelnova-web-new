@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { motion } from "framer-motion";
 import {
   Palette,
   Plus,
@@ -14,16 +13,6 @@ import {
   ExternalLink,
   Package,
 } from "lucide-react";
-
-const container = {
-  hidden: { opacity: 0 },
-  show: { opacity: 1, transition: { staggerChildren: 0.06 } },
-};
-
-const item = {
-  hidden: { opacity: 0, y: 16 },
-  show: { opacity: 1, y: 0, transition: { duration: 0.35, ease: "easeOut" as const } },
-};
 
 interface Brand {
   id: string;
@@ -65,8 +54,8 @@ export default function BrandManagementPage() {
   const pendingCount = brands.filter((b) => b.status === "Pending").length;
 
   return (
-    <motion.div variants={container} initial="hidden" animate="show" className="space-y-8 pb-8">
-      <motion.div variants={item} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div className="space-y-8 pb-8">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 font-display tracking-tight">Brand Management</h1>
           <p className="text-sm text-slate-500 mt-1">Manage the brands you sell on the marketplace</p>
@@ -78,11 +67,11 @@ export default function BrandManagementPage() {
           <Plus size={16} />
           Request New Brand
         </button>
-      </motion.div>
+      </div>
 
       {/* Summary */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <motion.div variants={item} className="bg-white rounded-2xl border border-warm-200 p-5 shadow-soft flex items-center gap-4">
+        <div className="bg-white rounded-2xl border border-warm-200 p-5 shadow-soft flex items-center gap-4">
           <div className="w-12 h-12 rounded-xl bg-violet-100 flex items-center justify-center shrink-0">
             <Palette size={22} className="text-violet-600" />
           </div>
@@ -90,8 +79,8 @@ export default function BrandManagementPage() {
             <p className="text-2xl font-bold text-slate-900">{brands.length}</p>
             <p className="text-sm text-slate-500">Total brands</p>
           </div>
-        </motion.div>
-        <motion.div variants={item} className="bg-white rounded-2xl border border-warm-200 p-5 shadow-soft flex items-center gap-4">
+        </div>
+        <div className="bg-white rounded-2xl border border-warm-200 p-5 shadow-soft flex items-center gap-4">
           <div className="w-12 h-12 rounded-xl bg-emerald-100 flex items-center justify-center shrink-0">
             <CheckCircle2 size={22} className="text-emerald-600" />
           </div>
@@ -99,8 +88,8 @@ export default function BrandManagementPage() {
             <p className="text-2xl font-bold text-slate-900">{approvedCount}</p>
             <p className="text-sm text-slate-500">Approved</p>
           </div>
-        </motion.div>
-        <motion.div variants={item} className="bg-white rounded-2xl border border-warm-200 p-5 shadow-soft flex items-center gap-4">
+        </div>
+        <div className="bg-white rounded-2xl border border-warm-200 p-5 shadow-soft flex items-center gap-4">
           <div className="w-12 h-12 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
             <Clock size={22} className="text-amber-600" />
           </div>
@@ -108,17 +97,12 @@ export default function BrandManagementPage() {
             <p className="text-2xl font-bold text-slate-900">{pendingCount}</p>
             <p className="text-sm text-slate-500">Pending approval</p>
           </div>
-        </motion.div>
+        </div>
       </div>
 
       {/* Add brand form */}
       {showAddForm && (
-        <motion.div
-          initial={{ opacity: 0, height: 0 }}
-          animate={{ opacity: 1, height: "auto" }}
-          exit={{ opacity: 0, height: 0 }}
-          className="bg-white rounded-2xl border border-warm-200 shadow-soft p-6"
-        >
+        <div className="bg-white rounded-2xl border border-warm-200 shadow-soft p-6">
           <h2 className="text-base font-semibold text-slate-900 font-display mb-4">Request New Brand</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
@@ -160,11 +144,11 @@ export default function BrandManagementPage() {
               Submit Request
             </button>
           </div>
-        </motion.div>
+        </div>
       )}
 
       {/* Search */}
-      <motion.div variants={item} className="relative max-w-md">
+      <div className="relative max-w-md">
         <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
         <input
           type="text"
@@ -173,16 +157,15 @@ export default function BrandManagementPage() {
           placeholder="Search brands..."
           className="w-full h-10 pl-10 pr-4 rounded-xl bg-warm-100 border border-warm-200 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-200 focus:border-amber-400 transition-all"
         />
-      </motion.div>
+      </div>
 
       {/* Brand grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         {filtered.map((brand) => {
           const status = statusConfig[brand.status];
           return (
-            <motion.div
+            <div
               key={brand.id}
-              variants={item}
               className="bg-white rounded-2xl border border-warm-200 shadow-soft overflow-hidden hover:shadow-card transition-all group"
             >
               <div className="p-5 flex flex-col items-center text-center">
@@ -216,7 +199,7 @@ export default function BrandManagementPage() {
                   </button>
                 </div>
               </div>
-            </motion.div>
+            </div>
           );
         })}
       </div>
@@ -227,6 +210,6 @@ export default function BrandManagementPage() {
           <p className="text-slate-500 text-sm">No brands match your search</p>
         </div>
       )}
-    </motion.div>
+    </div>
   );
 }

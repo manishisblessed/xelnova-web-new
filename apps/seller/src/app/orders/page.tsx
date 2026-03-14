@@ -14,16 +14,6 @@ import {
 } from "lucide-react";
 import { orders, formatINR } from "@/lib/mock-data";
 
-const container = {
-  hidden: { opacity: 0 },
-  show: { opacity: 1, transition: { staggerChildren: 0.06 } },
-};
-
-const item = {
-  hidden: { opacity: 0, y: 16 },
-  show: { opacity: 1, y: 0, transition: { duration: 0.35 } },
-};
-
 const statusColors: Record<string, string> = {
   Pending: "bg-amber-100 text-amber-800",
   Processing: "bg-sky-100 text-sky-800",
@@ -81,17 +71,16 @@ export default function OrdersPage() {
   });
 
   return (
-    <motion.div variants={container} initial="hidden" animate="show" className="space-y-6">
-      <motion.div variants={item}>
+    <div className="space-y-6">
+      <div>
         <h1 className="text-2xl font-bold text-slate-900 font-display">Orders</h1>
         <p className="text-sm text-slate-500 mt-1">Manage and track all your orders</p>
-      </motion.div>
+      </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {orderStats.map((stat) => (
-          <motion.div
+          <div
             key={stat.label}
-            variants={item}
             className="bg-white rounded-2xl border border-warm-200 shadow-soft p-4 flex items-center gap-3"
           >
             <div className={`w-10 h-10 rounded-xl ${stat.bg} flex items-center justify-center ${stat.color}`}>
@@ -101,11 +90,11 @@ export default function OrdersPage() {
               <p className="text-2xl font-bold text-slate-900">{stat.count}</p>
               <p className="text-xs text-slate-500">{stat.label}</p>
             </div>
-          </motion.div>
+          </div>
         ))}
       </div>
 
-      <motion.div variants={item} className="bg-white rounded-2xl border border-warm-200 shadow-soft p-4">
+      <div className="bg-white rounded-2xl border border-warm-200 shadow-soft p-4">
         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
           <div className="relative flex-1 w-full sm:max-w-sm">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -133,9 +122,9 @@ export default function OrdersPage() {
             />
           </div>
         </div>
-      </motion.div>
+      </div>
 
-      <motion.div variants={item} className="bg-white rounded-2xl border border-warm-200 shadow-soft overflow-hidden">
+      <div className="bg-white rounded-2xl border border-warm-200 shadow-soft overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
@@ -237,7 +226,7 @@ export default function OrdersPage() {
             <p className="text-slate-500 text-sm">No orders match your filters</p>
           </div>
         )}
-      </motion.div>
-    </motion.div>
+      </div>
+    </div>
   );
 }

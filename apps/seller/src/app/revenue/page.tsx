@@ -59,16 +59,13 @@ export default function RevenuePage() {
   ];
 
   return (
-    <motion.div variants={container} initial="hidden" animate="show" className="space-y-6">
-      <motion.div variants={item}>
+    <div className="space-y-6">
+      <div>
         <h1 className="text-2xl font-bold text-slate-900 font-display">Revenue</h1>
         <p className="text-sm text-slate-600 mt-1">Track your earnings, payouts, and transactions</p>
-      </motion.div>
+      </div>
 
-      <motion.div
-        variants={item}
-        className="relative overflow-hidden rounded-2xl p-6 bg-gradient-to-br from-amber-400 to-amber-600"
-      >
+      <div className="relative overflow-hidden rounded-2xl p-6 bg-gradient-to-br from-amber-400 to-amber-600">
         <div className="absolute top-0 right-0 w-64 h-64 rounded-full bg-white/10 -translate-y-1/2 translate-x-1/4" />
         <div className="absolute bottom-0 left-0 w-32 h-32 rounded-full bg-white/5 translate-y-1/2 -translate-x-1/4" />
         <div className="relative z-10">
@@ -83,13 +80,12 @@ export default function RevenuePage() {
             Request Payout
           </button>
         </div>
-      </motion.div>
+      </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {summaryCards.map((card) => (
-          <motion.div
+          <div
             key={card.label}
-            variants={item}
             className="bg-white rounded-2xl border border-warm-200 shadow-soft p-5 hover:border-warm-300 transition-all duration-200 hover:-translate-y-0.5"
           >
             <div className={`w-10 h-10 rounded-lg ${card.bg} flex items-center justify-center ${card.color} mb-3`}>
@@ -97,11 +93,11 @@ export default function RevenuePage() {
             </div>
             <p className="text-xl font-bold text-slate-900">{card.value}</p>
             <p className="text-xs text-slate-500 mt-1">{card.label}</p>
-          </motion.div>
+          </div>
         ))}
       </div>
 
-      <motion.div variants={item} className="bg-white rounded-2xl border border-warm-200 shadow-soft overflow-hidden">
+      <div className="bg-white rounded-2xl border border-warm-200 shadow-soft overflow-hidden">
         <div className="flex items-center justify-between p-5 border-b border-warm-200">
           <h2 className="text-base font-semibold text-slate-900 font-display">Transaction History</h2>
           <button className="text-xs text-amber-600 hover:text-amber-700 font-medium">
@@ -169,7 +165,7 @@ export default function RevenuePage() {
             </tbody>
           </table>
         </div>
-      </motion.div>
-    </motion.div>
+      </div>
+    </div>
   );
 }

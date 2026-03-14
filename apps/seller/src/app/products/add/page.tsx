@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { motion } from "framer-motion";
 import {
   ArrowLeft,
   Upload,
@@ -12,16 +11,6 @@ import {
   ImageIcon,
 } from "lucide-react";
 import Link from "next/link";
-
-const container = {
-  hidden: { opacity: 0 },
-  show: { opacity: 1, transition: { staggerChildren: 0.06 } },
-};
-
-const item = {
-  hidden: { opacity: 0, y: 16 },
-  show: { opacity: 1, y: 0, transition: { duration: 0.35 } },
-};
 
 const categories = [
   "Select Category",
@@ -87,8 +76,8 @@ export default function AddProductPage() {
   };
 
   return (
-    <motion.div variants={container} initial="hidden" animate="show" className="max-w-4xl mx-auto space-y-6">
-      <motion.div variants={item} className="flex items-center gap-3">
+    <div className="max-w-4xl mx-auto space-y-6">
+      <div className="flex items-center gap-3">
         <Link
           href="/products"
           className="w-9 h-9 rounded-lg border border-warm-200 flex items-center justify-center hover:bg-warm-100 transition-colors text-slate-500"
@@ -99,9 +88,9 @@ export default function AddProductPage() {
           <h1 className="text-2xl font-bold text-slate-900 font-display">Add New Product</h1>
           <p className="text-sm text-slate-700 mt-0.5">Fill in the details to list a new product</p>
         </div>
-      </motion.div>
+      </div>
 
-      <motion.div variants={item} className="bg-white rounded-2xl border border-warm-200 shadow-soft p-6">
+      <div className="bg-white rounded-2xl border border-warm-200 shadow-soft p-6">
         <h2 className="text-base font-semibold text-slate-900 font-display mb-4">Basic Information</h2>
         <div className="space-y-4">
           <div>
@@ -129,9 +118,9 @@ export default function AddProductPage() {
             />
           </div>
         </div>
-      </motion.div>
+      </div>
 
-      <motion.div variants={item} className="bg-white rounded-2xl border border-warm-200 shadow-soft p-6">
+      <div className="bg-white rounded-2xl border border-warm-200 shadow-soft p-6">
         <h2 className="text-base font-semibold text-slate-900 font-display mb-4">Pricing</h2>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div>
@@ -168,9 +157,9 @@ export default function AddProductPage() {
             </div>
           </div>
         </div>
-      </motion.div>
+      </div>
 
-      <motion.div variants={item} className="bg-white rounded-2xl border border-warm-200 shadow-soft p-6">
+      <div className="bg-white rounded-2xl border border-warm-200 shadow-soft p-6">
         <h2 className="text-base font-semibold text-slate-900 font-display mb-4">Category & Brand</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
@@ -190,9 +179,9 @@ export default function AddProductPage() {
             </select>
           </div>
         </div>
-      </motion.div>
+      </div>
 
-      <motion.div variants={item} className="bg-white rounded-2xl border border-warm-200 shadow-soft p-6">
+      <div className="bg-white rounded-2xl border border-warm-200 shadow-soft p-6">
         <h2 className="text-base font-semibold text-slate-900 font-display mb-4">Product Images</h2>
         <div className="border-2 border-dashed border-warm-300 rounded-xl p-8 text-center hover:border-amber-400 transition-colors cursor-pointer bg-warm-50">
           <div className="w-14 h-14 rounded-full bg-amber-100 flex items-center justify-center mx-auto mb-3">
@@ -214,9 +203,9 @@ export default function AddProductPage() {
             </div>
           ))}
         </div>
-      </motion.div>
+      </div>
 
-      <motion.div variants={item} className="bg-white rounded-2xl border border-warm-200 shadow-soft p-6">
+      <div className="bg-white rounded-2xl border border-warm-200 shadow-soft p-6">
         <h2 className="text-base font-semibold text-slate-900 font-display mb-4">Inventory</h2>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div>
@@ -244,9 +233,9 @@ export default function AddProductPage() {
             />
           </div>
         </div>
-      </motion.div>
+      </div>
 
-      <motion.div variants={item} className="bg-white rounded-2xl border border-warm-200 shadow-soft p-6">
+      <div className="bg-white rounded-2xl border border-warm-200 shadow-soft p-6">
         <h2 className="text-base font-semibold text-slate-900 font-display mb-4">Shipping</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <div>
@@ -281,9 +270,9 @@ export default function AddProductPage() {
           </button>
           <span className="text-sm text-slate-700">Offer Free Shipping</span>
         </div>
-      </motion.div>
+      </div>
 
-      <motion.div variants={item} className="bg-white rounded-2xl border border-warm-200 shadow-soft p-6">
+      <div className="bg-white rounded-2xl border border-warm-200 shadow-soft p-6">
         <h2 className="text-base font-semibold text-slate-900 font-display mb-4">Tax Information</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
@@ -303,9 +292,9 @@ export default function AddProductPage() {
             />
           </div>
         </div>
-      </motion.div>
+      </div>
 
-      <motion.div variants={item} className="bg-white rounded-2xl border border-warm-200 shadow-soft p-6">
+      <div className="bg-white rounded-2xl border border-warm-200 shadow-soft p-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-base font-semibold text-slate-900 font-display">Variants</h2>
         </div>
@@ -366,9 +355,9 @@ export default function AddProductPage() {
             <Plus size={14} /> Add Variant
           </button>
         </div>
-      </motion.div>
+      </div>
 
-      <motion.div variants={item} className="flex items-center justify-end gap-3 pb-8">
+      <div className="flex items-center justify-end gap-3 pb-8">
         <button className="flex items-center gap-2 px-5 py-2.5 rounded-lg border border-warm-200 text-sm font-medium text-slate-600 hover:bg-warm-100 transition-colors">
           <Save size={16} />
           Save as Draft
@@ -377,7 +366,7 @@ export default function AddProductPage() {
           <Send size={16} />
           Submit for Review
         </button>
-      </motion.div>
-    </motion.div>
+      </div>
+    </div>
   );
 }

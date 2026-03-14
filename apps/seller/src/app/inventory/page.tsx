@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { motion } from "framer-motion";
 import {
   Search,
   AlertTriangle,
@@ -13,16 +12,6 @@ import {
   Filter,
 } from "lucide-react";
 import { products, formatINR } from "@/lib/mock-data";
-
-const container = {
-  hidden: { opacity: 0 },
-  show: { opacity: 1, transition: { staggerChildren: 0.06 } },
-};
-
-const item = {
-  hidden: { opacity: 0, y: 16 },
-  show: { opacity: 1, y: 0, transition: { duration: 0.35, ease: "easeOut" as const } },
-};
 
 type StockFilter = "all" | "in-stock" | "low-stock" | "out-of-stock";
 
@@ -61,15 +50,15 @@ export default function InventoryPage() {
   const outOfStockCount = products.filter((p) => p.stock === 0).length;
 
   return (
-    <motion.div variants={container} initial="hidden" animate="show" className="space-y-8 pb-8">
-      <motion.div variants={item}>
+    <div className="space-y-8 pb-8">
+      <div>
         <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 font-display tracking-tight">Inventory</h1>
         <p className="text-sm text-slate-500 mt-1">Track stock levels and manage your product inventory</p>
-      </motion.div>
+      </div>
 
       {/* Summary cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <motion.div variants={item} className="bg-white rounded-2xl border border-warm-200 p-5 shadow-soft flex items-center gap-4">
+        <div className="bg-white rounded-2xl border border-warm-200 p-5 shadow-soft flex items-center gap-4">
           <div className="w-12 h-12 rounded-xl bg-sky-100 flex items-center justify-center shrink-0">
             <Package size={22} className="text-sky-600" />
           </div>
@@ -77,8 +66,8 @@ export default function InventoryPage() {
             <p className="text-2xl font-bold text-slate-900">{totalStock.toLocaleString()}</p>
             <p className="text-sm text-slate-500">Total units in stock</p>
           </div>
-        </motion.div>
-        <motion.div variants={item} className="bg-white rounded-2xl border border-warm-200 p-5 shadow-soft flex items-center gap-4">
+        </div>
+        <div className="bg-white rounded-2xl border border-warm-200 p-5 shadow-soft flex items-center gap-4">
           <div className="w-12 h-12 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
             <TrendingDown size={22} className="text-amber-600" />
           </div>
@@ -86,8 +75,8 @@ export default function InventoryPage() {
             <p className="text-2xl font-bold text-slate-900">{lowStockCount}</p>
             <p className="text-sm text-slate-500">Low stock alerts</p>
           </div>
-        </motion.div>
-        <motion.div variants={item} className="bg-white rounded-2xl border border-warm-200 p-5 shadow-soft flex items-center gap-4">
+        </div>
+        <div className="bg-white rounded-2xl border border-warm-200 p-5 shadow-soft flex items-center gap-4">
           <div className="w-12 h-12 rounded-xl bg-rose-100 flex items-center justify-center shrink-0">
             <AlertTriangle size={22} className="text-rose-600" />
           </div>
@@ -95,11 +84,11 @@ export default function InventoryPage() {
             <p className="text-2xl font-bold text-slate-900">{outOfStockCount}</p>
             <p className="text-sm text-slate-500">Out of stock</p>
           </div>
-        </motion.div>
+        </div>
       </div>
 
       {/* Filters */}
-      <motion.div variants={item} className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
         <div className="relative flex-1 max-w-md w-full">
           <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
@@ -126,10 +115,10 @@ export default function InventoryPage() {
             </button>
           ))}
         </div>
-      </motion.div>
+      </div>
 
       {/* Inventory table */}
-      <motion.div variants={item} className="bg-white rounded-2xl border border-warm-200 overflow-hidden shadow-soft">
+      <div className="bg-white rounded-2xl border border-warm-200 overflow-hidden shadow-soft">
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
@@ -203,7 +192,7 @@ export default function InventoryPage() {
             </button>
           </div>
         )}
-      </motion.div>
-    </motion.div>
+      </div>
+    </div>
   );
 }
