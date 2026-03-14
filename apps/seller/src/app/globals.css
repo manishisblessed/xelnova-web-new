@@ -1,0 +1,58 @@
+@import "tailwindcss";
+
+@theme {
+  /* Warm light theme */
+  --color-warm-50: #fefdfb;
+  --color-warm-100: #faf8f5;
+  --color-warm-200: #f5f1eb;
+  --color-warm-300: #ebe6dd;
+  --color-warm-400: #d4c9b8;
+  --color-gold-50: #fdf8e8;
+  --color-gold-100: #f9edc5;
+  --color-gold-200: #f0d98a;
+  --color-gold-300: #e6c355;
+  --color-gold-400: #c9a227;
+  --color-gold-500: #a67c2e;
+  --color-gold-600: #8b6919;
+  --color-gold-700: #6b5012;
+  --color-gold-800: #4d3a0d;
+  --color-gold-900: #2e2308;
+  --color-slate-850: #1e293b;
+  --color-slate-900: #0f172a;
+  --color-slate-950: #020617;
+  --color-danger-400: #f87171;
+  --color-danger-500: #ef4444;
+  --color-success-400: #22c55e;
+  --color-success-500: #16a34a;
+  --color-success-600: #15803d;
+  --color-sky-400: #38bdf8;
+  --color-sky-500: #0ea5e9;
+  --color-violet-400: #a78bfa;
+  --color-violet-500: #8b5cf6;
+  --color-coral-400: #fb7185;
+  --color-coral-500: #f43f5e;
+  --shadow-soft: 0 2px 8px rgba(0, 0, 0, 0.06);
+  --shadow-card: 0 2px 12px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.04);
+  --shadow-card-hover: 0 8px 24px rgba(0, 0, 0, 0.08), 0 2px 6px rgba(0, 0, 0, 0.04);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: "Inter", system-ui, sans-serif;
+  color: var(--color-slate-900);
+  background: var(--color-warm-100);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--color-warm-200); }
+::-webkit-scrollbar-thumb { background: var(--color-warm-400); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-gold-400); }
+.font-display { font-family: var(--font-poppins), "Poppins", "Inter", sans-serif; }
+.text-gradient-gold {
+  background: linear-gradient(135deg, #c9a227, #a67c2e);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
