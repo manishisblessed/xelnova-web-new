@@ -11,7 +11,7 @@ applications:
           commands:
             - npx turbo run build --filter=@xelnova/web
       artifacts:
-        baseDirectory: apps/web/.next
+        baseDirectory: apps/web/out
         files:
           - '**/*'
       cache:
@@ -30,7 +30,7 @@ applications:
           commands:
             - npx turbo run build --filter=@xelnova/admin
       artifacts:
-        baseDirectory: apps/admin/.next
+        baseDirectory: apps/admin/out
         files:
           - '**/*'
       cache:
@@ -49,7 +49,7 @@ applications:
           commands:
             - npx turbo run build --filter=@xelnova/seller
       artifacts:
-        baseDirectory: apps/seller/.next
+        baseDirectory: apps/seller/out
         files:
           - '**/*'
       cache:

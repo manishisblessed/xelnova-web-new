@@ -84,7 +84,7 @@ export default function BlogPage() {
             <Link href="#" className="group block bg-white rounded-3xl border border-border/60 overflow-hidden shadow-card hover:shadow-elevated transition-all duration-300">
               <div className="grid md:grid-cols-2">
                 <div className="relative aspect-[16/10] md:aspect-auto">
-                  <Image src={featuredPost.image} alt={featuredPost.title} fill className="object-cover group-hover:scale-105 transition-transform duration-700" />
+                  <Image src={featuredPost.image} alt={featuredPost.title} fill sizes="(max-width: 768px) 100vw, 50vw" className="object-cover group-hover:scale-105 transition-transform duration-700" />
                 </div>
                 <div className="p-8 md:p-10 flex flex-col justify-center">
                   <span className="inline-flex items-center gap-1.5 bg-primary-50 text-primary-700 px-3 py-1 rounded-full text-xs font-semibold w-fit mb-4">
@@ -113,7 +113,7 @@ export default function BlogPage() {
               <motion.div key={post.title} custom={i} variants={fadeUp} initial="hidden" whileInView="visible" viewport={{ once: true }}>
                 <Link href="#" className="group block bg-white rounded-2xl border border-border/60 overflow-hidden shadow-card hover:shadow-card-hover hover:-translate-y-1 transition-all duration-300">
                   <div className="relative aspect-[16/10]">
-                    <Image src={post.image} alt={post.title} fill className="object-cover group-hover:scale-105 transition-transform duration-500" />
+                    <Image src={post.image} alt={post.title} fill sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw" className="object-cover group-hover:scale-105 transition-transform duration-500" />
                     <div className="absolute top-3 left-3">
                       <span className="bg-white/90 backdrop-blur-sm text-text-primary px-2.5 py-1 rounded-full text-[11px] font-semibold">{post.category}</span>
                     </div>

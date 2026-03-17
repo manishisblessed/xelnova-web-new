@@ -97,7 +97,7 @@ function CartItemCard({ item, onRemove, onUpdateQty, onSaveForLater }: { item: C
     <motion.div layout initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, x: -100, height: 0, marginBottom: 0, padding: 0 }} transition={{ duration: 0.3 }} className="rounded-2xl border border-surface-300/50 bg-surface-800 p-4 sm:p-5">
       <div className="flex gap-4">
         <Link href={`/products/${item.slug}`} className="relative h-28 w-28 shrink-0 overflow-hidden rounded-xl border border-surface-300/30 bg-surface-700 sm:h-32 sm:w-32">
-          <Image src={item.image} alt={item.name} fill className="object-cover" />
+          <Image src={item.image} alt={item.name} fill sizes="128px" className="object-cover" />
         </Link>
         <div className="flex flex-1 flex-col">
           <Link href={`/products/${item.slug}`} className="text-sm font-medium text-white hover:text-gold-400 transition-colors line-clamp-2 sm:text-base">{item.name}</Link>

@@ -99,7 +99,7 @@ export default function SellerLandingPage() {
             </motion.div>
             <motion.div initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.7, delay: 0.2 }} className="hidden md:block">
               <div className="relative rounded-3xl overflow-hidden aspect-square max-w-[480px] mx-auto">
-                <Image src="https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?w=600&h=600&fit=crop" alt="Sell on Xelnova" fill className="object-cover" />
+                <Image src="https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?w=600&h=600&fit=crop" alt="Sell on Xelnova" fill sizes="480px" className="object-cover" />
                 <div className="absolute inset-0 bg-gradient-to-t from-surface-dark/60 to-transparent" />
                 <div className="absolute bottom-6 left-6 right-6">
                   <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-5 border border-white/10">

@@ -110,7 +110,7 @@ export default function AboutPage() {
             </motion.div>
             <motion.div initial={{ opacity: 0, x: 30 }} whileInView={{ opacity: 1, x: 0 }} viewport={{ once: true }} transition={{ duration: 0.6 }}>
               <div className="relative rounded-3xl overflow-hidden aspect-[4/3] bg-gradient-to-br from-primary-100 to-accent-50">
-                <Image src="https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=800&h=600&fit=crop" alt="Xelnova team" fill className="object-cover" />
+                <Image src="https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=800&h=600&fit=crop" alt="Xelnova team" fill sizes="(max-width: 768px) 100vw, 50vw" className="object-cover" />
                 <div className="absolute inset-0 bg-gradient-to-t from-primary-900/40 to-transparent" />
               </div>
             </motion.div>
