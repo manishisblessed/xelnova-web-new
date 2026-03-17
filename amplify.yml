@@ -1,0 +1,58 @@
+version: 1
+applications:
+  - appRoot: apps/web
+    frontend:
+      buildPath: /
+      phases:
+        preBuild:
+          commands:
+            - npm ci
+        build:
+          commands:
+            - npx turbo run build --filter=@xelnova/web
+      artifacts:
+        baseDirectory: apps/web/out
+        files:
+          - '**/*'
+      cache:
+        paths:
+          - node_modules/**/*
+          - .turbo/**/*
+
+  - appRoot: apps/admin
+    frontend:
+      buildPath: /
+      phases:
+        preBuild:
+          commands:
+            - npm ci
+        build:
+          commands:
+            - npx turbo run build --filter=@xelnova/admin
+      artifacts:
+        baseDirectory: apps/admin/out
+        files:
+          - '**/*'
+      cache:
+        paths:
+          - node_modules/**/*
+          - .turbo/**/*
+
+  - appRoot: apps/seller
+    frontend:
+      buildPath: /
+      phases:
+        preBuild:
+          commands:
+            - npm ci
+        build:
+          commands:
+            - npx turbo run build --filter=@xelnova/seller
+      artifacts:
+        baseDirectory: apps/seller/out
+        files:
+          - '**/*'
+      cache:
+        paths:
+          - node_modules/**/*
+          - .turbo/**/*

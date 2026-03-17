@@ -1,8 +1,7 @@
 import type { Metadata } from "next";
 import { Inter, Poppins } from "next/font/google";
 import "./globals.css";
-import SellerSidebar from "@/components/seller-sidebar";
-import SellerHeader from "@/components/seller-header";
+import { DashboardShell } from "@/components/dashboard-shell";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -26,15 +25,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
-      <body className={`${inter.variable} ${poppins.variable} antialiased bg-warm-100 text-slate-900`}>
-        <div className="flex min-h-screen">
-          <SellerSidebar />
-          <div className="flex-1 ml-[260px] transition-all duration-200">
-            <SellerHeader />
-            <main className="p-6 sm:p-8">{children}</main>
-          </div>
-        </div>
+    <html lang="en" className={`${inter.variable} ${poppins.variable}`}>
+      <body className="min-h-screen bg-page text-body antialiased">
+        <DashboardShell>{children}</DashboardShell>
       </body>
     </html>
   );

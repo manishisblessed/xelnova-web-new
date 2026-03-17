@@ -1,57 +1,113 @@
 @import "tailwindcss";
 
 @theme {
-  /* Warm light theme */
+  /* Xelnova brand: gold primary */
+  --color-primary-50: #fdf9ed;
+  --color-primary-100: #f9f0d4;
+  --color-primary-200: #f2e2a8;
+  --color-primary-300: #e8cf72;
+  --color-primary-400: #dbb84a;
+  --color-primary-500: #D4AF37;
+  --color-primary-600: #C89B3C;
+  --color-primary-700: #a67c2e;
+  --color-primary-800: #876326;
+  --color-primary-900: #6f5120;
+  --color-primary-950: #3d2c12;
+
+  /* Light dashboard */
+  --color-page: #F7F7F7;
+  --color-card: #ffffff;
+  --color-card-hover: #fafafa;
+  --color-border: #e5e5e5;
+  --color-sidebar: #ffffff;
+  --color-sidebar-hover: #f7f7f7;
+  --color-sidebar-active: #fdf9ed;
+  --color-sidebar-border: #e5e5e5;
+  --color-sidebar-muted: #737373;
+  --color-sidebar-text: #525252;
+  --color-heading: #171717;
+  --color-body: #404040;
+  --color-muted: #737373;
+  --color-subtle: #a3a3a3;
+
+  /* Warm neutrals (keep for compatibility) */
   --color-warm-50: #fefdfb;
-  --color-warm-100: #faf8f5;
-  --color-warm-200: #f5f1eb;
-  --color-warm-300: #ebe6dd;
-  --color-warm-400: #d4c9b8;
-  --color-gold-50: #fdf8e8;
-  --color-gold-100: #f9edc5;
-  --color-gold-200: #f0d98a;
-  --color-gold-300: #e6c355;
-  --color-gold-400: #c9a227;
-  --color-gold-500: #a67c2e;
-  --color-gold-600: #8b6919;
-  --color-gold-700: #6b5012;
-  --color-gold-800: #4d3a0d;
-  --color-gold-900: #2e2308;
-  --color-slate-850: #1e293b;
-  --color-slate-900: #0f172a;
-  --color-slate-950: #020617;
+  --color-warm-100: #F7F7F7;
+  --color-warm-200: #f0f0f0;
+  --color-warm-300: #e8e8e8;
+  --color-warm-400: #d4d4d4;
+  --color-gold-50: #fdf9ed;
+  --color-gold-100: #f9f0d4;
+  --color-gold-200: #f2e2a8;
+  --color-gold-300: #e8cf72;
+  --color-gold-400: #D4AF37;
+  --color-gold-500: #C89B3C;
+  --color-gold-600: #a67c2e;
+  --color-slate-900: #171717;
+  --color-slate-800: #404040;
+  --color-slate-500: #737373;
+
   --color-danger-400: #f87171;
   --color-danger-500: #ef4444;
+  --color-success-50: rgba(34, 197, 94, 0.08);
+  --color-success-100: #dcfce7;
+  --color-success-200: #bbf7d0;
   --color-success-400: #22c55e;
-  --color-success-500: #16a34a;
-  --color-success-600: #15803d;
-  --color-sky-400: #38bdf8;
-  --color-sky-500: #0ea5e9;
-  --color-violet-400: #a78bfa;
-  --color-violet-500: #8b5cf6;
-  --color-coral-400: #fb7185;
-  --color-coral-500: #f43f5e;
-  --shadow-soft: 0 2px 8px rgba(0, 0, 0, 0.06);
-  --shadow-card: 0 2px 12px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.04);
+  --color-success-500: #22c55e;
+  --color-success-600: #16a34a;
+  --color-success-700: #15803d;
+  --color-warning-50: rgba(245, 158, 11, 0.08);
+  --color-warning-100: #fef3c7;
+  --color-warning-200: #fde68a;
+  --color-warning-600: #d97706;
+  --color-info-400: #3b82f6;
+  --color-info-500: #3b82f6;
+  --color-surface-1: #f0f0f0;
+  --color-surface-2: #e8e8e8;
+
+  --shadow-soft: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
   --shadow-card-hover: 0 8px 24px rgba(0, 0, 0, 0.08), 0 2px 6px rgba(0, 0, 0, 0.04);
 }
 
-* { margin: 0; padding: 0; box-sizing: border-box; }
-html { scroll-behavior: smooth; }
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+html {
+  scroll-behavior: smooth;
+}
 body {
-  font-family: "Inter", system-ui, sans-serif;
-  color: var(--color-slate-900);
-  background: var(--color-warm-100);
+  font-family: var(--font-inter), "Inter", system-ui, sans-serif;
+  color: var(--color-body);
+  background: var(--color-page);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
-::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-track { background: var(--color-warm-200); }
-::-webkit-scrollbar-thumb { background: var(--color-warm-400); border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: var(--color-gold-400); }
-.font-display { font-family: var(--font-poppins), "Poppins", "Inter", sans-serif; }
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-warm-200);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-warm-400);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-primary-500);
+}
+
+.font-display {
+  font-family: var(--font-poppins), "Poppins", "Inter", sans-serif;
+}
+
 .text-gradient-gold {
-  background: linear-gradient(135deg, #c9a227, #a67c2e);
+  background: linear-gradient(135deg, #D4AF37, #C89B3C);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;

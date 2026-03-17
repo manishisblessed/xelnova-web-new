@@ -152,15 +152,15 @@ const financialCards = [
 ];
 
 const pieData = [
-  { name: 'New', value: 63, color: '#8b5cf6' },
-  { name: 'Returning', value: 25, color: '#3b82f6' },
-  { name: 'Inactive', value: 12, color: '#475569' },
+  { name: 'New', value: 63, color: '#D4AF37' },
+  { name: 'Returning', value: 25, color: '#C89B3C' },
+  { name: 'Inactive', value: 12, color: '#737373' },
 ];
 
 const orderPieData = [
-  { name: 'Paid', value: 70, color: '#8b5cf6' },
+  { name: 'Paid', value: 70, color: '#D4AF37' },
   { name: 'Due', value: 20, color: '#3b82f6' },
-  { name: 'Trial', value: 10, color: '#475569' },
+  { name: 'Trial', value: 10, color: '#a3a3a3' },
 ];
 
 const activityConfig: Record<
@@ -176,11 +176,11 @@ const activityConfig: Record<
 };
 
 const statusRowColors: Record<string, string> = {
-  Delivered: 'bg-emerald-500/8 hover:bg-emerald-500/12',
-  Processing: 'bg-amber-500/8 hover:bg-amber-500/12',
-  Shipped: 'bg-blue-500/8 hover:bg-blue-500/12',
-  Pending: 'bg-orange-500/8 hover:bg-orange-500/12',
-  Cancelled: 'bg-rose-500/8 hover:bg-rose-500/12',
+  Delivered: 'bg-emerald-50 hover:bg-emerald-100/80',
+  Processing: 'bg-amber-50 hover:bg-amber-100/80',
+  Shipped: 'bg-blue-50 hover:bg-blue-100/80',
+  Pending: 'bg-orange-50 hover:bg-orange-100/80',
+  Cancelled: 'bg-rose-50 hover:bg-rose-100/80',
 };
 
 const statusDotColors: Record<string, string> = {
@@ -194,7 +194,7 @@ const statusDotColors: Record<string, string> = {
 function BarTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="rounded-lg border border-border bg-surface-3 px-3 py-2 shadow-dropdown">
+    <div className="rounded-lg border border-border bg-card px-3 py-2 shadow-dropdown">
       <p className="text-[11px] text-muted">{label}</p>
       <p className="text-sm font-semibold text-heading">${payload[0].value.toLocaleString()}</p>
     </div>
@@ -242,9 +242,11 @@ export default function DashboardPage() {
         {statCards.map((stat) => {
           const Icon = stat.icon;
           return (
-            <div
+            <motion.div
               key={stat.label}
               className="card rounded-2xl p-5"
+              whileHover={{ y: -2 }}
+              transition={{ duration: 0.2 }}
             >
               <div className="flex items-start justify-between">
                 <div>
@@ -253,13 +255,13 @@ export default function DashboardPage() {
                     <AnimatedCounter value={stat.numericValue} prefix={stat.prefix} />
                   </p>
                 </div>
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-surface-4">
-                  <Icon size={18} className="text-muted" strokeWidth={1.6} />
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary-50">
+                  <Icon size={18} className="text-primary-600" strokeWidth={1.6} />
                 </div>
               </div>
               {stat.change > 0 && (
                 <p className="mt-3 text-[12px] text-muted">
-                  <span className="inline-flex items-center gap-0.5 font-semibold text-emerald-400">
+                  <span className="inline-flex items-center gap-0.5 font-semibold text-success-600">
                     <TrendingUp size={11} /> {stat.change}%
                   </span>{' '}
                   {stat.subtitle}
@@ -268,7 +270,7 @@ export default function DashboardPage() {
               {stat.change === 0 && (
                 <p className="mt-3 text-[12px] text-muted">{stat.subtitle}</p>
               )}
-            </div>
+            </motion.div>
           );
         })}
       </motion.div>
@@ -278,9 +280,11 @@ export default function DashboardPage() {
         {financialCards.map((stat) => {
           const Icon = stat.icon;
           return (
-            <div
+            <motion.div
               key={stat.label}
               className="card rounded-2xl p-5"
+              whileHover={{ y: -2 }}
+              transition={{ duration: 0.2 }}
             >
               <div className="flex items-start justify-between">
                 <div>
@@ -289,17 +293,17 @@ export default function DashboardPage() {
                     <AnimatedCounter value={stat.numericValue} prefix={stat.prefix} />
                   </p>
                 </div>
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-surface-4">
-                  <Icon size={18} className="text-muted" strokeWidth={1.6} />
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary-50">
+                  <Icon size={18} className="text-primary-600" strokeWidth={1.6} />
                 </div>
               </div>
               <p className="mt-3 text-[12px] text-muted">
-                <span className="inline-flex items-center gap-0.5 font-semibold text-emerald-400">
+                <span className="inline-flex items-center gap-0.5 font-semibold text-success-600">
                   <TrendingUp size={11} /> +{stat.change}%
                 </span>{' '}
                 {stat.subtitle}
               </p>
-            </div>
+            </motion.div>
           );
         })}
 
@@ -347,23 +351,23 @@ export default function DashboardPage() {
           <div className="h-56">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={revenueData} margin={{ top: 4, right: 0, left: -20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" vertical={false} />
+                <CartesianGrid strokeDasharray="3 3" stroke="#e5e5e5" vertical={false} />
                 <XAxis
                   dataKey="month"
-                  tick={{ fontSize: 11, fill: '#565a72' }}
+                  tick={{ fontSize: 11, fill: '#737373' }}
                   tickLine={false}
-                  axisLine={{ stroke: 'rgba(255,255,255,0.06)' }}
+                  axisLine={{ stroke: '#e5e5e5' }}
                 />
                 <YAxis
-                  tick={{ fontSize: 11, fill: '#565a72' }}
+                  tick={{ fontSize: 11, fill: '#737373' }}
                   tickLine={false}
                   axisLine={false}
                   tickFormatter={(v) => `$${v / 1000}k`}
                 />
-                <Tooltip content={<BarTooltip />} cursor={{ fill: 'rgba(255,255,255,0.03)' }} />
+                <Tooltip content={<BarTooltip />} cursor={{ fill: 'rgba(0,0,0,0.03)' }} />
                 <Bar
                   dataKey="revenue"
-                  fill="#6d28d9"
+                  fill="#D4AF37"
                   radius={[4, 4, 0, 0]}
                   maxBarSize={32}
                 />
@@ -376,10 +380,10 @@ export default function DashboardPage() {
         <div className="card flex flex-col justify-between rounded-2xl p-5">
           <div>
             <div className="mb-3 flex items-center justify-between">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary-500/10">
-                <FileText size={18} className="text-primary-400" />
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary-50">
+                <FileText size={18} className="text-primary-600" />
               </div>
-              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-semibold text-emerald-400">
+              <span className="inline-flex items-center gap-1 rounded-full bg-success-50 px-2 py-0.5 text-[11px] font-semibold text-success-600">
                 <TrendingUp size={10} /> +15%
               </span>
             </div>
@@ -395,10 +399,10 @@ export default function DashboardPage() {
         <div className="card flex flex-col justify-between rounded-2xl p-5">
           <div>
             <div className="mb-3 flex items-center justify-between">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-500/10">
-                <Wallet size={18} className="text-blue-400" />
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-info-50">
+                <Wallet size={18} className="text-info-600" />
               </div>
-              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-semibold text-emerald-400">
+              <span className="inline-flex items-center gap-1 rounded-full bg-success-50 px-2 py-0.5 text-[11px] font-semibold text-success-600">
                 <TrendingUp size={10} /> +58%
               </span>
             </div>
@@ -434,7 +438,7 @@ export default function DashboardPage() {
                   initial={{ opacity: 0, y: 4 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.03 * idx, duration: 0.2 }}
-                  className="flex items-center gap-3 rounded-xl px-2 py-2.5 transition-colors hover:bg-surface-3"
+                  className="flex items-center gap-3 rounded-xl px-2 py-2.5 transition-colors hover:bg-surface-2"
                 >
                   <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${cfg.color}`}>
                     {cfg.icon}
@@ -504,7 +508,7 @@ export default function DashboardPage() {
         <div className="card rounded-2xl p-5">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-sm font-semibold text-heading">Top Products</h2>
-            <button className="text-[12px] font-medium text-primary-400 transition-colors hover:text-primary-300">
+            <button className="text-[12px] font-medium text-primary-600 transition-colors hover:text-primary-700">
               View All
             </button>
           </div>
@@ -512,12 +516,12 @@ export default function DashboardPage() {
             {topProducts.map((product, index) => (
               <div
                 key={product.id}
-                className="flex items-center gap-3 rounded-xl p-2.5 transition-colors hover:bg-surface-3"
+                className="flex items-center gap-3 rounded-xl p-2.5 transition-colors hover:bg-surface-2"
               >
-                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-surface-4 text-[12px] font-bold text-muted">
+                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-surface-2 text-[12px] font-bold text-muted">
                   {index + 1}
                 </span>
-                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-surface-3 text-base">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-surface-2 text-base">
                   {product.image}
                 </div>
                 <div className="min-w-0 flex-1">
@@ -548,7 +552,7 @@ export default function DashboardPage() {
               const colors = ['bg-violet-500', 'bg-blue-500', 'bg-emerald-500', 'bg-amber-500'];
               const iconBg = ['bg-violet-500/10 text-violet-400', 'bg-blue-500/10 text-blue-400', 'bg-emerald-500/10 text-emerald-400', 'bg-amber-500/10 text-amber-400'];
               return (
-                <div key={ch.channel} className="rounded-xl bg-surface-3 p-3.5">
+                <div key={ch.channel} className="rounded-xl bg-surface-1 border border-border p-3.5">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${iconBg[idx]}`}>
@@ -561,10 +565,10 @@ export default function DashboardPage() {
                     </div>
                     <div className="text-right">
                       <p className="text-[13px] font-semibold text-heading">${ch.revenue.toLocaleString()}</p>
-                      <p className="text-[11px] font-medium text-primary-400">{ch.percentage}%</p>
+                      <p className="text-[11px] font-medium text-primary-600">{ch.percentage}%</p>
                     </div>
                   </div>
-                  <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-surface-5">
+                  <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-surface-3">
                     <motion.div
                       initial={{ width: 0 }}
                       animate={{ width: `${ch.percentage}%` }}
