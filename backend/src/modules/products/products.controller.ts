@@ -15,51 +15,58 @@ export class ProductsController {
 
   @Get()
   @ApiOperation({ summary: 'List products with filters and pagination' })
-  findAll(@Query() query: ProductQueryDto) {
-    const { items, total, page, limit } = this.productsService.findAll(query);
-    return paginatedResponse(items, total, page, limit, 'Products fetched successfully');
+  async findAll(@Query() query: ProductQueryDto) {
+    const { items, total, page, limit } =
+      await this.productsService.findAll(query);
+    return paginatedResponse(
+      items,
+      total,
+      page,
+      limit,
+      'Products fetched successfully',
+    );
   }
 
   @Get('featured')
   @ApiOperation({ summary: 'Get featured products' })
-  findFeatured() {
+  async findFeatured() {
     return successResponse(
-      this.productsService.findFeatured(),
+      await this.productsService.findFeatured(),
       'Featured products fetched successfully',
     );
   }
 
   @Get('trending')
   @ApiOperation({ summary: 'Get trending products' })
-  findTrending() {
+  async findTrending() {
     return successResponse(
-      this.productsService.findTrending(),
+      await this.productsService.findTrending(),
       'Trending products fetched successfully',
     );
   }
 
   @Get('flash-deals')
   @ApiOperation({ summary: 'Get flash deal products' })
-  findFlashDeals() {
+  async findFlashDeals() {
     return successResponse(
-      this.productsService.findFlashDeals(),
+      await this.productsService.findFlashDeals(),
       'Flash deals fetched successfully',
     );
   }
 
   @Get('banners')
   @ApiOperation({ summary: 'Get promotional banners' })
-  getBanners() {
+  async getBanners() {
     return successResponse(
-      this.productsService.getBanners(),
+      await this.productsService.getBanners(),
       'Banners fetched successfully',
     );
   }
 
   @Get(':slug')
   @ApiOperation({ summary: 'Get product detail by slug' })
-  findBySlug(@Param('slug') slug: string) {
-    const product = this.productsService.findBySlug(slug);
+  async findBySlug(@Param('slug') slug: string) {
+    const product = await this.productsService.findBySlug(slug);
     if (!product) {
       return errorResponse('Product not found');
     }

@@ -1,0 +1,720 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Enums ───
+
+enum Role {
+  CUSTOMER
+  SELLER
+  ADMIN
+}
+
+enum OrderStatus {
+  PENDING
+  PROCESSING
+  CONFIRMED
+  SHIPPED
+  DELIVERED
+  CANCELLED
+  RETURNED
+  REFUNDED
+}
+
+enum DiscountType {
+  PERCENTAGE
+  FLAT
+}
+
+enum AddressType {
+  HOME
+  OFFICE
+  OTHER
+}
+
+enum ProductStatus {
+  ACTIVE
+  PENDING
+  DRAFT
+  REJECTED
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+enum PayoutStatus {
+  PENDING
+  APPROVED
+  PAID
+  REJECTED
+}
+
+enum SellerOnboardingStatus {
+  PENDING_VERIFICATION
+  EMAIL_VERIFIED
+  PHONE_VERIFIED
+  DOCUMENTS_SUBMITTED
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+}
+
+enum DocumentType {
+  PAN_CARD
+  GST_CERTIFICATE
+  CANCELLED_CHEQUE
+  BUSINESS_LICENSE
+  ADDRESS_PROOF
+  IDENTITY_PROOF
+}
+
+// ─── User & Auth ───
+
+model User {
+  id            String    @id @default(cuid())
+  name          String
+  email         String    @unique
+  phone         String?   @unique
+  password      String
+  avatar        String?
+  role          Role      @default(CUSTOMER)
+  emailVerified Boolean   @default(false)
+  phoneVerified Boolean   @default(false)
+  lastLoginAt   DateTime?
+  lastLoginIp   String?
+  lastLoginLocation Json?
+  loginCount    Int       @default(0)
+  isActive      Boolean   @default(true)
+  isBanned      Boolean   @default(false)
+  banReason     String?
+
+  addresses        Address[]
+  orders           Order[]
+  reviews          Review[]
+  cartItems        CartItem[]
+  wishlist         Wishlist[]
+  refreshTokens    RefreshToken[]
+  sellerProfile    SellerProfile?
+  sessions         UserSession[]
+  activityLogs     ActivityLog[]
+  verificationLogs VerificationLog[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  revoked   Boolean  @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([token])
+  @@map("refresh_tokens")
+}
+
+// ─── Address ───
+
+model Address {
+  id           String      @id @default(cuid())
+  userId       String
+  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fullName     String
+  phone        String
+  addressLine1 String
+  addressLine2 String?
+  city         String
+  state        String
+  pincode      String
+  landmark     String?
+  type         AddressType @default(HOME)
+  isDefault    Boolean     @default(false)
+
+  orders    Order[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@map("addresses")
+}
+
+// ─── Seller ───
+
+model SellerProfile {
+  id          String  @id @default(cuid())
+  userId      String  @unique
+  user        User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  storeName   String
+  slug        String  @unique
+  logo        String?
+  description String?
+  verified    Boolean @default(false)
+  location    String?
+  rating      Float   @default(0)
+  totalSales  Int     @default(0)
+
+  // Onboarding status
+  onboardingStatus  SellerOnboardingStatus @default(PENDING_VERIFICATION)
+  onboardingStep    Int      @default(1)
+  onboardingCompletedAt DateTime?
+  rejectionReason   String?
+  reviewedBy        String?
+  reviewedAt        DateTime?
+
+  // GST Details
+  gstNumber         String?
+  gstVerified       Boolean @default(false)
+  gstVerifiedAt     DateTime?
+  gstVerifiedData   Json?
+  gstCertificateUrl String?
+  sellsNonGstProducts Boolean @default(false)
+  
+  // PAN Details
+  panNumber         String?
+  panName           String?
+  panVerified       Boolean @default(false)
+  panVerifiedAt     DateTime?
+  panDocumentUrl    String?
+  
+  // Bank Details
+  bankAccountName   String?
+  bankAccountNumber String?
+  bankIfscCode      String?
+  bankVerified      Boolean @default(false)
+  bankVerifiedAt    DateTime?
+  bankVerifiedData  Json?
+  bankName          String?
+  bankBranch        String?
+  cancelledChequeUrl String?
+  
+  commissionRate    Float   @default(10)
+  
+  // Business Address (Pickup Address)
+  businessAddress   String?
+  businessCity      String?
+  businessState     String?
+  businessPincode   String?
+  businessType      String?
+  businessCategory  String?
+  
+  // Shipping Preferences
+  shippingMethod    String?  @default("easy_ship")
+  offerFreeDelivery Boolean  @default(true)
+  deliveryCharge1to3Days Float?
+  deliveryCharge3PlusDays Float?
+
+  products   Product[]
+  payouts    Payout[]
+  documents  SellerDocument[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("seller_profiles")
+}
+
+// Seller Documents for verification
+model SellerDocument {
+  id            String       @id @default(cuid())
+  sellerId      String
+  seller        SellerProfile @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  type          DocumentType
+  fileName      String
+  fileUrl       String
+  fileSize      Int?
+  mimeType      String?
+  verified      Boolean      @default(false)
+  verifiedAt    DateTime?
+  verifiedBy    String?
+  rejectionNote String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([sellerId])
+  @@index([type])
+  @@map("seller_documents")
+}
+
+// OTP Verification
+model OtpVerification {
+  id          String   @id @default(cuid())
+  identifier  String   // email or phone
+  type        String   // EMAIL or PHONE
+  otp         String
+  purpose     String   // REGISTRATION, LOGIN, PASSWORD_RESET
+  expiresAt   DateTime
+  verified    Boolean  @default(false)
+  verifiedAt  DateTime?
+  attempts    Int      @default(0)
+  maxAttempts Int      @default(5)
+  userId      String?
+  ipAddress   String?
+
+  createdAt DateTime @default(now())
+
+  @@index([identifier, type])
+  @@index([otp])
+  @@map("otp_verifications")
+}
+
+// Puzzle CAPTCHA Sessions
+model CaptchaSession {
+  id          String   @id @default(cuid())
+  sessionId   String   @unique
+  puzzleType  String   // ROCK_COUNT, IMAGE_MATCH, etc.
+  answer      String
+  attempts    Int      @default(0)
+  maxAttempts Int      @default(3)
+  solved      Boolean  @default(false)
+  solvedAt    DateTime?
+  expiresAt   DateTime
+  ipAddress   String?
+
+  createdAt DateTime @default(now())
+
+  @@index([sessionId])
+  @@map("captcha_sessions")
+}
+
+// ─── Category ───
+
+model Category {
+  id           String     @id @default(cuid())
+  name         String
+  slug         String     @unique
+  description  String?
+  image        String?
+  parentId     String?
+  parent       Category?  @relation("CategoryTree", fields: [parentId], references: [id])
+  children     Category[] @relation("CategoryTree")
+  productCount Int        @default(0)
+
+  products Product[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([parentId])
+  @@map("categories")
+}
+
+// ─── Product ───
+
+model Product {
+  id               String   @id @default(cuid())
+  name             String
+  slug             String   @unique
+  shortDescription String?
+  description      String?
+  price            Float
+  compareAtPrice   Float?
+  images           String[]
+
+  categoryId String
+  category   Category      @relation(fields: [categoryId], references: [id])
+  brand      String?
+
+  sellerId String
+  seller   SellerProfile @relation(fields: [sellerId], references: [id])
+
+  rating      Float   @default(0)
+  reviewCount Int     @default(0)
+  stock       Int     @default(0)
+
+  isFeatured      Boolean   @default(false)
+  isTrending      Boolean   @default(false)
+  isFlashDeal     Boolean   @default(false)
+  flashDealEndsAt DateTime?
+
+  variants       Json?
+  specifications Json?
+  highlights     String[]
+  tags           String[]
+
+  isActive Boolean       @default(true)
+  status   ProductStatus @default(ACTIVE)
+  sku      String?
+
+  reviews    Review[]
+  orderItems OrderItem[]
+  cartItems  CartItem[]
+  wishlist   Wishlist[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([categoryId])
+  @@index([sellerId])
+  @@index([isFeatured])
+  @@index([isTrending])
+  @@index([isFlashDeal])
+  @@index([status])
+  @@map("products")
+}
+
+// ─── Review ───
+
+model Review {
+  id        String  @id @default(cuid())
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  rating    Int
+  title     String?
+  comment   String?
+  images    String[]
+  verified  Boolean @default(false)
+  helpful   Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([productId])
+  @@index([userId])
+  @@map("reviews")
+}
+
+// ─── Order ───
+
+model Order {
+  id          String      @id @default(cuid())
+  orderNumber String      @unique
+  userId      String
+  user        User        @relation(fields: [userId], references: [id])
+
+  items OrderItem[]
+
+  subtotal Float
+  discount Float       @default(0)
+  shipping Float       @default(0)
+  tax      Float       @default(0)
+  total    Float
+
+  status        OrderStatus @default(PENDING)
+  paymentMethod String?
+
+  shippingAddressId String?
+  shippingAddress   Address? @relation(fields: [shippingAddressId], references: [id])
+
+  couponCode        String?
+  estimatedDelivery DateTime?
+
+  paymentId     String?
+  paymentStatus PaymentStatus @default(PENDING)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@map("orders")
+}
+
+model OrderItem {
+  id           String  @id @default(cuid())
+  orderId      String
+  order        Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId    String
+  product      Product @relation(fields: [productId], references: [id])
+  productName  String
+  productImage String?
+  quantity     Int
+  price        Float
+  variant      String?
+
+  @@index([orderId])
+  @@map("order_items")
+}
+
+// ─── Cart ───
+
+model CartItem {
+  id        String  @id @default(cuid())
+  userId    String
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  quantity  Int     @default(1)
+  variant   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, productId, variant])
+  @@map("cart_items")
+}
+
+// ─── Wishlist ───
+
+model Wishlist {
+  userId    String
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@id([userId, productId])
+  @@map("wishlists")
+}
+
+// ─── Coupon ───
+
+model Coupon {
+  id             String       @id @default(cuid())
+  code           String       @unique
+  description    String?
+  discountType   DiscountType
+  discountValue  Float
+  minOrderAmount Float        @default(0)
+  maxDiscount    Float?
+  validUntil     DateTime?
+  isActive       Boolean      @default(true)
+  usageLimit     Int?
+  usedCount      Int          @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("coupons")
+}
+
+// ─── Banner ───
+
+model Banner {
+  id          String  @id @default(cuid())
+  title       String
+  subtitle    String?
+  description String?
+  image       String?
+  ctaText     String?
+  ctaLink     String?
+  bgColor     String?
+  isActive    Boolean @default(true)
+  sortOrder   Int     @default(0)
+  position    String  @default("hero")
+  clicks      Int     @default(0)
+  impressions Int     @default(0)
+  startDate   DateTime?
+  endDate     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("banners")
+}
+
+// ─── Brand ───
+
+model Brand {
+  id       String  @id @default(cuid())
+  name     String  @unique
+  slug     String  @unique
+  logo     String?
+  featured Boolean @default(false)
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("brands")
+}
+
+// ─── Payout ───
+
+model Payout {
+  id       String       @id @default(cuid())
+  sellerId String
+  seller   SellerProfile @relation(fields: [sellerId], references: [id])
+  amount   Float
+  status   PayoutStatus @default(PENDING)
+  method   String       @default("bank_transfer")
+  note     String?
+
+  requestedAt DateTime @default(now())
+  paidAt      DateTime?
+
+  @@index([sellerId])
+  @@index([status])
+  @@map("payouts")
+}
+
+// ─── Commission Rule ───
+
+model CommissionRule {
+  id           String  @id @default(cuid())
+  categorySlug String
+  rate         Float
+  isPercentage Boolean @default(true)
+  minOrder     Float   @default(0)
+  isActive     Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("commission_rules")
+}
+
+// ─── CMS Page ───
+
+model CmsPage {
+  id      String  @id @default(cuid())
+  title   String
+  slug    String  @unique
+  content String?
+  status  String  @default("draft")
+  author  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("cms_pages")
+}
+
+// ─── Activity Log ───
+
+model ActivityLog {
+  id        String  @id @default(cuid())
+  type      String
+  action    String
+  message   String
+  userId    String?
+  user      User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userRole  Role?
+  ipAddress String?
+  userAgent String?
+  location  Json?
+  meta      Json?
+  duration  Int?
+  status    String  @default("success")
+  endpoint  String?
+  method    String?
+
+  createdAt DateTime @default(now())
+
+  @@index([type])
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("activity_logs")
+}
+
+// ─── User Session ───
+
+model UserSession {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token        String   @unique
+  ipAddress    String?
+  userAgent    String?
+  device       String?
+  browser      String?
+  os           String?
+  location     Json?
+  city         String?
+  region       String?
+  country      String?
+  latitude     Float?
+  longitude    Float?
+  isActive     Boolean  @default(true)
+  lastActivity DateTime @default(now())
+  expiresAt    DateTime
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([token])
+  @@index([isActive])
+  @@map("user_sessions")
+}
+
+// ─── API Request Log ───
+
+model ApiRequestLog {
+  id           String  @id @default(cuid())
+  method       String
+  endpoint     String
+  statusCode   Int
+  responseTime Int
+  userId       String?
+  ipAddress    String?
+  userAgent    String?
+  requestBody  Json?
+  responseBody Json?
+  error        String?
+  location     Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([endpoint])
+  @@index([userId])
+  @@index([statusCode])
+  @@index([createdAt])
+  @@map("api_request_logs")
+}
+
+// ─── System Performance Log ───
+
+model PerformanceLog {
+  id            String @id @default(cuid())
+  type          String
+  metric        String
+  value         Float
+  unit          String
+  endpoint      String?
+  memoryUsage   Float?
+  cpuUsage      Float?
+  activeUsers   Int?
+  requestCount  Int?
+  errorCount    Int?
+  avgResponseMs Float?
+  meta          Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([type])
+  @@index([metric])
+  @@index([createdAt])
+  @@map("performance_logs")
+}
+
+// ─── Verification Log ───
+
+model VerificationLog {
+  id             String  @id @default(cuid())
+  type           String
+  identifier     String
+  status         String
+  response       Json?
+  userId         String?
+  user           User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+  verifiedData   Json?
+  errorMessage   String?
+
+  createdAt DateTime @default(now())
+
+  @@index([type])
+  @@index([identifier])
+  @@index([userId])
+  @@map("verification_logs")
+}

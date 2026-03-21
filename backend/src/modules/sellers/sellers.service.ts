@@ -1,13 +1,27 @@
 import { Injectable } from '@nestjs/common';
-import { sellers, products } from '../../data/mock-data';
+import { PrismaService } from '../../prisma/prisma.service';
 
 @Injectable()
 export class SellersService {
-  findById(id: string) {
-    return sellers.find((s) => s.id === id) || null;
+  constructor(private readonly prisma: PrismaService) {}
+
+  async findById(id: string) {
+    return this.prisma.sellerProfile.findUnique({
+      where: { id },
+      include: { user: { select: { email: true } } },
+    });
   }
 
-  findProducts(id: string) {
-    return products.filter((p) => p.sellerId === id);
+  async findBySlug(slug: string) {
+    return this.prisma.sellerProfile.findUnique({
+      where: { slug },
+    });
+  }
+
+  async findProducts(sellerId: string) {
+    return this.prisma.product.findMany({
+      where: { sellerId, isActive: true },
+      include: { category: true },
+    });
   }
 }

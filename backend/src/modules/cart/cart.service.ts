@@ -1,142 +1,173 @@
-import { Injectable } from '@nestjs/common';
-import { products, coupons } from '../../data/mock-data';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { PrismaService } from '../../prisma/prisma.service';
 import { AddToCartDto, UpdateCartDto } from './dto/cart.dto';
-
-export interface CartItem {
-  productId: string;
-  productName: string;
-  productImage: string;
-  price: number;
-  compareAtPrice: number;
-  quantity: number;
-  variant?: string;
-  brand: string;
-  sellerId: string;
-}
-
-interface Cart {
-  items: CartItem[];
-  coupon: { code: string; discount: number } | null;
-}
 
 @Injectable()
 export class CartService {
-  private cart: Cart = { items: [], coupon: null };
+  constructor(private readonly prisma: PrismaService) {}
 
-  getCart() {
-    const subtotal = this.cart.items.reduce(
+  async getCart(userId: string) {
+    const items = await this.prisma.cartItem.findMany({
+      where: { userId },
+      include: {
+        product: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            price: true,
+            compareAtPrice: true,
+            images: true,
+            brand: true,
+            sellerId: true,
+            stock: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const cartItems = items.map((item) => ({
+      id: item.id,
+      productId: item.product.id,
+      productName: item.product.name,
+      productSlug: item.product.slug,
+      productImage: item.product.images[0] || '',
+      price: item.product.price,
+      compareAtPrice: item.product.compareAtPrice,
+      quantity: item.quantity,
+      variant: item.variant,
+      brand: item.product.brand,
+      sellerId: item.product.sellerId,
+      stock: item.product.stock,
+    }));
+
+    const subtotal = cartItems.reduce(
       (sum, item) => sum + item.price * item.quantity,
       0,
     );
-    const discount = this.cart.coupon?.discount || 0;
     const shipping = subtotal > 499 ? 0 : 49;
-    const tax = Math.round((subtotal - discount) * 0.18);
-    const total = subtotal - discount + shipping + tax;
+    const tax = Math.round((subtotal) * 0.18);
+    const total = subtotal + shipping + tax;
 
     return {
-      items: this.cart.items,
-      coupon: this.cart.coupon,
+      items: cartItems,
       summary: {
         subtotal,
-        discount,
+        discount: 0,
         shipping,
         tax,
         total,
-        itemCount: this.cart.items.reduce((sum, item) => sum + item.quantity, 0),
+        itemCount: cartItems.reduce((sum, item) => sum + item.quantity, 0),
       },
     };
   }
 
-  addItem(dto: AddToCartDto) {
-    const product = products.find((p) => p.id === dto.productId);
-    if (!product) return { error: 'Product not found' };
+  async addItem(userId: string, dto: AddToCartDto) {
+    const product = await this.prisma.product.findUnique({
+      where: { id: dto.productId },
+    });
+    if (!product) throw new NotFoundException('Product not found');
 
-    const existingIndex = this.cart.items.findIndex(
-      (item) =>
-        item.productId === dto.productId &&
-        item.variant === (dto.variant || undefined),
-    );
+    const existing = await this.prisma.cartItem.findUnique({
+      where: {
+        userId_productId_variant: {
+          userId,
+          productId: dto.productId,
+          variant: dto.variant || '',
+        },
+      },
+    });
 
-    if (existingIndex >= 0) {
-      this.cart.items[existingIndex].quantity += dto.quantity;
+    if (existing) {
+      await this.prisma.cartItem.update({
+        where: { id: existing.id },
+        data: { quantity: existing.quantity + dto.quantity },
+      });
     } else {
-      this.cart.items.push({
-        productId: product.id,
-        productName: product.name,
-        productImage: product.images[0],
-        price: product.price,
-        compareAtPrice: product.compareAtPrice,
-        quantity: dto.quantity,
-        variant: dto.variant,
-        brand: product.brand,
-        sellerId: product.sellerId,
+      await this.prisma.cartItem.create({
+        data: {
+          userId,
+          productId: dto.productId,
+          quantity: dto.quantity,
+          variant: dto.variant || '',
+        },
       });
     }
 
-    return this.getCart();
+    return this.getCart(userId);
   }
 
-  updateItem(dto: UpdateCartDto) {
-    const index = this.cart.items.findIndex(
-      (item) => item.productId === dto.productId,
-    );
-
-    if (index === -1) return { error: 'Item not found in cart' };
+  async updateItem(userId: string, dto: UpdateCartDto) {
+    const item = await this.prisma.cartItem.findFirst({
+      where: { userId, productId: dto.productId },
+    });
+    if (!item) throw new NotFoundException('Item not found in cart');
 
     if (dto.quantity === 0) {
-      this.cart.items.splice(index, 1);
+      await this.prisma.cartItem.delete({ where: { id: item.id } });
     } else {
-      this.cart.items[index].quantity = dto.quantity;
+      await this.prisma.cartItem.update({
+        where: { id: item.id },
+        data: { quantity: dto.quantity },
+      });
     }
 
-    return this.getCart();
+    return this.getCart(userId);
   }
 
-  removeItem(productId: string) {
-    const index = this.cart.items.findIndex(
-      (item) => item.productId === productId,
-    );
+  async removeItem(userId: string, productId: string) {
+    const item = await this.prisma.cartItem.findFirst({
+      where: { userId, productId },
+    });
+    if (!item) throw new NotFoundException('Item not found in cart');
 
-    if (index === -1) return { error: 'Item not found in cart' };
-
-    this.cart.items.splice(index, 1);
-    return this.getCart();
+    await this.prisma.cartItem.delete({ where: { id: item.id } });
+    return this.getCart(userId);
   }
 
-  applyCoupon(code: string) {
-    const coupon = coupons.find(
-      (c) => c.code.toUpperCase() === code.toUpperCase() && c.isActive,
-    );
+  async applyCoupon(userId: string, code: string) {
+    const coupon = await this.prisma.coupon.findUnique({
+      where: { code: code.toUpperCase() },
+    });
+    if (!coupon || !coupon.isActive) {
+      throw new BadRequestException('Invalid or expired coupon code');
+    }
+    if (coupon.validUntil && coupon.validUntil < new Date()) {
+      throw new BadRequestException('Coupon has expired');
+    }
 
-    if (!coupon) return { error: 'Invalid or expired coupon code' };
-
-    const subtotal = this.cart.items.reduce(
-      (sum, item) => sum + item.price * item.quantity,
-      0,
-    );
-
-    if (subtotal < coupon.minOrderAmount) {
-      return {
-        error: `Minimum order amount of ₹${coupon.minOrderAmount} required for this coupon`,
-      };
+    const cart = await this.getCart(userId);
+    if (cart.summary.subtotal < coupon.minOrderAmount) {
+      throw new BadRequestException(
+        `Minimum order amount of ₹${coupon.minOrderAmount} required`,
+      );
     }
 
     let discount: number;
-    if (coupon.discountType === 'percentage') {
+    if (coupon.discountType === 'PERCENTAGE') {
       discount = Math.min(
-        Math.round((subtotal * coupon.discountValue) / 100),
-        coupon.maxDiscount,
+        Math.round((cart.summary.subtotal * coupon.discountValue) / 100),
+        coupon.maxDiscount || Infinity,
       );
     } else {
       discount = coupon.discountValue;
     }
 
-    this.cart.coupon = { code: coupon.code, discount };
-    return this.getCart();
-  }
+    const subtotal = cart.summary.subtotal;
+    const shipping = subtotal > 499 ? 0 : 49;
+    const tax = Math.round((subtotal - discount) * 0.18);
+    const total = subtotal - discount + shipping + tax;
 
-  removeCoupon() {
-    this.cart.coupon = null;
-    return this.getCart();
+    return {
+      ...cart,
+      coupon: { code: coupon.code, discount },
+      summary: {
+        ...cart.summary,
+        discount,
+        tax,
+        total,
+      },
+    };
   }
 }

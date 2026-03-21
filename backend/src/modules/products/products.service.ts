@@ -1,119 +1,149 @@
 import { Injectable } from '@nestjs/common';
-import { products, banners, sellers } from '../../data/mock-data';
+import { PrismaService } from '../../prisma/prisma.service';
 import { ProductQueryDto } from './dto/product.dto';
+import { Prisma } from '../../../generated/prisma/client';
 
 @Injectable()
 export class ProductsService {
-  findAll(query: ProductQueryDto) {
-    let filtered = [...products];
+  constructor(private readonly prisma: PrismaService) {}
+
+  async findAll(query: ProductQueryDto) {
+    const where: Prisma.ProductWhereInput = { isActive: true };
 
     if (query.category) {
-      filtered = filtered.filter(
-        (p) => p.category === query.category || p.subcategory === query.category,
-      );
-    }
-
-    if (query.subcategory) {
-      filtered = filtered.filter((p) => p.subcategory === query.subcategory);
-    }
-
-    if (query.brand) {
-      filtered = filtered.filter(
-        (p) => p.brand.toLowerCase() === query.brand!.toLowerCase(),
-      );
-    }
-
-    if (query.minPrice !== undefined) {
-      filtered = filtered.filter((p) => p.price >= query.minPrice!);
-    }
-
-    if (query.maxPrice !== undefined) {
-      filtered = filtered.filter((p) => p.price <= query.maxPrice!);
-    }
-
-    if (query.minRating !== undefined) {
-      filtered = filtered.filter((p) => p.rating >= query.minRating!);
-    }
-
-    if (query.search) {
-      const term = query.search.toLowerCase();
-      filtered = filtered.filter(
-        (p) =>
-          p.name.toLowerCase().includes(term) ||
-          p.brand.toLowerCase().includes(term) ||
-          p.shortDescription.toLowerCase().includes(term) ||
-          p.tags.some((t) => t.includes(term)),
-      );
-    }
-
-    if (query.tag) {
-      filtered = filtered.filter((p) => p.tags.includes(query.tag!));
-    }
-
-    if (query.sortBy) {
-      switch (query.sortBy) {
-        case 'price_asc':
-          filtered.sort((a, b) => a.price - b.price);
-          break;
-        case 'price_desc':
-          filtered.sort((a, b) => b.price - a.price);
-          break;
-        case 'rating':
-          filtered.sort((a, b) => b.rating - a.rating);
-          break;
-        case 'newest':
-          filtered.sort(
-            (a, b) =>
-              new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-          );
-          break;
-        case 'popular':
-          filtered.sort((a, b) => b.reviewCount - a.reviewCount);
-          break;
+      const category = await this.prisma.category.findUnique({
+        where: { slug: query.category },
+        include: { children: true },
+      });
+      if (category) {
+        const categoryIds = [
+          category.id,
+          ...category.children.map((c) => c.id),
+        ];
+        where.categoryId = { in: categoryIds };
       }
     }
 
-    const total = filtered.length;
-    const page = query.page;
-    const limit = query.limit;
-    const start = (page - 1) * limit;
-    const paginatedItems = filtered.slice(start, start + limit);
+    if (query.subcategory) {
+      const subcat = await this.prisma.category.findUnique({
+        where: { slug: query.subcategory },
+      });
+      if (subcat) {
+        where.categoryId = subcat.id;
+      }
+    }
 
-    return { items: paginatedItems, total, page, limit };
+    if (query.brand) {
+      where.brand = { equals: query.brand, mode: 'insensitive' };
+    }
+
+    if (query.minPrice !== undefined || query.maxPrice !== undefined) {
+      where.price = {};
+      if (query.minPrice !== undefined) where.price.gte = query.minPrice;
+      if (query.maxPrice !== undefined) where.price.lte = query.maxPrice;
+    }
+
+    if (query.minRating !== undefined) {
+      where.rating = { gte: query.minRating };
+    }
+
+    if (query.search) {
+      where.OR = [
+        { name: { contains: query.search, mode: 'insensitive' } },
+        { brand: { contains: query.search, mode: 'insensitive' } },
+        { shortDescription: { contains: query.search, mode: 'insensitive' } },
+        { tags: { has: query.search.toLowerCase() } },
+      ];
+    }
+
+    if (query.tag) {
+      where.tags = { has: query.tag };
+    }
+
+    let orderBy: Prisma.ProductOrderByWithRelationInput = {};
+    switch (query.sortBy) {
+      case 'price_asc':
+        orderBy = { price: 'asc' };
+        break;
+      case 'price_desc':
+        orderBy = { price: 'desc' };
+        break;
+      case 'rating':
+        orderBy = { rating: 'desc' };
+        break;
+      case 'newest':
+        orderBy = { createdAt: 'desc' };
+        break;
+      case 'popular':
+        orderBy = { reviewCount: 'desc' };
+        break;
+      default:
+        orderBy = { createdAt: 'desc' };
+    }
+
+    const [items, total] = await Promise.all([
+      this.prisma.product.findMany({
+        where,
+        orderBy,
+        skip: (query.page - 1) * query.limit,
+        take: query.limit,
+        include: { category: true, seller: true },
+      }),
+      this.prisma.product.count({ where }),
+    ]);
+
+    return { items, total, page: query.page, limit: query.limit };
   }
 
-  findBySlug(slug: string) {
-    const product = products.find((p) => p.slug === slug);
+  async findBySlug(slug: string) {
+    const product = await this.prisma.product.findUnique({
+      where: { slug },
+      include: {
+        category: { include: { parent: true } },
+        seller: true,
+      },
+    });
     if (!product) return null;
 
-    const seller = sellers.find((s) => s.id === product.sellerId);
-    const relatedProducts = products
-      .filter(
-        (p) => p.category === product.category && p.id !== product.id,
-      )
-      .slice(0, 6);
+    const relatedProducts = await this.prisma.product.findMany({
+      where: {
+        categoryId: product.categoryId,
+        id: { not: product.id },
+        isActive: true,
+      },
+      take: 6,
+    });
 
-    return { ...product, seller, relatedProducts };
+    return { ...product, relatedProducts };
   }
 
-  findFeatured() {
-    return products.filter((p) => p.isFeatured).slice(0, 12);
+  async findFeatured() {
+    return this.prisma.product.findMany({
+      where: { isFeatured: true, isActive: true },
+      take: 12,
+      include: { seller: true },
+    });
   }
 
-  findTrending() {
-    return products.filter((p) => p.isTrending).slice(0, 12);
+  async findTrending() {
+    return this.prisma.product.findMany({
+      where: { isTrending: true, isActive: true },
+      take: 12,
+      include: { seller: true },
+    });
   }
 
-  findFlashDeals() {
-    return products
-      .filter((p) => p.isFlashDeal)
-      .map((p) => ({
-        ...p,
-        flashDealEndsAt: p.flashDealEndsAt || null,
-      }));
+  async findFlashDeals() {
+    return this.prisma.product.findMany({
+      where: { isFlashDeal: true, isActive: true },
+      include: { seller: true },
+    });
   }
 
-  getBanners() {
-    return banners;
+  async getBanners() {
+    return this.prisma.banner.findMany({
+      where: { isActive: true },
+      orderBy: { sortOrder: 'asc' },
+    });
   }
 }

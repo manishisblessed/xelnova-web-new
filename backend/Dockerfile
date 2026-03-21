@@ -1,25 +1,30 @@
-# Build stage
-FROM node:20-alpine AS builder
-
+FROM node:20-alpine AS base
 WORKDIR /app
 
-# Copy backend package files
-COPY package*.json ./
-RUN npm ci
-
-COPY . .
-RUN npm run build
-
-# Production stage
-FROM node:20-alpine
-
-WORKDIR /app
-
-ENV NODE_ENV=production
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/package*.json ./
+FROM base AS deps
+COPY package.json package-lock.json* ./
+COPY prisma ./prisma/
+COPY prisma.config.ts ./
 RUN npm ci --omit=dev
+RUN npx prisma generate
 
+FROM base AS builder
+COPY package.json package-lock.json* ./
+COPY prisma ./prisma/
+COPY prisma.config.ts ./
+RUN npm ci
+RUN npx prisma generate
+COPY tsconfig.json nest-cli.json ./
+COPY src ./src/
+RUN npx nest build
+
+FROM base AS runner
+ENV NODE_ENV=production
+RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 nestjs
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/generated ./generated
+COPY --from=builder /app/dist ./dist
+COPY package.json ./
+USER nestjs
 EXPOSE 4000
-USER node
-CMD ["node", "dist/main.js"]
+CMD ["node", "dist/main"]

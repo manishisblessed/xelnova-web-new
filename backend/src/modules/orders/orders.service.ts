@@ -1,36 +1,44 @@
-import { Injectable } from '@nestjs/common';
-import { orders, products, coupons } from '../../data/mock-data';
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { PrismaService } from '../../prisma/prisma.service';
 import { CreateOrderDto } from './dto/order.dto';
 
 @Injectable()
 export class OrdersService {
-  private allOrders = [...orders];
+  constructor(private readonly prisma: PrismaService) {}
 
-  findAll() {
-    return this.allOrders
-      .filter((o) => o.userId === 'user-1')
-      .sort(
-        (a, b) =>
-          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-      );
-  }
-
-  findByOrderNumber(orderNumber: string) {
-    return this.allOrders.find((o) => o.orderNumber === orderNumber) || null;
-  }
-
-  create(dto: CreateOrderDto) {
-    const orderItems = dto.items.map((item) => {
-      const product = products.find((p) => p.id === item.productId);
-      return {
-        productId: item.productId,
-        productName: product?.name || 'Unknown Product',
-        productImage: product?.images[0] || '',
-        quantity: item.quantity,
-        price: product?.price || 0,
-        variant: item.variant,
-      };
+  async findAll(userId: string) {
+    return this.prisma.order.findMany({
+      where: { userId },
+      include: { items: true, shippingAddress: true },
+      orderBy: { createdAt: 'desc' },
     });
+  }
+
+  async findByOrderNumber(orderNumber: string, userId: string) {
+    const order = await this.prisma.order.findUnique({
+      where: { orderNumber },
+      include: { items: true, shippingAddress: true },
+    });
+    if (!order || order.userId !== userId) return null;
+    return order;
+  }
+
+  async create(userId: string, dto: CreateOrderDto) {
+    const orderItems = await Promise.all(
+      dto.items.map(async (item) => {
+        const product = await this.prisma.product.findUnique({
+          where: { id: item.productId },
+        });
+        return {
+          productId: item.productId,
+          productName: product?.name || 'Unknown Product',
+          productImage: product?.images[0] || '',
+          quantity: item.quantity,
+          price: product?.price || 0,
+          variant: item.variant,
+        };
+      }),
+    );
 
     const subtotal = orderItems.reduce(
       (sum, item) => sum + item.price * item.quantity,
@@ -39,15 +47,14 @@ export class OrdersService {
 
     let discount = 0;
     if (dto.couponCode) {
-      const coupon = coupons.find(
-        (c) =>
-          c.code.toUpperCase() === dto.couponCode!.toUpperCase() && c.isActive,
-      );
-      if (coupon) {
-        if (coupon.discountType === 'percentage') {
+      const coupon = await this.prisma.coupon.findUnique({
+        where: { code: dto.couponCode.toUpperCase() },
+      });
+      if (coupon && coupon.isActive) {
+        if (coupon.discountType === 'PERCENTAGE') {
           discount = Math.min(
             Math.round((subtotal * coupon.discountValue) / 100),
-            coupon.maxDiscount,
+            coupon.maxDiscount || Infinity,
           );
         } else {
           discount = coupon.discountValue;
@@ -60,32 +67,63 @@ export class OrdersService {
     const total = subtotal - discount + shipping + tax;
 
     const orderNumber = `XN-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 999999)).padStart(6, '0')}`;
+    const estimatedDelivery = new Date();
+    estimatedDelivery.setDate(estimatedDelivery.getDate() + 7);
 
-    const now = new Date();
-    const estimatedDelivery = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+    let shippingAddressId: string | undefined;
 
-    const newOrder = {
-      id: `order-${Date.now()}`,
-      orderNumber,
-      userId: 'user-1',
-      items: orderItems,
-      subtotal,
-      discount,
-      shipping,
-      tax,
-      total,
-      status: 'processing',
-      paymentMethod: dto.paymentMethod,
-      shippingAddress: {
-        ...dto.shippingAddress,
-        addressLine2: dto.shippingAddress.addressLine2 || '',
-        type: dto.shippingAddress.type,
+    const existingAddress = await this.prisma.address.findFirst({
+      where: {
+        userId,
+        addressLine1: dto.shippingAddress.addressLine1,
+        pincode: dto.shippingAddress.pincode,
       },
-      createdAt: now.toISOString().split('T')[0],
-      estimatedDelivery: estimatedDelivery.toISOString().split('T')[0],
-    };
+    });
 
-    this.allOrders.push(newOrder);
-    return newOrder;
+    if (existingAddress) {
+      shippingAddressId = existingAddress.id;
+    } else {
+      const newAddress = await this.prisma.address.create({
+        data: {
+          userId,
+          fullName: dto.shippingAddress.fullName,
+          phone: dto.shippingAddress.phone,
+          addressLine1: dto.shippingAddress.addressLine1,
+          addressLine2: dto.shippingAddress.addressLine2,
+          city: dto.shippingAddress.city,
+          state: dto.shippingAddress.state,
+          pincode: dto.shippingAddress.pincode,
+          landmark: dto.shippingAddress.landmark,
+          type: (dto.shippingAddress.type?.toUpperCase() as any) || 'HOME',
+        },
+      });
+      shippingAddressId = newAddress.id;
+    }
+
+    const order = await this.prisma.order.create({
+      data: {
+        orderNumber,
+        userId,
+        subtotal,
+        discount,
+        shipping,
+        tax,
+        total,
+        status: 'PROCESSING',
+        paymentMethod: dto.paymentMethod,
+        shippingAddressId,
+        couponCode: dto.couponCode,
+        estimatedDelivery,
+        items: {
+          create: orderItems,
+        },
+      },
+      include: { items: true, shippingAddress: true },
+    });
+
+    // Clear user's cart after order
+    await this.prisma.cartItem.deleteMany({ where: { userId } });
+
+    return order;
   }
 }

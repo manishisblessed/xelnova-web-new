@@ -1,31 +1,33 @@
 import { Injectable } from '@nestjs/common';
-import { categories, products } from '../../data/mock-data';
+import { PrismaService } from '../../prisma/prisma.service';
 
 @Injectable()
 export class CategoriesService {
-  findAll() {
-    return categories;
+  constructor(private readonly prisma: PrismaService) {}
+
+  async findAll() {
+    return this.prisma.category.findMany({
+      where: { parentId: null },
+      include: { children: true },
+      orderBy: { name: 'asc' },
+    });
   }
 
-  findBySlug(slug: string) {
-    const findCategory = (cats: typeof categories): (typeof categories)[0] | null => {
-      for (const cat of cats) {
-        if (cat.slug === slug) return cat;
-        if (cat.children) {
-          const found = findCategory(cat.children);
-          if (found) return found;
-        }
-      }
-      return null;
-    };
+  async findBySlug(slug: string) {
+    const category = await this.prisma.category.findUnique({
+      where: { slug },
+      include: { children: true, parent: true },
+    });
 
-    const category = findCategory(categories);
     if (!category) return null;
 
-    const categoryProducts = products.filter(
-      (p) => p.category === slug || p.subcategory === slug,
-    );
+    const categoryIds = [category.id, ...category.children.map((c) => c.id)];
 
-    return { category, products: categoryProducts };
+    const products = await this.prisma.product.findMany({
+      where: { categoryId: { in: categoryIds }, isActive: true },
+      include: { seller: true },
+    });
+
+    return { category, products };
   }
 }

@@ -1,72 +1,122 @@
-import { Injectable } from '@nestjs/common';
-import { users, products } from '../../data/mock-data';
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { PrismaService } from '../../prisma/prisma.service';
 
 @Injectable()
 export class UsersService {
-  getProfile() {
-    const user = users[0];
-    return {
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      phone: user.phone,
-      avatar: user.avatar,
-      createdAt: user.createdAt,
-    };
-  }
+  constructor(private readonly prisma: PrismaService) {}
 
-  updateProfile(data: { name?: string; email?: string; phone?: string }) {
-    const user = users[0];
-    if (data.name) user.name = data.name;
-    if (data.email) user.email = data.email;
-    if (data.phone) user.phone = data.phone;
-
-    return {
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      phone: user.phone,
-      avatar: user.avatar,
-      createdAt: user.createdAt,
-    };
-  }
-
-  getAddresses() {
-    return users[0].addresses;
-  }
-
-  addAddress(address: {
-    fullName: string;
-    phone: string;
-    addressLine1: string;
-    addressLine2?: string;
-    city: string;
-    state: string;
-    pincode: string;
-    landmark?: string;
-    type: string;
-  }) {
-    users[0].addresses.push({
-      ...address,
-      addressLine2: address.addressLine2 || '',
+  async getProfile(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        phone: true,
+        avatar: true,
+        role: true,
+        createdAt: true,
+      },
     });
-    return users[0].addresses;
+    if (!user) throw new NotFoundException('User not found');
+    return user;
   }
 
-  getWishlist() {
-    const user = users[0];
-    return products.filter((p) => user.wishlist.includes(p.id));
+  async updateProfile(
+    userId: string,
+    data: { name?: string; email?: string; phone?: string },
+  ) {
+    return this.prisma.user.update({
+      where: { id: userId },
+      data,
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        phone: true,
+        avatar: true,
+        role: true,
+        createdAt: true,
+      },
+    });
   }
 
-  toggleWishlist(productId: string) {
-    const user = users[0];
-    const index = user.wishlist.indexOf(productId);
-    if (index >= 0) {
-      user.wishlist.splice(index, 1);
-      return { added: false, wishlist: user.wishlist };
+  async getAddresses(userId: string) {
+    return this.prisma.address.findMany({
+      where: { userId },
+      orderBy: { isDefault: 'desc' },
+    });
+  }
+
+  async addAddress(
+    userId: string,
+    address: {
+      fullName: string;
+      phone: string;
+      addressLine1: string;
+      addressLine2?: string;
+      city: string;
+      state: string;
+      pincode: string;
+      landmark?: string;
+      type: string;
+    },
+  ) {
+    return this.prisma.address.create({
+      data: {
+        userId,
+        fullName: address.fullName,
+        phone: address.phone,
+        addressLine1: address.addressLine1,
+        addressLine2: address.addressLine2,
+        city: address.city,
+        state: address.state,
+        pincode: address.pincode,
+        landmark: address.landmark,
+        type: (address.type?.toUpperCase() as any) || 'HOME',
+      },
+    });
+  }
+
+  async getWishlist(userId: string) {
+    const wishlist = await this.prisma.wishlist.findMany({
+      where: { userId },
+      include: {
+        product: {
+          include: { seller: true },
+        },
+      },
+    });
+    return wishlist.map((w) => w.product);
+  }
+
+  async toggleWishlist(userId: string, productId: string) {
+    const existing = await this.prisma.wishlist.findUnique({
+      where: { userId_productId: { userId, productId } },
+    });
+
+    if (existing) {
+      await this.prisma.wishlist.delete({
+        where: { userId_productId: { userId, productId } },
+      });
+      const wishlistIds = (
+        await this.prisma.wishlist.findMany({
+          where: { userId },
+          select: { productId: true },
+        })
+      ).map((w) => w.productId);
+      return { added: false, wishlist: wishlistIds };
     } else {
-      user.wishlist.push(productId);
-      return { added: true, wishlist: user.wishlist };
+      await this.prisma.wishlist.create({
+        data: { userId, productId },
+      });
+      const wishlistIds = (
+        await this.prisma.wishlist.findMany({
+          where: { userId },
+          select: { productId: true },
+        })
+      ).map((w) => w.productId);
+      return { added: true, wishlist: wishlistIds };
     }
   }
 }

@@ -10,8 +10,9 @@ import {
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { CartService } from './cart.service';
 import { AddToCartDto, UpdateCartDto, ApplyCouponDto } from './dto/cart.dto';
-import { successResponse, errorResponse } from '../../common/helpers/response.helper';
-import { ApiResponse } from '../../common/interfaces/api-response.interface';
+import { successResponse } from '../../common/helpers/response.helper';
+import { Auth } from '../../common/decorators/auth.decorator';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
 @ApiTags('Cart')
 @Controller('cart')
@@ -19,57 +20,64 @@ export class CartController {
   constructor(private readonly cartService: CartService) {}
 
   @Get()
+  @Auth()
   @ApiOperation({ summary: 'Get cart contents' })
-  getCart(): ApiResponse {
-    return successResponse(this.cartService.getCart(), 'Cart fetched successfully');
+  async getCart(@CurrentUser('id') userId: string) {
+    return successResponse(
+      await this.cartService.getCart(userId),
+      'Cart fetched successfully',
+    );
   }
 
   @Post('add')
+  @Auth()
   @ApiOperation({ summary: 'Add item to cart' })
-  addItem(@Body() dto: AddToCartDto): ApiResponse {
-    const result = this.cartService.addItem(dto);
-    if ('error' in result) {
-      return errorResponse(result.error as string);
-    }
-    return successResponse(result, 'Item added to cart');
+  async addItem(
+    @CurrentUser('id') userId: string,
+    @Body() dto: AddToCartDto,
+  ) {
+    return successResponse(
+      await this.cartService.addItem(userId, dto),
+      'Item added to cart',
+    );
   }
 
   @Put('update')
+  @Auth()
   @ApiOperation({ summary: 'Update cart item quantity' })
-  updateItem(@Body() dto: UpdateCartDto): ApiResponse {
-    const result = this.cartService.updateItem(dto);
-    if ('error' in result) {
-      return errorResponse(result.error as string);
-    }
-    return successResponse(result, 'Cart updated successfully');
+  async updateItem(
+    @CurrentUser('id') userId: string,
+    @Body() dto: UpdateCartDto,
+  ) {
+    return successResponse(
+      await this.cartService.updateItem(userId, dto),
+      'Cart updated successfully',
+    );
   }
 
   @Delete('remove/:id')
+  @Auth()
   @ApiOperation({ summary: 'Remove item from cart' })
-  removeItem(@Param('id') id: string): ApiResponse {
-    const result = this.cartService.removeItem(id);
-    if ('error' in result) {
-      return errorResponse(result.error as string);
-    }
-    return successResponse(result, 'Item removed from cart');
+  async removeItem(
+    @CurrentUser('id') userId: string,
+    @Param('id') id: string,
+  ) {
+    return successResponse(
+      await this.cartService.removeItem(userId, id),
+      'Item removed from cart',
+    );
   }
 
   @Post('coupon/apply')
+  @Auth()
   @ApiOperation({ summary: 'Apply coupon code' })
-  applyCoupon(@Body() dto: ApplyCouponDto): ApiResponse {
-    const result = this.cartService.applyCoupon(dto.code);
-    if ('error' in result) {
-      return errorResponse(result.error as string);
-    }
-    return successResponse(result, 'Coupon applied successfully');
-  }
-
-  @Delete('coupon/remove')
-  @ApiOperation({ summary: 'Remove applied coupon' })
-  removeCoupon(): ApiResponse {
+  async applyCoupon(
+    @CurrentUser('id') userId: string,
+    @Body() dto: ApplyCouponDto,
+  ) {
     return successResponse(
-      this.cartService.removeCoupon(),
-      'Coupon removed successfully',
+      await this.cartService.applyCoupon(userId, dto.code),
+      'Coupon applied successfully',
     );
   }
 }

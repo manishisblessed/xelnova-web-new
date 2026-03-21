@@ -1,7 +1,10 @@
 import { Controller, Get, Query } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { SearchService } from './search.service';
-import { successResponse, paginatedResponse } from '../../common/helpers/response.helper';
+import {
+  successResponse,
+  paginatedResponse,
+} from '../../common/helpers/response.helper';
 
 @ApiTags('Search')
 @Controller('search')
@@ -13,14 +16,14 @@ export class SearchController {
   @ApiQuery({ name: 'q', required: true })
   @ApiQuery({ name: 'page', required: false })
   @ApiQuery({ name: 'limit', required: false })
-  search(
+  async search(
     @Query('q') q: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
   ) {
     const pageNum = parseInt(page || '1', 10);
     const limitNum = parseInt(limit || '12', 10);
-    const result = this.searchService.search(q || '', pageNum, limitNum);
+    const result = await this.searchService.search(q || '', pageNum, limitNum);
     return paginatedResponse(
       result.products,
       result.total,
@@ -33,18 +36,18 @@ export class SearchController {
   @Get('autocomplete')
   @ApiOperation({ summary: 'Get autocomplete suggestions' })
   @ApiQuery({ name: 'q', required: true })
-  autocomplete(@Query('q') q: string) {
+  async autocomplete(@Query('q') q: string) {
     return successResponse(
-      this.searchService.autocomplete(q || ''),
+      await this.searchService.autocomplete(q || ''),
       'Autocomplete suggestions fetched',
     );
   }
 
   @Get('popular')
   @ApiOperation({ summary: 'Get popular searches' })
-  popular() {
+  async popular() {
     return successResponse(
-      this.searchService.getPopularSearches(),
+      await this.searchService.getPopularSearches(),
       'Popular searches fetched successfully',
     );
   }

@@ -2,6 +2,8 @@ import { Controller, Get, Post, Param, Body } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { ReviewsService } from './reviews.service';
 import { successResponse } from '../../common/helpers/response.helper';
+import { Auth } from '../../common/decorators/auth.decorator';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
 @ApiTags('Reviews')
 @Controller('reviews')
@@ -10,16 +12,18 @@ export class ReviewsController {
 
   @Get('product/:productId')
   @ApiOperation({ summary: 'Get reviews for a product' })
-  findByProductId(@Param('productId') productId: string) {
+  async findByProductId(@Param('productId') productId: string) {
     return successResponse(
-      this.reviewsService.findByProductId(productId),
+      await this.reviewsService.findByProductId(productId),
       'Reviews fetched successfully',
     );
   }
 
   @Post()
+  @Auth()
   @ApiOperation({ summary: 'Create a review' })
-  create(
+  async create(
+    @CurrentUser('id') userId: string,
     @Body()
     body: {
       productId: string;
@@ -29,7 +33,7 @@ export class ReviewsController {
     },
   ) {
     return successResponse(
-      this.reviewsService.create(body),
+      await this.reviewsService.create(userId, body),
       'Review created successfully',
     );
   }
