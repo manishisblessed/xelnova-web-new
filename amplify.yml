@@ -6,18 +6,19 @@ applications:
       phases:
         preBuild:
           commands:
+            - nvm use 18
             - npm ci
         build:
           commands:
             - npx turbo run build --filter=@xelnova/web
       artifacts:
-        baseDirectory: apps/web/out
+        baseDirectory: apps/web/.next
         files:
           - '**/*'
       cache:
         paths:
           - node_modules/**/*
-          - .turbo/**/*
+          - apps/web/.next/cache/**/*
 
   - appRoot: apps/admin
     frontend:
@@ -25,18 +26,19 @@ applications:
       phases:
         preBuild:
           commands:
+            - nvm use 18
             - npm ci
         build:
           commands:
             - npx turbo run build --filter=@xelnova/admin
       artifacts:
-        baseDirectory: apps/admin/out
+        baseDirectory: apps/admin/.next
         files:
           - '**/*'
       cache:
         paths:
           - node_modules/**/*
-          - .turbo/**/*
+          - apps/admin/.next/cache/**/*
 
   - appRoot: apps/seller
     frontend:
@@ -44,15 +46,16 @@ applications:
       phases:
         preBuild:
           commands:
+            - nvm use 18
             - npm ci
         build:
           commands:
             - npx turbo run build --filter=@xelnova/seller
       artifacts:
-        baseDirectory: apps/seller/out
+        baseDirectory: apps/seller/.next
         files:
           - '**/*'
       cache:
         paths:
           - node_modules/**/*
-          - .turbo/**/*
+          - apps/seller/.next/cache/**/*
