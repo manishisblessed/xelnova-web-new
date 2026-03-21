@@ -13,7 +13,7 @@ import {
 import { successResponse } from '../../common/helpers/response.helper';
 import { Auth } from '../../common/decorators/auth.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { Role } from '../../../generated/prisma/enums';
+import { Role } from '@prisma/client';
 
 @ApiTags('Auth')
 @Controller('auth')

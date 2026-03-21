@@ -10,16 +10,7 @@ import {
 import { ProductCard } from '@/components/marketplace/product-card';
 import { FlashDealCard } from '@/components/marketplace/flash-deal-card';
 import { SectionHeader } from '@/components/marketplace/section-header';
-import {
-  flashDealProducts,
-  getBestSellers,
-  getRecommended,
-  products,
-} from '@/lib/data';
-
-const trendingProducts = products.filter((p) => p.isFeatured || p.rating >= 4.5).slice(0, 8);
-const bestSellers = getBestSellers();
-const recommended = getRecommended();
+import { useProducts, useFlashDeals } from '@/lib/api';
 
 const promoBanners = [
   { id: 1, image: 'https://images.unsplash.com/photo-1607082348824-0a96f2a4b9da?w=700&h=300&fit=crop', href: '/products?category=fashion', alt: 'Summer Fashion Sale', title: 'Fashion Fest', subtitle: 'Up to 60% Off' },
@@ -50,9 +41,17 @@ const brands = [
   'boAt', 'OnePlus', 'JBL', 'Ray-Ban', 'Prestige', 'Philips',
 ];
 
-const dealProduct = products.find((p) => p.discount >= 30 && p.rating >= 4.5) || products[0];
-
 export function HomeBelowFold() {
+  const { data: productsData } = useProducts({ limit: 50 });
+  const { data: flashDeals } = useFlashDeals();
+
+  const allProducts = productsData?.products || [];
+  const flashDealProducts = flashDeals || [];
+  const trendingProducts = allProducts.filter((p) => p.isFeatured || p.rating >= 4.5).slice(0, 8);
+  const bestSellers = allProducts.filter((p) => p.rating >= 4.5).sort((a, b) => b.reviewCount - a.reviewCount).slice(0, 8);
+  const recommended = allProducts.filter((p) => p.rating >= 4.0).slice(0, 8);
+  const dealProduct = allProducts.find((p) => p.discount >= 30 && p.rating >= 4.5) || allProducts[0];
+
   return (
     <>
       {/* ─── 5. FLASH DEALS STRIP ─── */}
@@ -84,6 +83,9 @@ export function HomeBelowFold() {
                   {flashDealProducts.map((product) => (
                     <FlashDealCard key={product.id} product={product} />
                   ))}
+                  {flashDealProducts.length === 0 && (
+                    <div className="flex items-center justify-center w-full py-8 text-text-muted text-sm">Loading deals...</div>
+                  )}
                 </div>
               </div>
             </div>
@@ -133,84 +135,88 @@ export function HomeBelowFold() {
       </section>
 
       {/* ─── 8. DEAL OF THE DAY ─── */}
-      <section className="py-6">
-        <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
-          <div className="relative bg-gradient-to-br from-accent-50 via-white to-surface-warm rounded-3xl border border-accent-200/40 overflow-hidden">
-            <div className="absolute top-0 right-0 w-72 h-72 bg-accent-100/40 rounded-full blur-3xl -translate-y-1/3 translate-x-1/4" />
-            <div className="absolute bottom-0 left-0 w-48 h-48 bg-primary-100/30 rounded-full blur-3xl translate-y-1/3 -translate-x-1/4" />
-            <div className="relative p-6 md:p-10">
-              <div className="grid md:grid-cols-2 gap-8 items-center">
-                <div className="relative aspect-square max-w-[360px] mx-auto">
-                  <div className="absolute inset-4 rounded-3xl bg-white shadow-elevated" />
-                  <Image
-                    src={dealProduct.images[0]}
-                    alt={dealProduct.name}
-                    fill
-                    sizes="(max-width: 768px) 100vw, 360px"
-                    className="object-contain relative z-10 p-6"
-                  />
-                </div>
-                <div>
-                  <span className="inline-flex items-center gap-1.5 bg-danger-100 text-danger-700 px-3 py-1 rounded-full text-xs font-bold mb-4">
-                    <Flame size={12} className="fill-current" /> Deal of the Day
-                  </span>
-                  <h2 className="text-2xl md:text-3xl font-extrabold text-text-primary mb-2 font-display leading-tight">
-                    {dealProduct.name}
-                  </h2>
-                  <p className="text-sm text-text-muted mb-5">{dealProduct.brand} · {dealProduct.rating.toFixed(1)} ★ ({dealProduct.reviewCount.toLocaleString('en-IN')} reviews)</p>
-                  <div className="flex items-baseline gap-3 mb-5">
-                    <span className="text-3xl font-extrabold text-text-primary">₹{dealProduct.price.toLocaleString('en-IN')}</span>
-                    {dealProduct.comparePrice > dealProduct.price && (
-                      <>
-                        <span className="text-lg text-text-muted line-through">₹{dealProduct.comparePrice.toLocaleString('en-IN')}</span>
-                        <span className="bg-primary-100 text-primary-700 px-2 py-0.5 rounded-lg text-sm font-bold">{dealProduct.discount}% OFF</span>
-                      </>
-                    )}
+      {dealProduct && (
+        <section className="py-6">
+          <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
+            <div className="relative bg-gradient-to-br from-accent-50 via-white to-surface-warm rounded-3xl border border-accent-200/40 overflow-hidden">
+              <div className="absolute top-0 right-0 w-72 h-72 bg-accent-100/40 rounded-full blur-3xl -translate-y-1/3 translate-x-1/4" />
+              <div className="absolute bottom-0 left-0 w-48 h-48 bg-primary-100/30 rounded-full blur-3xl translate-y-1/3 -translate-x-1/4" />
+              <div className="relative p-6 md:p-10">
+                <div className="grid md:grid-cols-2 gap-8 items-center">
+                  <div className="relative aspect-square max-w-[360px] mx-auto">
+                    <div className="absolute inset-4 rounded-3xl bg-white shadow-elevated" />
+                    <Image
+                      src={dealProduct.images[0]}
+                      alt={dealProduct.name}
+                      fill
+                      sizes="(max-width: 768px) 100vw, 360px"
+                      className="object-contain relative z-10 p-6"
+                    />
                   </div>
-                  <div className="flex gap-3 mb-6">
-                    {[
-                      { val: '12', label: 'Hours' },
-                      { val: '45', label: 'Mins' },
-                      { val: '30', label: 'Secs' },
-                    ].map((t) => (
-                      <div key={t.label} className="bg-surface-dark text-white px-4 py-3 rounded-xl text-center min-w-[56px]">
-                        <div className="text-xl font-bold tabular-nums font-display">{t.val}</div>
-                        <div className="text-[9px] text-white/40 uppercase tracking-wider mt-0.5">{t.label}</div>
-                      </div>
-                    ))}
-                    <div className="flex items-center">
-                      <div className="w-2 h-2 rounded-full bg-danger-500 animate-pulse mr-1.5" />
-                      <span className="text-xs text-danger-600 font-semibold">Live</span>
+                  <div>
+                    <span className="inline-flex items-center gap-1.5 bg-danger-100 text-danger-700 px-3 py-1 rounded-full text-xs font-bold mb-4">
+                      <Flame size={12} className="fill-current" /> Deal of the Day
+                    </span>
+                    <h2 className="text-2xl md:text-3xl font-extrabold text-text-primary mb-2 font-display leading-tight">
+                      {dealProduct.name}
+                    </h2>
+                    <p className="text-sm text-text-muted mb-5">{dealProduct.brand} · {dealProduct.rating.toFixed(1)} ★ ({dealProduct.reviewCount.toLocaleString('en-IN')} reviews)</p>
+                    <div className="flex items-baseline gap-3 mb-5">
+                      <span className="text-3xl font-extrabold text-text-primary">₹{dealProduct.price.toLocaleString('en-IN')}</span>
+                      {dealProduct.comparePrice > dealProduct.price && (
+                        <>
+                          <span className="text-lg text-text-muted line-through">₹{dealProduct.comparePrice.toLocaleString('en-IN')}</span>
+                          <span className="bg-primary-100 text-primary-700 px-2 py-0.5 rounded-lg text-sm font-bold">{dealProduct.discount}% OFF</span>
+                        </>
+                      )}
                     </div>
+                    <div className="flex gap-3 mb-6">
+                      {[
+                        { val: '12', label: 'Hours' },
+                        { val: '45', label: 'Mins' },
+                        { val: '30', label: 'Secs' },
+                      ].map((t) => (
+                        <div key={t.label} className="bg-surface-dark text-white px-4 py-3 rounded-xl text-center min-w-[56px]">
+                          <div className="text-xl font-bold tabular-nums font-display">{t.val}</div>
+                          <div className="text-[9px] text-white/40 uppercase tracking-wider mt-0.5">{t.label}</div>
+                        </div>
+                      ))}
+                      <div className="flex items-center">
+                        <div className="w-2 h-2 rounded-full bg-danger-500 animate-pulse mr-1.5" />
+                        <span className="text-xs text-danger-600 font-semibold">Live</span>
+                      </div>
+                    </div>
+                    <Link
+                      href={`/products/${dealProduct.slug}`}
+                      className="inline-flex items-center gap-2 bg-primary-600 text-white px-8 py-3.5 rounded-xl font-semibold text-sm hover:bg-primary-700 transition-all shadow-primary active:scale-[0.98]"
+                    >
+                      Shop Now <ArrowRight className="w-4 h-4" />
+                    </Link>
                   </div>
-                  <Link
-                    href={`/products/${dealProduct.slug}`}
-                    className="inline-flex items-center gap-2 bg-primary-600 text-white px-8 py-3.5 rounded-xl font-semibold text-sm hover:bg-primary-700 transition-all shadow-primary active:scale-[0.98]"
-                  >
-                    Shop Now <ArrowRight className="w-4 h-4" />
-                  </Link>
                 </div>
               </div>
             </div>
           </div>
-        </div>
-      </section>
+        </section>
+      )}
 
       {/* ─── 9. BEST SELLERS ─── */}
-      <section className="py-6">
-        <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
-          <div className="bg-white rounded-2xl border border-border/60 p-5 md:p-6 shadow-card">
-            <SectionHeader title="Best Sellers" subtitle="Most loved by our customers" seeAllHref="/products?sort=best-selling" />
-            <div className="flex gap-4 overflow-x-auto pb-2 scrollbar-hide">
-              {bestSellers.map((product, i) => (
-                <div key={product.id} className="w-[220px] flex-shrink-0 sm:w-[240px]">
-                  <ProductCard product={product} index={i} />
-                </div>
-              ))}
+      {bestSellers.length > 0 && (
+        <section className="py-6">
+          <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
+            <div className="bg-white rounded-2xl border border-border/60 p-5 md:p-6 shadow-card">
+              <SectionHeader title="Best Sellers" subtitle="Most loved by our customers" seeAllHref="/products?sort=best-selling" />
+              <div className="flex gap-4 overflow-x-auto pb-2 scrollbar-hide">
+                {bestSellers.map((product, i) => (
+                  <div key={product.id} className="w-[220px] flex-shrink-0 sm:w-[240px]">
+                    <ProductCard product={product} index={i} />
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
-        </div>
-      </section>
+        </section>
+      )}
 
       {/* ─── 10. TOP SELECTIONS ─── */}
       <section className="py-4">
@@ -240,18 +246,20 @@ export function HomeBelowFold() {
       </section>
 
       {/* ─── 11. RECOMMENDED ─── */}
-      <section className="py-6">
-        <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
-          <div className="bg-white rounded-2xl border border-border/60 p-5 md:p-6 shadow-card">
-            <SectionHeader title="Recommended for You" subtitle="Handpicked based on top ratings" seeAllHref="/products" />
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 md:gap-4">
-              {recommended.map((product, i) => (
-                <ProductCard key={product.id} product={product} index={i} />
-              ))}
+      {recommended.length > 0 && (
+        <section className="py-6">
+          <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
+            <div className="bg-white rounded-2xl border border-border/60 p-5 md:p-6 shadow-card">
+              <SectionHeader title="Recommended for You" subtitle="Handpicked based on top ratings" seeAllHref="/products" />
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 md:gap-4">
+                {recommended.map((product, i) => (
+                  <ProductCard key={product.id} product={product} index={i} />
+                ))}
+              </div>
             </div>
           </div>
-        </div>
-      </section>
+        </section>
+      )}
 
       {/* ─── 12. BRAND SHOWCASE ─── */}
       <section className="py-6">

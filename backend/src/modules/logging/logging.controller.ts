@@ -1,7 +1,7 @@
 import { Controller, Get, Query } from '@nestjs/common';
 import { LoggingService } from './logging.service';
 import { Auth } from '../../common/decorators/auth.decorator';
-import { Role } from '../../../generated/prisma/enums';
+import { Role } from '@prisma/client';
 
 @Controller('logs')
 @Auth('ADMIN')

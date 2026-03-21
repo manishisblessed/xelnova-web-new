@@ -5,7 +5,7 @@ import { motion } from "framer-motion";
 import Link from "next/link";
 import { Heart } from "lucide-react";
 import { useWishlistStore } from "@/lib/store/wishlist-store";
-import { products } from "@/lib/data";
+import { useProducts } from "@/lib/api";
 import { ProductCard } from "@/components/marketplace/product-card";
 
 export default function WishlistPage() {
@@ -13,9 +13,12 @@ export default function WishlistPage() {
   const wishlistItems = useWishlistStore((s) => s.items);
   useEffect(() => setMounted(true), []);
 
+  const { data: productsData } = useProducts({ limit: 100 });
+  const allProducts = productsData?.products || [];
+
   if (!mounted) return <div className="flex min-h-screen items-center justify-center bg-surface-950"><div className="h-8 w-8 animate-spin rounded-full border-4 border-gold-400 border-t-transparent" /></div>;
 
-  const wishlistProducts = products.filter((p) => wishlistItems.includes(p.id));
+  const wishlistProducts = allProducts.filter((p) => wishlistItems.includes(p.id));
 
   return (
     <div className="min-h-screen bg-surface-950">

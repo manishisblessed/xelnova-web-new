@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "turbo run dev",
     "dev:web": "turbo run dev --filter=@xelnova/web",
+    "dev:api": "turbo run dev --filter=@xelnova/api-app",
     "dev:admin": "turbo run dev --filter=@xelnova/admin",
     "dev:seller": "turbo run dev --filter=@xelnova/seller",
     "dev:backend": "turbo run dev --filter=@xelnova/backend",
@@ -22,6 +23,6 @@
   },
   "packageManager": "npm@11.9.0",
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.0.0"
   }
 }

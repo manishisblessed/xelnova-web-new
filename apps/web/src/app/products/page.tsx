@@ -11,8 +11,7 @@ import {
   Check,
 } from "lucide-react";
 import { cn } from "@xelnova/utils";
-import { products, type Product } from "@/lib/data/products";
-import { categories } from "@/lib/data/categories";
+import { useProducts, useCategories } from "@/lib/api";
 import { ProductCard } from "@/components/marketplace/product-card";
 
 const SORT_OPTIONS = [
@@ -39,11 +38,12 @@ const DISCOUNT_RANGES = [
   { label: "70% off or more", value: 70 },
 ];
 
-const brands = [...new Set(products.map((p) => p.brand))].sort();
-
 function ProductsContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
+
+  const { data: categoriesData } = useCategories();
+  const categories = categoriesData || [];
 
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const [selectedCategories, setSelectedCategories] = useState<string[]>(() => {
@@ -60,6 +60,11 @@ function ProductsContent() {
   const [inStockOnly, setInStockOnly] = useState(false);
   const [sort, setSort] = useState(searchParams.get("sort") || "relevance");
 
+  const { data: productsData, loading } = useProducts({ limit: 100 });
+  const allProducts = productsData?.products || [];
+
+  const brands = useMemo(() => [...new Set(allProducts.map((p) => p.brand).filter(Boolean))].sort(), [allProducts]);
+
   useEffect(() => {
     const cat = searchParams.get("category");
     if (cat) setSelectedCategories(cat.split(","));
@@ -68,7 +73,7 @@ function ProductsContent() {
   }, [searchParams]);
 
   const filteredProducts = useMemo(() => {
-    let result = [...products];
+    let result = [...allProducts];
     if (selectedCategories.length > 0) result = result.filter((p) => selectedCategories.includes(p.category));
     if (selectedBrands.length > 0) result = result.filter((p) => selectedBrands.includes(p.brand));
     if (priceRange.min) result = result.filter((p) => p.price >= Number(priceRange.min));
@@ -83,7 +88,7 @@ function ProductsContent() {
       case "newest": result.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()); break;
     }
     return result;
-  }, [selectedCategories, selectedBrands, priceRange, minRating, minDiscount, inStockOnly, sort]);
+  }, [allProducts, selectedCategories, selectedBrands, priceRange, minRating, minDiscount, inStockOnly, sort]);
 
   const toggleCategory = (slug: string) => setSelectedCategories((prev) => prev.includes(slug) ? prev.filter((c) => c !== slug) : [...prev, slug]);
   const toggleBrand = (brand: string) => setSelectedBrands((prev) => prev.includes(brand) ? prev.filter((b) => b !== brand) : [...prev, brand]);
@@ -114,7 +119,7 @@ function ProductsContent() {
             />
             <span className="text-sm text-surface-50">{cat.name}</span>
             <span className="ml-auto text-xs text-surface-200">
-              {products.filter((p) => p.category === cat.slug).length}
+              {cat.productCount}
             </span>
           </label>
         ))}
@@ -223,7 +228,7 @@ function ProductsContent() {
           <div>
             <h1 className="text-2xl font-bold text-white font-display">All Products</h1>
             <p className="mt-1 text-sm text-surface-100">
-              Showing {filteredProducts.length} of {products.length} results
+              {loading ? 'Loading...' : `Showing ${filteredProducts.length} of ${allProducts.length} results`}
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -275,7 +280,11 @@ function ProductsContent() {
           </aside>
 
           <main className="flex-1">
-            {filteredProducts.length > 0 ? (
+            {loading ? (
+              <div className="flex items-center justify-center py-20">
+                <div className="h-8 w-8 animate-spin rounded-full border-4 border-gold-400 border-t-transparent" />
+              </div>
+            ) : filteredProducts.length > 0 ? (
               <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
                 {filteredProducts.map((product, i) => (<ProductCard key={product.id} product={product} index={i} />))}
               </div>

@@ -8,7 +8,7 @@ import {
   UpdateSellerProfileDto,
   RevenueQueryDto,
 } from './dto/seller-dashboard.dto';
-import { Prisma, ProductStatus } from '../../../generated/prisma/client';
+import { Prisma, ProductStatus } from '@prisma/client';
 
 @Injectable()
 export class SellerDashboardService {

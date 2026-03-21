@@ -10,7 +10,7 @@ import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RegisterDto } from './dto/auth.dto';
 import { LoggingService } from '../logging/logging.service';
-import { Role } from '../../../generated/prisma/enums';
+import { Role } from '@prisma/client';
 
 @Injectable()
 export class AuthService {

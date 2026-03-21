@@ -5,8 +5,7 @@ import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { Search, X, Clock, TrendingUp, ChevronDown } from "lucide-react";
 import { cn } from "@xelnova/utils";
-import { categories } from "@/lib/data/categories";
-import { products } from "@/lib/data/products";
+import { useCategories, useProducts } from "@/lib/api";
 
 const POPULAR_SEARCHES = ["Samsung Galaxy", "Headphones", "Running Shoes", "Books", "Laptop", "Skincare"];
 const STORAGE_KEY = "xelnova-recent-searches";
@@ -20,6 +19,11 @@ export default function SearchBar({ className }: { className?: string }) {
   const [selectedCategory, setSelectedCategory] = useState("all");
   const [categoryOpen, setCategoryOpen] = useState(false);
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
+
+  const { data: categories } = useCategories();
+  const categoriesList = categories || [];
+  const { data: productsData } = useProducts({ limit: 50 });
+  const products = productsData?.products || [];
 
   useEffect(() => { try { const stored = localStorage.getItem(STORAGE_KEY); if (stored) setRecentSearches(JSON.parse(stored)); } catch {} }, []);
   useEffect(() => {
@@ -40,7 +44,7 @@ export default function SearchBar({ className }: { className?: string }) {
   const handleSuggestionClick = (text: string) => { setQuery(text); saveSearch(text); setOpen(false); const params = new URLSearchParams({ q: text }); if (selectedCategory !== "all") params.set("category", selectedCategory); router.push(`/search?${params.toString()}`); };
   const clearRecent = () => { setRecentSearches([]); try { localStorage.removeItem(STORAGE_KEY); } catch {} };
 
-  const currentCategoryLabel = selectedCategory === "all" ? "All" : categories.find((c) => c.slug === selectedCategory)?.name ?? "All";
+  const currentCategoryLabel = selectedCategory === "all" ? "All" : categoriesList.find((c) => c.slug === selectedCategory)?.name ?? "All";
 
   return (
     <div ref={containerRef} className={cn("relative w-full max-w-3xl", className)}>
@@ -55,7 +59,7 @@ export default function SearchBar({ className }: { className?: string }) {
             {categoryOpen && (
               <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} className="absolute left-0 top-full z-50 mt-1 w-56 rounded-xl border border-surface-300/50 bg-surface-800 py-1 shadow-lg">
                 <button type="button" onClick={() => { setSelectedCategory("all"); setCategoryOpen(false); }} className={cn("w-full px-4 py-2 text-left text-sm hover:bg-surface-700 transition-colors", selectedCategory === "all" && "bg-gold-400/10 text-gold-400 font-medium")}>All Categories</button>
-                {categories.map((cat) => (<button key={cat.slug} type="button" onClick={() => { setSelectedCategory(cat.slug); setCategoryOpen(false); }} className={cn("w-full px-4 py-2 text-left text-sm hover:bg-surface-700 transition-colors text-surface-50", selectedCategory === cat.slug && "bg-gold-400/10 text-gold-400 font-medium")}>{cat.name}</button>))}
+                {categoriesList.map((cat) => (<button key={cat.slug} type="button" onClick={() => { setSelectedCategory(cat.slug); setCategoryOpen(false); }} className={cn("w-full px-4 py-2 text-left text-sm hover:bg-surface-700 transition-colors text-surface-50", selectedCategory === cat.slug && "bg-gold-400/10 text-gold-400 font-medium")}>{cat.name}</button>))}
               </motion.div>
             )}
           </AnimatePresence>

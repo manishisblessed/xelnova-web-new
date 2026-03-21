@@ -4,7 +4,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { motion } from 'framer-motion';
 import { useState } from 'react';
-import type { Category } from '@/lib/data';
+import type { Category } from '@/lib/data/categories';
 
 export function CategoryCard({ category, index = 0 }: { category: Category; index?: number }) {
   const [imageLoaded, setImageLoaded] = useState(false);

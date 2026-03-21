@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import { useCartStore } from '@/lib/store/cart-store';
 import { useWishlistStore } from '@/lib/store/wishlist-store';
-import { categories } from '@/lib/data';
+import { useCategories } from '@/lib/api';
 
 const navCategories = [
   { name: 'Electronics', slug: 'electronics', icon: '⚡' },
@@ -31,6 +31,7 @@ export function Header() {
 
   const cartItemCount = useCartStore((s) => s.totalItems());
   const wishlistCount = useWishlistStore((s) => s.items.length);
+  const { data: categories } = useCategories();
 
   useEffect(() => {
     const handleScroll = () => setIsScrolled(window.scrollY > 30);
@@ -285,7 +286,7 @@ export function Header() {
                 <div className="px-4 pb-1.5">
                   <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-text-muted">Shop by Category</p>
                 </div>
-                {categories.map((cat) => (
+                {(categories || []).map((cat) => (
                   <Link
                     key={cat.id}
                     href={`/products?category=${cat.slug}`}

@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { Role } from '../../../generated/prisma/enums';
+import { Role } from '@prisma/client';
 
 export interface LocationData {
   ip?: string;

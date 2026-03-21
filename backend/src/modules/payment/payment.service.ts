@@ -6,16 +6,22 @@ import * as crypto from 'crypto';
 
 @Injectable()
 export class PaymentService {
-  private razorpay: Razorpay;
+  private razorpay: Razorpay | null = null;
 
   constructor(
     private readonly config: ConfigService,
     private readonly prisma: PrismaService,
   ) {
-    this.razorpay = new Razorpay({
-      key_id: this.config.get('RAZORPAY_KEY_ID') || '',
-      key_secret: this.config.get('RAZORPAY_KEY_SECRET') || '',
-    });
+    const keyId = this.config.get('RAZORPAY_KEY_ID');
+    const keySecret = this.config.get('RAZORPAY_KEY_SECRET');
+    if (keyId && keySecret) {
+      this.razorpay = new Razorpay({ key_id: keyId, key_secret: keySecret });
+    }
+  }
+
+  private getRazorpay(): Razorpay {
+    if (!this.razorpay) throw new BadRequestException('Payment gateway not configured');
+    return this.razorpay;
   }
 
   async createOrder(userId: string, orderId: string) {
@@ -23,7 +29,7 @@ export class PaymentService {
     if (!order) throw new NotFoundException('Order not found');
     if (order.userId !== userId) throw new BadRequestException('Not your order');
 
-    const razorpayOrder = await this.razorpay.orders.create({
+    const razorpayOrder = await this.getRazorpay().orders.create({
       amount: Math.round(order.total * 100),
       currency: 'INR',
       receipt: order.orderNumber,
@@ -125,7 +131,7 @@ export class PaymentService {
 
     const refundAmount = amount ? Math.round(amount * 100) : Math.round(order.total * 100);
 
-    const refund = await this.razorpay.payments.refund(order.paymentId, {
+    const refund = await this.getRazorpay().payments.refund(order.paymentId, {
       amount: refundAmount,
     });
 

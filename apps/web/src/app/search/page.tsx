@@ -1,10 +1,10 @@
 "use client";
 
-import { Suspense, useMemo } from "react";
+import { Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import { Search } from "lucide-react";
-import { products } from "@/lib/data";
+import { useSearch } from "@/lib/api";
 import { ProductCard } from "@/components/marketplace/product-card";
 
 function SearchContent() {
@@ -12,15 +12,8 @@ function SearchContent() {
   const query = searchParams.get("q") || "";
   const category = searchParams.get("category") || "";
 
-  const results = useMemo(() => {
-    if (!query) return [];
-    const q = query.toLowerCase();
-    return products.filter((p) => {
-      const matchesQuery = p.name.toLowerCase().includes(q) || p.brand.toLowerCase().includes(q) || p.tags.some((t) => t.includes(q)) || p.description.toLowerCase().includes(q);
-      const matchesCategory = !category || category === "all" || p.category === category;
-      return matchesQuery && matchesCategory;
-    });
-  }, [query, category]);
+  const { data, loading } = useSearch(query);
+  const results = data?.products || [];
 
   return (
     <div className="min-h-screen bg-surface-950">
@@ -29,9 +22,15 @@ function SearchContent() {
           <h1 className="text-2xl font-bold text-white font-display">
             {query ? <>Search results for &quot;<span className="text-gold-400">{query}</span>&quot;</> : "Search Products"}
           </h1>
-          <p className="mt-1 text-sm text-surface-100">{results.length} {results.length === 1 ? "result" : "results"} found</p>
+          <p className="mt-1 text-sm text-surface-100">
+            {loading ? 'Searching...' : `${results.length} ${results.length === 1 ? "result" : "results"} found`}
+          </p>
         </div>
-        {results.length > 0 ? (
+        {loading ? (
+          <div className="flex items-center justify-center py-20">
+            <div className="h-8 w-8 animate-spin rounded-full border-4 border-gold-400 border-t-transparent" />
+          </div>
+        ) : results.length > 0 ? (
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:gap-5">
             {results.map((product, i) => (<ProductCard key={product.id} product={product} index={i} />))}
           </div>

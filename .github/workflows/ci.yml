@@ -1,0 +1,112 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  lint-and-build:
+    name: Lint & Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma Client
+        working-directory: backend
+        run: npx prisma generate
+
+      - name: Build backend
+        working-directory: backend
+        run: npx nest build
+
+      - name: Build web app
+        working-directory: apps/web
+        env:
+          NEXT_PUBLIC_API_URL: https://api.xelnova.com/api/v1
+        run: npm run build
+
+      - name: Build seller app
+        working-directory: apps/seller
+        env:
+          NEXT_PUBLIC_API_URL: https://api.xelnova.com/api/v1
+        run: npm run build
+
+      - name: Build admin app
+        working-directory: apps/admin
+        env:
+          NEXT_PUBLIC_API_URL: https://api.xelnova.com/api/v1
+        run: npm run build
+
+  deploy-backend:
+    name: Deploy Backend
+    needs: lint-and-build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push backend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          push: true
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/xelnova-backend:latest
+            ${{ secrets.DOCKER_USERNAME }}/xelnova-backend:${{ github.sha }}
+
+      - name: Deploy to server
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            docker pull ${{ secrets.DOCKER_USERNAME }}/xelnova-backend:latest
+            docker stop xelnova-backend || true
+            docker rm xelnova-backend || true
+            docker run -d \
+              --name xelnova-backend \
+              --restart unless-stopped \
+              --env-file /opt/xelnova/.env.production \
+              -p 4000:4000 \
+              ${{ secrets.DOCKER_USERNAME }}/xelnova-backend:latest
+            docker run --rm \
+              --env-file /opt/xelnova/.env.production \
+              ${{ secrets.DOCKER_USERNAME }}/xelnova-backend:latest \
+              npx prisma migrate deploy
+
+  deploy-web:
+    name: Deploy Web (Vercel)
+    needs: lint-and-build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy to Vercel
+        uses: amondnet/vercel-action@v25
+        with:
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID_WEB }}
+          working-directory: ./apps/web
+          vercel-args: '--prod'

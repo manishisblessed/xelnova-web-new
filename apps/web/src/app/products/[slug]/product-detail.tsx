@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { cn } from "@xelnova/utils";
 import { formatCurrency, formatDate } from "@xelnova/utils";
-import { getProductBySlug, getProductsByCategory } from "@/lib/data/products";
+import { useProductBySlug } from "@/lib/api";
 import { useCartStore } from "@/lib/store/cart-store";
 import { useWishlistStore } from "@/lib/store/wishlist-store";
 import { ProductCard } from "@/components/marketplace/product-card";
@@ -22,7 +22,8 @@ export default function ProductDetail() {
   const params = useParams();
   const router = useRouter();
   const slug = params.slug as string;
-  const product = getProductBySlug(slug);
+  const { data, loading } = useProductBySlug(slug);
+  const product = data?.product ?? null;
 
   const [selectedImage, setSelectedImage] = useState(0);
   const [quantity, setQuantity] = useState(1);
@@ -35,10 +36,15 @@ export default function ProductDetail() {
   const toggle = useWishlistStore((s) => s.toggle);
   const isInWishlist = useWishlistStore((s) => product ? s.isInWishlist(product.id) : false);
 
-  const similarProducts = useMemo(() => {
-    if (!product) return [];
-    return getProductsByCategory(product.category).filter((p) => p.id !== product.id).slice(0, 4);
-  }, [product]);
+  const similarProducts = data?.relatedProducts || [];
+
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-surface-950">
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-gold-400 border-t-transparent" />
+      </div>
+    );
+  }
 
   if (!product) {
     return (

@@ -1,11 +1,8 @@
-import type { NextConfig } from "next";
+import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
-  output: "export",
-  transpilePackages: ["@xelnova/ui", "@xelnova/utils"],
-  images: {
-    unoptimized: true,
-  },
+  transpilePackages: ['@xelnova/ui', '@xelnova/utils'],
+  experimental: { optimizePackageImports: ['lucide-react', 'framer-motion'] },
 };
 
 export default nextConfig;

@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import { HeroCarousel } from '@/components/marketplace/hero-carousel';
 import { CategoryCard } from '@/components/marketplace/category-card';
-import { categories } from '@/lib/data/categories';
+import { useCategories } from '@/lib/api';
 
 const HomeBelowFold = dynamic(
   () => import('@/components/marketplace/home-below-fold').then((m) => m.HomeBelowFold),
@@ -36,6 +36,8 @@ const sidePromos = [
 ];
 
 export default function HomePage() {
+  const { data: categories } = useCategories();
+
   return (
     <div className="min-h-screen mesh-hero">
 
@@ -114,7 +116,7 @@ export default function HomePage() {
         <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
           <div className="bg-white rounded-2xl border border-border/60 py-5 px-4 shadow-card">
             <div className="flex items-center justify-between sm:justify-center gap-4 sm:gap-8 lg:gap-12 overflow-x-auto scrollbar-hide">
-              {categories.map((cat, i) => (
+              {(categories || []).map((cat, i) => (
                 <CategoryCard key={cat.id} category={cat} index={i} />
               ))}
             </div>
