@@ -7,7 +7,7 @@ COPY prisma ./prisma/
 COPY prisma.config.ts ./
 RUN npm ci
 RUN npx prisma generate
-COPY tsconfig.json nest-cli.json ./
+COPY tsconfig.json tsconfig.build.json nest-cli.json ./
 COPY src ./src/
 RUN npx nest build
 
@@ -25,6 +25,7 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY package.json ./
 COPY prisma ./prisma/
+COPY prisma.config.ts ./
 USER nestjs
 EXPOSE 4000
 CMD ["node", "dist/src/main"]

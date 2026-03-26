@@ -407,7 +407,7 @@ export class SellerOnboardingService {
     }
 
     let gstVerified = false;
-    let gstVerifiedData = null;
+    let gstVerifiedData: any = null;
 
     // Verify GST if provided
     if (dto.gstNumber && !dto.sellsNonGstProducts) {
@@ -803,7 +803,7 @@ export class SellerOnboardingService {
   }
 
   private getCompletedSteps(seller: any) {
-    const steps = [];
+    const steps: number[] = [];
     
     if (seller.user?.emailVerified && seller.user?.phoneVerified) steps.push(1);
     if (seller.panNumber && (seller.gstVerified || seller.sellsNonGstProducts)) steps.push(2);
