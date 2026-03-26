@@ -3,7 +3,7 @@ import type { NextConfig } from 'next';
 const nextConfig: NextConfig = {
   output: 'standalone',
   env: {
-    BACKEND_URL: process.env.BACKEND_URL || 'http://localhost:4000',
+    BACKEND_URL: process.env.BACKEND_URL || process.env.NEXT_PUBLIC_BACKEND_URL || 'http://3.83.45.205:4000',
   },
   async headers() {
     return [
