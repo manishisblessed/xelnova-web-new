@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 function getBackendUrl() {
-  return process.env.BACKEND_URL || 'http://localhost:4000';
+  const url = process.env.BACKEND_URL;
+  if (!url) throw new Error('BACKEND_URL is not configured. Set NEXT_PUBLIC_BACKEND_URL in Amplify env vars.');
+  return url;
 }
 
 function mapBackendToFrontendShape(backendData: Record<string, unknown>) {
