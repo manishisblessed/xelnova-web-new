@@ -40,7 +40,7 @@ export class LoggingMiddleware implements NestMiddleware {
           userAgent,
           requestBody: this.sanitizeBody(req.body),
           responseBody: statusCode >= 400 ? this.parseResponseBody(responseBody) : undefined,
-          error: statusCode >= 400 ? this.parseResponseBody(responseBody)?.message : undefined,
+          error: statusCode >= 400 ? String(this.parseResponseBody(responseBody)?.message ?? '') || undefined : undefined,
         }).catch(err => console.error('Failed to log request:', err));
       }
     });
