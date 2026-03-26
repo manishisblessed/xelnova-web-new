@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-/** NestJS API base (no path). Seller routes are at `${BACKEND_URL}/api/v1/seller/...`. */
-const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:4000';
+function getBackendUrl() {
+  return process.env.BACKEND_URL || 'http://localhost:4000';
+}
 
 async function proxy(request: NextRequest, segments: string[] | undefined) {
+  const BACKEND_URL = getBackendUrl();
   const path = segments?.length ? segments.join('/') : '';
   const search = request.nextUrl.search;
   const target = `${BACKEND_URL}/api/v1/seller/${path}${search}`;

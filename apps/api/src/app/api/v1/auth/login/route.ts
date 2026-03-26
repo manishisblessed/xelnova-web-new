@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:4000';
+function getBackendUrl() {
+  return process.env.BACKEND_URL || 'http://localhost:4000';
+}
 
 export async function POST(request: NextRequest) {
+  const BACKEND_URL = getBackendUrl();
   const body = await request.text();
   try {
     const res = await fetch(`${BACKEND_URL}/api/v1/auth/login`, {

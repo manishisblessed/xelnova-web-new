@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-/** Proxies to Nest `POST /api/v1/auth/google/token` so the Next API app can be used as BFF (port 3001). */
-const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:4000';
+function getBackendUrl() {
+  return process.env.BACKEND_URL || 'http://localhost:4000';
+}
 
 export async function POST(request: NextRequest) {
+  const BACKEND_URL = getBackendUrl();
   const body = await request.text();
   try {
     const res = await fetch(`${BACKEND_URL}/api/v1/auth/google/token`, {

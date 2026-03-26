@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:4000';
+function getBackendUrl() {
+  return process.env.BACKEND_URL || 'http://localhost:4000';
+}
 
 function mapBackendToFrontendShape(backendData: Record<string, unknown>) {
   return {
@@ -30,7 +32,7 @@ export async function GET(
       );
     }
 
-    // Prefer NestJS backend — it has GSTIN_API_KEY in backend/.env (single source of truth)
+    const BACKEND_URL = getBackendUrl();
     try {
       const backendUrl = `${BACKEND_URL.replace(/\/$/, '')}/api/v1/verification/gstin/${encodeURIComponent(gstinUpper)}`;
       const res = await fetch(backendUrl, {
