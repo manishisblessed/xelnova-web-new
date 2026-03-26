@@ -98,7 +98,7 @@ export function Header() {
               Get App
             </Link>
             <span className="hidden md:inline text-white/45">|</span>
-            <a href="http://localhost:3003" className="hover:text-white transition-colors">Sell on Xelnova</a>
+            <a href="https://seller.xelnova.in" className="hover:text-white transition-colors">Sell on Xelnova</a>
             <span className="text-white/45">|</span>
             <Link href="/track-order" className="hover:text-white transition-colors">Track Order</Link>
             <span className="text-white/45 hidden sm:inline">|</span>
@@ -331,7 +331,7 @@ export function Header() {
               Mega Sale — Up to 70% Off
             </Link>
             <a
-              href="http://localhost:3003"
+              href="https://seller.xelnova.in"
               className="flex-shrink-0 flex items-center gap-1 px-3 py-2.5 text-sm font-semibold text-accent-600 hover:bg-accent-50 transition-colors rounded-lg"
             >
               <Sparkles size={14} />
@@ -465,7 +465,7 @@ export function Header() {
 
               <div className="border-t border-border p-4">
                 <a
-                  href="http://localhost:3003"
+                  href="https://seller.xelnova.in"
                   onClick={() => setIsMobileMenuOpen(false)}
                   className="flex items-center justify-center gap-2 rounded-xl bg-primary-600 px-4 py-3 text-sm font-semibold text-white hover:bg-primary-700 transition-colors shadow-primary"
                 >
