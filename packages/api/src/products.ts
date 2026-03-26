@@ -15,6 +15,32 @@ export interface ProductQuery {
   sortBy?: 'price_asc' | 'price_desc' | 'rating' | 'newest' | 'popular';
 }
 
+export interface MarketplaceStats {
+  products: number;
+  sellers: number;
+  customers: number;
+  orders: number;
+}
+
+export interface BrandItem {
+  id: string;
+  name: string;
+  slug: string;
+  logo: string | null;
+  featured: boolean;
+}
+
+export interface TopReview {
+  id: string;
+  rating: number;
+  title: string | null;
+  comment: string | null;
+  helpful: number;
+  createdAt: string;
+  user: { id: string; name: string; avatar: string | null };
+  product: { name: string; slug: string; images: string[] };
+}
+
 export async function getProducts(query?: ProductQuery) {
   const { data } = await api.get<ApiResponse<Product[]>>('/products', { params: query });
   return { products: data.data, meta: data.meta };
@@ -40,7 +66,23 @@ export async function getFlashDeals() {
   return data.data;
 }
 
-export async function getBanners() {
-  const { data } = await api.get<ApiResponse<Banner[]>>('/products/banners');
+export async function getBanners(position?: string) {
+  const params = position ? { position } : {};
+  const { data } = await api.get<ApiResponse<Banner[]>>('/products/banners', { params });
+  return data.data;
+}
+
+export async function getStats(): Promise<MarketplaceStats> {
+  const { data } = await api.get<ApiResponse<MarketplaceStats>>('/products/stats');
+  return data.data;
+}
+
+export async function getBrands(): Promise<BrandItem[]> {
+  const { data } = await api.get<ApiResponse<BrandItem[]>>('/products/brands');
+  return data.data;
+}
+
+export async function getTopReviews(): Promise<TopReview[]> {
+  const { data } = await api.get<ApiResponse<TopReview[]>>('/products/reviews/top');
   return data.data;
 }

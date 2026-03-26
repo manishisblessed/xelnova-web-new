@@ -2,6 +2,7 @@
 
 import { motion } from 'framer-motion';
 import Link from 'next/link';
+import Image from 'next/image';
 import {
   ArrowRight,
   TrendingUp,
@@ -23,10 +24,10 @@ import {
 import { Button } from '@xelnova/ui';
 
 const stats = [
-  { value: '50L+', label: 'Active Customers', icon: Users },
-  { value: '99.5%', label: 'Pincode Coverage', icon: Globe },
-  { value: '₹2Cr+', label: 'Daily Transactions', icon: TrendingUp },
-  { value: '10K+', label: 'Sellers Trust Us', icon: Shield },
+  { value: '-', label: 'Active Customers', icon: Users },
+  { value: '-', label: 'Pincode Coverage', icon: Globe },
+  { value: '-', label: 'Daily Transactions', icon: TrendingUp },
+  { value: '-', label: 'Sellers Trust Us', icon: Shield },
 ];
 
 const benefits = [
@@ -91,32 +92,7 @@ const steps = [
   },
 ];
 
-const testimonials = [
-  {
-    name: 'Rajesh Kumar',
-    business: 'RK Electronics',
-    location: 'Delhi',
-    image: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&h=100&fit=crop&crop=face',
-    quote: 'Started with 50 products, now selling 500+ items. Xelnova transformed my small shop into a nationwide business.',
-    growth: '400% growth in 1 year',
-  },
-  {
-    name: 'Priya Sharma',
-    business: 'Priya Fashion House',
-    location: 'Jaipur',
-    image: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&h=100&fit=crop&crop=face',
-    quote: 'The logistics support is incredible. I focus on designing, Xelnova handles everything else.',
-    growth: '₹15L monthly revenue',
-  },
-  {
-    name: 'Mohammed Ali',
-    business: 'Ali Handicrafts',
-    location: 'Moradabad',
-    image: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=100&h=100&fit=crop&crop=face',
-    quote: 'My handcrafted items now reach customers across India. The platform is very easy to use.',
-    growth: '5000+ orders delivered',
-  },
-];
+const testimonials: { name: string; business: string; location: string; image: string; quote: string; growth: string }[] = [];
 
 const categories = [
   'Electronics', 'Fashion', 'Home & Kitchen', 'Beauty', 'Sports', 'Books', 'Toys', 'Grocery'
@@ -143,10 +119,8 @@ export default function SellerLandingPage() {
       <nav className="fixed top-0 left-0 right-0 z-50 bg-white/80 backdrop-blur-xl border-b border-gray-100">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16 md:h-20">
-            <div className="flex items-center gap-2">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center">
-                <span className="text-white font-bold text-lg">X</span>
-              </div>
+            <div className="flex items-center gap-2.5">
+              <Image src="/xelnova-icon-dark.png" alt="Xelnova" width={40} height={40} className="h-9 w-9" />
               <span className="text-xl font-bold text-gray-900 font-display">Xelnova <span className="text-primary-500">Seller</span></span>
             </div>
             <div className="hidden md:flex items-center gap-8">
@@ -210,25 +184,10 @@ export default function SellerLandingPage() {
                 </button>
               </div>
               
-              <div className="mt-10 flex items-center gap-6">
-                <div className="flex -space-x-3">
-                  {[1, 2, 3, 4, 5].map((i) => (
-                    <div key={i} className="w-10 h-10 rounded-full border-2 border-white bg-gradient-to-br from-gray-200 to-gray-300 overflow-hidden">
-                      <img 
-                        src={`https://i.pravatar.cc/100?img=${i + 10}`} 
-                        alt="" 
-                        className="w-full h-full object-cover"
-                      />
-                    </div>
-                  ))}
-                </div>
-                <div>
-                  <div className="flex items-center gap-1">
-                    {[1, 2, 3, 4, 5].map((i) => (
-                      <Star key={i} size={16} className="fill-yellow-400 text-yellow-400" />
-                    ))}
-                  </div>
-                  <p className="text-sm text-gray-600 mt-0.5">Rated 4.8/5 by 10,000+ sellers</p>
+              <div className="mt-10 flex items-center gap-4">
+                <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-green-100 text-green-700 text-sm font-medium">
+                  <CheckCircle2 size={16} />
+                  <span>Trusted by sellers across India</span>
                 </div>
               </div>
             </motion.div>
@@ -246,8 +205,8 @@ export default function SellerLandingPage() {
                 
                 <div className="space-y-6">
                   <div>
-                    <p className="text-gray-400 text-sm">Your potential monthly earnings</p>
-                    <p className="text-4xl font-bold text-white mt-1">₹2,50,000+</p>
+                    <p className="text-gray-300 text-sm">Grow your business with Xelnova</p>
+                    <p className="text-4xl font-bold text-white mt-1">Start Earning</p>
                   </div>
                   
                   <div className="h-40 flex items-end gap-2">
@@ -264,16 +223,16 @@ export default function SellerLandingPage() {
                   
                   <div className="grid grid-cols-3 gap-4 pt-4 border-t border-gray-700">
                     <div>
-                      <p className="text-2xl font-bold text-white">156</p>
-                      <p className="text-xs text-gray-400">Orders Today</p>
+                      <p className="text-2xl font-bold text-white">-</p>
+                      <p className="text-xs text-gray-300">Orders Today</p>
                     </div>
                     <div>
-                      <p className="text-2xl font-bold text-primary-400">+23%</p>
-                      <p className="text-xs text-gray-400">Growth</p>
+                      <p className="text-2xl font-bold text-primary-400">-</p>
+                      <p className="text-xs text-gray-300">Growth</p>
                     </div>
                     <div>
-                      <p className="text-2xl font-bold text-white">4.9</p>
-                      <p className="text-xs text-gray-400">Rating</p>
+                      <p className="text-2xl font-bold text-white">-</p>
+                      <p className="text-xs text-gray-300">Rating</p>
                     </div>
                   </div>
                 </div>
@@ -291,8 +250,8 @@ export default function SellerLandingPage() {
                     <CheckCircle2 size={24} className="text-green-600" />
                   </div>
                   <div>
-                    <p className="text-sm font-semibold text-gray-900">Payment Received</p>
-                    <p className="text-xs text-gray-500">₹45,230 credited</p>
+                    <p className="text-sm font-semibold text-gray-900">Fast Payments</p>
+                    <p className="text-xs text-gray-500">Within 7 days</p>
                   </div>
                 </div>
               </motion.div>
@@ -308,8 +267,8 @@ export default function SellerLandingPage() {
                     <Package size={24} className="text-blue-600" />
                   </div>
                   <div>
-                    <p className="text-sm font-semibold text-gray-900">New Order!</p>
-                    <p className="text-xs text-gray-500">Order #XN78234</p>
+                    <p className="text-sm font-semibold text-gray-900">Easy Fulfillment</p>
+                    <p className="text-xs text-gray-500">We handle logistics</p>
                   </div>
                 </div>
               </motion.div>
@@ -338,7 +297,7 @@ export default function SellerLandingPage() {
                   <stat.icon size={28} className="text-primary-400" />
                 </div>
                 <p className="text-3xl md:text-4xl font-bold text-white">{stat.value}</p>
-                <p className="text-gray-400 mt-1">{stat.label}</p>
+                <p className="text-gray-300 mt-1">{stat.label}</p>
               </motion.div>
             ))}
           </motion.div>
@@ -417,7 +376,7 @@ export default function SellerLandingPage() {
               Start Selling in 4 Easy Steps
             </h2>
             <p className="mt-4 text-lg text-gray-600">
-              From registration to your first sale — we've made it incredibly simple.
+              From registration to your first sale - we&apos;ve made it incredibly simple.
             </p>
           </motion.div>
 
@@ -480,47 +439,53 @@ export default function SellerLandingPage() {
             <h2 className="text-3xl md:text-4xl font-bold text-white font-display">
               Sellers Who Transformed Their Business
             </h2>
-            <p className="mt-4 text-lg text-gray-400">
+            <p className="mt-4 text-lg text-gray-300">
               Real stories from real sellers who found success on Xelnova.
             </p>
           </motion.div>
 
-          <motion.div
-            variants={staggerContainer}
-            initial="initial"
-            whileInView="animate"
-            viewport={{ once: true }}
-            className="grid md:grid-cols-3 gap-8"
-          >
-            {testimonials.map((testimonial, index) => (
-              <motion.div
-                key={index}
-                variants={fadeInUp}
-                className="bg-white/5 backdrop-blur-sm rounded-2xl p-8 border border-white/10 hover:border-primary-500/30 transition-colors"
-              >
-                <div className="flex items-center gap-1 mb-4">
-                  {[1, 2, 3, 4, 5].map((i) => (
-                    <Star key={i} size={18} className="fill-yellow-400 text-yellow-400" />
-                  ))}
-                </div>
-                <p className="text-gray-300 leading-relaxed mb-6">"{testimonial.quote}"</p>
-                <div className="flex items-center gap-4">
-                  <img
-                    src={testimonial.image}
-                    alt={testimonial.name}
-                    className="w-12 h-12 rounded-full object-cover"
-                  />
-                  <div>
-                    <p className="font-semibold text-white">{testimonial.name}</p>
-                    <p className="text-sm text-gray-400">{testimonial.business}, {testimonial.location}</p>
+          {testimonials.length > 0 ? (
+            <motion.div
+              variants={staggerContainer}
+              initial="initial"
+              whileInView="animate"
+              viewport={{ once: true }}
+              className="grid md:grid-cols-3 gap-8"
+            >
+              {testimonials.map((testimonial, index) => (
+                <motion.div
+                  key={index}
+                  variants={fadeInUp}
+                  className="bg-white/5 backdrop-blur-sm rounded-2xl p-8 border border-white/10 hover:border-primary-500/30 transition-colors"
+                >
+                  <div className="flex items-center gap-1 mb-4">
+                    {[1, 2, 3, 4, 5].map((i) => (
+                      <Star key={i} size={18} className="fill-yellow-400 text-yellow-400" />
+                    ))}
                   </div>
-                </div>
-                <div className="mt-4 pt-4 border-t border-white/10">
-                  <p className="text-sm text-primary-400 font-medium">{testimonial.growth}</p>
-                </div>
-              </motion.div>
-            ))}
-          </motion.div>
+                  <p className="text-gray-300 leading-relaxed mb-6">&quot;{testimonial.quote}&quot;</p>
+                  <div className="flex items-center gap-4">
+                    <img
+                      src={testimonial.image}
+                      alt={testimonial.name}
+                      className="w-12 h-12 rounded-full object-cover"
+                    />
+                    <div>
+                      <p className="font-semibold text-white">{testimonial.name}</p>
+                      <p className="text-sm text-gray-300">{testimonial.business}, {testimonial.location}</p>
+                    </div>
+                  </div>
+                  <div className="mt-4 pt-4 border-t border-white/10">
+                    <p className="text-sm text-primary-400 font-medium">{testimonial.growth}</p>
+                  </div>
+                </motion.div>
+              ))}
+            </motion.div>
+          ) : (
+            <div className="text-center py-12">
+              <p className="text-gray-300 text-lg">Success stories coming soon!</p>
+            </div>
+          )}
         </div>
       </section>
 
@@ -649,18 +614,16 @@ export default function SellerLandingPage() {
       </section>
 
       {/* Footer */}
-      <footer className="bg-gray-900 pt-16 pb-8">
+      <footer className="bg-slate-950 pt-16 pb-8">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-8 pb-12 border-b border-gray-800">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-8 pb-12 border-b border-slate-800/80">
             <div className="col-span-2 md:col-span-1">
-              <div className="flex items-center gap-2 mb-4">
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center">
-                  <span className="text-white font-bold text-lg">X</span>
-                </div>
+              <div className="flex items-center gap-2.5 mb-4">
+                <Image src="/xelnova-icon-white.png" alt="Xelnova" width={40} height={40} className="h-9 w-9" />
                 <span className="text-xl font-bold text-white font-display">Xelnova</span>
               </div>
-              <p className="text-gray-400 text-sm">
-                India's fastest growing e-commerce platform for sellers.
+              <p className="text-slate-300 text-sm">
+                India&apos;s fastest growing e-commerce platform for sellers.
               </p>
             </div>
             
@@ -669,7 +632,7 @@ export default function SellerLandingPage() {
               <ul className="space-y-2">
                 {['How to Sell', 'Fees & Pricing', 'Seller Policies', 'Seller Tools'].map((item) => (
                   <li key={item}>
-                    <a href="#" className="text-gray-400 hover:text-primary-400 text-sm transition-colors">{item}</a>
+                    <a href="#" className="text-slate-300 hover:text-primary-300 text-sm transition-colors">{item}</a>
                   </li>
                 ))}
               </ul>
@@ -680,7 +643,7 @@ export default function SellerLandingPage() {
               <ul className="space-y-2">
                 {['Seller University', 'Help Center', 'Community Forum', 'Success Stories'].map((item) => (
                   <li key={item}>
-                    <a href="#" className="text-gray-400 hover:text-primary-400 text-sm transition-colors">{item}</a>
+                    <a href="#" className="text-slate-300 hover:text-primary-300 text-sm transition-colors">{item}</a>
                   </li>
                 ))}
               </ul>
@@ -691,7 +654,7 @@ export default function SellerLandingPage() {
               <ul className="space-y-2">
                 {['seller-support@xelnova.com', '1800-XXX-XXXX', 'Live Chat'].map((item) => (
                   <li key={item}>
-                    <a href="#" className="text-gray-400 hover:text-primary-400 text-sm transition-colors">{item}</a>
+                    <a href="#" className="text-slate-300 hover:text-primary-300 text-sm transition-colors">{item}</a>
                   </li>
                 ))}
               </ul>
@@ -699,13 +662,13 @@ export default function SellerLandingPage() {
           </div>
           
           <div className="pt-8 flex flex-col md:flex-row items-center justify-between gap-4">
-            <p className="text-gray-500 text-sm">
+            <p className="text-slate-300 text-sm">
               © 2024 Xelnova. All rights reserved.
             </p>
             <div className="flex items-center gap-6">
-              <a href="#" className="text-gray-400 hover:text-white text-sm transition-colors">Privacy Policy</a>
-              <a href="#" className="text-gray-400 hover:text-white text-sm transition-colors">Terms of Service</a>
-              <a href="#" className="text-gray-400 hover:text-white text-sm transition-colors">Cookie Policy</a>
+              <a href="#" className="text-slate-300 hover:text-white text-sm transition-colors">Privacy Policy</a>
+              <a href="#" className="text-slate-300 hover:text-white text-sm transition-colors">Terms of Service</a>
+              <a href="#" className="text-slate-300 hover:text-white text-sm transition-colors">Cookie Policy</a>
             </div>
           </div>
         </div>

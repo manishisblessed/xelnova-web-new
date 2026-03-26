@@ -46,7 +46,7 @@ export default function SecurityPage() {
               <Shield size={14} /> Your Safety
             </span>
             <h1 className="text-4xl md:text-5xl font-extrabold text-white font-display mb-4">Security at Xelnova</h1>
-            <p className="text-lg text-white/50 max-w-xl mx-auto">Your safety is our top priority. Here&apos;s how we protect you.</p>
+            <p className="text-lg text-white/80 max-w-xl mx-auto">Your safety is our top priority. Here&apos;s how we protect you.</p>
           </motion.div>
         </div>
       </section>

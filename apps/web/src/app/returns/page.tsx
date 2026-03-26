@@ -50,7 +50,7 @@ export default function ReturnsPage() {
               <RotateCcw size={14} /> Policies
             </span>
             <h1 className="text-4xl md:text-5xl font-extrabold text-white font-display mb-4">Returns & Refunds</h1>
-            <p className="text-lg text-white/50">Hassle-free returns within 7 days of delivery</p>
+            <p className="text-lg text-white/80">Hassle-free returns within 7 days of delivery</p>
           </motion.div>
         </div>
       </section>

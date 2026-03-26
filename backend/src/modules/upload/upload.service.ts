@@ -15,23 +15,29 @@ export class UploadService {
   async uploadImage(file: Express.Multer.File, folder = 'xelnova'): Promise<{ url: string; publicId: string }> {
     if (!file) throw new BadRequestException('No file provided');
 
-    const allowedMimes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    const allowedMimes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'application/pdf'];
     if (!allowedMimes.includes(file.mimetype)) {
-      throw new BadRequestException('Invalid file type. Allowed: jpg, png, webp, gif');
+      throw new BadRequestException('Invalid file type. Allowed: jpg, png, webp, gif, pdf');
     }
 
     if (file.size > 5 * 1024 * 1024) {
       throw new BadRequestException('File too large. Max 5MB');
     }
 
+    const isPdf = file.mimetype === 'application/pdf';
+
     return new Promise((resolve, reject) => {
       const uploadStream = cloudinary.uploader.upload_stream(
         {
           folder,
-          transformation: [
-            { width: 1200, height: 1200, crop: 'limit' },
-            { quality: 'auto', fetch_format: 'auto' },
-          ],
+          ...(isPdf
+            ? { resource_type: 'raw' as const }
+            : {
+                transformation: [
+                  { width: 1200, height: 1200, crop: 'limit' },
+                  { quality: 'auto', fetch_format: 'auto' },
+                ],
+              }),
         },
         (error, result) => {
           if (error) return reject(new BadRequestException('Upload failed: ' + error.message));

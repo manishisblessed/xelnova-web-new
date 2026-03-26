@@ -8,9 +8,8 @@ export class LoggingMiddleware implements NestMiddleware {
 
   use(req: Request, res: Response, next: NextFunction) {
     const startTime = Date.now();
-    const { method, originalUrl, ip, headers } = req;
+    const { method, originalUrl, headers } = req;
     const userAgent = headers['user-agent'] || '';
-    const userId = (req as any).user?.id;
 
     const originalSend = res.send;
     let responseBody: any;
@@ -23,6 +22,7 @@ export class LoggingMiddleware implements NestMiddleware {
     res.on('finish', async () => {
       const responseTime = Date.now() - startTime;
       const { statusCode } = res;
+      const userId = (req as any).user?.id;
 
       const excludedPaths = ['/health', '/favicon.ico', '/_next', '/static'];
       const shouldLog = !excludedPaths.some(path => originalUrl.startsWith(path));

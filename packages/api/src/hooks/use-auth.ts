@@ -21,17 +21,35 @@ export function AuthProvider({ children, requiredRole }: { children: ReactNode; 
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let cancelled = false;
     const stored = authApi.getStoredUser();
     if (stored) {
       setUser(stored);
-      authApi.refreshTokens().then((tokens) => {
-        setAccessToken(tokens.accessToken);
-      }).catch(() => {
-        setUser(null);
-        authApi.logout();
-      });
+      // Also sync the access token from cookie if available
+      if (typeof document !== 'undefined') {
+        const m = document.cookie.match(/(?:^|;\s*)xelnova-token=([^;]*)/);
+        if (m) setAccessToken(decodeURIComponent(m[1]));
+      }
+      authApi.refreshTokens()
+        .then((tokens) => {
+          if (!cancelled) setAccessToken(tokens.accessToken);
+        })
+        .catch(() => {
+          // Don't clear user if we have a valid cookie — token refresh may just be temporarily unavailable
+          if (typeof document !== 'undefined') {
+            const hasCookie = /(?:^|;\s*)xelnova-token=/.test(document.cookie);
+            if (hasCookie) return;
+          }
+          if (!cancelled) {
+            setUser(null);
+            authApi.logout();
+          }
+        })
+        .finally(() => { if (!cancelled) setLoading(false); });
+    } else {
+      setLoading(false);
     }
-    setLoading(false);
+    return () => { cancelled = true; };
   }, []);
 
   const login = useCallback(async (email: string, password: string) => {

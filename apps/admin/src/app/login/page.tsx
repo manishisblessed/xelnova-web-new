@@ -2,6 +2,7 @@
 
 import { useState, Suspense, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import Image from 'next/image';
 import { motion } from 'framer-motion';
 import {
   Eye,
@@ -13,16 +14,11 @@ import {
   Activity,
   Users,
   BarChart3,
-  Settings,
   Fingerprint,
-  Loader2,
 } from 'lucide-react';
 import { Button } from '@xelnova/ui';
 import { DashboardAuthProvider, useDashboardAuth } from '@/lib/auth-context';
 import { apiLogin } from '@/lib/api';
-
-const GOOGLE_CLIENT_ID = '435713810993-9c2c2j1nh7hcm374mruihfuf4807fuat.apps.googleusercontent.com';
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api/v1';
 
 const features = [
   { icon: BarChart3, title: 'Real-time Analytics', description: 'Monitor sales, traffic, and performance metrics' },
@@ -31,27 +27,12 @@ const features = [
   { icon: Activity, title: 'Activity Logs', description: 'Track all system activities and changes' },
 ];
 
-declare global {
-  interface Window {
-    google?: {
-      accounts: {
-        id: {
-          initialize: (config: any) => void;
-          renderButton: (element: HTMLElement, config: any) => void;
-          prompt: () => void;
-        };
-      };
-    };
-  }
-}
-
 function LoginFormInner() {
   const [showPassword, setShowPassword] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [remember, setRemember] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState('');
   const { setUser } = useDashboardAuth();
   const router = useRouter();
@@ -65,100 +46,25 @@ function LoginFormInner() {
     }
   }, [searchParams]);
 
-  useEffect(() => {
-    const script = document.createElement('script');
-    script.src = 'https://accounts.google.com/gsi/client';
-    script.async = true;
-    script.defer = true;
-    script.onload = initializeGoogleSignIn;
-    document.body.appendChild(script);
-
-    return () => {
-      document.body.removeChild(script);
-    };
-  }, []);
-
-  const initializeGoogleSignIn = () => {
-    if (window.google) {
-      window.google.accounts.id.initialize({
-        client_id: GOOGLE_CLIENT_ID,
-        callback: handleGoogleCallback,
-        auto_select: false,
-      });
-
-      const buttonDiv = document.getElementById('google-signin-button-admin');
-      if (buttonDiv) {
-        window.google.accounts.id.renderButton(buttonDiv, {
-          type: 'standard',
-          theme: 'filled_black',
-          size: 'large',
-          text: 'continue_with',
-          shape: 'rectangular',
-          width: 320,
-        });
-      }
-    }
-  };
-
-  const handleGoogleCallback = async (response: { credential: string }) => {
-    setGoogleLoading(true);
-    setError('');
-    
-    try {
-      const res = await fetch(`${API_BASE}/auth/google/token`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ idToken: response.credential, role: 'admin' }),
-      });
-
-      const data = await res.json();
-
-      if (res.ok && data.success) {
-        if (data.data.user.role !== 'ADMIN') {
-          setError('Access denied. Admin privileges required.');
-          setGoogleLoading(false);
-          return;
-        }
-
-        setUser(data.data.user);
-        
-        const sessionRes = await fetch('/api/session', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ 
-            token: data.data.accessToken, 
-            role: 'admin', 
-            user: data.data.user 
-          }),
-        });
-        
-        if (!sessionRes.ok) throw new Error('Session failed');
-        
-        router.push(redirectTo);
-        router.refresh();
-      } else {
-        setError(data.message || 'Google sign-in failed');
-      }
-    } catch (err) {
-      setError('Failed to sign in with Google');
-    } finally {
-      setGoogleLoading(false);
-    }
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setLoading(true);
     try {
-      const data = await apiLogin(email.trim(), password, remember);
+      const data = await apiLogin(email.trim(), password);
+
+      if (data.user.role !== 'ADMIN') {
+        setError('Access denied. Admin privileges required.');
+        setLoading(false);
+        return;
+      }
+
       setUser(data.user);
       const sessionRes = await fetch('/api/session', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ token: data.token, role: data.role, user: data.user }),
+        body: JSON.stringify({ token: data.accessToken, role: 'admin', user: data.user }),
       });
       if (!sessionRes.ok) throw new Error('Session failed');
       router.push(redirectTo);
@@ -166,7 +72,7 @@ function LoginFormInner() {
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Login failed';
       if (msg === 'Failed to fetch' || msg.includes('fetch')) {
-        setError('Cannot reach the API. Start it from the project root with: npm run dev:api');
+        setError('Cannot reach the API server. Make sure the backend is running.');
       } else {
         setError(msg);
       }
@@ -198,13 +104,8 @@ function LoginFormInner() {
           >
             {/* Logo */}
             <div className="flex items-center gap-3 mb-12">
-              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center shadow-lg shadow-primary-500/30">
-                <span className="text-white font-bold text-xl">X</span>
-              </div>
-              <div>
-                <span className="text-2xl font-bold text-white font-display">Xelnova</span>
-                <span className="ml-2 px-2 py-0.5 rounded-md bg-white/10 text-xs font-medium text-white/80">ADMIN</span>
-              </div>
+              <Image src="/xelnova-logo-white.png" alt="Xelnova" width={280} height={80} className="h-12 w-auto" priority />
+              <span className="px-2 py-0.5 rounded-md bg-white/10 text-xs font-medium text-white/80">ADMIN</span>
             </div>
 
             <h1 className="text-4xl xl:text-5xl font-bold text-white font-display leading-tight mb-6">
@@ -245,9 +146,7 @@ function LoginFormInner() {
         >
           {/* Mobile Logo */}
           <div className="lg:hidden flex items-center justify-center gap-3 mb-8">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center">
-              <span className="text-white font-bold text-xl">X</span>
-            </div>
+            <Image src="/xelnova-icon-dark.png" alt="Xelnova" width={48} height={48} className="h-10 w-10" />
             <span className="text-2xl font-bold text-white font-display">Xelnova Admin</span>
           </div>
 
@@ -270,7 +169,7 @@ function LoginFormInner() {
                     type="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder="admin@xelnova.com"
+                    placeholder="admin@xelnova.in"
                     required
                     className="flex-1 bg-transparent px-3 py-3.5 text-sm text-white placeholder:text-slate-500 outline-none"
                   />
@@ -339,35 +238,7 @@ function LoginFormInner() {
             </Button>
           </form>
 
-          {/* Divider */}
-          <div className="relative my-6">
-            <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-slate-700"></div>
-            </div>
-            <div className="relative flex justify-center text-xs">
-              <span className="bg-slate-950 px-3 text-slate-500">or continue with</span>
-            </div>
-          </div>
-
-          {/* Google Sign-In */}
-          <div className="flex justify-center">
-            {googleLoading ? (
-              <div className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl border border-slate-700 bg-slate-800/50 w-full max-w-[320px]">
-                <Loader2 size={20} className="animate-spin text-slate-400" />
-                <span className="text-sm text-slate-400">Signing in with Google...</span>
-              </div>
-            ) : (
-              <div id="google-signin-button-admin" />
-            )}
-          </div>
-
-          <div className="mt-8 pt-6 border-t border-slate-800">
-            <p className="text-center text-sm text-slate-500">
-              Demo credentials: <span className="text-slate-400">admin@xelnova.com</span> / <span className="text-slate-400">admin123</span>
-            </p>
-          </div>
-
-          <div className="mt-6 flex items-center justify-center gap-6 text-xs text-slate-500">
+          <div className="mt-8 flex items-center justify-center gap-6 text-xs text-slate-500">
             <a href="#" className="hover:text-slate-400 transition-colors">Privacy Policy</a>
             <span>•</span>
             <a href="#" className="hover:text-slate-400 transition-colors">Terms of Service</a>

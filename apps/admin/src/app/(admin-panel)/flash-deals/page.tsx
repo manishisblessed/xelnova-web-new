@@ -1,59 +1,176 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { Badge } from '@xelnova/ui';
 import { AdminListPage } from '@/components/dashboard/admin-list-page';
 import { ActionModal } from '@/components/dashboard/action-modal';
-import { ConfirmDialog } from '@/components/dashboard/confirm-dialog';
-import { FormField, FormInput, FormSelect } from '@/components/dashboard/form-field';
-import { Pencil, Trash2 } from 'lucide-react';
+import { FormField, FormInput, FormToggle } from '@/components/dashboard/form-field';
+import { Pencil } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Column } from '@/components/dashboard/data-table';
+import { apiUpdate } from '@/lib/api';
 
-interface FlashDeal {
-  id: string; title: string; discount: string; products: number;
-  sold: number; status: string; startsAt: string; endsAt: string;
+interface FlashDealProduct {
+  id: string;
+  name: string;
+  slug: string;
+  price: number;
+  compareAtPrice: number | null;
+  stock: number;
+  isFlashDeal: boolean;
+  flashDealEndsAt: string | null;
+  category: { name: string } | null;
+  seller: { storeName: string } | null;
 }
 
-const SV: Record<string, 'success' | 'warning' | 'danger' | 'default'> = { Active: 'success', Scheduled: 'warning', Expired: 'danger' };
+function dealStatus(p: FlashDealProduct): 'Active' | 'Expired' {
+  if (!p.isFlashDeal) return 'Expired';
+  if (!p.flashDealEndsAt) return 'Active';
+  const end = new Date(p.flashDealEndsAt).getTime();
+  if (Number.isNaN(end)) return 'Active';
+  return end >= Date.now() ? 'Active' : 'Expired';
+}
+
+const SV: Record<string, 'success' | 'warning' | 'danger' | 'default'> = {
+  Active: 'success',
+  Expired: 'danger',
+};
+
+function toLocalInputValue(iso: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 
 export default function FlashDealsPage() {
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [modalOpen, setModalOpen] = useState(false);
-  const [deleteOpen, setDeleteOpen] = useState(false);
-  const [editing, setEditing] = useState<FlashDeal | null>(null);
-  const [form, setForm] = useState({ title: '', discount: '', status: 'Active' });
+  const [editing, setEditing] = useState<FlashDealProduct | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({ isFlashDeal: false, endsAt: '' });
 
-  const openAdd = () => { setEditing(null); setForm({ title: '', discount: '', status: 'Active' }); setModalOpen(true); };
-  const openEdit = (d: FlashDeal) => { setEditing(d); setForm({ title: d.title, discount: d.discount, status: d.status }); setModalOpen(true); };
+  const normalizeItems = useCallback((rows: FlashDealProduct[]) => rows.filter((p) => p.isFlashDeal), []);
 
-  const columns: Column<FlashDeal>[] = [
-    { key: 'title', header: 'Deal', render: (r) => <span className="font-medium">{r.title}</span> },
-    { key: 'discount', header: 'Discount', render: (r) => <span className="font-semibold text-danger-600">{r.discount}</span> },
-    { key: 'products', header: 'Products' },
-    { key: 'sold', header: 'Sold' },
-    { key: 'status', header: 'Status', render: (r) => <Badge variant={SV[r.status] ?? 'default'}>{r.status}</Badge> },
-    { key: 'startsAt', header: 'Starts', render: (r) => new Date(r.startsAt).toLocaleDateString() },
-    { key: 'endsAt', header: 'Ends', render: (r) => new Date(r.endsAt).toLocaleDateString() },
+  const openEdit = (p: FlashDealProduct) => {
+    setEditing(p);
+    setForm({
+      isFlashDeal: p.isFlashDeal,
+      endsAt: toLocalInputValue(p.flashDealEndsAt),
+    });
+    setModalOpen(true);
+  };
+
+  const handleSave = async () => {
+    if (!editing) return;
+    try {
+      setSaving(true);
+      await apiUpdate('products', editing.id, {
+        isFlashDeal: form.isFlashDeal,
+        ...(form.isFlashDeal && form.endsAt.trim()
+          ? { flashDealEndsAt: new Date(form.endsAt).toISOString() }
+          : {}),
+      });
+      toast.success('Flash deal settings updated');
+      setModalOpen(false);
+      setRefreshTrigger((n) => n + 1);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Request failed');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const columns: Column<FlashDealProduct>[] = [
+    {
+      key: 'name',
+      header: 'Product',
+      render: (r) => (
+        <div>
+          <span className="font-medium">{r.name}</span>
+          <p className="text-xs text-text-muted mt-0.5">{r.slug}</p>
+        </div>
+      ),
+    },
+    { key: 'category', header: 'Category', render: (r) => r.category?.name ?? '—' },
+    { key: 'seller', header: 'Seller', render: (r) => r.seller?.storeName ?? '—' },
+    {
+      key: 'price',
+      header: 'Price',
+      render: (r) => (
+        <span>
+          ₹{r.price.toLocaleString()}
+          {r.compareAtPrice != null && r.compareAtPrice > r.price && (
+            <span className="ml-1.5 text-xs text-text-muted line-through">₹{r.compareAtPrice.toLocaleString()}</span>
+          )}
+        </span>
+      ),
+    },
+    { key: 'stock', header: 'Stock', render: (r) => r.stock },
+    {
+      key: 'status',
+      header: 'Deal status',
+      render: (r) => {
+        const s = dealStatus(r);
+        return <Badge variant={SV[s] ?? 'default'}>{s}</Badge>;
+      },
+    },
+    {
+      key: 'flashDealEndsAt',
+      header: 'Ends',
+      render: (r) => (r.flashDealEndsAt ? new Date(r.flashDealEndsAt).toLocaleString() : '—'),
+    },
   ];
 
   return (
     <>
-      <AdminListPage<FlashDeal> title="Flash Deals" section="flash-deals" columns={columns} keyExtractor={(r) => r.id}
-        searchKeys={['title']} filterKey="status" filterOptions={['Active', 'Scheduled', 'Expired']}
-        onAdd={openAdd} addLabel="Create Deal"
+      <AdminListPage<FlashDealProduct>
+        title="Flash Deals"
+        section="products"
+        queryParams={{ limit: '200' }}
+        normalizeItems={normalizeItems}
+        columns={columns}
+        keyExtractor={(r) => r.id}
+        searchKeys={['name', 'slug']}
+        refreshTrigger={refreshTrigger}
         renderActions={(r) => (
-          <div className="flex items-center gap-1">
-            <button onClick={() => openEdit(r)} className="p-1.5 rounded-lg hover:bg-surface-muted text-text-muted hover:text-primary-600"><Pencil size={15} /></button>
-            <button onClick={() => { setEditing(r); setDeleteOpen(true); }} className="p-1.5 rounded-lg hover:bg-danger-50 text-text-muted hover:text-danger-600"><Trash2 size={15} /></button>
-          </div>
+          <button
+            type="button"
+            onClick={() => openEdit(r)}
+            className="p-1.5 rounded-lg hover:bg-surface-muted text-text-muted hover:text-primary-600"
+            title="Edit flash deal"
+          >
+            <Pencil size={15} />
+          </button>
         )}
       />
-      <ActionModal open={modalOpen} onClose={() => setModalOpen(false)} title={editing ? 'Edit Deal' : 'Create Deal'} onSubmit={() => { toast.success(editing ? 'Deal updated' : 'Deal created'); setModalOpen(false); }}>
-        <FormField label="Title"><FormInput value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} /></FormField>
-        <FormField label="Discount"><FormInput value={form.discount} onChange={e => setForm(f => ({ ...f, discount: e.target.value }))} placeholder="e.g. 30%" /></FormField>
-        <FormField label="Status"><FormSelect value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))}><option>Active</option><option>Scheduled</option><option>Expired</option></FormSelect></FormField>
+      <ActionModal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        title={editing ? `Flash deal: ${editing.name}` : 'Flash deal'}
+        onSubmit={handleSave}
+        loading={saving}
+        wide
+      >
+        {editing && (
+          <div className="space-y-4">
+            <FormToggle
+              label="Flash deal active"
+              checked={form.isFlashDeal}
+              onChange={(checked) => setForm((f) => ({ ...f, isFlashDeal: checked }))}
+            />
+            <FormField label="Deal ends at (local time)">
+              <FormInput
+                type="datetime-local"
+                value={form.endsAt}
+                onChange={(e) => setForm((f) => ({ ...f, endsAt: e.target.value }))}
+                disabled={!form.isFlashDeal}
+              />
+            </FormField>
+          </div>
+        )}
       </ActionModal>
-      <ConfirmDialog open={deleteOpen} onClose={() => setDeleteOpen(false)} onConfirm={() => { toast.success('Deal deleted'); setDeleteOpen(false); }} title="Delete Flash Deal" message={`Delete "${editing?.title}"?`} />
     </>
   );
 }

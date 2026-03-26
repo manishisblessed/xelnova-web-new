@@ -12,11 +12,22 @@ interface ActionModalProps {
   children: ReactNode;
   onSubmit?: () => void;
   submitLabel?: string;
+  submitVariant?: 'primary' | 'danger';
   loading?: boolean;
   wide?: boolean;
 }
 
-export function ActionModal({ open, onClose, title, children, onSubmit, submitLabel = 'Save', loading, wide }: ActionModalProps) {
+export function ActionModal({
+  open,
+  onClose,
+  title,
+  children,
+  onSubmit,
+  submitLabel = 'Save',
+  submitVariant = 'primary',
+  loading,
+  wide,
+}: ActionModalProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -45,7 +56,18 @@ export function ActionModal({ open, onClose, title, children, onSubmit, submitLa
             {onSubmit && (
               <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-border">
                 <Button variant="ghost" onClick={onClose} size="sm">Cancel</Button>
-                <Button variant="primary" onClick={onSubmit} loading={loading} size="sm">{submitLabel}</Button>
+                {submitVariant === 'danger' ? (
+                  <button
+                    type="button"
+                    onClick={onSubmit}
+                    disabled={!!loading}
+                    className="inline-flex items-center justify-center rounded-lg bg-danger-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-danger-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {loading ? 'Deleting...' : submitLabel}
+                  </button>
+                ) : (
+                  <Button variant={submitVariant} onClick={onSubmit} loading={loading} size="sm">{submitLabel}</Button>
+                )}
               </div>
             )}
           </motion.div>

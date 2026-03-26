@@ -1,6 +1,7 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { Prisma } from '@prisma/client';
+import { Prisma, Role } from '@prisma/client';
+import { LoggingService } from '../logging/logging.service';
 import {
   AdminProductQueryDto, AdminUpdateProductDto,
   AdminOrderQueryDto, AdminUpdateOrderDto,
@@ -12,15 +13,66 @@ import {
   CreateCouponDto, UpdateCouponDto,
   CreateCommissionDto, UpdateCommissionDto,
   AdminPayoutQueryDto, UpdatePayoutDto,
+  CreateRoleDto, UpdateRoleDto,
   CreatePageDto, UpdatePageDto,
+  AdminSiteSettingsDto,
+  AdminAuditContext,
 } from './dto/admin.dto';
 
 @Injectable()
 export class AdminService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly logging: LoggingService,
+  ) {}
 
   private slugify(text: string): string {
     return text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+  }
+
+  /** Creates a SellerProfile for SELLER users who have none (e.g. Google sign-in before profile sync). */
+  private async ensureSellerProfileRow(userId: string, name: string, email?: string, phone?: string): Promise<void> {
+    const existing = await this.prisma.sellerProfile.findUnique({ where: { userId } });
+    if (existing) return;
+
+    if (email) {
+      const orphaned = await this.prisma.sellerProfile.findUnique({ where: { email } });
+      if (orphaned) {
+        await this.prisma.sellerProfile.update({ where: { id: orphaned.id }, data: { userId } });
+        return;
+      }
+    }
+
+    const baseSlug = name
+      .toLowerCase()
+      .trim()
+      .replace(/[^\w\s-]/g, '')
+      .replace(/\s+/g, '-')
+      .substring(0, 40);
+    const uniqueSuffix = Math.random().toString(36).substring(2, 8);
+    const slug = `${baseSlug || 'seller'}-${uniqueSuffix}`;
+
+    await this.prisma.sellerProfile.create({
+      data: {
+        userId,
+        email,
+        phone,
+        storeName: `${name}'s Store`,
+        slug,
+        onboardingStatus: 'EMAIL_VERIFIED',
+        onboardingStep: 2,
+      },
+    });
+  }
+
+  private async backfillSellerProfilesForOrphanSellerUsers(): Promise<void> {
+    const orphans = await this.prisma.user.findMany({
+      where: { role: Role.SELLER, sellerProfile: null },
+      select: { id: true, name: true, email: true, phone: true },
+    });
+    for (const u of orphans) {
+      await this.ensureSellerProfileRow(u.id, u.name, u.email, u.phone ?? undefined);
+    }
   }
 
   // ─── Dashboard ───
@@ -146,8 +198,9 @@ export class AdminService {
         where, skip: (page - 1) * limit, take: limit,
         orderBy: { createdAt: 'desc' },
         include: {
-          user: { select: { name: true, email: true } },
+          user: { select: { name: true, email: true, phone: true } },
           items: { include: { product: { select: { name: true, images: true } } } },
+          shippingAddress: true,
         },
       }),
       this.prisma.order.count({ where }),
@@ -173,6 +226,7 @@ export class AdminService {
     if (query.search) {
       where.OR = [
         { storeName: { contains: query.search, mode: 'insensitive' } },
+        { email: { contains: query.search, mode: 'insensitive' } },
         { user: { email: { contains: query.search, mode: 'insensitive' } } },
       ];
     }
@@ -184,7 +238,7 @@ export class AdminService {
         where, skip: (page - 1) * limit, take: limit,
         orderBy: { createdAt: 'desc' },
         include: {
-          user: { select: { name: true, email: true, phone: true } },
+          user: { select: { name: true, email: true, phone: true, isBanned: true, banReason: true } },
           _count: { select: { products: true } },
         },
       }),
@@ -194,11 +248,93 @@ export class AdminService {
     return { items, total, page, limit };
   }
 
-  async updateSeller(id: string, dto: AdminUpdateSellerDto) {
+  async updateSeller(id: string, dto: AdminUpdateSellerDto, audit?: AdminAuditContext) {
+    const profile = await this.prisma.sellerProfile.findUnique({ where: { id }, select: { userId: true } });
+    if (!profile) throw new NotFoundException('Seller not found');
+
     const data: any = {};
     if (dto.verified !== undefined) data.verified = dto.verified;
     if (dto.commissionRate !== undefined) data.commissionRate = dto.commissionRate;
-    return this.prisma.sellerProfile.update({ where: { id }, data, include: { user: { select: { name: true, email: true } } } });
+    if (Object.keys(data).length) {
+      await this.prisma.sellerProfile.update({ where: { id }, data });
+    }
+
+    if (profile.userId && (dto.isBanned !== undefined || dto.banReason !== undefined)) {
+      const userData: any = {};
+      if (dto.isBanned !== undefined) userData.isBanned = dto.isBanned;
+      if (dto.banReason !== undefined) userData.banReason = dto.banReason?.trim() || null;
+      await this.prisma.user.update({ where: { id: profile.userId }, data: userData });
+    }
+
+    const result = await this.prisma.sellerProfile.findUniqueOrThrow({
+      where: { id },
+      include: {
+        user: { select: { name: true, email: true, phone: true, isBanned: true, banReason: true } },
+        _count: { select: { products: true } },
+      },
+    });
+
+    if (audit) {
+      await this.logging.logAdminAudit({
+        adminId: audit.adminId,
+        adminRole: audit.adminRole,
+        action: 'SELLER_UPDATE',
+        message: `Updated seller "${result.storeName}" (${result.email ?? result.user?.email ?? 'unknown'})`,
+        ipAddress: audit.ipAddress,
+        userAgent: audit.userAgent,
+        meta: { sellerProfileId: id, patch: dto },
+        endpoint: '/admin/sellers/:id',
+        method: 'PATCH',
+      });
+    }
+
+    return result;
+  }
+
+  async deleteSeller(sellerProfileId: string, adminId: string, audit?: AdminAuditContext) {
+    const seller = await this.prisma.sellerProfile.findUnique({
+      where: { id: sellerProfileId },
+      include: {
+        user: true,
+        _count: { select: { products: true } },
+      },
+    });
+    if (!seller) throw new NotFoundException('Seller not found');
+    if (seller.userId === adminId) throw new BadRequestException('Cannot delete your own account');
+    if (seller._count.products > 0) {
+      throw new BadRequestException('Cannot delete seller with listed products. Remove or unpublish products first.');
+    }
+    if (audit) {
+      await this.logging.logAdminAudit({
+        adminId: audit.adminId,
+        adminRole: audit.adminRole,
+        action: 'SELLER_DELETE',
+        message: `Deleted seller "${seller.storeName}" (${seller.email ?? seller.user?.email ?? 'unknown'})`,
+        ipAddress: audit.ipAddress,
+        userAgent: audit.userAgent,
+        meta: {
+          sellerProfileId,
+          targetUserId: seller.userId,
+          targetEmail: seller.email ?? seller.user?.email,
+        },
+        endpoint: '/admin/sellers/:id',
+        method: 'DELETE',
+      });
+    }
+
+    // Only delete the SellerProfile — the linked User (customer account)
+    // is unaffected and remains intact.
+    await this.prisma.sellerProfile.delete({ where: { id: sellerProfileId } });
+
+    // Downgrade user role back to CUSTOMER if they were marked as SELLER
+    if (seller.userId) {
+      await this.prisma.user.update({
+        where: { id: seller.userId },
+        data: { role: 'CUSTOMER' },
+      }).catch(() => {});
+    }
+
+    return { deleted: true };
   }
 
   // ─── Customers ───
@@ -206,21 +342,38 @@ export class AdminService {
   async getCustomers(query: AdminCustomerQueryDto) {
     const page = query.page || 1;
     const limit = query.limit || 20;
-    const where: Prisma.UserWhereInput = {};
+    const where: Prisma.UserWhereInput = {
+      role: Role.CUSTOMER,
+    };
 
     if (query.search) {
-      where.OR = [
-        { name: { contains: query.search, mode: 'insensitive' } },
-        { email: { contains: query.search, mode: 'insensitive' } },
+      where.AND = [
+        {
+          OR: [
+            { name: { contains: query.search, mode: 'insensitive' } },
+            { email: { contains: query.search, mode: 'insensitive' } },
+          ],
+        },
       ];
     }
-    if (query.role) where.role = query.role as any;
 
     const [items, total] = await Promise.all([
       this.prisma.user.findMany({
         where, skip: (page - 1) * limit, take: limit,
         orderBy: { createdAt: 'desc' },
-        select: { id: true, name: true, email: true, phone: true, role: true, emailVerified: true, createdAt: true, _count: { select: { orders: true } } },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          phone: true,
+          role: true,
+          emailVerified: true,
+          isActive: true,
+          isBanned: true,
+          banReason: true,
+          createdAt: true,
+          _count: { select: { orders: true } },
+        },
       }),
       this.prisma.user.count({ where }),
     ]);
@@ -228,11 +381,81 @@ export class AdminService {
     return { items, total, page, limit };
   }
 
-  async updateCustomer(id: string, dto: AdminUpdateCustomerDto) {
+  async updateCustomer(id: string, dto: AdminUpdateCustomerDto, audit?: AdminAuditContext) {
     const data: any = {};
     if (dto.role) data.role = dto.role;
     if (dto.emailVerified !== undefined) data.emailVerified = dto.emailVerified;
-    return this.prisma.user.update({ where: { id }, data, select: { id: true, name: true, email: true, role: true } });
+    if (dto.isActive !== undefined) data.isActive = dto.isActive;
+    if (dto.isBanned !== undefined) data.isBanned = dto.isBanned;
+    if (dto.banReason !== undefined) data.banReason = dto.banReason?.trim() || null;
+    const updated = await this.prisma.user.update({
+      where: { id },
+      data,
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        emailVerified: true,
+        isActive: true,
+        isBanned: true,
+        banReason: true,
+        createdAt: true,
+        _count: { select: { orders: true } },
+      },
+    });
+
+    if (audit) {
+      const parts: string[] = [];
+      if (dto.role !== undefined) parts.push(`role=${dto.role}`);
+      if (dto.emailVerified !== undefined) parts.push(`emailVerified=${dto.emailVerified}`);
+      if (dto.isActive !== undefined) parts.push(`isActive=${dto.isActive}`);
+      if (dto.isBanned !== undefined) parts.push(`isBanned=${dto.isBanned}`);
+      if (dto.banReason !== undefined) parts.push('banReason updated');
+      await this.logging.logAdminAudit({
+        adminId: audit.adminId,
+        adminRole: audit.adminRole,
+        action: 'USER_UPDATE',
+        message: `Updated user ${updated.email} (${updated.name}): ${parts.join(', ') || 'fields saved'}`,
+        ipAddress: audit.ipAddress,
+        userAgent: audit.userAgent,
+        meta: { targetUserId: id, patch: dto },
+        endpoint: '/admin/customers/:id',
+        method: 'PATCH',
+      });
+    }
+
+    return updated;
+  }
+
+  async deleteCustomer(userId: string, adminId: string, audit?: AdminAuditContext) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: { _count: { select: { orders: true } } },
+    });
+    if (!user) throw new NotFoundException('User not found');
+    if (userId === adminId) throw new BadRequestException('Cannot delete your own account');
+    if (user.role === 'ADMIN') throw new BadRequestException('Cannot delete admin users');
+    if (user._count.orders > 0) {
+      throw new BadRequestException('Cannot delete user with order history');
+    }
+    if (audit) {
+      await this.logging.logAdminAudit({
+        adminId: audit.adminId,
+        adminRole: audit.adminRole,
+        action: 'USER_DELETE',
+        message: `Deleted user ${user.email} (${user.name}, role ${user.role})`,
+        ipAddress: audit.ipAddress,
+        userAgent: audit.userAgent,
+        meta: { targetUserId: userId, targetEmail: user.email, targetRole: user.role },
+        endpoint: '/admin/customers/:id',
+        method: 'DELETE',
+      });
+    }
+    // Deleting user sets sellerProfile.userId = null (SetNull) — seller
+    // profile is preserved as an independent entity.
+    await this.prisma.user.delete({ where: { id: userId } });
+    return { deleted: true };
   }
 
   // ─── Categories ───
@@ -408,6 +631,30 @@ export class AdminService {
     return { deleted: true };
   }
 
+  // ─── Admin Roles ───
+
+  async getRoles() {
+    return this.prisma.adminRole.findMany({ orderBy: { createdAt: 'desc' } });
+  }
+
+  async createRole(dto: CreateRoleDto) {
+    return this.prisma.adminRole.create({
+      data: { name: dto.name, permissions: dto.permissions || '' },
+    });
+  }
+
+  async updateRole(id: string, dto: UpdateRoleDto) {
+    return this.prisma.adminRole.update({ where: { id }, data: dto as any });
+  }
+
+  async deleteRole(id: string) {
+    const role = await this.prisma.adminRole.findUnique({ where: { id } });
+    if (!role) throw new NotFoundException('Role not found');
+    if (role.isSystem) throw new NotFoundException('Cannot delete system roles');
+    await this.prisma.adminRole.delete({ where: { id } });
+    return { deleted: true };
+  }
+
   // ─── Revenue Analytics ───
 
   async getRevenue(query: { period?: string; dateFrom?: string; dateTo?: string }) {
@@ -471,5 +718,66 @@ export class AdminService {
         ...(userId && { user: { connect: { id: userId } } }),
       } 
     });
+  }
+
+  // ─── Site settings (singleton) ───
+
+  private readonly defaultSiteSettings = {
+    general: { siteName: 'Xelnova', tagline: 'Your marketplace', currency: 'INR', timezone: 'Asia/Kolkata', language: 'en' },
+    tax: { gstEnabled: true, gstRate: 18, hsnDefault: '' },
+    shipping: { freeShippingMin: 499, defaultRate: 49, expressRate: 99, codEnabled: true, codFee: 0 },
+    payment: { razorpayEnabled: true, codEnabled: true, upiEnabled: true, cardEnabled: true, netBankingEnabled: true },
+    notifications: { orderConfirmation: true, shipmentUpdate: true, promotionalEmails: false, smsAlerts: false, adminNewOrder: true },
+  };
+
+  private mergeSiteSettings(stored: unknown) {
+    const s = stored && typeof stored === 'object' ? (stored as Record<string, unknown>) : {};
+    return {
+      general: { ...this.defaultSiteSettings.general, ...(s.general as Record<string, unknown>) },
+      tax: { ...this.defaultSiteSettings.tax, ...(s.tax as Record<string, unknown>) },
+      shipping: { ...this.defaultSiteSettings.shipping, ...(s.shipping as Record<string, unknown>) },
+      payment: { ...this.defaultSiteSettings.payment, ...(s.payment as Record<string, unknown>) },
+      notifications: { ...this.defaultSiteSettings.notifications, ...(s.notifications as Record<string, unknown>) },
+    };
+  }
+
+  async getSiteSettings() {
+    const row = await this.prisma.siteSettings.findUnique({ where: { id: 1 } });
+    return this.mergeSiteSettings(row?.payload);
+  }
+
+  async updateSiteSettings(dto: AdminSiteSettingsDto, audit?: AdminAuditContext) {
+    const current = await this.getSiteSettings();
+    const merged = {
+      general: dto.general !== undefined ? { ...current.general, ...dto.general } : current.general,
+      tax: dto.tax !== undefined ? { ...current.tax, ...dto.tax } : current.tax,
+      shipping: dto.shipping !== undefined ? { ...current.shipping, ...dto.shipping } : current.shipping,
+      payment: dto.payment !== undefined ? { ...current.payment, ...dto.payment } : current.payment,
+      notifications: dto.notifications !== undefined ? { ...current.notifications, ...dto.notifications } : current.notifications,
+    };
+    await this.prisma.siteSettings.upsert({
+      where: { id: 1 },
+      create: { id: 1, payload: merged as Prisma.InputJsonValue },
+      update: { payload: merged as Prisma.InputJsonValue },
+    });
+
+    if (audit) {
+      const sections = (['general', 'tax', 'shipping', 'payment', 'notifications'] as const).filter(
+        (k) => dto[k] !== undefined,
+      );
+      await this.logging.logAdminAudit({
+        adminId: audit.adminId,
+        adminRole: audit.adminRole,
+        action: 'SETTINGS_UPDATE',
+        message: `Site settings updated (${sections.join(', ') || 'payload'})`,
+        ipAddress: audit.ipAddress,
+        userAgent: audit.userAgent,
+        meta: { sections },
+        endpoint: '/admin/settings',
+        method: 'PATCH',
+      });
+    }
+
+    return merged;
   }
 }

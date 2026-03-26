@@ -63,17 +63,17 @@ export function Modal({
             exit={{ opacity: 0, scale: 0.95, y: 10 }}
             transition={{ duration: 0.2, ease: "easeOut" }}
             className={cn(
-              "relative w-full rounded-2xl border border-dark-300 bg-dark-100 p-6 shadow-xl",
+              "relative w-full rounded-2xl border border-border bg-surface p-6 shadow-xl",
               sizeStyles[size],
               className
             )}
           >
             {title && (
               <div className="mb-4 flex items-center justify-between">
-                <h2 className="text-lg font-semibold text-white">{title}</h2>
+                <h2 className="text-lg font-semibold text-text-primary">{title}</h2>
                 <button
                   onClick={onClose}
-                  className="rounded-lg p-1.5 text-secondary-500 transition-colors hover:bg-dark-300 hover:text-white"
+                  className="rounded-lg p-1.5 text-text-muted transition-colors hover:bg-surface-muted hover:text-text-primary"
                 >
                   <X size={18} />
                 </button>
@@ -82,7 +82,7 @@ export function Modal({
             {!title && (
               <button
                 onClick={onClose}
-                className="absolute right-4 top-4 rounded-lg p-1.5 text-secondary-500 transition-colors hover:bg-dark-300 hover:text-white"
+                className="absolute right-4 top-4 rounded-lg p-1.5 text-text-muted transition-colors hover:bg-surface-muted hover:text-text-primary"
               >
                 <X size={18} />
               </button>

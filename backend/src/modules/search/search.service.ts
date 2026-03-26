@@ -92,17 +92,37 @@ export class SearchService {
   }
 
   async getPopularSearches() {
-    return [
-      'iPhone 15',
-      'Samsung Galaxy S24',
-      'wireless earbuds',
-      'running shoes',
-      'laptop under 50000',
-      'kurta for men',
-      'face wash',
-      'air fryer',
-      'smartwatch',
-      'protein powder',
+    const [topBrands, topProducts, topCategories] = await Promise.all([
+      this.prisma.product.groupBy({
+        by: ['brand'],
+        where: { isActive: true, brand: { not: null } },
+        _count: { brand: true },
+        orderBy: { _count: { brand: 'desc' } },
+        take: 4,
+      }),
+      this.prisma.product.findMany({
+        where: { isActive: true, isFeatured: true },
+        select: { name: true },
+        orderBy: { reviewCount: 'desc' },
+        take: 4,
+      }),
+      this.prisma.category.findMany({
+        where: { parentId: null },
+        select: { name: true },
+        orderBy: { productCount: 'desc' },
+        take: 4,
+      }),
+    ]);
+
+    const searches = [
+      ...topProducts.map((p) => p.name),
+      ...topBrands.filter((b) => b.brand).map((b) => b.brand as string),
+      ...topCategories.map((c) => c.name),
     ];
+
+    const unique = [...new Set(searches)].slice(0, 10);
+    return unique.length > 0
+      ? unique
+      : ['Electronics', 'Fashion', 'Home & Kitchen', 'Sports', 'Beauty'];
   }
 }

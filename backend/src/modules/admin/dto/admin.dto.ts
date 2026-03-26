@@ -1,4 +1,5 @@
-import { IsString, IsOptional, IsNumber, IsBoolean, Min, IsArray, IsEnum } from 'class-validator';
+import { Role } from '@prisma/client';
+import { IsString, IsOptional, IsNumber, IsBoolean, Min, IsArray, IsEnum, Allow } from 'class-validator';
 import { ApiPropertyOptional, ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 
@@ -47,6 +48,8 @@ export class AdminSellerQueryDto extends PaginationDto {
 export class AdminUpdateSellerDto {
   @ApiPropertyOptional() @IsOptional() @IsBoolean() verified?: boolean;
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Type(() => Number) commissionRate?: number;
+  @ApiPropertyOptional() @IsOptional() @IsBoolean() isBanned?: boolean;
+  @ApiPropertyOptional() @IsOptional() @IsString() banReason?: string;
 }
 
 // ─── Customer management ───
@@ -57,6 +60,9 @@ export class AdminCustomerQueryDto extends PaginationDto {
 export class AdminUpdateCustomerDto {
   @ApiPropertyOptional() @IsOptional() @IsString() role?: string;
   @ApiPropertyOptional() @IsOptional() @IsBoolean() emailVerified?: boolean;
+  @ApiPropertyOptional() @IsOptional() @IsBoolean() isActive?: boolean;
+  @ApiPropertyOptional() @IsOptional() @IsBoolean() isBanned?: boolean;
+  @ApiPropertyOptional() @IsOptional() @IsString() banReason?: string;
 }
 
 // ─── Category CRUD ───
@@ -144,6 +150,17 @@ export class UpdatePayoutDto {
   @ApiPropertyOptional() @IsOptional() @IsString() note?: string;
 }
 
+// ─── Admin Roles ───
+export class CreateRoleDto {
+  @ApiProperty() @IsString() name: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() permissions?: string;
+}
+
+export class UpdateRoleDto {
+  @ApiPropertyOptional() @IsOptional() @IsString() name?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() permissions?: string;
+}
+
 // ─── CMS Page ───
 export class CreatePageDto {
   @ApiProperty() @IsString() title: string;
@@ -152,3 +169,34 @@ export class CreatePageDto {
 }
 
 export class UpdatePageDto extends CreatePageDto {}
+
+// ─── Site settings (singleton JSON document) ───
+export class AdminSiteSettingsDto {
+  @ApiPropertyOptional()
+  @Allow()
+  general?: Record<string, unknown>;
+
+  @ApiPropertyOptional()
+  @Allow()
+  tax?: Record<string, unknown>;
+
+  @ApiPropertyOptional()
+  @Allow()
+  shipping?: Record<string, unknown>;
+
+  @ApiPropertyOptional()
+  @Allow()
+  payment?: Record<string, unknown>;
+
+  @ApiPropertyOptional()
+  @Allow()
+  notifications?: Record<string, unknown>;
+}
+
+/** Passed from admin HTTP handlers for audit logging (Performance → Recent Activity). */
+export interface AdminAuditContext {
+  adminId: string;
+  adminRole: Role;
+  ipAddress: string;
+  userAgent: string;
+}

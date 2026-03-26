@@ -85,7 +85,7 @@ export default function SitemapPage() {
               <Map size={14} /> Navigation
             </span>
             <h1 className="text-4xl md:text-5xl font-extrabold text-white font-display mb-4">Sitemap</h1>
-            <p className="text-lg text-white/50">Find everything on Xelnova in one place.</p>
+            <p className="text-lg text-white/80">Find everything on Xelnova in one place.</p>
           </motion.div>
         </div>
       </section>

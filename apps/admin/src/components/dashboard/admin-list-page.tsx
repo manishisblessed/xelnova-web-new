@@ -9,18 +9,30 @@ import { DataTable, type Column } from './data-table';
 import { apiGet } from '@/lib/api';
 import { toast } from 'sonner';
 
+function valueAtPath(obj: unknown, path: string): unknown {
+  return path.split('.').reduce<unknown>((acc, part) => {
+    if (acc == null || typeof acc !== 'object') return undefined;
+    return (acc as Record<string, unknown>)[part];
+  }, obj);
+}
+
 interface AdminListPageProps<T> {
   title: string;
   section: string;
   columns: Column<T>[];
   keyExtractor: (row: T) => string;
-  searchKeys?: (keyof T)[];
+  searchKeys?: (keyof T | string)[];
   filterKey?: keyof T;
   filterOptions?: string[];
   onAdd?: () => void;
   addLabel?: string;
   renderActions?: (row: T) => ReactNode;
   children?: ReactNode;
+  refreshTrigger?: number;
+  /** Extra query string params for `apiGet` (e.g. `isFlashDeal: 'true'`). */
+  queryParams?: Record<string, string>;
+  /** Transform API rows before search/filter (e.g. flatten a category tree). */
+  normalizeItems?: (rows: T[]) => T[];
 }
 
 export function AdminListPage<T extends object>({
@@ -35,6 +47,9 @@ export function AdminListPage<T extends object>({
   addLabel = 'Add New',
   renderActions,
   children,
+  refreshTrigger,
+  queryParams,
+  normalizeItems,
 }: AdminListPageProps<T>) {
   const [data, setData] = useState<T[]>([]);
   const [loading, setLoading] = useState(true);
@@ -43,21 +58,26 @@ export function AdminListPage<T extends object>({
 
   const fetchData = useCallback(async () => {
     try {
-      const result = await apiGet<T[]>(section);
-      setData(result);
+      const result = await apiGet<T[]>(section, queryParams);
+      setData(normalizeItems ? normalizeItems(result) : result);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to load data');
     } finally {
       setLoading(false);
     }
-  }, [section]);
+  }, [section, queryParams, normalizeItems]);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => { fetchData(); }, [fetchData, refreshTrigger]);
 
   let filtered = data;
   if (search && searchKeys?.length) {
     const q = search.toLowerCase();
-    filtered = filtered.filter(row => searchKeys.some(k => String((row as Record<string, unknown>)[k as string]).toLowerCase().includes(q)));
+    filtered = filtered.filter(row =>
+      searchKeys.some((k) => {
+        const v = String(valueAtPath(row, k as string) ?? '').toLowerCase();
+        return v.includes(q);
+      }),
+    );
   }
   if (filter && filterKey) {
     filtered = filtered.filter(row => String((row as Record<string, unknown>)[filterKey as string]) === filter);

@@ -6,7 +6,7 @@ import { DashboardHeader } from '@/components/dashboard/dashboard-header';
 import { FormField, FormInput, FormSelect, FormToggle } from '@/components/dashboard/form-field';
 import { Button } from '@xelnova/ui';
 import { Save } from 'lucide-react';
-import { apiGet } from '@/lib/api';
+import { apiGet, apiPatchSiteSettings } from '@/lib/api';
 import { toast } from 'sonner';
 
 interface Settings {
@@ -39,7 +39,19 @@ export default function SettingsPage() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  const save = () => toast.success('Settings saved');
+  const [saving, setSaving] = useState(false);
+  const save = async () => {
+    if (!data) return;
+    try {
+      setSaving(true);
+      await apiPatchSiteSettings(data as unknown as Record<string, unknown>);
+      toast.success('Settings saved');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   if (loading) return (
     <>
@@ -102,8 +114,8 @@ export default function SettingsPage() {
         </SettingsSection>
 
         <div className="flex justify-end pt-2 pb-8">
-          <Button variant="primary" onClick={save} size="md">
-            <Save size={16} /> Save Settings
+          <Button variant="primary" onClick={() => void save()} size="md" disabled={saving}>
+            <Save size={16} /> {saving ? 'Saving…' : 'Save Settings'}
           </Button>
         </div>
       </div>

@@ -1,7 +1,7 @@
 import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
-  // Allow CORS from admin and seller app origins
+  output: 'standalone',
   async headers() {
     return [
       {

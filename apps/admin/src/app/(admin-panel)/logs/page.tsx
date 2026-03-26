@@ -6,12 +6,57 @@ import { RefreshCw, Search, Calendar } from 'lucide-react';
 import { DashboardHeader } from '@/components/dashboard/dashboard-header';
 import { LogViewer } from '@/components/dashboard/log-viewer';
 import { apiLogs } from '@/lib/api';
-import type { LogsResponse } from '@/lib/types';
+import type { ApiLogEntry, UserActivityEntry, SystemMetrics, ErrorLogEntry } from '@/lib/types';
+import { toast } from 'sonner';
 
-const REFRESH_MS = 5000;
+const REFRESH_MS = 15_000;
+
+type ApiRequestRow = {
+  id: string;
+  endpoint: string;
+  method: string;
+  statusCode: number;
+  responseTime: number;
+  createdAt: string;
+  error?: string | null;
+};
+
+type ActivityRow = {
+  id: string;
+  action: string;
+  ipAddress?: string | null;
+  createdAt: string;
+  user?: { name?: string | null; email?: string | null } | null;
+};
+
+type StatsPayload = {
+  stats?: {
+    totalRequests?: number;
+    errorRequests?: number;
+    avgResponseTime?: string | number;
+    activeUsers?: number;
+  };
+};
+
+function mapApiLogsResponse(raw: unknown): { logs: ApiRequestRow[] } {
+  const o = raw as { logs?: ApiRequestRow[] };
+  return { logs: Array.isArray(o.logs) ? o.logs : [] };
+}
+
+function mapActivityResponse(raw: unknown): { logs: ActivityRow[] } {
+  const o = raw as { logs?: ActivityRow[] };
+  return { logs: Array.isArray(o.logs) ? o.logs : [] };
+}
 
 export default function LogsPage() {
-  const [data, setData] = useState<LogsResponse | null>(null);
+  const [apiLogsRows, setApiLogsRows] = useState<ApiLogEntry[]>([]);
+  const [userActivityRows, setUserActivityRows] = useState<UserActivityEntry[]>([]);
+  const [systemMetrics, setSystemMetrics] = useState<SystemMetrics>({
+    cpuUsage: 0,
+    memoryUsage: 0,
+    activeSessions: 0,
+  });
+  const [errorLogsRows, setErrorLogsRows] = useState<ErrorLogEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -19,24 +64,84 @@ export default function LogsPage() {
   const [search, setSearch] = useState('');
 
   const fetchLogs = useCallback(async () => {
-    const params: Record<string, string> = {};
-    if (dateFrom) params.dateFrom = dateFrom;
-    if (dateTo) params.dateTo = dateTo;
-    if (statusFilter) params.status = statusFilter;
-    if (search) params.search = search;
-    const result = await apiLogs(params);
-    setData(result);
+    const apiParams: Record<string, string> = { limit: '80', page: '1' };
+    if (dateFrom) apiParams.startDate = dateFrom;
+    if (dateTo) apiParams.endDate = dateTo;
+    if (statusFilter) apiParams.statusCode = statusFilter;
+    if (search.trim()) apiParams.endpoint = search.trim();
+
+    const actParams: Record<string, string> = { limit: '40', page: '1' };
+    if (dateFrom) actParams.startDate = dateFrom;
+    if (dateTo) actParams.endDate = dateTo;
+
+    try {
+      const [apiRaw, activityRaw, statsRaw] = await Promise.all([
+        apiLogs('api-requests', apiParams),
+        apiLogs('activity', actParams),
+        apiLogs('stats', { period: 'day' }),
+      ]);
+
+      const { logs: reqLogs } = mapApiLogsResponse(apiRaw);
+      const apiMapped: ApiLogEntry[] = reqLogs.map((l) => ({
+        id: l.id,
+        endpoint: l.endpoint,
+        method: l.method,
+        status: l.statusCode,
+        responseTimeMs: l.responseTime,
+        timestamp: l.createdAt,
+      }));
+      setApiLogsRows(apiMapped);
+
+      const { logs: actLogs } = mapActivityResponse(activityRaw);
+      setUserActivityRows(
+        actLogs.map((l) => ({
+          id: l.id,
+          user: l.user?.name?.trim() || l.user?.email || '—',
+          action: l.action,
+          ip: l.ipAddress ?? '—',
+          timestamp: l.createdAt,
+        })),
+      );
+
+      const stats = statsRaw as StatsPayload;
+      const s = stats?.stats;
+      setSystemMetrics({
+        cpuUsage: 0,
+        memoryUsage: 0,
+        activeSessions: typeof s?.activeUsers === 'number' ? s.activeUsers : 0,
+      });
+
+      const err: ErrorLogEntry[] = reqLogs
+        .filter((l) => l.statusCode >= 400 || (l.error != null && String(l.error).length > 0))
+        .map((l) => ({
+          id: l.id,
+          message: l.error?.trim() || `${l.method} ${l.endpoint}`,
+          stack: `HTTP ${l.statusCode}`,
+          severity: (l.statusCode >= 500 ? 'high' : 'medium') as ErrorLogEntry['severity'],
+          timestamp: l.createdAt,
+        }));
+      setErrorLogsRows(err);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to load logs');
+    }
   }, [dateFrom, dateTo, statusFilter, search]);
 
   useEffect(() => {
     let cancelled = false;
-    fetchLogs()
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
+    (async () => {
+      setLoading(true);
+      await fetchLogs();
+      if (!cancelled) setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [fetchLogs]);
 
   useEffect(() => {
-    const id = setInterval(fetchLogs, REFRESH_MS);
+    const id = setInterval(() => {
+      fetchLogs();
+    }, REFRESH_MS);
     return () => clearInterval(id);
   }, [fetchLogs]);
 
@@ -44,14 +149,28 @@ export default function LogsPage() {
     <>
       <DashboardHeader title="System Logs" />
       <div className="p-6 space-y-6">
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="flex flex-wrap items-center gap-3">
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="flex flex-wrap items-center gap-3"
+        >
           <div className="flex items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2">
             <Calendar size={18} className="text-text-muted" />
-            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="bg-transparent text-sm text-text-primary outline-none" />
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              className="bg-transparent text-sm text-text-primary outline-none"
+            />
           </div>
           <div className="flex items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2">
             <Calendar size={18} className="text-text-muted" />
-            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="bg-transparent text-sm text-text-primary outline-none" />
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              className="bg-transparent text-sm text-text-primary outline-none"
+            />
           </div>
           <select
             value={statusFilter}
@@ -70,22 +189,31 @@ export default function LogsPage() {
             <Search size={18} className="text-text-muted shrink-0" />
             <input
               type="text"
-              placeholder="Search endpoint or method..."
+              placeholder="Filter API logs by endpoint (contains)…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="flex-1 bg-transparent text-sm text-text-primary outline-none placeholder:text-text-muted"
             />
           </div>
           <button
-            onClick={() => { setLoading(true); fetchLogs().finally(() => setLoading(false)); }}
+            type="button"
+            onClick={() => {
+              setLoading(true);
+              fetchLogs().finally(() => setLoading(false));
+            }}
             className="flex items-center gap-2 rounded-xl border border-border bg-surface px-4 py-2 text-sm font-medium text-text-primary hover:bg-surface-muted transition-colors"
           >
             <RefreshCw size={18} />
             Refresh
           </button>
         </motion.div>
-        {data && <LogViewer apiLogs={data.apiLogs} userActivity={data.userActivity} systemMetrics={data.systemMetrics} errorLogs={data.errorLogs} loading={loading} />}
-        {!data && !loading && <div className="rounded-2xl border border-border bg-surface p-12 text-center text-text-muted">Unable to load logs.</div>}
+        <LogViewer
+          apiLogs={apiLogsRows}
+          userActivity={userActivityRows}
+          systemMetrics={systemMetrics}
+          errorLogs={errorLogsRows}
+          loading={loading}
+        />
       </div>
     </>
   );

@@ -18,6 +18,8 @@ export interface PaginationMeta {
 
 // ─── Auth ───
 
+export type AuthProvider = 'EMAIL' | 'PHONE' | 'GOOGLE';
+
 export interface AuthUser {
   id: string;
   name: string;
@@ -25,6 +27,7 @@ export interface AuthUser {
   phone: string | null;
   avatar: string | null;
   role: 'CUSTOMER' | 'SELLER' | 'ADMIN';
+  authProvider?: AuthProvider;
 }
 
 export interface AuthTokens {
@@ -36,6 +39,7 @@ export interface LoginResponse {
   user: AuthUser;
   accessToken: string;
   refreshToken: string;
+  hasSellerProfile?: boolean;
 }
 
 // ─── Product ───
@@ -114,6 +118,7 @@ export interface Banner {
   bgColor: string | null;
   isActive: boolean;
   sortOrder: number;
+  position: string;
 }
 
 // ─── Cart ───
@@ -158,6 +163,8 @@ export interface OrderItem {
   quantity: number;
   price: number;
   variant: string | null;
+  /** Present when API includes nested product (e.g. some list/detail responses). */
+  product?: { name?: string; images?: string[] };
 }
 
 export interface Order {
@@ -176,6 +183,7 @@ export interface Order {
   couponCode: string | null;
   estimatedDelivery: string | null;
   createdAt: string;
+  updatedAt?: string;
 }
 
 // ─── Address ───

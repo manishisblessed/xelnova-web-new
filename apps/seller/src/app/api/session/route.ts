@@ -7,7 +7,7 @@ export async function POST(request: NextRequest) {
     if (!token || !role) return NextResponse.json({ success: false }, { status: 400 });
     const expiresIn = 60 * 60 * 24;
     const res = NextResponse.json({ success: true });
-    res.cookies.set('xelnova-dashboard-token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', maxAge: expiresIn, path: '/' });
+    res.cookies.set('xelnova-dashboard-token', token, { httpOnly: false, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', maxAge: expiresIn, path: '/' });
     res.cookies.set('xelnova-dashboard-role', role, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', maxAge: expiresIn, path: '/' });
     if (user && typeof user === 'object') {
       res.cookies.set('xelnova-dashboard-user', JSON.stringify(user), { httpOnly: false, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', maxAge: expiresIn, path: '/' });

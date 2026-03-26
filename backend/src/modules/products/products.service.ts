@@ -7,6 +7,49 @@ import { Prisma } from '@prisma/client';
 export class ProductsService {
   constructor(private readonly prisma: PrismaService) {}
 
+  async getStats() {
+    const [productCount, sellerCount, userCount, orderCount] =
+      await Promise.all([
+        this.prisma.product.count({ where: { isActive: true } }),
+        this.prisma.sellerProfile.count({ where: { verified: true } }),
+        this.prisma.user.count({ where: { isActive: true } }),
+        this.prisma.order.count(),
+      ]);
+
+    return {
+      products: productCount,
+      sellers: sellerCount,
+      customers: userCount,
+      orders: orderCount,
+    };
+  }
+
+  async getBrands() {
+    return this.prisma.brand.findMany({
+      where: { isActive: true },
+      orderBy: [{ featured: 'desc' }, { name: 'asc' }],
+    });
+  }
+
+  async getBannersByPosition(position: string) {
+    return this.prisma.banner.findMany({
+      where: { isActive: true, position },
+      orderBy: { sortOrder: 'asc' },
+    });
+  }
+
+  async getTopReviews(limit = 6) {
+    return this.prisma.review.findMany({
+      where: { rating: { gte: 4 } },
+      orderBy: [{ helpful: 'desc' }, { rating: 'desc' }, { createdAt: 'desc' }],
+      take: limit,
+      include: {
+        user: { select: { id: true, name: true, avatar: true } },
+        product: { select: { name: true, slug: true, images: true } },
+      },
+    });
+  }
+
   async findAll(query: ProductQueryDto) {
     const where: Prisma.ProductWhereInput = { isActive: true };
 

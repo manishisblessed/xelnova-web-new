@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { LayoutDashboard, Package, Store, CreditCard, LogOut, User, BarChart3, Settings } from 'lucide-react';
@@ -22,9 +23,12 @@ export function DashboardSidebar() {
   return (
     <aside className="w-64 min-h-screen border-r border-border bg-surface flex flex-col">
       <div className="p-6 border-b border-border">
-        <Link href="/dashboard" className="flex items-center gap-2">
-          <span className="text-xl font-bold text-primary-600 font-display">Xelnova</span>
-          <span className="text-xs text-text-muted font-medium uppercase tracking-wider">Seller</span>
+        <Link href="/dashboard" className="flex items-center gap-2.5">
+          <Image src="/xelnova-icon-dark.png" alt="Xelnova" width={36} height={36} className="h-8 w-8" />
+          <div className="flex items-center gap-1.5">
+            <span className="text-xl font-bold text-primary-600 font-display">Xelnova</span>
+            <span className="text-xs text-text-muted font-medium uppercase tracking-wider">Seller</span>
+          </div>
         </Link>
       </div>
       <nav className="flex-1 p-3 space-y-0.5">

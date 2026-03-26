@@ -1,5 +1,6 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import {
@@ -7,27 +8,12 @@ import {
   Truck, RotateCcw, ShieldCheck, Headphones, Flame,
   ChevronRight, ArrowRight, Smartphone,
 } from 'lucide-react';
+import { productsApi } from '@xelnova/api';
+import type { Banner } from '@xelnova/api';
 import { ProductCard } from '@/components/marketplace/product-card';
 import { FlashDealCard } from '@/components/marketplace/flash-deal-card';
 import { SectionHeader } from '@/components/marketplace/section-header';
-import { useProducts, useFlashDeals } from '@/lib/api';
-
-const promoBanners = [
-  { id: 1, image: 'https://images.unsplash.com/photo-1607082348824-0a96f2a4b9da?w=700&h=300&fit=crop', href: '/products?category=fashion', alt: 'Summer Fashion Sale', title: 'Fashion Fest', subtitle: 'Up to 60% Off' },
-  { id: 2, image: 'https://images.unsplash.com/photo-1550009158-9ebf69173e03?w=700&h=300&fit=crop', href: '/products?category=electronics', alt: 'New Tech Arrivals', title: 'Tech Week', subtitle: 'Latest Gadgets' },
-];
-
-const topSelections = [
-  { id: 1, title: 'Top Rated Fashion', discount: 'Min. 50% Off', image: 'https://images.unsplash.com/photo-1558171813-4c088753af8f?w=200&h=200&fit=crop', href: '/products?category=fashion' },
-  { id: 2, title: 'Best of Gadgets', discount: 'Up to 60% Off', image: 'https://images.unsplash.com/photo-1498049794561-7780e7231661?w=200&h=200&fit=crop', href: '/products?category=electronics' },
-  { id: 3, title: 'Premium Footwear', discount: 'Min. 40% Off', image: 'https://images.unsplash.com/photo-1549298916-b41d501d3772?w=200&h=200&fit=crop', href: '/products?category=footwear' },
-];
-
-const testimonials = [
-  { id: 1, name: 'Priya Sharma', location: 'Mumbai', initials: 'PS', rating: 5, text: 'Amazing quality products! The delivery was super fast and the packaging was premium. Definitely my go-to marketplace now.', color: 'bg-primary-100 text-primary-700' },
-  { id: 2, name: 'Rahul Verma', location: 'Delhi', initials: 'RV', rating: 5, text: 'Found brands here that I couldn\'t find anywhere else. The deals are genuine and customer service is top-notch.', color: 'bg-accent-100 text-accent-700' },
-  { id: 3, name: 'Anita Patel', location: 'Bangalore', initials: 'AP', rating: 5, text: 'Love the easy returns policy. Ordered electronics worth ₹50K and everything was authentic with warranty cards.', color: 'bg-info-100 text-info-600' },
-];
+import { useProducts, useFlashDeals, useCategories } from '@/lib/api';
 
 const trustFeatures = [
   { icon: Truck, title: 'Free Delivery', desc: 'On orders over ₹499' },
@@ -36,14 +22,58 @@ const trustFeatures = [
   { icon: Headphones, title: '24/7 Support', desc: "We're here to help" },
 ];
 
-const brands = [
-  'Samsung', 'Apple', 'Sony', 'Nike', "Levi's", 'Puma',
-  'boAt', 'OnePlus', 'JBL', 'Ray-Ban', 'Prestige', 'Philips',
+const reviewColors = [
+  'bg-primary-100 text-primary-700',
+  'bg-accent-100 text-accent-700',
+  'bg-info-100 text-info-600',
+  'bg-warning-100 text-warning-700',
+  'bg-success-100 text-success-700',
+  'bg-danger-100 text-danger-700',
 ];
+
+function useDealCountdown(endAt?: string) {
+  const [timeLeft, setTimeLeft] = useState({ h: 0, m: 0, s: 0 });
+
+  useEffect(() => {
+    if (!endAt) return;
+    function calc() {
+      const diff = new Date(endAt!).getTime() - Date.now();
+      if (diff <= 0) return { h: 0, m: 0, s: 0 };
+      return {
+        h: Math.floor(diff / 3600000),
+        m: Math.floor((diff % 3600000) / 60000),
+        s: Math.floor((diff % 60000) / 1000),
+      };
+    }
+    setTimeLeft(calc());
+    const interval = setInterval(() => setTimeLeft(calc()), 1000);
+    return () => clearInterval(interval);
+  }, [endAt]);
+
+  return timeLeft;
+}
 
 export function HomeBelowFold() {
   const { data: productsData } = useProducts({ limit: 50 });
   const { data: flashDeals } = useFlashDeals();
+  const { data: categories } = useCategories();
+  const [promoBanners, setPromoBanners] = useState<Banner[]>([]);
+  const [brands, setBrands] = useState<{ id: string; name: string; slug: string; logo: string | null; featured: boolean }[]>([]);
+  const [topReviews, setTopReviews] = useState<{ id: string; rating: number; title: string | null; comment: string | null; helpful: number; createdAt: string; user: { id: string; name: string; avatar: string | null }; product: { name: string; slug: string; images: string[] } }[]>([]);
+
+  useEffect(() => {
+    productsApi.getBanners('promo')
+      .then((b) => { if (b?.length) setPromoBanners(b); })
+      .catch(() => {});
+
+    productsApi.getBrands()
+      .then((b) => { if (b?.length) setBrands(b); })
+      .catch(() => {});
+
+    productsApi.getTopReviews()
+      .then((r) => { if (r?.length) setTopReviews(r); })
+      .catch(() => {});
+  }, []);
 
   const allProducts = productsData?.products || [];
   const flashDealProducts = flashDeals || [];
@@ -51,6 +81,15 @@ export function HomeBelowFold() {
   const bestSellers = allProducts.filter((p) => p.rating >= 4.5).sort((a, b) => b.reviewCount - a.reviewCount).slice(0, 8);
   const recommended = allProducts.filter((p) => p.rating >= 4.0).slice(0, 8);
   const dealProduct = allProducts.find((p) => p.discount >= 30 && p.rating >= 4.5) || allProducts[0];
+  const dealCountdown = useDealCountdown(dealProduct?.flashDealEndsAt);
+
+  const topSelections = (categories || []).slice(0, 3).map((cat) => ({
+    id: cat.id,
+    title: cat.name,
+    discount: `${cat.productCount} Products`,
+    image: cat.image || '',
+    href: `/products?category=${cat.slug}`,
+  }));
 
   return (
     <>
@@ -69,7 +108,7 @@ export function HomeBelowFold() {
                     <Zap className="w-6 h-6 text-white fill-white" />
                   </div>
                   <h2 className="text-2xl lg:text-3xl font-bold text-white mb-1 leading-tight font-display">Flash Deals</h2>
-                  <p className="text-xs text-white/50 mb-5">Limited time offers</p>
+                  <p className="text-xs text-white/80 mb-5">Limited time offers</p>
                   <Link
                     href="/products?deals=flash"
                     className="inline-flex items-center gap-1.5 bg-white text-primary-700 px-5 py-2.5 rounded-xl font-semibold text-sm hover:bg-primary-50 transition-all shadow-lg shadow-black/10 active:scale-95"
@@ -108,91 +147,116 @@ export function HomeBelowFold() {
       </section>
 
       {/* ─── 7. PROMO BANNERS ─── */}
-      <section className="py-4">
-        <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {promoBanners.map((banner) => (
-              <Link
-                key={banner.id}
-                href={banner.href}
-                className="block relative h-44 md:h-52 rounded-2xl overflow-hidden group shadow-card hover:shadow-card-hover transition-all duration-300"
-              >
-                <Image src={banner.image} alt={banner.alt} fill sizes="(max-width: 768px) 100vw, 50vw" className="object-cover group-hover:scale-105 transition-transform duration-700" />
-                <div className="absolute inset-0 bg-gradient-to-r from-black/60 via-black/30 to-transparent" />
-                <div className="absolute inset-0 flex items-center px-8">
-                  <div>
-                    <span className="inline-block text-[10px] font-bold uppercase tracking-[0.15em] text-white/60 mb-1">{banner.subtitle}</span>
-                    <h3 className="text-2xl md:text-3xl font-extrabold text-white font-display">{banner.title}</h3>
-                    <span className="inline-flex items-center gap-1 text-sm font-semibold text-white mt-3 group-hover:gap-2 transition-all">
-                      Shop Now <ArrowRight className="w-4 h-4" />
-                    </span>
+      {promoBanners.length > 0 && (
+        <section className="py-4">
+          <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {promoBanners.map((banner) => (
+                <Link
+                  key={banner.id}
+                  href={banner.ctaLink || '/products'}
+                  className="block relative h-44 md:h-52 rounded-2xl overflow-hidden group shadow-card hover:shadow-card-hover transition-all duration-300"
+                >
+                  {banner.image && (
+                    <Image src={banner.image} alt={banner.title} fill sizes="(max-width: 768px) 100vw, 50vw" className="object-cover group-hover:scale-105 transition-transform duration-700" />
+                  )}
+                  <div className="absolute inset-0 bg-gradient-to-r from-black/60 via-black/30 to-transparent" />
+                  <div className="absolute inset-0 flex items-center px-8">
+                    <div>
+                      <span className="inline-block text-[10px] font-bold uppercase tracking-[0.15em] text-white/85 mb-1">{banner.subtitle}</span>
+                      <h3 className="text-2xl md:text-3xl font-extrabold text-white font-display">{banner.title}</h3>
+                      <span className="inline-flex items-center gap-1 text-sm font-semibold text-white mt-3 group-hover:gap-2 transition-all">
+                        {banner.ctaText || 'Shop Now'} <ArrowRight className="w-4 h-4" />
+                      </span>
+                    </div>
                   </div>
-                </div>
-              </Link>
-            ))}
+                </Link>
+              ))}
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
+      )}
 
       {/* ─── 8. DEAL OF THE DAY ─── */}
       {dealProduct && (
         <section className="py-6">
           <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
-            <div className="relative bg-gradient-to-br from-accent-50 via-white to-surface-warm rounded-3xl border border-accent-200/40 overflow-hidden">
-              <div className="absolute top-0 right-0 w-72 h-72 bg-accent-100/40 rounded-full blur-3xl -translate-y-1/3 translate-x-1/4" />
-              <div className="absolute bottom-0 left-0 w-48 h-48 bg-primary-100/30 rounded-full blur-3xl translate-y-1/3 -translate-x-1/4" />
-              <div className="relative p-6 md:p-10">
-                <div className="grid md:grid-cols-2 gap-8 items-center">
-                  <div className="relative aspect-square max-w-[360px] mx-auto">
-                    <div className="absolute inset-4 rounded-3xl bg-white shadow-elevated" />
-                    <Image
-                      src={dealProduct.images[0]}
-                      alt={dealProduct.name}
-                      fill
-                      sizes="(max-width: 768px) 100vw, 360px"
-                      className="object-contain relative z-10 p-6"
-                    />
-                  </div>
-                  <div>
-                    <span className="inline-flex items-center gap-1.5 bg-danger-100 text-danger-700 px-3 py-1 rounded-full text-xs font-bold mb-4">
-                      <Flame size={12} className="fill-current" /> Deal of the Day
-                    </span>
-                    <h2 className="text-2xl md:text-3xl font-extrabold text-text-primary mb-2 font-display leading-tight">
-                      {dealProduct.name}
-                    </h2>
-                    <p className="text-sm text-text-muted mb-5">{dealProduct.brand} · {dealProduct.rating.toFixed(1)} ★ ({dealProduct.reviewCount.toLocaleString('en-IN')} reviews)</p>
-                    <div className="flex items-baseline gap-3 mb-5">
-                      <span className="text-3xl font-extrabold text-text-primary">₹{dealProduct.price.toLocaleString('en-IN')}</span>
-                      {dealProduct.comparePrice > dealProduct.price && (
-                        <>
-                          <span className="text-lg text-text-muted line-through">₹{dealProduct.comparePrice.toLocaleString('en-IN')}</span>
-                          <span className="bg-primary-100 text-primary-700 px-2 py-0.5 rounded-lg text-sm font-bold">{dealProduct.discount}% OFF</span>
-                        </>
-                      )}
+            <div className="relative rounded-3xl border border-border/60 overflow-hidden bg-white shadow-card">
+              <div className="grid md:grid-cols-2">
+                {/* Image side */}
+                <div className="relative bg-gradient-to-br from-primary-50 via-accent-50/60 to-white flex items-center justify-center p-8 md:p-12 min-h-[280px] md:min-h-[400px]">
+                  <div className="absolute top-0 right-0 w-56 h-56 bg-primary-100/50 rounded-full blur-3xl -translate-y-1/4 translate-x-1/4" />
+                  <div className="absolute bottom-0 left-0 w-40 h-40 bg-accent-100/50 rounded-full blur-3xl translate-y-1/4 -translate-x-1/4" />
+                  {dealProduct.images[0] ? (
+                    <div className="relative w-full max-w-[320px] aspect-square z-10">
+                      <div className="absolute inset-0 rounded-3xl bg-white shadow-elevated" />
+                      <Image
+                        src={dealProduct.images[0]}
+                        alt={dealProduct.name}
+                        fill
+                        sizes="(max-width: 768px) 100vw, 360px"
+                        className="object-contain relative z-10 p-6"
+                      />
                     </div>
-                    <div className="flex gap-3 mb-6">
-                      {[
-                        { val: '12', label: 'Hours' },
-                        { val: '45', label: 'Mins' },
-                        { val: '30', label: 'Secs' },
-                      ].map((t) => (
-                        <div key={t.label} className="bg-surface-dark text-white px-4 py-3 rounded-xl text-center min-w-[56px]">
-                          <div className="text-xl font-bold tabular-nums font-display">{t.val}</div>
-                          <div className="text-[9px] text-white/40 uppercase tracking-wider mt-0.5">{t.label}</div>
-                        </div>
-                      ))}
-                      <div className="flex items-center">
-                        <div className="w-2 h-2 rounded-full bg-danger-500 animate-pulse mr-1.5" />
-                        <span className="text-xs text-danger-600 font-semibold">Live</span>
+                  ) : (
+                    <div className="relative z-10 flex flex-col items-center gap-4">
+                      <div className="w-28 h-28 rounded-3xl bg-white shadow-lg flex items-center justify-center">
+                        <Flame size={48} className="text-danger-400" />
+                      </div>
+                      <div className="text-center">
+                        <p className="text-sm font-semibold text-text-secondary">Today&apos;s Hot Deal</p>
+                        <p className="text-xs text-text-muted mt-0.5">Grab it before it&apos;s gone!</p>
                       </div>
                     </div>
-                    <Link
-                      href={`/products/${dealProduct.slug}`}
-                      className="inline-flex items-center gap-2 bg-primary-600 text-white px-8 py-3.5 rounded-xl font-semibold text-sm hover:bg-primary-700 transition-all shadow-primary active:scale-[0.98]"
-                    >
-                      Shop Now <ArrowRight className="w-4 h-4" />
-                    </Link>
+                  )}
+                </div>
+
+                {/* Info side */}
+                <div className="flex flex-col justify-center p-6 md:p-10">
+                  <span className="inline-flex items-center gap-1.5 bg-danger-100 text-danger-700 px-3 py-1 rounded-full text-xs font-bold mb-4 w-fit">
+                    <Flame size={12} className="fill-current" /> Deal of the Day
+                  </span>
+                  <h2 className="text-2xl md:text-3xl font-extrabold text-text-primary mb-2 font-display leading-tight">
+                    {dealProduct.name}
+                  </h2>
+                  <p className="text-sm text-text-muted mb-5">
+                    {[
+                      dealProduct.brand,
+                      `${dealProduct.rating.toFixed(1)} ★`,
+                      `${dealProduct.reviewCount.toLocaleString('en-IN')} reviews`,
+                    ].filter(Boolean).join(' · ')}
+                  </p>
+                  <div className="flex items-baseline gap-3 mb-5">
+                    <span className="text-3xl font-extrabold text-text-primary">₹{dealProduct.price.toLocaleString('en-IN')}</span>
+                    {dealProduct.comparePrice > dealProduct.price && (
+                      <>
+                        <span className="text-lg text-text-muted line-through">₹{dealProduct.comparePrice.toLocaleString('en-IN')}</span>
+                        <span className="bg-primary-100 text-primary-700 px-2 py-0.5 rounded-lg text-sm font-bold">{dealProduct.discount}% OFF</span>
+                      </>
+                    )}
                   </div>
+                  <div className="flex items-center gap-3 mb-6">
+                    {[
+                      { val: String(dealCountdown.h).padStart(2, '0'), label: 'Hours' },
+                      { val: String(dealCountdown.m).padStart(2, '0'), label: 'Mins' },
+                      { val: String(dealCountdown.s).padStart(2, '0'), label: 'Secs' },
+                    ].map((t) => (
+                      <div key={t.label} className="bg-surface-dark text-white px-4 py-3 rounded-xl text-center min-w-[56px]">
+                        <div className="text-xl font-bold tabular-nums font-display">{t.val}</div>
+                        <div className="text-[9px] text-white/70 uppercase tracking-wider mt-0.5">{t.label}</div>
+                      </div>
+                    ))}
+                    <div className="flex items-center ml-1">
+                      <div className="w-2 h-2 rounded-full bg-danger-500 animate-pulse mr-1.5" />
+                      <span className="text-xs text-danger-600 font-semibold">Live</span>
+                    </div>
+                  </div>
+                  <Link
+                    href={`/products/${dealProduct.slug}`}
+                    className="inline-flex items-center gap-2 bg-primary-600 text-white px-8 py-3.5 rounded-xl font-semibold text-sm hover:bg-primary-700 transition-all shadow-primary active:scale-[0.98] w-fit"
+                  >
+                    Shop Now <ArrowRight className="w-4 h-4" />
+                  </Link>
                 </div>
               </div>
             </div>
@@ -262,55 +326,67 @@ export function HomeBelowFold() {
       )}
 
       {/* ─── 12. BRAND SHOWCASE ─── */}
-      <section className="py-6">
-        <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
-          <SectionHeader title="Top Brands" subtitle="Shop from the brands you love" />
-          <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-6">
-            {brands.map((brand) => (
-              <Link
-                key={brand}
-                href={`/products?brand=${encodeURIComponent(brand)}`}
-                className="flex h-20 items-center justify-center rounded-2xl border border-border/60 bg-white px-4 text-center text-sm font-bold text-text-secondary transition-all duration-300 hover:border-primary-300 hover:text-primary-700 hover:shadow-card-hover hover:-translate-y-0.5"
-              >
-                {brand}
-              </Link>
-            ))}
+      {brands.length > 0 && (
+        <section className="py-6">
+          <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
+            <SectionHeader title="Top Brands" subtitle="Shop from the brands you love" />
+            <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-6">
+              {brands.map((brand) => (
+                <Link
+                  key={brand.id}
+                  href={`/products?brand=${encodeURIComponent(brand.name)}`}
+                  className="flex h-20 items-center justify-center rounded-2xl border border-border/60 bg-white px-4 text-center transition-all duration-300 hover:border-primary-300 hover:text-primary-700 hover:shadow-card-hover hover:-translate-y-0.5"
+                >
+                  {brand.logo ? (
+                    <Image src={brand.logo} alt={brand.name} width={80} height={40} className="h-8 w-auto object-contain" />
+                  ) : (
+                    <span className="text-sm font-bold text-text-secondary">{brand.name}</span>
+                  )}
+                </Link>
+              ))}
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
+      )}
 
       {/* ─── 13. CUSTOMER TESTIMONIALS ─── */}
-      <section className="py-8">
-        <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
-          <SectionHeader title="What Our Customers Say" subtitle="Real reviews from real shoppers" />
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {testimonials.map((review) => (
-              <div
-                key={review.id}
-                className="bg-white rounded-2xl border border-border/60 p-6 shadow-card hover:shadow-card-hover transition-all duration-300"
-              >
-                <div className="flex items-center gap-1 mb-3">
-                  {Array.from({ length: review.rating }).map((_, j) => (
-                    <Star key={j} size={14} className="fill-accent-400 text-accent-400" />
-                  ))}
-                </div>
-                <p className="text-sm text-text-secondary leading-relaxed mb-5">
-                  &ldquo;{review.text}&rdquo;
-                </p>
-                <div className="flex items-center gap-3 pt-4 border-t border-border/60">
-                  <div className={`w-10 h-10 rounded-full flex items-center justify-center text-xs font-bold ${review.color}`}>
-                    {review.initials}
+      {topReviews.length > 0 && (
+        <section className="py-8">
+          <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
+            <SectionHeader title="What Our Customers Say" subtitle="Real reviews from real shoppers" />
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {topReviews.slice(0, 3).map((review, i) => {
+                const name = review.user?.name || 'Customer';
+                const initials = name.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase();
+                return (
+                  <div
+                    key={review.id}
+                    className="bg-white rounded-2xl border border-border/60 p-6 shadow-card hover:shadow-card-hover transition-all duration-300"
+                  >
+                    <div className="flex items-center gap-1 mb-3">
+                      {Array.from({ length: review.rating }).map((_, j) => (
+                        <Star key={j} size={14} className="fill-accent-400 text-accent-400" />
+                      ))}
+                    </div>
+                    <p className="text-sm text-text-secondary leading-relaxed mb-5">
+                      &ldquo;{review.comment || review.title || 'Great product!'}&rdquo;
+                    </p>
+                    <div className="flex items-center gap-3 pt-4 border-t border-border/60">
+                      <div className={`w-10 h-10 rounded-full flex items-center justify-center text-xs font-bold ${reviewColors[i % reviewColors.length]}`}>
+                        {initials}
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold text-text-primary">{name}</p>
+                        <p className="text-xs text-text-muted">on {review.product?.name?.slice(0, 30)}</p>
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-sm font-semibold text-text-primary">{review.name}</p>
-                    <p className="text-xs text-text-muted">{review.location}</p>
-                  </div>
-                </div>
-              </div>
-            ))}
+                );
+              })}
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
+      )}
 
       {/* ─── 14. APP DOWNLOAD CTA ─── */}
       <section className="py-6">
@@ -322,13 +398,13 @@ export function HomeBelowFold() {
             </div>
             <div className="relative flex flex-col md:flex-row items-center gap-8 md:gap-12">
               <div className="flex-1 text-center md:text-left">
-                <div className="inline-flex items-center gap-2 bg-white/10 px-3 py-1 rounded-full text-xs text-white/60 mb-4 font-medium">
+                <div className="inline-flex items-center gap-2 bg-white/10 px-3 py-1 rounded-full text-xs text-white/85 mb-4 font-medium">
                   <Smartphone size={12} /> Available on iOS & Android
                 </div>
                 <h2 className="text-2xl md:text-4xl font-extrabold text-white mb-3 font-display leading-tight">
                   Shop Anytime,<br />Anywhere
                 </h2>
-                <p className="text-white/50 mb-6 max-w-md text-sm leading-relaxed">
+                <p className="text-white/80 mb-6 max-w-md text-sm leading-relaxed">
                   Download the Xelnova app and get <strong className="text-accent-300">₹200 off</strong> on your first order. Exclusive app-only deals await!
                 </p>
                 <div className="flex gap-3 justify-center md:justify-start">
@@ -346,11 +422,9 @@ export function HomeBelowFold() {
                 <div className="w-48 h-72 bg-white/5 rounded-[2rem] border border-white/10 p-2 relative">
                   <div className="w-full h-full bg-gradient-to-b from-primary-500/50 to-primary-700/50 rounded-[1.5rem] flex items-center justify-center">
                     <div className="text-center">
-                      <div className="w-14 h-14 bg-white/15 rounded-2xl flex items-center justify-center mx-auto mb-3 backdrop-blur-sm">
-                        <ShoppingBag className="w-7 h-7 text-white" />
-                      </div>
+                      <img src="/xelnova-icon-green.png" alt="Xelnova" className="w-14 h-14 rounded-2xl mx-auto mb-3" />
                       <p className="text-white font-bold text-base font-display">Xelnova</p>
-                      <p className="text-white/40 text-[10px] mt-0.5">Shop smart</p>
+                      <p className="text-white/70 text-[10px] mt-0.5">Shop smart</p>
                     </div>
                   </div>
                   <div className="absolute top-0 left-1/2 -translate-x-1/2 w-20 h-4 bg-surface-dark rounded-b-xl" />

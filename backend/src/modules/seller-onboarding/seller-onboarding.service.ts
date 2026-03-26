@@ -1,4 +1,12 @@
-import { Injectable, HttpException, HttpStatus, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  HttpException,
+  HttpStatus,
+  BadRequestException,
+  BadGatewayException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
+import { sendFortiusOtpSms } from '../../common/helpers/fortius-sms.helper';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VerificationService } from '../verification/verification.service';
 import * as bcrypt from 'bcrypt';
@@ -27,17 +35,18 @@ export class SellerOnboardingService {
   async sendOtp(dto: SendOtpDto, ipAddress?: string) {
     const { identifier, type, purpose = 'REGISTRATION' } = dto;
 
-    // Rate limiting: Check recent OTPs
+    // Rate limiting: only count unverified OTPs sent in the last 60 seconds
     const recentOtps = await this.prisma.otpVerification.count({
       where: {
         identifier,
         type,
-        createdAt: { gte: new Date(Date.now() - 60 * 1000) }, // Last 1 minute
+        verified: false,
+        createdAt: { gte: new Date(Date.now() - 60 * 1000) },
       },
     });
 
     if (recentOtps >= 1) {
-      throw new HttpException('Please wait before requesting another OTP', HttpStatus.TOO_MANY_REQUESTS);
+      throw new HttpException('Please wait 60 seconds before requesting another OTP', HttpStatus.TOO_MANY_REQUESTS);
     }
 
     // Generate 6-digit OTP
@@ -50,8 +59,7 @@ export class SellerOnboardingService {
       data: { expiresAt: new Date() },
     });
 
-    // Save new OTP
-    await this.prisma.otpVerification.create({
+    const record = await this.prisma.otpVerification.create({
       data: {
         identifier,
         type,
@@ -62,17 +70,29 @@ export class SellerOnboardingService {
       },
     });
 
-    // Send OTP via email or SMS
-    if (type === 'EMAIL') {
-      await this.sendEmailOtp(identifier, otp);
-    } else {
-      await this.sendSmsOtp(identifier, otp);
+    try {
+      if (type === 'EMAIL') {
+        await this.sendEmailOtp(identifier, otp);
+      } else {
+        await sendFortiusOtpSms(identifier, otp);
+      }
+    } catch (err) {
+      await this.prisma.otpVerification.delete({ where: { id: record.id } }).catch(() => undefined);
+      throw err;
+    }
+
+    const isDev = process.env.NODE_ENV !== 'production';
+    let devOtp: string | undefined;
+    if (isDev) {
+      const resendMissing = !process.env.RESEND_API_KEY || process.env.RESEND_API_KEY === 're_xxxxx';
+      const fortiusMissing = !process.env.FORTIUS_API_KEY?.trim();
+      if (type === 'EMAIL' && resendMissing) devOtp = otp;
+      if (type === 'PHONE' && fortiusMissing) devOtp = otp;
     }
 
     return {
-      success: true,
-      message: `OTP sent to ${type === 'EMAIL' ? 'email' : 'phone'}`,
-      expiresIn: 600, // 10 minutes in seconds
+      expiresIn: 600,
+      ...(devOtp ? { devOtp } : {}),
     };
   }
 
@@ -122,26 +142,29 @@ export class SellerOnboardingService {
   }
 
   private async sendEmailOtp(email: string, otp: string) {
-    // Use Resend or your email service
     const resendApiKey = process.env.RESEND_API_KEY;
-    
+
     if (!resendApiKey || resendApiKey === 're_xxxxx') {
+      if (process.env.NODE_ENV === 'production') {
+        throw new ServiceUnavailableException(
+          'Email is not configured. Set RESEND_API_KEY and EMAIL_FROM on the backend.',
+        );
+      }
       console.log(`[DEV] Email OTP for ${email}: ${otp}`);
       return;
     }
 
-    try {
-      const response = await fetch('https://api.resend.com/emails', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${resendApiKey}`,
-        },
-        body: JSON.stringify({
-          from: process.env.EMAIL_FROM || 'Xelnova <noreply@xelnova.com>',
-          to: email,
-          subject: 'Verify your email - Xelnova Seller',
-          html: `
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${resendApiKey}`,
+      },
+      body: JSON.stringify({
+        from: process.env.EMAIL_FROM || 'Xelnova <noreply@xelnova.com>',
+        to: email,
+        subject: 'Verify your email - Xelnova Seller',
+        html: `
             <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
               <h2 style="color: #10b981;">Xelnova Seller Verification</h2>
               <p>Your OTP for email verification is:</p>
@@ -151,96 +174,53 @@ export class SellerOnboardingService {
               <p style="color: #6b7280; font-size: 14px;">This OTP is valid for 10 minutes. Do not share it with anyone.</p>
             </div>
           `,
-        }),
-      });
-
-      if (!response.ok) {
-        console.error('Failed to send email:', await response.text());
-      }
-    } catch (error) {
-      console.error('Email sending error:', error);
-    }
-  }
-
-  private async sendSmsOtp(phone: string, otp: string) {
-    const apiKey = process.env.FORTIUS_API_KEY;
-    const senderId = process.env.FORTIUS_SENDER_ID || 'XELN';
-    const templateId = process.env.FORTIUS_OTP_TEMPLATE_ID;
-
-    if (!apiKey) {
-      console.log(`[DEV] SMS OTP for ${phone}: ${otp} (FORTIUS_API_KEY not set)`);
-      return;
-    }
-
-    const number = phone.replace(/^\+91/, '').replace(/\D/g, '');
-    const message = `${otp} is your Xelnova verification code. Valid for 10 minutes. Do not share this code with anyone.`;
-
-    const params = new URLSearchParams({
-      apikey: apiKey,
-      senderid: senderId,
-      number,
-      message,
+      }),
     });
-    if (templateId) params.set('templateid', templateId);
 
-    try {
-      const res = await fetch(`https://smsfortius.work/V2/apikey.php?${params.toString()}`);
-      const data = await res.json();
-
-      if (data.code === '011') {
-        console.log(`[SMS] OTP sent to ${number} | msgid: ${data.data?.messageid}`);
-      } else {
-        console.error(`[SMS] Failed for ${number}:`, data);
-      }
-    } catch (error) {
-      console.error(`[SMS] Error sending to ${number}:`, error);
+    if (!response.ok) {
+      const body = await response.text();
+      throw new BadGatewayException(`Email send failed (${response.status}): ${body.slice(0, 300)}`);
     }
   }
 
   // ========== Captcha Services ==========
 
-  async generateCaptcha(type: string = 'ROCK_COUNT') {
-    const sessionId = uuidv4();
-    let puzzleData: any;
-    let answer: string;
-
-    if (type === 'ROCK_COUNT') {
-      const count = Math.floor(Math.random() * 5) + 2; // 2-6 rocks
-      answer = count.toString();
-      puzzleData = {
-        type: 'ROCK_COUNT',
-        instruction: 'Match the number of rocks with the number on the left',
-        images: this.generateRockImages(count),
-        options: [count - 1, count, count + 1].filter(n => n > 0).sort(() => Math.random() - 0.5),
-      };
-    } else {
-      const number = Math.floor(Math.random() * 9) + 1;
-      answer = number.toString();
-      puzzleData = {
-        type: 'NUMBER_MATCH',
-        instruction: 'Select the image that matches the number shown',
-        targetNumber: number,
-        options: this.generateNumberOptions(number),
-      };
+  async generateCaptcha(type: string = 'RECAPTCHA') {
+    if (type === 'RECAPTCHA') {
+      const siteKey = process.env.RECAPTCHA_SITE_KEY;
+      if (!siteKey) {
+        throw new HttpException('reCAPTCHA is not configured. Set RECAPTCHA_SITE_KEY on the backend.', HttpStatus.SERVICE_UNAVAILABLE);
+      }
+      return { type: 'RECAPTCHA', siteKey };
     }
+
+    const sessionId = uuidv4();
+    const a = Math.floor(Math.random() * 20) + 1;
+    const b = Math.floor(Math.random() * 20) + 1;
+    const answer = (a + b).toString();
 
     await this.prisma.captchaSession.create({
       data: {
         sessionId,
-        puzzleType: type,
+        puzzleType: 'MATH',
         answer,
-        expiresAt: new Date(Date.now() + 5 * 60 * 1000), // 5 minutes
+        expiresAt: new Date(Date.now() + 5 * 60 * 1000),
       },
     });
 
     return {
+      type: 'MATH',
       sessionId,
-      puzzle: puzzleData,
+      puzzle: { instruction: `What is ${a} + ${b}?`, display: `${a} + ${b} = ?` },
       expiresIn: 300,
     };
   }
 
   async verifyCaptcha(sessionId: string, answer: string) {
+    if (sessionId === 'recaptcha') {
+      return this.verifyRecaptchaToken(answer);
+    }
+
     const session = await this.prisma.captchaSession.findUnique({
       where: { sessionId },
     });
@@ -275,91 +255,146 @@ export class SellerOnboardingService {
     });
 
     const captchaToken = uuidv4();
-
-    return {
-      success: true,
-      captchaToken,
-    };
+    return { success: true, captchaToken };
   }
 
-  private generateRockImages(count: number) {
-    // Returns placeholder image URLs - in production, use actual rock images
-    return Array(count).fill(null).map((_, i) => ({
-      id: i,
-      url: `/api/captcha/rock-${i % 5}.png`,
-    }));
-  }
-
-  private generateNumberOptions(target: number) {
-    const options = [target];
-    while (options.length < 4) {
-      const num = Math.floor(Math.random() * 9) + 1;
-      if (!options.includes(num)) options.push(num);
+  private async verifyRecaptchaToken(token: string) {
+    const secret = process.env.RECAPTCHA_SECRET_KEY;
+    if (!secret) {
+      throw new HttpException('reCAPTCHA is not configured. Set RECAPTCHA_SECRET_KEY on the backend.', HttpStatus.SERVICE_UNAVAILABLE);
     }
-    return options.sort(() => Math.random() - 0.5).map(n => ({
-      value: n,
-      imageUrl: `/api/captcha/number-${n}.png`,
-    }));
+
+    const params = new URLSearchParams({ secret, response: token });
+    const res = await fetch('https://www.google.com/recaptcha/api/siteverify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: params.toString(),
+    });
+
+    const data = await res.json();
+
+    if (!data.success) {
+      throw new HttpException('reCAPTCHA verification failed. Please try again.', HttpStatus.BAD_REQUEST);
+    }
+
+    const captchaToken = uuidv4();
+    return { success: true, captchaToken };
   }
 
   // ========== Onboarding Steps ==========
 
   async createSellerAccount(dto: Step1AccountDto, ipAddress?: string, userAgent?: string) {
-    // Verify email already exists
-    const existingUser = await this.prisma.user.findFirst({
-      where: {
-        OR: [{ email: dto.email }, { phone: dto.phone }],
-      },
+    dto.email = dto.email.trim().toLowerCase();
+    dto.fullName = dto.fullName.trim();
+    dto.phone = dto.phone.trim();
+
+    // Check for an existing SellerProfile by email (independent of User)
+    const existingSeller = await this.prisma.sellerProfile.findUnique({
+      where: { email: dto.email },
     });
 
-    if (existingUser) {
-      throw new HttpException(
-        existingUser.email === dto.email ? 'Email already registered' : 'Phone number already registered',
-        HttpStatus.CONFLICT,
-      );
-    }
+    if (existingSeller) {
+      const completedStatuses = ['APPROVED', 'UNDER_REVIEW', 'DOCUMENTS_SUBMITTED'];
 
-    // Hash password
-    const hashedPassword = await bcrypt.hash(dto.password, 12);
+      if (completedStatuses.includes(existingSeller.onboardingStatus)) {
+        throw new HttpException(
+          'A seller account with this email has already completed registration. Please log in instead.',
+          HttpStatus.CONFLICT,
+        );
+      }
 
-    // Create user and seller profile in transaction
-    const result = await this.prisma.$transaction(async (tx) => {
-      const user = await tx.user.create({
-        data: {
-          name: dto.fullName,
-          email: dto.email,
-          phone: dto.phone,
-          password: hashedPassword,
-          role: 'SELLER',
-          emailVerified: true,
-          phoneVerified: true,
-          lastLoginAt: new Date(),
-          lastLoginIp: ipAddress,
-        },
-      });
+      // Early-stage seller profile exists — allow re-registration (user has
+      // re-verified email/phone via OTP in this flow, so reset the profile).
+      const hashedPassword = await bcrypt.hash(dto.password, 12);
+      const user = await this.findOrCreateUser(dto, hashedPassword, ipAddress);
 
-      const slug = this.generateSlug(dto.fullName);
-      
-      const sellerProfile = await tx.sellerProfile.create({
+      await this.prisma.sellerProfile.update({
+        where: { id: existingSeller.id },
         data: {
           userId: user.id,
+          email: dto.email,
+          phone: dto.phone,
           storeName: dto.fullName + "'s Store",
-          slug,
           onboardingStatus: 'EMAIL_VERIFIED',
           onboardingStep: 2,
         },
       });
 
-      return { user, sellerProfile };
+      return {
+        success: true,
+        message: 'Seller registration reset',
+        userId: user.id,
+        sellerId: existingSeller.id,
+        nextStep: 2,
+      };
+    }
+
+    // No existing seller profile — create fresh
+    const hashedPassword = await bcrypt.hash(dto.password, 12);
+    const user = await this.findOrCreateUser(dto, hashedPassword, ipAddress);
+
+    const slug = this.generateSlug(dto.fullName);
+    const sellerProfile = await this.prisma.sellerProfile.create({
+      data: {
+        userId: user.id,
+        email: dto.email,
+        phone: dto.phone,
+        storeName: dto.fullName + "'s Store",
+        slug,
+        onboardingStatus: 'EMAIL_VERIFIED',
+        onboardingStep: 2,
+      },
     });
 
     return {
       success: true,
       message: 'Account created successfully',
-      userId: result.user.id,
-      sellerId: result.sellerProfile.id,
+      userId: user.id,
+      sellerId: sellerProfile.id,
       nextStep: 2,
     };
+  }
+
+  /**
+   * Finds an existing User by email or creates a new one. Updates role to
+   * SELLER and refreshes login metadata in both cases.
+   */
+  private async findOrCreateUser(
+    dto: Step1AccountDto,
+    hashedPassword: string,
+    ipAddress?: string,
+  ) {
+    const existingUser = await this.prisma.user.findUnique({
+      where: { email: dto.email },
+    });
+
+    if (existingUser) {
+      await this.prisma.user.update({
+        where: { id: existingUser.id },
+        data: {
+          name: dto.fullName,
+          password: hashedPassword,
+          role: 'SELLER',
+          lastLoginAt: new Date(),
+          lastLoginIp: ipAddress,
+        },
+      });
+      return existingUser;
+    }
+
+    return this.prisma.user.create({
+      data: {
+        name: dto.fullName,
+        email: dto.email,
+        phone: dto.phone,
+        password: hashedPassword,
+        role: 'SELLER',
+        emailVerified: true,
+        phoneVerified: true,
+        lastLoginAt: new Date(),
+        lastLoginIp: ipAddress,
+      },
+    });
   }
 
   async updateTaxDetails(sellerId: string, dto: Step2TaxDetailsDto) {
@@ -377,7 +412,7 @@ export class SellerOnboardingService {
     // Verify GST if provided
     if (dto.gstNumber && !dto.sellsNonGstProducts) {
       try {
-        const gstData = await this.verificationService.verifyGSTIN(dto.gstNumber, seller.userId);
+        const gstData = await this.verificationService.verifyGSTIN(dto.gstNumber, seller.userId ?? undefined);
         gstVerified = true;
         gstVerifiedData = gstData;
       } catch (error) {
@@ -512,12 +547,18 @@ export class SellerOnboardingService {
       throw new HttpException('Seller not found', HttpStatus.NOT_FOUND);
     }
 
-    // Verify IFSC
     let bankData;
     try {
-      bankData = await this.verificationService.verifyIFSC(dto.ifscCode, seller.userId);
+      bankData = await this.verificationService.verifyBankAccount(
+        dto.accountNumber,
+        dto.ifscCode,
+        seller.userId ?? undefined,
+      );
     } catch (error) {
-      throw new HttpException(`IFSC verification failed: ${error.message}`, HttpStatus.BAD_REQUEST);
+      throw new HttpException(
+        `Bank account verification failed: ${error.message}`,
+        HttpStatus.BAD_REQUEST,
+      );
     }
 
     await this.prisma.sellerProfile.update({
@@ -529,8 +570,9 @@ export class SellerOnboardingService {
         bankVerified: true,
         bankVerifiedAt: new Date(),
         bankVerifiedData: bankData as any,
-        bankName: bankData.BANK,
-        bankBranch: bankData.BRANCH,
+        bankVerifiedName: bankData.nameAtBank,
+        bankName: bankData.bankName || '',
+        bankBranch: bankData.branch || '',
         onboardingStatus: 'DOCUMENTS_SUBMITTED',
         onboardingStep: 7,
       },
@@ -538,9 +580,11 @@ export class SellerOnboardingService {
 
     return {
       success: true,
-      message: 'Bank details verified and saved',
-      bankName: bankData.BANK,
-      bankBranch: bankData.BRANCH,
+      message: 'Bank account verified — ₹1 credited to account',
+      bankName: bankData.bankName,
+      branch: bankData.branch,
+      city: bankData.city,
+      nameAtBank: bankData.nameAtBank,
     };
   }
 
@@ -588,6 +632,17 @@ export class SellerOnboardingService {
 
   // ========== Document Upload ==========
 
+  async ensureSellerExists(sellerId: string) {
+    const seller = await this.prisma.sellerProfile.findUnique({
+      where: { id: sellerId },
+      select: { id: true },
+    });
+    if (!seller) {
+      throw new HttpException('Seller not found. Please restart registration from Step 1.', HttpStatus.NOT_FOUND);
+    }
+    return seller;
+  }
+
   async uploadDocument(
     sellerId: string,
     type: string,
@@ -634,9 +689,9 @@ export class SellerOnboardingService {
       });
     }
 
-    // Update seller profile with document URL
     const updateData: any = {};
     if (type === 'PAN_CARD') updateData.panDocumentUrl = fileUrl;
+    if (type === 'MASKED_AADHAAR') updateData.maskedAadhaarUrl = fileUrl;
     if (type === 'GST_CERTIFICATE') updateData.gstCertificateUrl = fileUrl;
     if (type === 'CANCELLED_CHEQUE') updateData.cancelledChequeUrl = fileUrl;
 
@@ -772,6 +827,29 @@ export class SellerOnboardingService {
     return `${baseSlug}-${uniqueSuffix}`;
   }
 
+  async getOnboardingStats() {
+    const counts = await this.prisma.sellerProfile.groupBy({
+      by: ['onboardingStatus'],
+      _count: { id: true },
+    });
+
+    const result: Record<string, number> = {
+      PENDING_VERIFICATION: 0,
+      EMAIL_VERIFIED: 0,
+      PHONE_VERIFIED: 0,
+      DOCUMENTS_SUBMITTED: 0,
+      UNDER_REVIEW: 0,
+      APPROVED: 0,
+      REJECTED: 0,
+    };
+
+    for (const row of counts) {
+      result[row.onboardingStatus] = row._count.id;
+    }
+
+    return result;
+  }
+
   async getAllSellers(filters: {
     status?: string;
     verified?: boolean;
@@ -789,6 +867,7 @@ export class SellerOnboardingService {
     if (search) {
       where.OR = [
         { storeName: { contains: search, mode: 'insensitive' } },
+        { email: { contains: search, mode: 'insensitive' } },
         { user: { email: { contains: search, mode: 'insensitive' } } },
         { user: { name: { contains: search, mode: 'insensitive' } } },
       ];
@@ -799,7 +878,7 @@ export class SellerOnboardingService {
         where,
         include: {
           user: { select: { id: true, name: true, email: true, phone: true, createdAt: true } },
-          documents: { select: { id: true, type: true, verified: true } },
+          documents: { select: { id: true, type: true, fileName: true, fileUrl: true, verified: true, verifiedAt: true } },
           _count: { select: { products: true } },
         },
         orderBy: { createdAt: 'desc' },

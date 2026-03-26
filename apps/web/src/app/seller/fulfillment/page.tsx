@@ -72,7 +72,7 @@ export default function FulfillmentPage() {
               <Warehouse size={14} /> Logistics
             </span>
             <h1 className="text-4xl md:text-5xl font-extrabold text-white font-display mb-4">Fulfillment Services</h1>
-            <p className="text-lg text-white/50 max-w-xl mx-auto">Let Xelnova handle your logistics so you can focus on growing your business.</p>
+            <p className="text-lg text-white/80 max-w-xl mx-auto">Let Xelnova handle your logistics so you can focus on growing your business.</p>
           </motion.div>
         </div>
       </section>
@@ -217,7 +217,7 @@ export default function FulfillmentPage() {
             </div>
             <div className="relative">
               <h2 className="text-2xl font-extrabold text-white font-display mb-3">Ready to Get Started?</h2>
-              <p className="text-white/50 mb-6">Register as a seller and start using our fulfillment services today.</p>
+              <p className="text-white/80 mb-6">Register as a seller and start using our fulfillment services today.</p>
               <Link href="/seller/register" className="inline-flex items-center gap-2 bg-white text-primary-700 px-8 py-3.5 rounded-xl font-semibold hover:bg-primary-50 transition-all shadow-lg">
                 Register Now <ArrowRight size={16} />
               </Link>

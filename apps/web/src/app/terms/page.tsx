@@ -30,7 +30,7 @@ export default function TermsPage() {
               <FileText size={14} /> Legal
             </span>
             <h1 className="text-4xl md:text-5xl font-extrabold text-white font-display mb-4">Terms & Conditions</h1>
-            <p className="text-sm text-white/40">Last updated: March 2026</p>
+            <p className="text-sm text-white/70">Last updated: March 2026</p>
           </motion.div>
         </div>
       </section>

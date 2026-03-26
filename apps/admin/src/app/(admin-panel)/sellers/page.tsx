@@ -1,67 +1,269 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Badge } from '@xelnova/ui';
 import { AdminListPage } from '@/components/dashboard/admin-list-page';
 import { ActionModal } from '@/components/dashboard/action-modal';
-import { ConfirmDialog } from '@/components/dashboard/confirm-dialog';
+import { AdminActionsDropdown } from '@/components/dashboard/admin-actions-dropdown';
 import { FormField, FormInput, FormSelect } from '@/components/dashboard/form-field';
-import { Pencil, Eye, Ban } from 'lucide-react';
+import { Ban, Pencil, Trash2, UserCheck } from 'lucide-react';
 import { toast } from 'sonner';
+import { apiUpdate, apiDelete } from '@/lib/api';
 import type { Column } from '@/components/dashboard/data-table';
 
 interface Seller {
-  id: string; storeName: string; ownerName: string; email: string;
-  products: number; totalSales: number; commission: number; verified: boolean; status: string; joinedAt: string;
+  id: string;
+  storeName: string;
+  email?: string | null;
+  phone?: string | null;
+  verified: boolean;
+  commissionRate: number;
+  rating: number;
+  totalSales: number;
+  createdAt: string;
+  user?: {
+    name: string;
+    email: string;
+    phone: string | null;
+    isBanned?: boolean;
+    banReason?: string | null;
+  } | null;
+  _count: { products: number };
 }
 
-const SV: Record<string, 'success' | 'warning' | 'danger' | 'default'> = { Active: 'success', Pending: 'warning', Suspended: 'danger' };
+const DEFAULT_BAN = 'Suspended by admin';
 
 export default function SellersPage() {
-  const [detailOpen, setDetailOpen] = useState(false);
-  const [suspendOpen, setSuspendOpen] = useState(false);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [editOpen, setEditOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Seller | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [selected, setSelected] = useState<Seller | null>(null);
+  const [formVerified, setFormVerified] = useState('true');
+  const [formCommissionRate, setFormCommissionRate] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!selected || !editOpen) return;
+    setFormVerified(String(selected.verified));
+    setFormCommissionRate(String(selected.commissionRate));
+  }, [selected, editOpen]);
+
+  const openEdit = (s: Seller) => {
+    setSelected(s);
+    setFormVerified(String(s.verified));
+    setFormCommissionRate(String(s.commissionRate));
+    setEditOpen(true);
+  };
+
+  const handleSave = async () => {
+    if (!selected) return;
+    const rate = Number(formCommissionRate);
+    if (Number.isNaN(rate) || rate < 0) {
+      toast.error('Enter a valid commission rate');
+      return;
+    }
+    setSaving(true);
+    try {
+      await apiUpdate('sellers', selected.id, {
+        verified: formVerified === 'true',
+        commissionRate: rate,
+      });
+      toast.success('Seller updated');
+      setEditOpen(false);
+      setSelected(null);
+      setRefreshTrigger((n) => n + 1);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to update seller');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const suspend = async (s: Seller) => {
+    try {
+      await apiUpdate('sellers', s.id, { isBanned: true, banReason: DEFAULT_BAN });
+      toast.success('Seller account suspended');
+      setRefreshTrigger((n) => n + 1);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to suspend');
+    }
+  };
+
+  const activate = async (s: Seller) => {
+    try {
+      await apiUpdate('sellers', s.id, { isBanned: false, banReason: '' });
+      toast.success('Seller account reactivated');
+      setRefreshTrigger((n) => n + 1);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to activate');
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await apiDelete('sellers', deleteTarget.id);
+      toast.success('Seller removed');
+      setDeleteTarget(null);
+      setRefreshTrigger((n) => n + 1);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to delete');
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const columns: Column<Seller>[] = [
     { key: 'storeName', header: 'Store', render: (r) => <span className="font-medium">{r.storeName}</span> },
-    { key: 'ownerName', header: 'Owner' },
-    { key: 'email', header: 'Email' },
-    { key: 'products', header: 'Products' },
+    { key: 'user', header: 'Owner', render: (r) => r.user?.name ?? '—' },
+    { key: 'email', header: 'Email', render: (r) => r.email ?? r.user?.email ?? '—' },
+    { key: 'phone', header: 'Phone', render: (r) => r.phone ?? r.user?.phone ?? '—' },
+    {
+      key: 'account',
+      header: 'Account',
+      render: (r) =>
+        r.user?.isBanned ? (
+          <Badge variant="danger">Suspended</Badge>
+        ) : (
+          <Badge variant="success">Active</Badge>
+        ),
+    },
+    { key: '_count', header: 'Products', render: (r) => r._count.products },
     { key: 'totalSales', header: 'Sales', render: (r) => `₹${r.totalSales.toLocaleString()}` },
-    { key: 'commission', header: 'Comm %', render: (r) => `${r.commission}%` },
-    { key: 'verified', header: 'Verified', render: (r) => <Badge variant={r.verified ? 'success' : 'default'}>{r.verified ? 'Yes' : 'No'}</Badge> },
-    { key: 'status', header: 'Status', render: (r) => <Badge variant={SV[r.status] ?? 'default'}>{r.status}</Badge> },
+    { key: 'commissionRate', header: 'Comm %', render: (r) => `${r.commissionRate}%` },
+    {
+      key: 'verified',
+      header: 'Verified',
+      render: (r) => <Badge variant={r.verified ? 'success' : 'default'}>{r.verified ? 'Verified' : 'Unverified'}</Badge>,
+    },
+    { key: 'rating', header: 'Rating', render: (r) => `${r.rating.toFixed(1)} ★` },
+    { key: 'createdAt', header: 'Joined', render: (r) => new Date(r.createdAt).toLocaleDateString() },
   ];
 
   return (
     <>
-      <AdminListPage<Seller> title="Sellers" section="sellers" columns={columns} keyExtractor={(r) => r.id}
-        searchKeys={['storeName', 'ownerName', 'email']} filterKey="status" filterOptions={['Active', 'Pending', 'Suspended']}
+      <AdminListPage<Seller>
+        title="Sellers"
+        section="sellers"
+        columns={columns}
+        keyExtractor={(r) => r.id}
+        searchKeys={['storeName']}
+        filterKey="verified"
+        filterOptions={['true', 'false']}
+        refreshTrigger={refreshTrigger}
         renderActions={(r) => (
-          <div className="flex items-center gap-1">
-            <button onClick={() => { setSelected(r); setDetailOpen(true); }} className="p-1.5 rounded-lg hover:bg-surface-muted text-text-muted hover:text-primary-600"><Eye size={15} /></button>
-            {r.status !== 'Suspended' && <button onClick={() => { setSelected(r); setSuspendOpen(true); }} className="p-1.5 rounded-lg hover:bg-danger-50 text-text-muted hover:text-danger-600"><Ban size={15} /></button>}
+          <div className="flex justify-end">
+            <AdminActionsDropdown
+              items={[
+                { key: 'edit', label: 'Edit', icon: <Pencil size={14} />, onClick: () => openEdit(r) },
+                ...(r.user?.isBanned
+                  ? [
+                      {
+                        key: 'activate',
+                        label: 'Reactivate',
+                        icon: <UserCheck size={14} />,
+                        onClick: () => void activate(r),
+                      },
+                    ]
+                  : [
+                      {
+                        key: 'suspend',
+                        label: 'Suspend',
+                        icon: <Ban size={14} />,
+                        onClick: () => void suspend(r),
+                      },
+                    ]),
+                {
+                  key: 'delete',
+                  label: 'Delete',
+                  icon: <Trash2 size={14} />,
+                  danger: true,
+                  onClick: () => setDeleteTarget(r),
+                },
+              ]}
+            />
           </div>
         )}
       />
-      <ActionModal open={detailOpen} onClose={() => setDetailOpen(false)} title={selected?.storeName ?? 'Seller'} wide>
+      <ActionModal
+        open={editOpen}
+        onClose={() => {
+          setEditOpen(false);
+          setSelected(null);
+        }}
+        title={selected?.storeName ?? 'Seller'}
+        wide
+        onSubmit={handleSave}
+        submitLabel="Save changes"
+        loading={saving}
+      >
         {selected && (
-          <div className="space-y-4">
+          <div className="space-y-6">
             <div className="grid grid-cols-2 gap-4 text-sm">
-              <div><span className="text-text-muted">Owner:</span> {selected.ownerName}</div>
-              <div><span className="text-text-muted">Email:</span> {selected.email}</div>
-              <div><span className="text-text-muted">Products:</span> {selected.products}</div>
-              <div><span className="text-text-muted">Total Sales:</span> ₹{selected.totalSales.toLocaleString()}</div>
-              <div><span className="text-text-muted">Commission Rate:</span> {selected.commission}%</div>
-              <div><span className="text-text-muted">Verified:</span> {selected.verified ? 'Yes' : 'No'}</div>
-              <div><span className="text-text-muted">Status:</span> <Badge variant={SV[selected.status] ?? 'default'}>{selected.status}</Badge></div>
-              <div><span className="text-text-muted">Joined:</span> {new Date(selected.joinedAt).toLocaleDateString()}</div>
+              <div>
+                <span className="text-text-muted">Owner:</span> {selected.user?.name ?? '—'}
+              </div>
+              <div>
+                <span className="text-text-muted">Email:</span> {selected.email ?? selected.user?.email ?? '—'}
+              </div>
+              <div>
+                <span className="text-text-muted">Phone:</span> {selected.phone ?? selected.user?.phone ?? '—'}
+              </div>
+              <div>
+                <span className="text-text-muted">Products:</span> {selected._count.products}
+              </div>
+              <div>
+                <span className="text-text-muted">Total sales:</span> ₹{selected.totalSales.toLocaleString()}
+              </div>
+              <div>
+                <span className="text-text-muted">Rating:</span> {selected.rating.toFixed(1)} ★
+              </div>
+              <div>
+                <span className="text-text-muted">Joined:</span>{' '}
+                {new Date(selected.createdAt).toLocaleDateString()}
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4 border-t border-border pt-4">
+              <FormField label="Verified">
+                <FormSelect value={formVerified} onChange={(e) => setFormVerified(e.target.value)}>
+                  <option value="true">Yes</option>
+                  <option value="false">No</option>
+                </FormSelect>
+              </FormField>
+              <FormField label="Commission rate (%)">
+                <FormInput
+                  type="number"
+                  min={0}
+                  step={0.1}
+                  value={formCommissionRate}
+                  onChange={(e) => setFormCommissionRate(e.target.value)}
+                  placeholder="e.g. 10"
+                />
+              </FormField>
             </div>
           </div>
         )}
       </ActionModal>
-      <ConfirmDialog open={suspendOpen} onClose={() => setSuspendOpen(false)} onConfirm={() => { toast.success(`${selected?.storeName} suspended`); setSuspendOpen(false); }}
-        title="Suspend Seller" message={`Suspend "${selected?.storeName}"? They won't be able to sell until reactivated.`} />
+      <ActionModal
+        open={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        title="Delete seller?"
+        submitLabel="Delete"
+        submitVariant="danger"
+        onSubmit={() => void handleDelete()}
+        loading={deleting}
+      >
+        <p className="text-sm text-text-muted">
+          Removes the seller account and linked user when they have no orders and no products. This cannot be undone.
+        </p>
+        {deleteTarget && (
+          <p className="text-sm text-text-primary pt-2">
+            Delete <strong>{deleteTarget.storeName}</strong> ({deleteTarget.email ?? deleteTarget.user?.email ?? '—'})?
+          </p>
+        )}
+      </ActionModal>
     </>
   );
 }

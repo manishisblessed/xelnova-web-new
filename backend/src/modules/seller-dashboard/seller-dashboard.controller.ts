@@ -20,6 +20,12 @@ import { successResponse, paginatedResponse, errorResponse } from '../../common/
 export class SellerDashboardController {
   constructor(private readonly service: SellerDashboardService) {}
 
+  @Get('registration-status')
+  @ApiOperation({ summary: 'Whether the current user has completed seller onboarding (SellerProfile row)' })
+  async registrationStatus(@CurrentUser('id') userId: string) {
+    return successResponse(await this.service.getRegistrationStatus(userId), 'Registration status');
+  }
+
   @Get('dashboard')
   @ApiOperation({ summary: 'Get seller dashboard overview' })
   async getDashboard(@CurrentUser('id') userId: string) {

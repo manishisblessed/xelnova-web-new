@@ -10,7 +10,7 @@ export async function POST(request: NextRequest) {
     const expiresIn = 60 * 60 * 24; // 1 day
     const res = NextResponse.json({ success: true });
     res.cookies.set('xelnova-dashboard-token', token, {
-      httpOnly: true,
+      httpOnly: false,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
       maxAge: expiresIn,

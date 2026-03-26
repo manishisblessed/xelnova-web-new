@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, Suspense, useEffect } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useState, Suspense, useEffect, useRef, useCallback } from 'react';
+import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import Image from 'next/image';
 import { motion } from 'framer-motion';
 import {
   Eye,
@@ -14,7 +15,6 @@ import {
   Package,
   Wallet,
   BarChart3,
-  Store,
   CheckCircle,
   Loader2,
 } from 'lucide-react';
@@ -22,8 +22,9 @@ import { Button } from '@xelnova/ui';
 import { DashboardAuthProvider, useDashboardAuth } from '@/lib/auth-context';
 import { apiLogin } from '@/lib/api';
 
-const GOOGLE_CLIENT_ID = '435713810993-9c2c2j1nh7hcm374mruihfuf4807fuat.apps.googleusercontent.com';
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api/v1';
+/** Must match `GOOGLE_CLIENT_ID` in the Nest backend `.env`. */
+const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
 
 const benefits = [
   { icon: TrendingUp, title: 'Grow Your Business', description: 'Access millions of customers nationwide' },
@@ -59,9 +60,9 @@ function LoginFormInner() {
   const [remember, setRemember] = useState(false);
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [googleClicked, setGoogleClicked] = useState(false);
   const [error, setError] = useState('');
   const { setUser } = useDashboardAuth();
-  const router = useRouter();
   const searchParams = useSearchParams();
   const redirectTo = searchParams.get('redirect') || '/dashboard';
   const registered = searchParams.get('registered');
@@ -73,29 +74,122 @@ function LoginFormInner() {
     }
   }, [searchParams]);
 
-  useEffect(() => {
-    const script = document.createElement('script');
-    script.src = 'https://accounts.google.com/gsi/client';
-    script.async = true;
-    script.defer = true;
-    script.onload = initializeGoogleSignIn;
-    document.body.appendChild(script);
+  const googleCallbackRef = useRef<(response: { credential: string }) => Promise<void>>(null!);
 
-    return () => {
-      document.body.removeChild(script);
-    };
-  }, []);
+  const handleGoogleCallback = useCallback(async (response: { credential: string }) => {
+    setGoogleClicked(false);
+    setGoogleLoading(true);
+    setError('');
 
-  const initializeGoogleSignIn = () => {
+    const abortController = new AbortController();
+    const timeoutId = setTimeout(() => abortController.abort(), 30_000);
+    
+    try {
+      const res = await fetch(`${API_BASE}/auth/google/token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken: response.credential, role: 'seller' }),
+        signal: abortController.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      const raw = await res.text();
+      let data: {
+        success?: boolean;
+        message?: string;
+        data?: {
+          accessToken: string;
+          hasSellerProfile?: boolean;
+          user: { id: string; name: string; email: string; role: string; avatar?: string | null };
+        };
+      } = {};
+      try {
+        data = raw ? JSON.parse(raw) : {};
+      } catch {
+        setError('Invalid response from server. Please try again.');
+        return;
+      }
+
+      if (res.ok && data.success) {
+        const payload = data.data;
+        if (!payload?.user || !payload.accessToken) {
+          setError('Invalid sign-in response. Please try again.');
+          return;
+        }
+
+        const u = payload.user;
+
+        if (u.role === 'ADMIN') {
+          setError('Admin accounts cannot be used here. Use the Admin app to sign in.');
+          return;
+        }
+
+        const dashboardUser = {
+          id: u.id,
+          name: u.name,
+          email: u.email,
+          role: 'seller' as const,
+          avatar: u.avatar ?? null,
+        };
+        setUser(dashboardUser);
+
+        const sessionRes = await fetch('/api/session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            token: payload.accessToken,
+            role: 'seller',
+            user: dashboardUser,
+          }),
+        });
+
+        if (!sessionRes.ok) throw new Error('Session failed');
+
+        // Hard navigation — keep the spinner visible until the browser
+        // fully unloads this page. Do NOT clear googleLoading here.
+        if (payload.hasSellerProfile === false) {
+          window.location.href = '/register';
+        } else {
+          window.location.href = redirectTo;
+        }
+        return;
+      } else {
+        const msg =
+          (typeof data.message === 'string' && data.message.trim()) ||
+          (res.status === 503
+            ? 'Sign-in service is unavailable. Ensure the API backend is running (port 4000).'
+            : '');
+        setError(msg || 'Google sign-in failed');
+      }
+    } catch (err) {
+      clearTimeout(timeoutId);
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        setError('Sign-in request timed out. Please check your connection and try again.');
+      } else {
+        setError(err instanceof Error ? err.message : 'Failed to sign in with Google');
+      }
+    }
+    setGoogleLoading(false);
+  }, [setUser, redirectTo]);
+
+  googleCallbackRef.current = handleGoogleCallback;
+
+  const initializeGoogleSignIn = useCallback(() => {
     if (window.google) {
       window.google.accounts.id.initialize({
         client_id: GOOGLE_CLIENT_ID,
-        callback: handleGoogleCallback,
+        callback: (response: { credential: string }) => {
+          googleCallbackRef.current?.(response);
+        },
         auto_select: false,
+        use_fedcm_for_prompt: true,
       });
 
       const buttonDiv = document.getElementById('google-signin-button-seller');
       if (buttonDiv) {
+        buttonDiv.innerHTML = '';
         window.google.accounts.id.renderButton(buttonDiv, {
           type: 'standard',
           theme: 'outline',
@@ -106,79 +200,122 @@ function LoginFormInner() {
         });
       }
     }
-  };
+  }, []);
 
-  const handleGoogleCallback = async (response: { credential: string }) => {
-    setGoogleLoading(true);
-    setError('');
-    
-    try {
-      const res = await fetch(`${API_BASE}/auth/google/token`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ idToken: response.credential, role: 'seller' }),
-      });
-
-      const data = await res.json();
-
-      if (res.ok && data.success) {
-        setUser(data.data.user);
-        
-        const sessionRes = await fetch('/api/session', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ 
-            token: data.data.accessToken, 
-            role: 'seller', 
-            user: data.data.user 
-          }),
-        });
-        
-        if (!sessionRes.ok) throw new Error('Session failed');
-        
-        router.push(redirectTo);
-        router.refresh();
+  useEffect(() => {
+    const existingScript = document.querySelector('script[src="https://accounts.google.com/gsi/client"]');
+    if (existingScript) {
+      if (window.google) {
+        initializeGoogleSignIn();
       } else {
-        setError(data.message || 'Google sign-in failed');
+        existingScript.addEventListener('load', initializeGoogleSignIn);
       }
-    } catch (err) {
-      setError('Failed to sign in with Google');
-    } finally {
-      setGoogleLoading(false);
+      return;
     }
-  };
+
+    const script = document.createElement('script');
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.async = true;
+    script.defer = true;
+    script.onload = initializeGoogleSignIn;
+    document.body.appendChild(script);
+
+    return () => {};
+  }, [initializeGoogleSignIn]);
+
+  useEffect(() => {
+    let clickTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    const handleBlur = () => {
+      const googleBtn = document.getElementById('google-signin-button-seller');
+      if (googleBtn && document.activeElement?.tagName === 'IFRAME' && googleBtn.contains(document.activeElement)) {
+        setGoogleClicked(true);
+        if (clickTimeout) clearTimeout(clickTimeout);
+        clickTimeout = setTimeout(() => {
+          setGoogleClicked((prev) => {
+            if (prev) return false;
+            return prev;
+          });
+        }, 120_000);
+      }
+    };
+
+    const handleFocus = () => {
+      setTimeout(() => {
+        setGoogleClicked((prev) => {
+          if (prev) return false;
+          return prev;
+        });
+      }, 5000);
+    };
+
+    window.addEventListener('blur', handleBlur);
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      window.removeEventListener('blur', handleBlur);
+      window.removeEventListener('focus', handleFocus);
+      if (clickTimeout) clearTimeout(clickTimeout);
+    };
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setLoading(true);
     try {
-      const data = await apiLogin(email.trim(), password, remember);
-      if (data.role !== 'seller') {
-        setError('Use the Admin app to sign in as admin.');
+      const data = await apiLogin(email.trim(), password);
+
+      if (data.user.role === 'ADMIN') {
+        setError('Admin accounts cannot be used here. Use the Admin app to sign in.');
         setLoading(false);
         return;
       }
-      setUser(data.user);
+
+      const dashboardUser = {
+        id: data.user.id,
+        name: data.user.name,
+        email: data.user.email,
+        role: 'seller' as const,
+        avatar: data.user.avatar ?? null,
+      };
+      setUser(dashboardUser);
       const sessionRes = await fetch('/api/session', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ token: data.token, role: data.role, user: data.user }),
+        body: JSON.stringify({ token: data.accessToken, role: 'seller', user: dashboardUser }),
       });
       if (!sessionRes.ok) throw new Error('Session failed');
-      router.push(redirectTo);
-      router.refresh();
+      if (data.hasSellerProfile === false) {
+        window.location.href = '/register';
+      } else {
+        window.location.href = redirectTo;
+      }
+      return;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');
-    } finally {
-      setLoading(false);
     }
+    setLoading(false);
   };
 
   return (
     <div className="min-h-screen flex">
+      {googleLoading && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-white/80 backdrop-blur-sm"
+        >
+          <div className="flex flex-col items-center gap-4 p-8 rounded-2xl bg-white shadow-2xl border border-gray-100">
+            <Image src="/xelnova-icon-green.png" alt="Xelnova" width={64} height={64} className="w-16 h-16" />
+            <Loader2 size={32} className="animate-spin text-primary-500" />
+            <p className="text-lg font-semibold text-gray-900">Signing you in...</p>
+            <p className="text-sm text-gray-500">Please wait while we log you in with Google</p>
+          </div>
+        </motion.div>
+      )}
+
       {/* Left Panel - Branding */}
       <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-primary-600 via-primary-500 to-emerald-500 relative overflow-hidden">
         {/* Background Elements */}
@@ -196,13 +333,8 @@ function LoginFormInner() {
           >
             {/* Logo */}
             <div className="flex items-center gap-3 mb-12">
-              <div className="w-12 h-12 rounded-2xl bg-white/20 backdrop-blur-sm flex items-center justify-center">
-                <Store size={28} className="text-white" />
-              </div>
-              <div>
-                <span className="text-2xl font-bold text-white font-display">Xelnova</span>
-                <span className="ml-2 px-2 py-0.5 rounded-md bg-white/20 text-xs font-medium text-white">SELLER</span>
-              </div>
+              <Image src="/xelnova-logo-white.png" alt="Xelnova" width={280} height={80} className="h-12 w-auto" priority />
+              <span className="px-2 py-0.5 rounded-md bg-white/20 text-xs font-medium text-white">SELLER</span>
             </div>
 
             <h1 className="text-4xl xl:text-5xl font-bold text-white font-display leading-tight mb-6">
@@ -263,9 +395,7 @@ function LoginFormInner() {
         >
           {/* Mobile Logo */}
           <div className="lg:hidden flex items-center justify-center gap-3 mb-8">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center">
-              <Store size={28} className="text-white" />
-            </div>
+            <Image src="/xelnova-icon-dark.png" alt="Xelnova" width={48} height={48} className="h-10 w-10" />
             <span className="text-2xl font-bold text-gray-900 font-display">Xelnova Seller</span>
           </div>
 
@@ -373,30 +503,44 @@ function LoginFormInner() {
             </div>
 
             {/* Google Sign-In */}
-            <div className="flex justify-center">
+            <div className="space-y-3">
               {googleLoading ? (
-                <div className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 w-full max-w-[320px]">
-                  <Loader2 size={20} className="animate-spin text-gray-500" />
-                  <span className="text-sm text-gray-500">Signing in with Google...</span>
+                <div className="flex items-center justify-center gap-3 px-6 py-4 rounded-xl border border-primary-200 bg-primary-50 w-full max-w-[320px] mx-auto">
+                  <Loader2 size={22} className="animate-spin text-primary-500" />
+                  <span className="text-sm font-medium text-primary-700">Signing in with Google...</span>
                 </div>
               ) : (
-                <div id="google-signin-button-seller" />
+                <div className="relative">
+                  <div id="google-signin-button-seller" className="flex justify-center" />
+                  {googleClicked && (
+                    <motion.div
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      className="mt-3 flex items-center justify-center gap-2 text-sm text-gray-500"
+                    >
+                      <Loader2 size={16} className="animate-spin" />
+                      <span>Waiting for Google sign-in...</span>
+                    </motion.div>
+                  )}
+                </div>
               )}
             </div>
 
-            <div className="mt-6 pt-6 border-t border-gray-100 text-center">
-              <p className="text-sm text-gray-600">
-                Don't have an account?{' '}
-                <Link href="/register" className="text-primary-500 hover:text-primary-600 font-medium">
-                  Start selling today
-                </Link>
-              </p>
+            <div className="mt-6 pt-6 border-t border-gray-100">
+              <p className="text-center text-sm text-gray-600 mb-3">Don&apos;t have an account?</p>
+              <Link
+                href="/register"
+                className="group flex w-full items-center justify-center gap-2 rounded-xl border-2 border-primary-500 bg-gradient-to-b from-primary-50 to-white px-4 py-3.5 text-sm font-semibold text-primary-700 shadow-sm transition-all duration-200 hover:border-primary-600 hover:bg-primary-500 hover:text-white hover:shadow-md hover:shadow-primary-500/25 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
+              >
+                Start selling today
+                <ArrowRight
+                  size={18}
+                  className="shrink-0 transition-transform duration-200 group-hover:translate-x-0.5"
+                  aria-hidden
+                />
+              </Link>
             </div>
           </div>
-
-          <p className="mt-6 text-center text-sm text-gray-500">
-            Demo: <span className="text-gray-700">seller@xelnova.com</span> / <span className="text-gray-700">seller123</span>
-          </p>
         </motion.div>
       </div>
     </div>

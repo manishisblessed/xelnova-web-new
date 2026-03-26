@@ -28,11 +28,11 @@ export default function PressPage() {
         </div>
         <div className="relative mx-auto max-w-[1440px] px-6 text-center">
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }}>
-            <span className="inline-flex items-center gap-2 bg-white/10 px-4 py-1.5 rounded-full text-xs font-medium text-white/70 mb-6">
+            <span className="inline-flex items-center gap-2 bg-white/10 px-4 py-1.5 rounded-full text-xs font-medium text-white/85 mb-6">
               <Newspaper size={14} /> Newsroom
             </span>
             <h1 className="text-4xl md:text-5xl font-extrabold text-white font-display mb-4">Press & Media</h1>
-            <p className="text-lg text-white/50 max-w-xl mx-auto">Latest news, press releases, and media coverage about Xelnova.</p>
+            <p className="text-lg text-white/80 max-w-xl mx-auto">Latest news, press releases, and media coverage about Xelnova.</p>
           </motion.div>
         </div>
       </section>

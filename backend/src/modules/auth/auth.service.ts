@@ -8,14 +8,17 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../prisma/prisma.service';
+import { sendFortiusOtpSms } from '../../common/helpers/fortius-sms.helper';
 import { RegisterDto } from './dto/auth.dto';
 import { LoggingService } from '../logging/logging.service';
 import { Role } from '@prisma/client';
 
 @Injectable()
 export class AuthService {
-  private otpStore: Map<string, { otp: string; expiresAt: number }> =
+  private otpStore: Map<string, { otp: string; expiresAt: number; attempts: number }> =
     new Map();
+  private verifiedPhones: Map<string, number> = new Map();
+  private static readonly MAX_OTP_ATTEMPTS = 5;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -25,6 +28,7 @@ export class AuthService {
   ) {}
 
   async login(email: string, password: string, ipAddress?: string, userAgent?: string) {
+    email = email.trim().toLowerCase();
     const user = await this.prisma.user.findUnique({ where: { email } });
     if (!user) {
       await this.loggingService.logActivity({
@@ -70,6 +74,15 @@ export class AuthService {
       throw new UnauthorizedException('Invalid email or password');
     }
 
+    if (user.role === 'SELLER') {
+      await this.ensureSellerProfileForSellerUser(user.id, user.name, user.email, user.phone ?? undefined);
+    }
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { authProvider: 'EMAIL' },
+    });
+
     const tokens = await this.generateTokens(user.id, user.email, user.role);
     await this.saveRefreshToken(user.id, tokens.refreshToken);
 
@@ -79,6 +92,8 @@ export class AuthService {
     expiresAt.setDate(expiresAt.getDate() + 7);
     await this.loggingService.createUserSession(user.id, tokens.accessToken, ipAddress || '', userAgent || '', expiresAt);
 
+    const hasSellerProfile = await this.userHasSellerProfile(user.id);
+
     return {
       user: {
         id: user.id,
@@ -87,12 +102,16 @@ export class AuthService {
         phone: user.phone,
         avatar: user.avatar,
         role: user.role,
+        authProvider: 'EMAIL' as const,
       },
       ...tokens,
+      hasSellerProfile,
     };
   }
 
   async register(dto: RegisterDto & { role?: Role }, ipAddress?: string, userAgent?: string) {
+    dto.email = dto.email.trim().toLowerCase();
+    dto.name = dto.name.trim();
     const existing = await this.prisma.user.findUnique({
       where: { email: dto.email },
     });
@@ -118,10 +137,15 @@ export class AuthService {
         email: dto.email,
         phone: dto.phone || null,
         password: hashedPassword,
-        avatar: '/images/users/default.jpg',
+        avatar: null,
         role,
+        authProvider: 'EMAIL',
       },
     });
+
+    if (user.role === 'SELLER') {
+      await this.ensureSellerProfileForSellerUser(user.id, user.name, user.email, user.phone ?? undefined);
+    }
 
     const tokens = await this.generateTokens(user.id, user.email, user.role);
     await this.saveRefreshToken(user.id, tokens.refreshToken);
@@ -136,6 +160,7 @@ export class AuthService {
         phone: user.phone,
         avatar: user.avatar,
         role: user.role,
+        authProvider: 'EMAIL' as const,
       },
       ...tokens,
     };
@@ -144,10 +169,14 @@ export class AuthService {
   async sendOtp(phone: string) {
     const otp = String(Math.floor(100000 + Math.random() * 900000));
     const expiresAt = Date.now() + 5 * 60 * 1000; // 5 minutes
-    this.otpStore.set(phone, { otp, expiresAt });
 
-    // TODO: Integrate real SMS provider (Twilio, MSG91, etc.)
-    return { message: `OTP sent to ${phone}`, otp }; // Remove otp from response in production
+    await sendFortiusOtpSms(phone, otp);
+    this.otpStore.set(phone, { otp, expiresAt, attempts: 0 });
+
+    return {
+      message: `OTP sent to ${phone}`,
+      ...(process.env.NODE_ENV !== 'production' ? { otp } : {}),
+    };
   }
 
   async verifyOtp(phone: string, otp: string) {
@@ -162,31 +191,89 @@ export class AuthService {
     }
 
     if (stored.otp !== otp) {
+      stored.attempts += 1;
+      if (stored.attempts >= AuthService.MAX_OTP_ATTEMPTS) {
+        this.otpStore.delete(phone);
+        throw new BadRequestException('Too many incorrect attempts. Please request a new OTP.');
+      }
       throw new BadRequestException('Invalid OTP');
     }
 
     this.otpStore.delete(phone);
 
-    let user = await this.prisma.user.findUnique({ where: { phone } });
-    const isNewUser = !user;
+    const user = await this.prisma.user.findUnique({ where: { phone } });
 
     if (!user) {
-      const tempPassword = await bcrypt.hash(
-        Math.random().toString(36).slice(-12),
-        10,
-      );
-      user = await this.prisma.user.create({
-        data: {
-          name: 'User',
-          email: `${phone.replace(/\D/g, '')}@temp.xelnova.in`,
-          phone,
-          password: tempPassword,
-          avatar: '/images/users/default.jpg',
-          role: 'CUSTOMER',
-          phoneVerified: true,
-        },
-      });
+      this.verifiedPhones.set(phone, Date.now() + 10 * 60 * 1000);
+      return { isNewUser: true, phone };
     }
+
+    if (user.isBanned) {
+      throw new UnauthorizedException('Your account has been suspended');
+    }
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { authProvider: 'PHONE' },
+    });
+
+    const tokens = await this.generateTokens(user.id, user.email, user.role);
+    await this.saveRefreshToken(user.id, tokens.refreshToken);
+    const hasSellerProfile = await this.userHasSellerProfile(user.id);
+
+    return {
+      isNewUser: false,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        avatar: user.avatar,
+        role: user.role,
+        authProvider: 'PHONE' as const,
+      },
+      ...tokens,
+      hasSellerProfile,
+    };
+  }
+
+  async completePhoneRegistration(phone: string, name: string, email: string) {
+    email = email.trim().toLowerCase();
+    name = name.trim();
+
+    const expiresAt = this.verifiedPhones.get(phone);
+    if (!expiresAt || Date.now() > expiresAt) {
+      this.verifiedPhones.delete(phone);
+      throw new BadRequestException('Phone not verified or verification expired. Please verify OTP again.');
+    }
+    this.verifiedPhones.delete(phone);
+
+    const existingPhone = await this.prisma.user.findUnique({ where: { phone } });
+    if (existingPhone) {
+      throw new ConflictException('An account with this phone number already exists');
+    }
+
+    const existingEmail = await this.prisma.user.findUnique({ where: { email } });
+    if (existingEmail) {
+      throw new ConflictException('An account with this email already exists');
+    }
+
+    const tempPassword = await bcrypt.hash(
+      Math.random().toString(36).slice(-12),
+      10,
+    );
+    const user = await this.prisma.user.create({
+      data: {
+        name,
+        email,
+        phone,
+        password: tempPassword,
+        avatar: null,
+        role: 'CUSTOMER',
+        phoneVerified: true,
+        authProvider: 'PHONE',
+      },
+    });
 
     const tokens = await this.generateTokens(user.id, user.email, user.role);
     await this.saveRefreshToken(user.id, tokens.refreshToken);
@@ -199,9 +286,10 @@ export class AuthService {
         phone: user.phone,
         avatar: user.avatar,
         role: user.role,
+        authProvider: 'PHONE' as const,
       },
       ...tokens,
-      isNewUser,
+      hasSellerProfile: false,
     };
   }
 
@@ -247,6 +335,8 @@ export class AuthService {
     name: string;
     avatar?: string;
   }, role: Role = 'CUSTOMER', ipAddress?: string, userAgent?: string) {
+    googleUser.email = googleUser.email.trim().toLowerCase();
+
     let user = await this.prisma.user.findUnique({
       where: { email: googleUser.email },
     });
@@ -264,9 +354,10 @@ export class AuthService {
           name: googleUser.name,
           email: googleUser.email,
           password: tempPassword,
-          avatar: googleUser.avatar || '/images/users/default.jpg',
+          avatar: googleUser.avatar || null,
           role,
           emailVerified: true,
+          authProvider: 'GOOGLE',
         },
       });
 
@@ -281,15 +372,32 @@ export class AuthService {
         meta: { provider: 'google', isNewUser: true },
       });
     } else {
-      if (!user.avatar || user.avatar === '/images/users/default.jpg') {
-        await this.prisma.user.update({
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: { 
+          avatar: user.avatar ? undefined : googleUser.avatar,
+          emailVerified: true,
+          authProvider: 'GOOGLE',
+        },
+      });
+    }
+
+    if (role === 'SELLER') {
+      if (user.role === 'ADMIN') {
+        throw new UnauthorizedException(
+          'This account is an administrator. Use the Admin app to sign in.',
+        );
+      }
+      if (user.role === 'CUSTOMER') {
+        user = await this.prisma.user.update({
           where: { id: user.id },
-          data: { 
-            avatar: googleUser.avatar,
-            emailVerified: true,
-          },
+          data: { role: 'SELLER' },
         });
       }
+    }
+
+    if (user.role === 'SELLER') {
+      await this.ensureSellerProfileForSellerUser(user.id, user.name, user.email, user.phone ?? undefined);
     }
 
     if (user.isBanned) {
@@ -316,6 +424,8 @@ export class AuthService {
     expiresAt.setDate(expiresAt.getDate() + 7);
     await this.loggingService.createUserSession(user.id, tokens.accessToken, ipAddress || '', userAgent || '', expiresAt);
 
+    const hasSellerProfile = await this.userHasSellerProfile(user.id);
+
     return {
       user: {
         id: user.id,
@@ -324,10 +434,60 @@ export class AuthService {
         phone: user.phone,
         avatar: user.avatar,
         role: user.role,
+        authProvider: 'GOOGLE' as const,
       },
       ...tokens,
       isNewUser,
+      hasSellerProfile,
     };
+  }
+
+  private async userHasSellerProfile(userId: string): Promise<boolean> {
+    const p = await this.prisma.sellerProfile.findUnique({
+      where: { userId },
+      select: { id: true },
+    });
+    return !!p;
+  }
+
+  /** Every SELLER user must have a SellerProfile row (admin /seller list uses this table). */
+  private async ensureSellerProfileForSellerUser(userId: string, name: string, email?: string, phone?: string): Promise<void> {
+    const existing = await this.prisma.sellerProfile.findUnique({ where: { userId } });
+    if (existing) return;
+
+    // Check if an orphaned seller profile exists for this email (e.g. customer
+    // was deleted then re-registered). Re-link it to the new user.
+    if (email) {
+      const orphaned = await this.prisma.sellerProfile.findUnique({ where: { email } });
+      if (orphaned) {
+        await this.prisma.sellerProfile.update({
+          where: { id: orphaned.id },
+          data: { userId },
+        });
+        return;
+      }
+    }
+
+    const baseSlug = name
+      .toLowerCase()
+      .trim()
+      .replace(/[^\w\s-]/g, '')
+      .replace(/\s+/g, '-')
+      .substring(0, 40);
+    const uniqueSuffix = Math.random().toString(36).substring(2, 8);
+    const slug = `${baseSlug || 'seller'}-${uniqueSuffix}`;
+
+    await this.prisma.sellerProfile.create({
+      data: {
+        userId,
+        email,
+        phone,
+        storeName: `${name}'s Store`,
+        slug,
+        onboardingStatus: 'EMAIL_VERIFIED',
+        onboardingStep: 2,
+      },
+    });
   }
 
   private async generateTokens(userId: string, email: string, role: string) {

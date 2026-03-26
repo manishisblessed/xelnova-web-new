@@ -1,7 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { useState, useEffect, useCallback } from 'react';
 import {
   Store,
   CheckCircle,
@@ -9,26 +8,21 @@ import {
   Clock,
   Eye,
   FileText,
-  CreditCard,
-  MapPin,
-  User,
-  Phone,
-  Mail,
-  Building2,
-  Download,
-  Shield,
-  AlertCircle,
-  Search,
-  Filter,
-  RefreshCw,
-  ChevronDown,
   ExternalLink,
   Loader2,
+  Search,
+  RefreshCw,
 } from 'lucide-react';
+import { motion } from 'framer-motion';
 import { Button, Badge } from '@xelnova/ui';
 import { toast } from 'sonner';
+import { DashboardHeader } from '@/components/dashboard/dashboard-header';
+import { StatCard } from '@/components/dashboard/stat-card';
+import { DataTable, type Column } from '@/components/dashboard/data-table';
+import { ActionModal } from '@/components/dashboard/action-modal';
+import { FormField, FormTextarea } from '@/components/dashboard/form-field';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api/v1';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
 
 interface SellerDocument {
   id: string;
@@ -41,7 +35,9 @@ interface SellerDocument {
 
 interface SellerProfile {
   id: string;
-  userId: string;
+  userId?: string | null;
+  email?: string | null;
+  phone?: string | null;
   storeName: string;
   slug: string;
   description?: string;
@@ -52,11 +48,13 @@ interface SellerProfile {
   reviewedAt?: string;
   gstNumber?: string;
   gstVerified: boolean;
-  gstVerifiedData?: any;
+  gstVerifiedData?: { tradeName?: string; legalName?: string };
   sellsNonGstProducts: boolean;
   panNumber?: string;
   panName?: string;
   panVerified: boolean;
+  panDocumentUrl?: string;
+  maskedAadhaarUrl?: string;
   bankAccountName?: string;
   bankAccountNumber?: string;
   bankIfscCode?: string;
@@ -73,17 +71,15 @@ interface SellerProfile {
   offerFreeDelivery: boolean;
   commissionRate: number;
   createdAt: string;
-  user: {
+  user?: {
     id: string;
     name: string;
     email: string;
     phone?: string;
     createdAt: string;
-  };
+  } | null;
   documents: SellerDocument[];
-  _count?: {
-    products: number;
-  };
+  _count?: { products: number };
 }
 
 const statusColors: Record<string, 'warning' | 'success' | 'danger' | 'default'> = {
@@ -100,25 +96,33 @@ const statusLabels: Record<string, string> = {
   PENDING_VERIFICATION: 'Pending',
   EMAIL_VERIFIED: 'Email Verified',
   PHONE_VERIFIED: 'Phone Verified',
-  DOCUMENTS_SUBMITTED: 'Documents Submitted',
+  DOCUMENTS_SUBMITTED: 'Docs Submitted',
   UNDER_REVIEW: 'Under Review',
   APPROVED: 'Approved',
   REJECTED: 'Rejected',
 };
 
+function getAuthToken() {
+  if (typeof window === 'undefined') return null;
+  return document.cookie
+    .split('; ')
+    .find((row) => row.startsWith('xelnova-dashboard-token='))
+    ?.split('=')[1] ?? null;
+}
+
 export default function SellerOnboardingPage() {
   const [sellers, setSellers] = useState<SellerProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedSeller, setSelectedSeller] = useState<SellerProfile | null>(null);
-  const [detailModalOpen, setDetailModalOpen] = useState(false);
-  const [reviewModalOpen, setReviewModalOpen] = useState(false);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
   const [reviewLoading, setReviewLoading] = useState(false);
   const [rejectionReason, setRejectionReason] = useState('');
-  const [statusFilter, setStatusFilter] = useState('UNDER_REVIEW');
+  const [statusFilter, setStatusFilter] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [pagination, setPagination] = useState({ page: 1, limit: 20, total: 0, totalPages: 0 });
 
-  const fetchSellers = async () => {
+  const fetchSellers = useCallback(async () => {
     setLoading(true);
     try {
       const params = new URLSearchParams({
@@ -128,15 +132,18 @@ export default function SellerOnboardingPage() {
       if (statusFilter) params.set('status', statusFilter);
       if (searchQuery) params.set('search', searchQuery);
 
+      const token = getAuthToken();
       const res = await fetch(`${API_BASE}/seller-onboarding/admin/sellers?${params}`, {
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${decodeURIComponent(token)}` } : {}),
+        },
       });
       const data = await res.json();
-      
+
       if (data.success) {
         setSellers(data.data.sellers);
-        setPagination(prev => ({ ...prev, ...data.data.pagination }));
+        setPagination((prev) => ({ ...prev, ...data.data.pagination }));
       }
     } catch (error) {
       console.error('Failed to fetch sellers:', error);
@@ -144,11 +151,11 @@ export default function SellerOnboardingPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [pagination.page, pagination.limit, statusFilter, searchQuery]);
 
   useEffect(() => {
     fetchSellers();
-  }, [pagination.page, statusFilter, searchQuery]);
+  }, [fetchSellers]);
 
   const handleReview = async (decision: 'APPROVED' | 'REJECTED') => {
     if (!selectedSeller) return;
@@ -159,10 +166,13 @@ export default function SellerOnboardingPage() {
 
     setReviewLoading(true);
     try {
+      const token = getAuthToken();
       const res = await fetch(`${API_BASE}/seller-onboarding/admin/review/${selectedSeller.id}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${decodeURIComponent(token)}` } : {}),
+        },
         body: JSON.stringify({
           decision,
           rejectionReason: decision === 'REJECTED' ? rejectionReason : undefined,
@@ -172,7 +182,7 @@ export default function SellerOnboardingPage() {
 
       if (data.success) {
         toast.success(`Seller ${decision.toLowerCase()}`);
-        setReviewModalOpen(false);
+        setReviewOpen(false);
         setSelectedSeller(null);
         setRejectionReason('');
         fetchSellers();
@@ -186,180 +196,199 @@ export default function SellerOnboardingPage() {
     }
   };
 
-  const openDetailModal = (seller: SellerProfile) => {
-    setSelectedSeller(seller);
-    setDetailModalOpen(true);
-  };
+  /* ── Stats ── */
+  const [stats, setStats] = useState<Record<string, number>>({});
 
-  const openReviewModal = (seller: SellerProfile) => {
-    setSelectedSeller(seller);
-    setReviewModalOpen(true);
-  };
+  useEffect(() => {
+    const token = getAuthToken();
+    fetch(`${API_BASE}/seller-onboarding/admin/stats`, {
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${decodeURIComponent(token)}` } : {}),
+      },
+    })
+      .then((r) => r.json())
+      .then((d) => { if (d.success) setStats(d.data); })
+      .catch(() => {});
+  }, [sellers]);
+
+  const pendingCount = stats.UNDER_REVIEW || 0;
+  const approvedCount = stats.APPROVED || 0;
+  const rejectedCount = stats.REJECTED || 0;
+  const inProgressCount =
+    (stats.PENDING_VERIFICATION || 0) +
+    (stats.EMAIL_VERIFIED || 0) +
+    (stats.PHONE_VERIFIED || 0) +
+    (stats.DOCUMENTS_SUBMITTED || 0);
+
+  /* ── Table columns ── */
+  const columns: Column<SellerProfile>[] = [
+    {
+      key: 'storeName',
+      header: 'Seller',
+      render: (row) => (
+        <div className="flex items-center gap-3">
+          <div className="h-9 w-9 rounded-lg bg-primary-50 flex items-center justify-center shrink-0">
+            <Store size={18} className="text-primary-600" />
+          </div>
+          <div className="min-w-0">
+            <p className="font-medium text-text-primary truncate">{row.storeName}</p>
+            <p className="text-xs text-text-muted truncate">{row.user?.name || '—'}</p>
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: 'contact',
+      header: 'Contact',
+      render: (row) => (
+        <div className="min-w-0">
+          <p className="text-sm text-text-primary truncate">{row.email ?? row.user?.email ?? '—'}</p>
+          <p className="text-xs text-text-muted">{row.phone ?? row.user?.phone ?? '—'}</p>
+        </div>
+      ),
+    },
+    {
+      key: 'verification',
+      header: 'Verification',
+      render: (row) => (
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <Badge variant={row.gstVerified || row.sellsNonGstProducts ? 'success' : 'warning'}>
+            GST {row.gstVerified ? 'Verified' : row.sellsNonGstProducts ? 'Exempt' : 'Pending'}
+          </Badge>
+          <Badge variant={row.bankVerified ? 'success' : 'warning'}>
+            Bank {row.bankVerified ? 'Verified' : 'Pending'}
+          </Badge>
+        </div>
+      ),
+    },
+    {
+      key: 'onboardingStatus',
+      header: 'Status',
+      render: (row) => (
+        <Badge variant={statusColors[row.onboardingStatus] || 'default'}>
+          {statusLabels[row.onboardingStatus] || row.onboardingStatus}
+        </Badge>
+      ),
+    },
+    {
+      key: 'createdAt',
+      header: 'Applied',
+      render: (row) => (
+        <span className="text-sm text-text-muted">
+          {new Date(row.createdAt).toLocaleDateString()}
+        </span>
+      ),
+    },
+    {
+      key: '_actions',
+      header: 'Actions',
+      className: 'text-right',
+      render: (row) => (
+        <div className="flex items-center justify-end gap-2">
+          <button
+            onClick={() => { setSelectedSeller(row); setDetailOpen(true); }}
+            className="p-1.5 rounded-lg hover:bg-surface-muted text-text-muted transition-colors"
+            title="View Details"
+          >
+            <Eye size={16} />
+          </button>
+          {row.onboardingStatus === 'UNDER_REVIEW' && (
+            <Button
+              size="sm"
+              onClick={() => { setSelectedSeller(row); setReviewOpen(true); }}
+            >
+              Review
+            </Button>
+          )}
+        </div>
+      ),
+    },
+  ];
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Seller Onboarding</h1>
-          <p className="text-gray-600 mt-1">Review and approve seller applications</p>
+    <>
+      <DashboardHeader title="Seller Onboarding" />
+
+      <div className="p-6 space-y-6">
+        {/* Stats */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <StatCard label="Pending Review" value={pendingCount} icon={Clock} loading={loading} />
+          <StatCard label="Approved" value={approvedCount} icon={CheckCircle} loading={loading} />
+          <StatCard label="Rejected" value={rejectedCount} icon={XCircle} loading={loading} />
+          <StatCard label="In Progress" value={inProgressCount} icon={Store} loading={loading} />
         </div>
-        <Button variant="outline" onClick={fetchSellers}>
-          <RefreshCw size={16} /> Refresh
-        </Button>
-      </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {[
-          { label: 'Pending Review', value: sellers.filter(s => s.onboardingStatus === 'UNDER_REVIEW').length, color: 'text-amber-600', bg: 'bg-amber-50', icon: Clock },
-          { label: 'Approved', value: sellers.filter(s => s.onboardingStatus === 'APPROVED').length, color: 'text-green-600', bg: 'bg-green-50', icon: CheckCircle },
-          { label: 'Rejected', value: sellers.filter(s => s.onboardingStatus === 'REJECTED').length, color: 'text-red-600', bg: 'bg-red-50', icon: XCircle },
-          { label: 'In Progress', value: sellers.filter(s => !['UNDER_REVIEW', 'APPROVED', 'REJECTED'].includes(s.onboardingStatus)).length, color: 'text-blue-600', bg: 'bg-blue-50', icon: Store },
-        ].map((stat, i) => (
-          <div key={i} className={`${stat.bg} rounded-xl p-4`}>
-            <div className="flex items-center gap-3">
-              <div className={`w-10 h-10 rounded-lg ${stat.bg} flex items-center justify-center`}>
-                <stat.icon size={20} className={stat.color} />
-              </div>
-              <div>
-                <p className={`text-2xl font-bold ${stat.color}`}>{stat.value}</p>
-                <p className="text-sm text-gray-600">{stat.label}</p>
-              </div>
-            </div>
+        {/* Toolbar */}
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="flex flex-wrap items-center gap-3"
+        >
+          <div className="flex items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2 flex-1 min-w-[200px] max-w-md">
+            <Search size={18} className="text-text-muted shrink-0" />
+            <input
+              type="text"
+              placeholder="Search by store name, email, or owner..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="flex-1 bg-transparent text-sm text-text-primary outline-none placeholder:text-text-muted"
+            />
           </div>
-        ))}
-      </div>
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="rounded-xl border border-border bg-surface px-3 py-2 text-sm text-text-primary outline-none"
+          >
+            <option value="">All Statuses</option>
+            <option value="UNDER_REVIEW">Under Review</option>
+            <option value="APPROVED">Approved</option>
+            <option value="REJECTED">Rejected</option>
+            <option value="PENDING_VERIFICATION">Pending Verification</option>
+            <option value="EMAIL_VERIFIED">Email Verified</option>
+            <option value="PHONE_VERIFIED">Phone Verified</option>
+            <option value="DOCUMENTS_SUBMITTED">Documents Submitted</option>
+          </select>
+          <button
+            onClick={() => { setLoading(true); fetchSellers(); }}
+            className="flex items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2 text-sm text-text-primary hover:bg-surface-muted transition-colors"
+          >
+            <RefreshCw size={16} />
+          </button>
+        </motion.div>
 
-      {/* Filters */}
-      <div className="flex flex-col sm:flex-row gap-4">
-        <div className="relative flex-1">
-          <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input
-            type="text"
-            placeholder="Search by store name, email, or owner..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-gray-200 focus:border-primary-400 focus:ring-2 focus:ring-primary-400/20 outline-none"
+        {/* Table */}
+        <div className="rounded-2xl border border-border bg-surface shadow-card">
+          <DataTable<SellerProfile>
+            columns={columns}
+            data={sellers}
+            keyExtractor={(row) => row.id}
+            loading={loading}
+            emptyMessage="No sellers found"
           />
         </div>
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="px-4 py-2.5 rounded-xl border border-gray-200 focus:border-primary-400 outline-none"
-        >
-          <option value="">All Statuses</option>
-          <option value="UNDER_REVIEW">Under Review</option>
-          <option value="APPROVED">Approved</option>
-          <option value="REJECTED">Rejected</option>
-          <option value="PENDING_VERIFICATION">Pending Verification</option>
-          <option value="DOCUMENTS_SUBMITTED">Documents Submitted</option>
-        </select>
-      </div>
-
-      {/* Sellers Table */}
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        {loading ? (
-          <div className="flex items-center justify-center py-20">
-            <Loader2 size={32} className="animate-spin text-primary-500" />
-          </div>
-        ) : sellers.length === 0 ? (
-          <div className="text-center py-20">
-            <Store size={48} className="mx-auto text-gray-300 mb-4" />
-            <p className="text-gray-500">No sellers found</p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-gray-50 border-b border-gray-200">
-                <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Seller</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Contact</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Verification</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Applied</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {sellers.map((seller) => (
-                  <tr key={seller.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-lg bg-primary-100 flex items-center justify-center">
-                          <Store size={20} className="text-primary-600" />
-                        </div>
-                        <div>
-                          <p className="font-medium text-gray-900">{seller.storeName}</p>
-                          <p className="text-sm text-gray-500">{seller.user.name}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-4">
-                      <p className="text-sm text-gray-900">{seller.user.email}</p>
-                      <p className="text-sm text-gray-500">{seller.user.phone || '-'}</p>
-                    </td>
-                    <td className="px-4 py-4">
-                      <div className="flex items-center gap-2">
-                        <Badge variant={seller.gstVerified || seller.sellsNonGstProducts ? 'success' : 'default'}>
-                          GST {seller.gstVerified ? '✓' : seller.sellsNonGstProducts ? 'N/A' : '✗'}
-                        </Badge>
-                        <Badge variant={seller.bankVerified ? 'success' : 'default'}>
-                          Bank {seller.bankVerified ? '✓' : '✗'}
-                        </Badge>
-                      </div>
-                    </td>
-                    <td className="px-4 py-4">
-                      <Badge variant={statusColors[seller.onboardingStatus] || 'default'}>
-                        {statusLabels[seller.onboardingStatus] || seller.onboardingStatus}
-                      </Badge>
-                    </td>
-                    <td className="px-4 py-4 text-sm text-gray-500">
-                      {new Date(seller.createdAt).toLocaleDateString()}
-                    </td>
-                    <td className="px-4 py-4">
-                      <div className="flex items-center justify-end gap-2">
-                        <button
-                          onClick={() => openDetailModal(seller)}
-                          className="p-2 rounded-lg hover:bg-gray-100 text-gray-600"
-                          title="View Details"
-                        >
-                          <Eye size={18} />
-                        </button>
-                        {seller.onboardingStatus === 'UNDER_REVIEW' && (
-                          <Button size="sm" onClick={() => openReviewModal(seller)}>
-                            Review
-                          </Button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
 
         {/* Pagination */}
         {pagination.totalPages > 1 && (
-          <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200">
-            <p className="text-sm text-gray-600">
-              Showing {(pagination.page - 1) * pagination.limit + 1} to {Math.min(pagination.page * pagination.limit, pagination.total)} of {pagination.total}
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-text-muted">
+              Showing {(pagination.page - 1) * pagination.limit + 1} to{' '}
+              {Math.min(pagination.page * pagination.limit, pagination.total)} of {pagination.total}
             </p>
             <div className="flex gap-2">
               <Button
-                variant="outline"
+                variant="ghost"
                 size="sm"
                 disabled={pagination.page === 1}
-                onClick={() => setPagination(prev => ({ ...prev, page: prev.page - 1 }))}
+                onClick={() => setPagination((prev) => ({ ...prev, page: prev.page - 1 }))}
               >
                 Previous
               </Button>
               <Button
-                variant="outline"
+                variant="ghost"
                 size="sm"
                 disabled={pagination.page === pagination.totalPages}
-                onClick={() => setPagination(prev => ({ ...prev, page: prev.page + 1 }))}
+                onClick={() => setPagination((prev) => ({ ...prev, page: prev.page + 1 }))}
               >
                 Next
               </Button>
@@ -368,309 +397,354 @@ export default function SellerOnboardingPage() {
         )}
       </div>
 
-      {/* Detail Modal */}
-      <AnimatePresence>
-        {detailModalOpen && selectedSeller && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
-            onClick={() => setDetailModalOpen(false)}
-          >
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white rounded-2xl shadow-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-                <h2 className="text-xl font-bold text-gray-900">Seller Details</h2>
-                <button onClick={() => setDetailModalOpen(false)} className="p-2 rounded-lg hover:bg-gray-100">
-                  <XCircle size={20} />
-                </button>
+      {/* ── Detail Modal ── */}
+      <ActionModal
+        open={detailOpen}
+        onClose={() => setDetailOpen(false)}
+        title="Seller Details"
+        wide
+        onSubmit={
+          selectedSeller?.onboardingStatus === 'UNDER_REVIEW'
+            ? () => { setDetailOpen(false); setReviewOpen(true); }
+            : undefined
+        }
+        submitLabel="Review Application"
+      >
+        {selectedSeller && (
+          <div className="space-y-6">
+            {/* Store Info */}
+            <DetailSection title="Store Information">
+              <DetailGrid>
+                <DetailItem label="Store Name" value={selectedSeller.storeName} />
+                <DetailItem label="Business Type" value={selectedSeller.businessType} />
+                <DetailItem label="Category" value={selectedSeller.businessCategory} />
+                <DetailItem label="Commission Rate" value={`${selectedSeller.commissionRate}%`} />
+              </DetailGrid>
+            </DetailSection>
+
+            {/* Contact Info */}
+            <DetailSection title="Contact Information">
+              <DetailGrid>
+                <DetailItem label="Owner Name" value={selectedSeller.user?.name} />
+                <DetailItem label="Email" value={selectedSeller.email ?? selectedSeller.user?.email} />
+                <DetailItem label="Phone" value={selectedSeller.phone ?? selectedSeller.user?.phone} />
+              </DetailGrid>
+            </DetailSection>
+
+            {/* Tax Details */}
+            <DetailSection title="Tax Details">
+              <DetailGrid>
+                <DetailItem
+                  label="GST Number"
+                  value={selectedSeller.gstNumber || (selectedSeller.sellsNonGstProducts ? 'Non-GST Seller' : undefined)}
+                  verified={selectedSeller.gstVerified}
+                />
+                <DetailItem label="PAN Number" value={selectedSeller.panNumber} />
+                <DetailItem label="PAN Name" value={selectedSeller.panName} />
+              </DetailGrid>
+              {selectedSeller.gstVerifiedData && (
+                <div className="mt-3 rounded-xl bg-success-50 border border-success-200 p-3">
+                  <p className="text-sm font-medium text-success-700">GST Verified</p>
+                  <p className="text-sm text-success-600">
+                    Trade Name: {selectedSeller.gstVerifiedData.tradeName}
+                  </p>
+                  <p className="text-sm text-success-600">
+                    Legal Name: {selectedSeller.gstVerifiedData.legalName}
+                  </p>
+                </div>
+              )}
+            </DetailSection>
+
+            {/* Address */}
+            <DetailSection title="Pickup Address">
+              <div className="rounded-xl bg-surface-muted p-4">
+                <p className="text-sm font-medium text-text-primary">
+                  {selectedSeller.businessAddress || '—'}
+                </p>
+                <p className="text-sm text-text-muted mt-0.5">
+                  {[selectedSeller.businessCity, selectedSeller.businessState, selectedSeller.businessPincode]
+                    .filter(Boolean)
+                    .join(', ') || '—'}
+                </p>
               </div>
+            </DetailSection>
 
-              <div className="p-6 space-y-6">
-                {/* Store Info */}
-                <div>
-                  <h3 className="text-sm font-medium text-gray-500 uppercase mb-3">Store Information</h3>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <p className="text-sm text-gray-500">Store Name</p>
-                      <p className="font-medium">{selectedSeller.storeName}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-gray-500">Business Type</p>
-                      <p className="font-medium">{selectedSeller.businessType || '-'}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-gray-500">Category</p>
-                      <p className="font-medium">{selectedSeller.businessCategory || '-'}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-gray-500">Commission Rate</p>
-                      <p className="font-medium">{selectedSeller.commissionRate}%</p>
-                    </div>
-                  </div>
-                </div>
+            {/* Bank Details */}
+            <DetailSection title="Bank Details">
+              <DetailGrid>
+                <DetailItem label="Account Holder" value={selectedSeller.bankAccountName} />
+                <DetailItem
+                  label="Account Number"
+                  value={
+                    selectedSeller.bankAccountNumber
+                      ? `****${selectedSeller.bankAccountNumber.slice(-4)}`
+                      : undefined
+                  }
+                />
+                <DetailItem
+                  label="IFSC Code"
+                  value={selectedSeller.bankIfscCode}
+                  verified={selectedSeller.bankVerified}
+                />
+                <DetailItem
+                  label="Bank"
+                  value={
+                    selectedSeller.bankName
+                      ? `${selectedSeller.bankName}${selectedSeller.bankBranch ? ` (${selectedSeller.bankBranch})` : ''}`
+                      : undefined
+                  }
+                />
+              </DetailGrid>
+            </DetailSection>
 
-                {/* Contact Info */}
-                <div>
-                  <h3 className="text-sm font-medium text-gray-500 uppercase mb-3">Contact Information</h3>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <p className="text-sm text-gray-500">Owner Name</p>
-                      <p className="font-medium">{selectedSeller.user.name}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-gray-500">Email</p>
-                      <p className="font-medium">{selectedSeller.user.email}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-gray-500">Phone</p>
-                      <p className="font-medium">{selectedSeller.user.phone || '-'}</p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Tax Details */}
-                <div>
-                  <h3 className="text-sm font-medium text-gray-500 uppercase mb-3">Tax Details</h3>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <p className="text-sm text-gray-500">GST Number</p>
-                      <div className="flex items-center gap-2">
-                        <p className="font-medium">{selectedSeller.gstNumber || (selectedSeller.sellsNonGstProducts ? 'Non-GST Seller' : '-')}</p>
-                        {selectedSeller.gstVerified && <CheckCircle size={16} className="text-green-500" />}
-                      </div>
-                    </div>
-                    <div>
-                      <p className="text-sm text-gray-500">PAN Number</p>
-                      <p className="font-medium">{selectedSeller.panNumber || '-'}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-gray-500">PAN Name</p>
-                      <p className="font-medium">{selectedSeller.panName || '-'}</p>
-                    </div>
-                  </div>
-                  {selectedSeller.gstVerifiedData && (
-                    <div className="mt-3 p-3 bg-green-50 rounded-lg">
-                      <p className="text-sm font-medium text-green-800">GST Verified</p>
-                      <p className="text-sm text-green-700">
-                        Trade Name: {selectedSeller.gstVerifiedData.tradeName}
-                      </p>
-                      <p className="text-sm text-green-700">
-                        Legal Name: {selectedSeller.gstVerifiedData.legalName}
-                      </p>
-                    </div>
+            {/* KYC Documents */}
+            <DetailSection title="KYC Documents">
+              {selectedSeller.panDocumentUrl || selectedSeller.maskedAadhaarUrl ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {selectedSeller.panDocumentUrl && (
+                    <DocCard label="PAN Card" url={selectedSeller.panDocumentUrl} />
+                  )}
+                  {selectedSeller.maskedAadhaarUrl && (
+                    <DocCard label="Masked Aadhaar" url={selectedSeller.maskedAadhaarUrl} />
                   )}
                 </div>
+              ) : (
+                <p className="text-sm text-text-muted italic">No KYC documents uploaded</p>
+              )}
+            </DetailSection>
 
-                {/* Address */}
-                <div>
-                  <h3 className="text-sm font-medium text-gray-500 uppercase mb-3">Pickup Address</h3>
-                  <div className="p-4 bg-gray-50 rounded-lg">
-                    <p className="font-medium">{selectedSeller.businessAddress || '-'}</p>
-                    <p className="text-gray-600">
-                      {[selectedSeller.businessCity, selectedSeller.businessState, selectedSeller.businessPincode].filter(Boolean).join(', ') || '-'}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Bank Details */}
-                <div>
-                  <h3 className="text-sm font-medium text-gray-500 uppercase mb-3">Bank Details</h3>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <p className="text-sm text-gray-500">Account Holder</p>
-                      <p className="font-medium">{selectedSeller.bankAccountName || '-'}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-gray-500">Account Number</p>
-                      <p className="font-medium">{selectedSeller.bankAccountNumber ? `****${selectedSeller.bankAccountNumber.slice(-4)}` : '-'}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-gray-500">IFSC Code</p>
-                      <div className="flex items-center gap-2">
-                        <p className="font-medium">{selectedSeller.bankIfscCode || '-'}</p>
-                        {selectedSeller.bankVerified && <CheckCircle size={16} className="text-green-500" />}
-                      </div>
-                    </div>
-                    <div>
-                      <p className="text-sm text-gray-500">Bank</p>
-                      <p className="font-medium">{selectedSeller.bankName || '-'} {selectedSeller.bankBranch ? `(${selectedSeller.bankBranch})` : ''}</p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Documents */}
-                {selectedSeller.documents && selectedSeller.documents.length > 0 && (
-                  <div>
-                    <h3 className="text-sm font-medium text-gray-500 uppercase mb-3">Documents</h3>
-                    <div className="space-y-2">
-                      {selectedSeller.documents.map((doc) => (
-                        <div key={doc.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                          <div className="flex items-center gap-3">
-                            <FileText size={20} className="text-gray-400" />
-                            <div>
-                              <p className="font-medium text-sm">{doc.type.replace(/_/g, ' ')}</p>
-                              <p className="text-xs text-gray-500">{doc.fileName}</p>
+            {/* Other Documents */}
+            {selectedSeller.documents?.length > 0 && (
+              <DetailSection title="All Documents">
+                <div className="space-y-2">
+                  {selectedSeller.documents.map((doc) => {
+                    const isImage = doc.fileUrl && /\.(jpg|jpeg|png|webp|gif)/i.test(doc.fileUrl);
+                    return (
+                      <div
+                        key={doc.id}
+                        className="flex items-center justify-between rounded-xl border border-border bg-surface-muted/50 p-3"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          {isImage ? (
+                            <img
+                              src={doc.fileUrl}
+                              alt={doc.type}
+                              className="h-10 w-10 rounded-lg object-cover border border-border"
+                            />
+                          ) : (
+                            <div className="h-10 w-10 rounded-lg bg-surface-muted flex items-center justify-center">
+                              <FileText size={18} className="text-text-muted" />
                             </div>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            {doc.verified ? (
-                              <Badge variant="success">Verified</Badge>
-                            ) : (
-                              <Badge variant="warning">Pending</Badge>
-                            )}
-                            <a
-                              href={doc.fileUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="p-2 rounded-lg hover:bg-gray-200"
-                            >
-                              <ExternalLink size={16} />
-                            </a>
+                          )}
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-text-primary truncate">
+                              {doc.type.replace(/_/g, ' ')}
+                            </p>
+                            <p className="text-xs text-text-muted truncate">{doc.fileName}</p>
                           </div>
                         </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Shipping */}
-                <div>
-                  <h3 className="text-sm font-medium text-gray-500 uppercase mb-3">Shipping Preferences</h3>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <p className="text-sm text-gray-500">Shipping Method</p>
-                      <p className="font-medium">{selectedSeller.shippingMethod === 'easy_ship' ? 'Easy Ship (Xelnova handles shipping)' : 'Self Ship'}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-gray-500">Free Delivery</p>
-                      <p className="font-medium">{selectedSeller.offerFreeDelivery ? 'Yes' : 'No'}</p>
-                    </div>
-                  </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <Badge variant={doc.verified ? 'success' : 'warning'}>
+                            {doc.verified ? 'Verified' : 'Pending'}
+                          </Badge>
+                          <a
+                            href={doc.fileUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-1.5 rounded-lg hover:bg-surface-muted text-text-muted transition-colors"
+                          >
+                            <ExternalLink size={14} />
+                          </a>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
+              </DetailSection>
+            )}
 
-                {/* Rejection Reason */}
-                {selectedSeller.rejectionReason && (
-                  <div className="p-4 bg-red-50 rounded-lg border border-red-200">
-                    <p className="font-medium text-red-800">Rejection Reason</p>
-                    <p className="text-red-700 mt-1">{selectedSeller.rejectionReason}</p>
-                  </div>
-                )}
-              </div>
+            {/* Shipping */}
+            <DetailSection title="Shipping Preferences">
+              <DetailGrid>
+                <DetailItem
+                  label="Shipping Method"
+                  value={
+                    selectedSeller.shippingMethod === 'easy_ship'
+                      ? 'Easy Ship (Xelnova handles shipping)'
+                      : selectedSeller.shippingMethod === 'self_ship'
+                        ? 'Self Ship'
+                        : selectedSeller.shippingMethod
+                  }
+                />
+                <DetailItem
+                  label="Free Delivery"
+                  value={selectedSeller.offerFreeDelivery ? 'Yes' : 'No'}
+                />
+              </DetailGrid>
+            </DetailSection>
 
-              <div className="sticky bottom-0 bg-gray-50 border-t border-gray-200 px-6 py-4 flex justify-end gap-3">
-                <Button variant="outline" onClick={() => setDetailModalOpen(false)}>
-                  Close
-                </Button>
-                {selectedSeller.onboardingStatus === 'UNDER_REVIEW' && (
-                  <Button onClick={() => { setDetailModalOpen(false); openReviewModal(selectedSeller); }}>
-                    Review Application
-                  </Button>
-                )}
+            {/* Rejection Reason */}
+            {selectedSeller.rejectionReason && (
+              <div className="rounded-xl bg-danger-50 border border-danger-200 p-4">
+                <p className="text-sm font-medium text-danger-700">Rejection Reason</p>
+                <p className="text-sm text-danger-600 mt-1">{selectedSeller.rejectionReason}</p>
               </div>
-            </motion.div>
-          </motion.div>
+            )}
+          </div>
         )}
-      </AnimatePresence>
+      </ActionModal>
 
-      {/* Review Modal */}
-      <AnimatePresence>
-        {reviewModalOpen && selectedSeller && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
-            onClick={() => setReviewModalOpen(false)}
-          >
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white rounded-2xl shadow-xl max-w-md w-full"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="px-6 py-4 border-b border-gray-200">
-                <h2 className="text-xl font-bold text-gray-900">Review Application</h2>
-                <p className="text-gray-600 mt-1">{selectedSeller.storeName}</p>
+      {/* ── Review Modal ── */}
+      <ActionModal
+        open={reviewOpen}
+        onClose={() => { setReviewOpen(false); setRejectionReason(''); }}
+        title={`Review — ${selectedSeller?.storeName ?? ''}`}
+      >
+        {selectedSeller && (
+          <div className="space-y-5">
+            <div className="grid grid-cols-2 gap-4">
+              <ReviewStatusItem
+                label="GST Status"
+                verified={selectedSeller.gstVerified}
+                fallback={selectedSeller.sellsNonGstProducts ? 'Non-GST' : undefined}
+              />
+              <ReviewStatusItem label="Bank Status" verified={selectedSeller.bankVerified} />
+              <div>
+                <p className="text-xs text-text-muted">Documents</p>
+                <p className="text-sm font-medium text-text-primary">
+                  {selectedSeller.documents?.length || 0} uploaded
+                </p>
               </div>
-
-              <div className="p-6 space-y-6">
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <p className="text-gray-500">GST Status</p>
-                    <p className="font-medium flex items-center gap-1">
-                      {selectedSeller.gstVerified ? (
-                        <><CheckCircle size={14} className="text-green-500" /> Verified</>
-                      ) : selectedSeller.sellsNonGstProducts ? (
-                        'Non-GST'
-                      ) : (
-                        <><XCircle size={14} className="text-red-500" /> Not Verified</>
-                      )}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-gray-500">Bank Status</p>
-                    <p className="font-medium flex items-center gap-1">
-                      {selectedSeller.bankVerified ? (
-                        <><CheckCircle size={14} className="text-green-500" /> Verified</>
-                      ) : (
-                        <><XCircle size={14} className="text-red-500" /> Not Verified</>
-                      )}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-gray-500">Documents</p>
-                    <p className="font-medium">{selectedSeller.documents?.length || 0} uploaded</p>
-                  </div>
-                  <div>
-                    <p className="text-gray-500">Address</p>
-                    <p className="font-medium">{selectedSeller.businessCity ? 'Provided' : 'Missing'}</p>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Rejection Reason (required if rejecting)
-                  </label>
-                  <textarea
-                    value={rejectionReason}
-                    onChange={(e) => setRejectionReason(e.target.value)}
-                    placeholder="Explain why the application is being rejected..."
-                    rows={3}
-                    className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-primary-400 focus:ring-2 focus:ring-primary-400/20 outline-none resize-none"
-                  />
-                </div>
+              <div>
+                <p className="text-xs text-text-muted">Address</p>
+                <p className="text-sm font-medium text-text-primary">
+                  {selectedSeller.businessCity ? 'Provided' : 'Missing'}
+                </p>
               </div>
+            </div>
 
-              <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 flex justify-end gap-3">
-                <Button variant="outline" onClick={() => setReviewModalOpen(false)} disabled={reviewLoading}>
-                  Cancel
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => handleReview('REJECTED')}
-                  disabled={reviewLoading}
-                  className="text-red-600 border-red-200 hover:bg-red-50"
-                >
-                  {reviewLoading ? <Loader2 size={16} className="animate-spin" /> : <XCircle size={16} />}
-                  Reject
-                </Button>
-                <Button onClick={() => handleReview('APPROVED')} disabled={reviewLoading}>
-                  {reviewLoading ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle size={16} />}
-                  Approve
-                </Button>
-              </div>
-            </motion.div>
-          </motion.div>
+            <FormField label="Rejection Reason (required if rejecting)">
+              <FormTextarea
+                value={rejectionReason}
+                onChange={(e) => setRejectionReason(e.target.value)}
+                placeholder="Explain why the application is being rejected..."
+                rows={3}
+              />
+            </FormField>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => { setReviewOpen(false); setRejectionReason(''); }}
+                disabled={reviewLoading}
+              >
+                Cancel
+              </Button>
+              <button
+                type="button"
+                onClick={() => handleReview('REJECTED')}
+                disabled={reviewLoading}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-danger-200 bg-white px-3 py-1.5 text-sm font-medium text-danger-600 hover:bg-danger-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {reviewLoading ? <Loader2 size={14} className="animate-spin" /> : <XCircle size={14} />}
+                Reject
+              </button>
+              <Button size="sm" onClick={() => handleReview('APPROVED')} loading={reviewLoading}>
+                <CheckCircle size={14} />
+                Approve
+              </Button>
+            </div>
+          </div>
         )}
-      </AnimatePresence>
+      </ActionModal>
+    </>
+  );
+}
+
+/* ── Shared sub-components ── */
+
+function DetailSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <h3 className="text-xs font-semibold uppercase tracking-wider text-text-muted mb-3">
+        {title}
+      </h3>
+      {children}
+    </div>
+  );
+}
+
+function DetailGrid({ children }: { children: React.ReactNode }) {
+  return <div className="grid grid-cols-2 gap-x-6 gap-y-3">{children}</div>;
+}
+
+function DetailItem({
+  label,
+  value,
+  verified,
+}: {
+  label: string;
+  value?: string | null;
+  verified?: boolean;
+}) {
+  return (
+    <div className="min-w-0">
+      <p className="text-xs text-text-muted">{label}</p>
+      <div className="flex items-center gap-1.5">
+        <p className="text-sm font-medium text-text-primary truncate">{value || '—'}</p>
+        {verified && <CheckCircle size={14} className="text-success-500 shrink-0" />}
+      </div>
+    </div>
+  );
+}
+
+function DocCard({ label, url }: { label: string; url: string }) {
+  return (
+    <div className="rounded-xl border border-border overflow-hidden">
+      <div className="px-3 py-2 bg-surface-muted border-b border-border flex items-center justify-between">
+        <span className="text-xs font-medium text-text-primary">{label}</span>
+        <a
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-primary-600 hover:text-primary-700 transition-colors"
+        >
+          <ExternalLink size={13} />
+        </a>
+      </div>
+      <a href={url} target="_blank" rel="noopener noreferrer">
+        <img src={url} alt={label} className="w-full h-36 object-contain bg-white p-2" />
+      </a>
+    </div>
+  );
+}
+
+function ReviewStatusItem({
+  label,
+  verified,
+  fallback,
+}: {
+  label: string;
+  verified: boolean;
+  fallback?: string;
+}) {
+  return (
+    <div>
+      <p className="text-xs text-text-muted">{label}</p>
+      <p className="text-sm font-medium flex items-center gap-1 text-text-primary">
+        {verified ? (
+          <>
+            <CheckCircle size={14} className="text-success-500" /> Verified
+          </>
+        ) : fallback ? (
+          fallback
+        ) : (
+          <>
+            <XCircle size={14} className="text-danger-500" /> Not Verified
+          </>
+        )}
+      </p>
     </div>
   );
 }

@@ -16,6 +16,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiOperation, ApiConsumes, ApiBody } from '@nestjs/swagger';
 import { Request } from 'express';
 import { SellerOnboardingService } from './seller-onboarding.service';
+import { UploadService } from '../upload/upload.service';
 import {
   SendOtpDto,
   VerifyOtpDto,
@@ -36,7 +37,10 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 @ApiTags('Seller Onboarding')
 @Controller('seller-onboarding')
 export class SellerOnboardingController {
-  constructor(private readonly onboardingService: SellerOnboardingService) {}
+  constructor(
+    private readonly onboardingService: SellerOnboardingService,
+    private readonly uploadService: UploadService,
+  ) {}
 
   private getClientIp(req: Request): string {
     const forwarded = req.headers['x-forwarded-for'];
@@ -154,36 +158,36 @@ export class SellerOnboardingController {
 
   @Post('document/:sellerId')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Upload document for verification' })
+  @ApiOperation({ summary: 'Upload KYC document (Cloudinary)' })
   @ApiConsumes('multipart/form-data')
   @ApiBody({
     schema: {
       type: 'object',
       properties: {
         file: { type: 'string', format: 'binary' },
-        type: { type: 'string', enum: ['PAN_CARD', 'GST_CERTIFICATE', 'CANCELLED_CHEQUE', 'BUSINESS_LICENSE', 'ADDRESS_PROOF', 'IDENTITY_PROOF'] },
+        type: { type: 'string', enum: ['PAN_CARD', 'MASKED_AADHAAR', 'GST_CERTIFICATE', 'CANCELLED_CHEQUE', 'BUSINESS_LICENSE', 'ADDRESS_PROOF', 'IDENTITY_PROOF'] },
       },
     },
   })
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 5 * 1024 * 1024 } }))
   async uploadDocument(
     @Param('sellerId') sellerId: string,
     @UploadedFile() file: Express.Multer.File,
     @Body('type') type: string,
   ) {
-    // In production, upload to Cloudinary/S3 and get URL
-    // For now, we'll use a placeholder URL
-    const fileUrl = `/uploads/seller-docs/${sellerId}/${type}-${Date.now()}.${file.originalname.split('.').pop()}`;
-    
+    await this.onboardingService.ensureSellerExists(sellerId);
+
+    const { url } = await this.uploadService.uploadImage(file, `xelnova/seller-docs/${sellerId}`);
+
     const result = await this.onboardingService.uploadDocument(
       sellerId,
       type,
-      fileUrl,
+      url,
       file.originalname,
       file.size,
       file.mimetype,
     );
-    return successResponse(result, 'Document uploaded');
+    return successResponse({ ...result, fileUrl: url }, 'Document uploaded');
   }
 
   @Post('submit/:sellerId')
@@ -215,6 +219,13 @@ export class SellerOnboardingController {
       parseInt(limit || '20'),
     );
     return successResponse(result, 'Pending reviews retrieved');
+  }
+
+  @Get('admin/stats')
+  @Auth('ADMIN')
+  @ApiOperation({ summary: 'Get onboarding status counts (Admin only)' })
+  async getOnboardingStats() {
+    return successResponse(await this.onboardingService.getOnboardingStats(), 'Stats retrieved');
   }
 
   @Get('admin/sellers')

@@ -20,6 +20,24 @@ export class SellerDashboardService {
     return profile;
   }
 
+  /** Used to gate the seller panel when the user has SELLER role but no onboarding row yet. */
+  async getRegistrationStatus(userId: string) {
+    const profile = await this.prisma.sellerProfile.findUnique({
+      where: { userId },
+      select: { id: true, onboardingStatus: true, onboardingStep: true },
+    });
+
+    const completedStatuses = ['APPROVED', 'UNDER_REVIEW', 'DOCUMENTS_SUBMITTED'];
+    const onboardingComplete = !!profile && completedStatuses.includes(profile.onboardingStatus);
+
+    return {
+      hasSellerProfile: !!profile,
+      onboardingStatus: profile?.onboardingStatus ?? null,
+      onboardingStep: profile?.onboardingStep ?? null,
+      onboardingComplete,
+    };
+  }
+
   private slugify(text: string): string {
     return text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
   }
@@ -216,11 +234,12 @@ export class SellerDashboardService {
         take: limit,
         orderBy: { createdAt: 'desc' },
         include: {
-          user: { select: { name: true, email: true } },
+          user: { select: { name: true, email: true, phone: true } },
           items: {
             where: { productId: { in: productIds } },
             include: { product: { select: { name: true, images: true } } },
           },
+          shippingAddress: true,
         },
       }),
       this.prisma.order.count({ where }),
@@ -247,7 +266,7 @@ export class SellerDashboardService {
     return this.prisma.order.update({
       where: { id: orderId },
       data: { status: status as any },
-      include: { items: true, user: { select: { name: true, email: true } } },
+      include: { items: true, user: { select: { name: true, email: true, phone: true } }, shippingAddress: true },
     });
   }
 

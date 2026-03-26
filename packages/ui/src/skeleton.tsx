@@ -20,7 +20,7 @@ export function Skeleton({
   lines = 1,
 }: SkeletonProps) {
   const baseStyles =
-    "animate-shimmer bg-gradient-to-r from-dark-300 via-dark-400 to-dark-300 bg-[length:200%_100%] rounded";
+    "animate-pulse bg-gray-200 rounded";
 
   if (shape === "circle") {
     return (

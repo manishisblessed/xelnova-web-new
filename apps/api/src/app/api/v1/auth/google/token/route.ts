@@ -1,88 +1,32 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { OAuth2Client } from 'google-auth-library';
 
-const GOOGLE_CLIENT_ID = '435713810993-9c2c2j1nh7hcm374mruihfuf4807fuat.apps.googleusercontent.com';
-
-export type DashboardRole = 'admin' | 'seller' | 'customer';
-
-export interface DashboardUser {
-  id: string;
-  name: string;
-  email: string;
-  role: DashboardRole;
-  avatar?: string | null;
-}
-
-interface GoogleTokenBody {
-  idToken: string;
-  role?: string;
-}
+/** Proxies to Nest `POST /api/v1/auth/google/token` so the Next API app can be used as BFF (port 3001). */
+const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:4000';
 
 export async function POST(request: NextRequest) {
+  const body = await request.text();
   try {
-    const body: GoogleTokenBody = await request.json();
-    const { idToken, role = 'customer' } = body;
-
-    if (!idToken) {
-      return NextResponse.json(
-        { success: false, message: 'ID token is required' },
-        { status: 400 }
-      );
-    }
-
-    const client = new OAuth2Client(GOOGLE_CLIENT_ID);
-    
-    try {
-      const ticket = await client.verifyIdToken({
-        idToken,
-        audience: GOOGLE_CLIENT_ID,
-      });
-
-      const payload = ticket.getPayload();
-      if (!payload || !payload.email) {
-        return NextResponse.json(
-          { success: false, message: 'Invalid token payload' },
-          { status: 401 }
-        );
-      }
-
-      const userRole: DashboardRole = 
-        role === 'admin' ? 'admin' : 
-        role === 'seller' ? 'seller' : 
-        'customer';
-
-      const user: DashboardUser = {
-        id: `google-${payload.sub}`,
-        name: payload.name || payload.email.split('@')[0],
-        email: payload.email,
-        role: userRole,
-        avatar: payload.picture || null,
-      };
-
-      const accessToken = `mock-jwt-${user.id}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const refreshToken = `mock-refresh-${user.id}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-
-      return NextResponse.json({
-        success: true,
-        data: {
-          user,
-          accessToken,
-          refreshToken,
-          isNewUser: false,
-        },
-      });
-    } catch (verifyError) {
-      console.error('Google token verification failed:', verifyError);
-      return NextResponse.json(
-        { success: false, message: 'Invalid Google token' },
-        { status: 401 }
-      );
-    }
-  } catch (error) {
-    console.error('Google auth error:', error);
+    const res = await fetch(`${BACKEND_URL}/api/v1/auth/google/token`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': request.headers.get('content-type') || 'application/json',
+        'User-Agent': request.headers.get('user-agent') || '',
+      },
+      body: body || undefined,
+    });
+    const text = await res.text();
+    return new NextResponse(text, {
+      status: res.status,
+      headers: { 'Content-Type': res.headers.get('content-type') || 'application/json' },
+    });
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : 'Unknown error';
     return NextResponse.json(
-      { success: false, message: 'Invalid request body' },
-      { status: 400 }
+      {
+        success: false,
+        message: `Cannot reach auth API at ${BACKEND_URL}. Start the Nest backend (PORT 4000) or set BACKEND_URL. (${detail})`,
+      },
+      { status: 503, headers: { 'Content-Type': 'application/json' } },
     );
   }
 }

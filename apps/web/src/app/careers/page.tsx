@@ -140,7 +140,7 @@ export default function CareersPage() {
             </div>
             <div className="relative">
               <h2 className="text-2xl md:text-4xl font-extrabold text-white font-display mb-4">Don&apos;t See a Match?</h2>
-              <p className="text-white/50 mb-8 max-w-md mx-auto">Send us your resume and we&apos;ll keep you in mind for future openings.</p>
+              <p className="text-white/80 mb-8 max-w-md mx-auto">Send us your resume and we&apos;ll keep you in mind for future openings.</p>
               <Link href="/contact" className="inline-flex items-center gap-2 bg-white text-primary-700 px-8 py-3.5 rounded-xl font-semibold hover:bg-primary-50 transition-all shadow-lg">
                 Get in Touch <ArrowRight size={16} />
               </Link>

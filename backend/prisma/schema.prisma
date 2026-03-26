@@ -1,9 +1,11 @@
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
 }
 
 datasource db {
   provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 // ─── Enums ───
@@ -69,11 +71,18 @@ enum SellerOnboardingStatus {
 
 enum DocumentType {
   PAN_CARD
+  MASKED_AADHAAR
   GST_CERTIFICATE
   CANCELLED_CHEQUE
   BUSINESS_LICENSE
   ADDRESS_PROOF
   IDENTITY_PROOF
+}
+
+enum AuthProvider {
+  EMAIL
+  PHONE
+  GOOGLE
 }
 
 // ─── User & Auth ───
@@ -85,9 +94,10 @@ model User {
   phone         String?   @unique
   password      String
   avatar        String?
-  role          Role      @default(CUSTOMER)
-  emailVerified Boolean   @default(false)
-  phoneVerified Boolean   @default(false)
+  role          Role         @default(CUSTOMER)
+  authProvider  AuthProvider @default(EMAIL)
+  emailVerified Boolean      @default(false)
+  phoneVerified Boolean      @default(false)
   lastLoginAt   DateTime?
   lastLoginIp   String?
   lastLoginLocation Json?
@@ -158,8 +168,10 @@ model Address {
 
 model SellerProfile {
   id          String  @id @default(cuid())
-  userId      String  @unique
-  user        User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId      String? @unique
+  user        User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+  email       String? @unique
+  phone       String?
   storeName   String
   slug        String  @unique
   logo        String?
@@ -191,6 +203,7 @@ model SellerProfile {
   panVerified       Boolean @default(false)
   panVerifiedAt     DateTime?
   panDocumentUrl    String?
+  maskedAadhaarUrl  String?
   
   // Bank Details
   bankAccountName   String?
@@ -199,6 +212,7 @@ model SellerProfile {
   bankVerified      Boolean @default(false)
   bankVerifiedAt    DateTime?
   bankVerifiedData  Json?
+  bankVerifiedName  String?
   bankName          String?
   bankBranch        String?
   cancelledChequeUrl String?
@@ -672,6 +686,21 @@ model ApiRequestLog {
   @@map("api_request_logs")
 }
 
+// ─── Admin Role (custom roles for RBAC) ───
+
+model AdminRole {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  permissions String
+  isSystem    Boolean  @default(false)
+  users       Int      @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("admin_roles")
+}
+
 // ─── System Performance Log ───
 
 model PerformanceLog {
@@ -716,4 +745,14 @@ model VerificationLog {
   @@index([identifier])
   @@index([userId])
   @@map("verification_logs")
+}
+
+// ─── Site-wide admin settings (singleton row id = 1) ───
+
+model SiteSettings {
+  id        Int      @id @default(1)
+  payload   Json
+  updatedAt DateTime @updatedAt
+
+  @@map("site_settings")
 }

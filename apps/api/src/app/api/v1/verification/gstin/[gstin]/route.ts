@@ -1,5 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:4000';
+
+function mapBackendToFrontendShape(backendData: Record<string, unknown>) {
+  return {
+    gstin: backendData.gstin,
+    tradeName: backendData.tradeName ?? '',
+    legalName: backendData.legalName ?? '',
+    status: backendData.status ?? 'Active',
+    registrationDate: backendData.dateOfRegistration ?? '',
+    businessType: backendData.constitutionOfBusiness ?? '',
+    address: backendData.address ?? '',
+    stateCode: backendData.stateCode ?? '',
+  };
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ gstin: string }> }
@@ -15,8 +30,36 @@ export async function GET(
       );
     }
 
-    // Try external API first
-    const apiKey = process.env.GSTIN_API_KEY;
+    // Prefer NestJS backend — it has GSTIN_API_KEY in backend/.env (single source of truth)
+    try {
+      const backendUrl = `${BACKEND_URL.replace(/\/$/, '')}/api/v1/verification/gstin/${encodeURIComponent(gstinUpper)}`;
+      const res = await fetch(backendUrl, {
+        signal: AbortSignal.timeout(15000),
+        headers: { Accept: 'application/json' },
+      });
+
+      const body = await res.json().catch(() => ({}));
+
+      if (res.ok && body.success && body.data) {
+        return NextResponse.json({
+          success: true,
+          data: mapBackendToFrontendShape(body.data as Record<string, unknown>),
+        });
+      }
+
+      if (!res.ok) {
+        const msg =
+          (typeof body.message === 'string' && body.message) ||
+          (typeof body.error === 'string' && body.error) ||
+          'GSTIN verification failed';
+        return NextResponse.json({ success: false, message: msg }, { status: res.status });
+      }
+    } catch (e) {
+      console.warn('[GSTIN] Backend proxy failed, trying direct API:', e);
+    }
+
+    // Fallback: call gstincheck directly when GSTIN_API_KEY is set on this app (no backend)
+    const apiKey = process.env.GSTIN_API_KEY?.trim();
     if (apiKey) {
       try {
         const res = await fetch(
@@ -40,29 +83,27 @@ export async function GET(
               },
             });
           }
+          return NextResponse.json(
+            {
+              success: false,
+              message: data.message || 'GSTIN not found or invalid',
+            },
+            { status: 400 }
+          );
         }
       } catch {
-        // Fall through to mock
+        // External API unavailable
       }
     }
 
-    // Mock response for development
-    const stateCode = gstinUpper.substring(0, 2);
-    const stateName = getStateName(stateCode);
-
-    return NextResponse.json({
-      success: true,
-      data: {
-        gstin: gstinUpper,
-        tradeName: `Business ${gstinUpper.substring(2, 7)}`,
-        legalName: `${gstinUpper.substring(2, 7)} Enterprises Pvt Ltd`,
-        status: 'Active',
-        registrationDate: '01/01/2020',
-        businessType: 'Private Limited Company',
-        address: `123 Business Park, ${stateName}`,
-        stateCode,
+    return NextResponse.json(
+      {
+        success: false,
+        message:
+          'Unable to verify GSTIN. Start the NestJS backend (port 4000) or set GSTIN_API_KEY in apps/api/.env.local.',
       },
-    });
+      { status: 503 }
+    );
   } catch (error) {
     console.error('GSTIN verification error:', error);
     return NextResponse.json(
@@ -70,22 +111,6 @@ export async function GET(
       { status: 500 }
     );
   }
-}
-
-function getStateName(code: string): string {
-  const states: Record<string, string> = {
-    '01': 'Jammu & Kashmir', '02': 'Himachal Pradesh', '03': 'Punjab',
-    '04': 'Chandigarh', '05': 'Uttarakhand', '06': 'Haryana',
-    '07': 'Delhi', '08': 'Rajasthan', '09': 'Uttar Pradesh',
-    '10': 'Bihar', '11': 'Sikkim', '12': 'Arunachal Pradesh',
-    '13': 'Nagaland', '14': 'Manipur', '15': 'Mizoram',
-    '16': 'Tripura', '17': 'Meghalaya', '18': 'Assam',
-    '19': 'West Bengal', '20': 'Jharkhand', '21': 'Odisha',
-    '22': 'Chhattisgarh', '23': 'Madhya Pradesh', '24': 'Gujarat',
-    '27': 'Maharashtra', '29': 'Karnataka', '32': 'Kerala',
-    '33': 'Tamil Nadu', '36': 'Telangana', '37': 'Andhra Pradesh',
-  };
-  return states[code] || 'India';
 }
 
 export async function OPTIONS() {

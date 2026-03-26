@@ -13,16 +13,19 @@ export interface LogViewerProps {
 
 function statusBadge(status: number) {
   if (status >= 200 && status < 300)
-    return <Badge variant="success" className="bg-success-100 text-success-700 border-success-200">{status}</Badge>;
+    return <Badge variant="success">{status}</Badge>;
+  if (status >= 300 && status < 400)
+    return <Badge variant="info">{status}</Badge>;
   if (status >= 400 && status < 500)
-    return <Badge variant="warning" className="bg-accent-100 text-accent-700 border-accent-200">{status}</Badge>;
+    return <Badge variant="warning">{status}</Badge>;
   return <Badge variant="danger">{status}</Badge>;
 }
 
 function severityBadge(severity: string) {
-  if (severity === 'high') return <Badge variant="danger">{severity}</Badge>;
-  if (severity === 'medium') return <Badge variant="warning">{severity}</Badge>;
-  return <Badge variant="info">{severity}</Badge>;
+  const label = severity.charAt(0).toUpperCase() + severity.slice(1);
+  if (severity === 'high') return <Badge variant="danger">{label}</Badge>;
+  if (severity === 'medium') return <Badge variant="warning">{label}</Badge>;
+  return <Badge variant="info">{label}</Badge>;
 }
 
 export function LogViewer({ apiLogs, userActivity, systemMetrics, errorLogs, loading }: LogViewerProps) {

@@ -18,6 +18,32 @@ export interface IFSCResponse {
   SWIFT?: string;
 }
 
+export interface BankVerificationResponse {
+  status: 'Success' | 'Failure';
+  'Account Number'?: string;
+  'Ifsc Code'?: string;
+  nameAtBank?: string;
+  bankName?: string;
+  utr?: string;
+  city?: string;
+  branch?: string;
+  micr?: number;
+  message: string;
+}
+
+export interface BankVerificationResult {
+  verified: boolean;
+  accountNumber: string;
+  ifscCode: string;
+  nameAtBank: string;
+  bankName?: string;
+  branch?: string;
+  city?: string;
+  micr?: number;
+  utr?: string;
+  message: string;
+}
+
 export interface GSTINResponse {
   gstin: string;
   tradeName: string;
@@ -34,8 +60,11 @@ export interface GSTINResponse {
 
 @Injectable()
 export class VerificationService {
-  private readonly GSTIN_API_KEY = process.env.GSTIN_API_KEY || '8a8e34cd78c26d2d0a59cc9a51746065';
+  private readonly GSTIN_API_KEY = process.env.GSTIN_API_KEY || '';
   private readonly GSTIN_API_URL = 'https://sheet.gstincheck.co.in/check';
+  private readonly EKYCHUB_USERNAME = process.env.EKYCHUB_USERNAME || '';
+  private readonly EKYCHUB_TOKEN = process.env.EKYCHUB_TOKEN || '';
+  private readonly EKYCHUB_BASE_URL = 'https://connect.ekychub.in/v3/verification';
 
   constructor(private prisma: PrismaService) {}
 
@@ -68,12 +97,90 @@ export class VerificationService {
     }
   }
 
+  async verifyBankAccount(
+    accountNumber: string,
+    ifscCode: string,
+    userId?: string,
+  ): Promise<BankVerificationResult> {
+    const normalizedIfsc = ifscCode.toUpperCase().trim();
+    const normalizedAccount = accountNumber.trim();
+
+    if (!/^[0-9]{9,18}$/.test(normalizedAccount)) {
+      await this.logVerification('BANK_VERIFY', normalizedAccount, 'INVALID_FORMAT', null, userId, 'Invalid account number format');
+      throw new HttpException('Invalid bank account number format', HttpStatus.BAD_REQUEST);
+    }
+
+    if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(normalizedIfsc)) {
+      await this.logVerification('BANK_VERIFY', normalizedAccount, 'INVALID_FORMAT', null, userId, 'Invalid IFSC format');
+      throw new HttpException('Invalid IFSC code format', HttpStatus.BAD_REQUEST);
+    }
+
+    if (!this.EKYCHUB_USERNAME || !this.EKYCHUB_TOKEN) {
+      await this.logVerification('BANK_VERIFY', normalizedAccount, 'CONFIG_ERROR', null, userId, 'eKYC Hub credentials not configured');
+      throw new HttpException('Bank verification service not configured', HttpStatus.SERVICE_UNAVAILABLE);
+    }
+
+    const orderId = `XN_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+
+    try {
+      const url = new URL(`${this.EKYCHUB_BASE_URL}/bank_verification`);
+      url.searchParams.set('username', this.EKYCHUB_USERNAME);
+      url.searchParams.set('token', this.EKYCHUB_TOKEN);
+      url.searchParams.set('account_number', normalizedAccount);
+      url.searchParams.set('ifsc', normalizedIfsc);
+      url.searchParams.set('orderid', orderId);
+
+      const response = await fetch(url.toString());
+
+      if (!response.ok) {
+        await this.logVerification('BANK_VERIFY', normalizedAccount, 'API_ERROR', null, userId, `API returned ${response.status}`);
+        throw new HttpException('Bank verification service unavailable', HttpStatus.SERVICE_UNAVAILABLE);
+      }
+
+      const data: BankVerificationResponse = await response.json();
+
+      if (data.status === 'Success') {
+        const result: BankVerificationResult = {
+          verified: true,
+          accountNumber: data['Account Number'] || normalizedAccount,
+          ifscCode: data['Ifsc Code'] || normalizedIfsc,
+          nameAtBank: data.nameAtBank || '',
+          bankName: data.bankName,
+          branch: data.branch,
+          city: data.city,
+          micr: data.micr,
+          utr: data.utr,
+          message: data.message,
+        };
+
+        await this.logVerification('BANK_VERIFY', normalizedAccount, 'VERIFIED', { ...result, orderId }, userId);
+        return result;
+      }
+
+      await this.logVerification('BANK_VERIFY', normalizedAccount, 'FAILED', data, userId, data.message);
+      throw new HttpException(
+        data.message || 'Bank account verification failed',
+        HttpStatus.BAD_REQUEST,
+      );
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+
+      await this.logVerification('BANK_VERIFY', normalizedAccount, 'ERROR', null, userId, error.message);
+      throw new HttpException('Failed to verify bank account', HttpStatus.SERVICE_UNAVAILABLE);
+    }
+  }
+
   async verifyGSTIN(gstin: string, userId?: string): Promise<GSTINResponse> {
     const normalizedGstin = gstin.toUpperCase().trim();
     
     if (!/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/.test(normalizedGstin)) {
       await this.logVerification('GSTIN', normalizedGstin, 'INVALID_FORMAT', null, userId, 'Invalid GSTIN format');
       throw new HttpException('Invalid GSTIN format', HttpStatus.BAD_REQUEST);
+    }
+
+    if (!this.GSTIN_API_KEY) {
+      await this.logVerification('GSTIN', normalizedGstin, 'CONFIG_ERROR', null, userId, 'GSTIN_API_KEY not configured');
+      throw new HttpException('GSTIN verification service not configured', HttpStatus.SERVICE_UNAVAILABLE);
     }
 
     try {
@@ -87,8 +194,18 @@ export class VerificationService {
       const rawData = await response.json();
       
       if (!rawData.flag || rawData.flag === false) {
-        await this.logVerification('GSTIN', normalizedGstin, 'INVALID', rawData, userId, rawData.message || 'Invalid GSTIN');
-        throw new HttpException(rawData.message || 'Invalid GSTIN', HttpStatus.BAD_REQUEST);
+        const apiMsg = rawData.message || 'Invalid GSTIN';
+        const isServiceIssue = /credit|expire|limit|quota|balance|unauthorized/i.test(apiMsg);
+        await this.logVerification('GSTIN', normalizedGstin, isServiceIssue ? 'SERVICE_ERROR' : 'INVALID', rawData, userId, apiMsg);
+
+        if (isServiceIssue) {
+          console.error(`[GSTIN] API service error: ${apiMsg} — renew credits at gstincheck.co.in`);
+          throw new HttpException(
+            'GSTIN verification service is temporarily unavailable. Please try again later.',
+            HttpStatus.SERVICE_UNAVAILABLE,
+          );
+        }
+        throw new HttpException(apiMsg, HttpStatus.BAD_REQUEST);
       }
 
       const data: GSTINResponse = {
@@ -147,17 +264,23 @@ export class VerificationService {
     };
   }
 
-  async updateSellerBankVerification(sellerId: string, ifscCode: string, userId?: string) {
-    const bankData = await this.verifyIFSC(ifscCode, userId);
-    
+  async updateSellerBankVerification(
+    sellerId: string,
+    accountNumber: string,
+    ifscCode: string,
+    userId?: string,
+  ) {
+    const bankData = await this.verifyBankAccount(accountNumber, ifscCode, userId);
+
     await this.prisma.sellerProfile.update({
       where: { id: sellerId },
       data: {
         bankVerified: true,
         bankVerifiedAt: new Date(),
         bankVerifiedData: bankData as any,
-        bankName: bankData.BANK,
-        bankBranch: bankData.BRANCH,
+        bankVerifiedName: bankData.nameAtBank,
+        bankName: bankData.bankName || '',
+        bankBranch: bankData.branch || '',
       },
     });
 

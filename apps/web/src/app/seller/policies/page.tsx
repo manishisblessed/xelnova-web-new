@@ -32,7 +32,7 @@ export default function SellerPoliciesPage() {
               <FileText size={14} /> Seller Guidelines
             </span>
             <h1 className="text-4xl md:text-5xl font-extrabold text-white font-display mb-4">Seller Policies</h1>
-            <p className="text-lg text-white/50 max-w-xl mx-auto">Guidelines and policies for selling on Xelnova marketplace.</p>
+            <p className="text-lg text-white/80 max-w-xl mx-auto">Guidelines and policies for selling on Xelnova marketplace.</p>
           </motion.div>
         </div>
       </section>

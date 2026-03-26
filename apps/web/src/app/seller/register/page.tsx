@@ -34,7 +34,7 @@ export default function SellerRegisterPage() {
               <Store size={14} /> Seller Registration
             </span>
             <h1 className="text-3xl md:text-4xl font-extrabold text-white font-display mb-2">Create Your Seller Account</h1>
-            <p className="text-sm text-white/50">Join 50,000+ sellers and start growing your business</p>
+            <p className="text-sm text-white/80">Join 50,000+ sellers and start growing your business</p>
           </motion.div>
         </div>
       </section>

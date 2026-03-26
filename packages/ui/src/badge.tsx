@@ -7,18 +7,28 @@ type BadgeVariant = "default" | "success" | "warning" | "danger" | "info";
 
 export interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {
   variant?: BadgeVariant;
+  dot?: boolean;
 }
 
 const variantStyles: Record<BadgeVariant, string> = {
-  default: "bg-secondary-700 text-secondary-200",
-  success: "bg-accent-500/15 text-accent-400 border border-accent-500/20",
-  warning: "bg-primary-500/15 text-primary-400 border border-primary-500/20",
-  danger: "bg-danger-500/15 text-danger-400 border border-danger-500/20",
-  info: "bg-blue-500/15 text-blue-400 border border-blue-500/20",
+  default: "bg-gray-50 text-gray-600 border border-gray-200/80",
+  success: "bg-emerald-50 text-emerald-700 border border-emerald-200/80",
+  warning: "bg-amber-50 text-amber-700 border border-amber-200/80",
+  danger: "bg-red-50 text-red-700 border border-red-200/80",
+  info: "bg-blue-50 text-blue-700 border border-blue-200/80",
+};
+
+const dotStyles: Record<BadgeVariant, string> = {
+  default: "bg-gray-400",
+  success: "bg-emerald-500",
+  warning: "bg-amber-500",
+  danger: "bg-red-500",
+  info: "bg-blue-500",
 };
 
 export function Badge({
   variant = "default",
+  dot = true,
   className,
   children,
   ...props
@@ -26,12 +36,18 @@ export function Badge({
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium",
+        "inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-xs font-semibold tracking-wide",
         variantStyles[variant],
         className
       )}
       {...props}
     >
+      {dot && (
+        <span
+          className={cn("h-1.5 w-1.5 rounded-full shrink-0", dotStyles[variant])}
+          aria-hidden="true"
+        />
+      )}
       {children}
     </span>
   );

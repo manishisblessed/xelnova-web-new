@@ -2,12 +2,26 @@ import { api } from './client';
 import type { ApiResponse, AuthUser, Address, Product } from './types';
 
 export async function getProfile(): Promise<AuthUser> {
-  const { data } = await api.get<ApiResponse<AuthUser>>('/users/profile');
+  const { data, status } = await api.get<ApiResponse<AuthUser | null>>('/users/profile');
+  if (!data.success || data.data == null) {
+    const err = new Error(data.message || 'Failed to load profile') as Error & {
+      response?: { status: number; data?: unknown };
+    };
+    err.response = { status: status >= 400 ? status : 500, data };
+    throw err;
+  }
   return data.data;
 }
 
 export async function updateProfile(body: { name?: string; email?: string; phone?: string }): Promise<AuthUser> {
-  const { data } = await api.put<ApiResponse<AuthUser>>('/users/profile', body);
+  const { data, status } = await api.put<ApiResponse<AuthUser | null>>('/users/profile', body);
+  if (!data.success || data.data == null) {
+    const err = new Error(data.message || 'Failed to update profile') as Error & {
+      response?: { status: number; data?: unknown };
+    };
+    err.response = { status: status >= 400 ? status : 500, data };
+    throw err;
+  }
   return data.data;
 }
 

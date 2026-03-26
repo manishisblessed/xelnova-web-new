@@ -1,8 +1,12 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, Query } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, Query, Req } from '@nestjs/common';
+import { Request } from 'express';
+import { Role } from '@prisma/client';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { AdminService } from './admin.service';
 import { Auth } from '../../common/decorators/auth.decorator';
 import { successResponse, paginatedResponse } from '../../common/helpers/response.helper';
+import { getClientIp } from '../../common/helpers/client-ip';
 import {
   AdminProductQueryDto, AdminUpdateProductDto,
   AdminOrderQueryDto, AdminUpdateOrderDto,
@@ -14,7 +18,9 @@ import {
   CreateCouponDto, UpdateCouponDto,
   CreateCommissionDto, UpdateCommissionDto,
   AdminPayoutQueryDto, UpdatePayoutDto,
+  CreateRoleDto, UpdateRoleDto,
   CreatePageDto, UpdatePageDto,
+  AdminSiteSettingsDto,
 } from './dto/admin.dto';
 
 @ApiTags('Admin')
@@ -72,9 +78,38 @@ export class AdminController {
   }
 
   @Patch('sellers/:id')
-  @ApiOperation({ summary: 'Update seller (verify, commission)' })
-  async updateSeller(@Param('id') id: string, @Body() dto: AdminUpdateSellerDto) {
-    return successResponse(await this.service.updateSeller(id, dto), 'Seller updated');
+  @ApiOperation({ summary: 'Update seller (verify, commission, suspend)' })
+  async updateSeller(
+    @Param('id') id: string,
+    @Body() dto: AdminUpdateSellerDto,
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('role') adminRole: Role,
+    @Req() req: Request,
+  ) {
+    const audit = {
+      adminId,
+      adminRole,
+      ipAddress: getClientIp(req),
+      userAgent: req.get('user-agent') || '',
+    };
+    return successResponse(await this.service.updateSeller(id, dto, audit), 'Seller updated');
+  }
+
+  @Delete('sellers/:id')
+  @ApiOperation({ summary: 'Delete seller (no products, no buyer orders)' })
+  async deleteSeller(
+    @Param('id') id: string,
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('role') adminRole: Role,
+    @Req() req: Request,
+  ) {
+    const audit = {
+      adminId,
+      adminRole,
+      ipAddress: getClientIp(req),
+      userAgent: req.get('user-agent') || '',
+    };
+    return successResponse(await this.service.deleteSeller(id, adminId, audit), 'Seller deleted');
   }
 
   // ─── Customers ───
@@ -86,9 +121,38 @@ export class AdminController {
   }
 
   @Patch('customers/:id')
-  @ApiOperation({ summary: 'Update customer role/status' })
-  async updateCustomer(@Param('id') id: string, @Body() dto: AdminUpdateCustomerDto) {
-    return successResponse(await this.service.updateCustomer(id, dto), 'Customer updated');
+  @ApiOperation({ summary: 'Update customer role/status, suspend' })
+  async updateCustomer(
+    @Param('id') id: string,
+    @Body() dto: AdminUpdateCustomerDto,
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('role') adminRole: Role,
+    @Req() req: Request,
+  ) {
+    const audit = {
+      adminId,
+      adminRole,
+      ipAddress: getClientIp(req),
+      userAgent: req.get('user-agent') || '',
+    };
+    return successResponse(await this.service.updateCustomer(id, dto, audit), 'Customer updated');
+  }
+
+  @Delete('customers/:id')
+  @ApiOperation({ summary: 'Delete customer (no orders)' })
+  async deleteCustomer(
+    @Param('id') id: string,
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('role') adminRole: Role,
+    @Req() req: Request,
+  ) {
+    const audit = {
+      adminId,
+      adminRole,
+      ipAddress: getClientIp(req),
+      userAgent: req.get('user-agent') || '',
+    };
+    return successResponse(await this.service.deleteCustomer(id, adminId, audit), 'Customer deleted');
   }
 
   // ─── Categories ───
@@ -255,6 +319,31 @@ export class AdminController {
     return successResponse(await this.service.deletePage(id), 'Page deleted');
   }
 
+  // ─── Admin Roles ───
+  @Get('roles')
+  @ApiOperation({ summary: 'List admin roles' })
+  async getRoles() {
+    return successResponse(await this.service.getRoles(), 'Roles fetched');
+  }
+
+  @Post('roles')
+  @ApiOperation({ summary: 'Create admin role' })
+  async createRole(@Body() dto: CreateRoleDto) {
+    return successResponse(await this.service.createRole(dto), 'Role created');
+  }
+
+  @Patch('roles/:id')
+  @ApiOperation({ summary: 'Update admin role' })
+  async updateRole(@Param('id') id: string, @Body() dto: UpdateRoleDto) {
+    return successResponse(await this.service.updateRole(id, dto), 'Role updated');
+  }
+
+  @Delete('roles/:id')
+  @ApiOperation({ summary: 'Delete admin role' })
+  async deleteRole(@Param('id') id: string) {
+    return successResponse(await this.service.deleteRole(id), 'Role deleted');
+  }
+
   // ─── Revenue ───
   @Get('revenue')
   @ApiOperation({ summary: 'Revenue analytics' })
@@ -268,5 +357,29 @@ export class AdminController {
   async getActivityLogs(@Query() query: { page?: number; limit?: number; type?: string }) {
     const { items, total, page, limit } = await this.service.getActivityLogs(query);
     return paginatedResponse(items, total, page, limit, 'Activity logs fetched');
+  }
+
+  // ─── Site settings ───
+  @Get('settings')
+  @ApiOperation({ summary: 'Get site settings' })
+  async getSiteSettings() {
+    return successResponse(await this.service.getSiteSettings(), 'Settings fetched');
+  }
+
+  @Patch('settings')
+  @ApiOperation({ summary: 'Update site settings' })
+  async updateSiteSettings(
+    @Body() dto: AdminSiteSettingsDto,
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('role') adminRole: Role,
+    @Req() req: Request,
+  ) {
+    const audit = {
+      adminId,
+      adminRole,
+      ipAddress: getClientIp(req),
+      userAgent: req.get('user-agent') || '',
+    };
+    return successResponse(await this.service.updateSiteSettings(dto, audit), 'Settings updated');
   }
 }

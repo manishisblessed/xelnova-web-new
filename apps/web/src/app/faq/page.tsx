@@ -92,13 +92,13 @@ export default function FAQPage() {
             <h1 className="text-4xl md:text-6xl font-extrabold text-white font-display mb-4">Frequently Asked Questions</h1>
             <p className="text-lg text-white/60 max-w-xl mx-auto mb-8">Find quick answers to commonly asked questions.</p>
             <div className="max-w-lg mx-auto relative">
-              <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-white/30" />
+              <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-white/60" />
               <input
                 type="text"
                 placeholder="Search for answers..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full bg-white/[0.07] border border-white/10 rounded-xl py-3.5 pl-11 pr-4 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-white/30 focus:ring-1 focus:ring-white/20 transition-all"
+                className="w-full bg-white/[0.07] border border-white/10 rounded-xl py-3.5 pl-11 pr-4 text-sm text-white placeholder:text-white/60 focus:outline-none focus:border-white/50 focus:ring-1 focus:ring-white/30 transition-all"
               />
             </div>
           </motion.div>

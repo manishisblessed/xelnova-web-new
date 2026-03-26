@@ -1,13 +1,27 @@
 import { api } from './client';
 import type { ApiResponse, Order } from './types';
 
+function apiError(message: string, status?: number) {
+  const err = new Error(message) as Error & {
+    response?: { status: number; data?: unknown };
+  };
+  if (status != null) err.response = { status, data: { message } };
+  return err;
+}
+
 export async function getOrders(): Promise<Order[]> {
-  const { data } = await api.get<ApiResponse<Order[]>>('/orders');
+  const { data, status } = await api.get<ApiResponse<Order[] | null>>('/orders');
+  if (!data.success || data.data == null) {
+    throw apiError(data.message || 'Failed to load orders', status >= 400 ? status : 500);
+  }
   return data.data;
 }
 
 export async function getOrderByNumber(orderNumber: string): Promise<Order> {
-  const { data } = await api.get<ApiResponse<Order>>(`/orders/${orderNumber}`);
+  const { data, status } = await api.get<ApiResponse<Order | null>>(`/orders/${orderNumber}`);
+  if (status === 404 || !data.success || data.data == null) {
+    throw apiError(data.message || 'Order not found', 404);
+  }
   return data.data;
 }
 

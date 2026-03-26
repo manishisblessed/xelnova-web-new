@@ -2,6 +2,7 @@
 
 import { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { useSearchParams } from 'next/navigation';
 import { motion } from 'framer-motion';
 import {
@@ -19,9 +20,11 @@ import {
   Star,
   Loader2,
 } from 'lucide-react';
+import { authApi, setAccessToken } from '@xelnova/api';
 
-const GOOGLE_CLIENT_ID = '435713810993-9c2c2j1nh7hcm374mruihfuf4807fuat.apps.googleusercontent.com';
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api/v1';
+const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
+const COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
 
 const benefits = [
   { icon: ShoppingBag, text: 'Track your orders in real-time' },
@@ -55,7 +58,13 @@ function LoginPageContent() {
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [googleClicked, setGoogleClicked] = useState(false);
   const [error, setError] = useState('');
+  const [needsName, setNeedsName] = useState(false);
+  const [fullName, setFullName] = useState('');
+  const [regEmail, setRegEmail] = useState('');
+
+  const redirectTo = searchParams.get('redirect') || '/';
 
   useEffect(() => {
     const errorParam = searchParams.get('error');
@@ -65,6 +74,12 @@ function LoginPageContent() {
   }, [searchParams]);
 
   useEffect(() => {
+    const existingScript = document.querySelector('script[src="https://accounts.google.com/gsi/client"]');
+    if (existingScript) {
+      initializeGoogleSignIn();
+      return;
+    }
+
     const script = document.createElement('script');
     script.src = 'https://accounts.google.com/gsi/client';
     script.async = true;
@@ -73,7 +88,7 @@ function LoginPageContent() {
     document.body.appendChild(script);
 
     return () => {
-      document.body.removeChild(script);
+      // Don't remove — React strict mode double-mounts in dev
     };
   }, []);
 
@@ -87,19 +102,21 @@ function LoginPageContent() {
 
       const buttonDiv = document.getElementById('google-signin-button');
       if (buttonDiv) {
+        buttonDiv.innerHTML = '';
         window.google.accounts.id.renderButton(buttonDiv, {
           type: 'standard',
           theme: 'outline',
           size: 'large',
           text: 'continue_with',
           shape: 'rectangular',
-          width: '100%',
+          width: 350,
         });
       }
     }
   };
 
   const handleGoogleCallback = async (response: { credential: string }) => {
+    setGoogleClicked(false);
     setGoogleLoading(true);
     setError('');
     
@@ -113,16 +130,134 @@ function LoginPageContent() {
       const data = await res.json();
 
       if (res.ok && data.success) {
+        const { setAccessToken } = await import('@xelnova/api');
+        setAccessToken(data.data.accessToken);
+        localStorage.setItem('xelnova-refresh-token', data.data.refreshToken);
+        localStorage.setItem('xelnova-user', JSON.stringify(data.data.user));
+        localStorage.setItem('xelnova-auth-provider', 'google');
         document.cookie = `xelnova-token=${data.data.accessToken}; path=/; max-age=${60 * 60 * 24 * 7}`;
         document.cookie = `xelnova-refresh-token=${data.data.refreshToken}; path=/; max-age=${60 * 60 * 24 * 7}`;
-        window.location.href = '/';
+        window.location.href = redirectTo;
       } else {
-        setError(data.message || 'Google sign-in failed');
+        console.error('Google sign-in API error:', res.status, data);
+        setError(data.message || `Google sign-in failed (${res.status})`);
       }
     } catch (err) {
-      setError('Failed to sign in with Google');
+      console.error('Google sign-in network error:', err);
+      setError(err instanceof Error ? err.message : 'Failed to sign in with Google');
     } finally {
       setGoogleLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const handleBlur = () => {
+      const googleBtn = document.getElementById('google-signin-button');
+      if (googleBtn && document.activeElement?.tagName === 'IFRAME' && googleBtn.contains(document.activeElement)) {
+        setGoogleClicked(true);
+      }
+    };
+
+    const handleFocus = () => {
+      setTimeout(() => {
+        if (googleClicked && !googleLoading) {
+          setGoogleClicked(false);
+        }
+      }, 3000);
+    };
+
+    window.addEventListener('blur', handleBlur);
+    window.addEventListener('focus', handleFocus);
+    return () => {
+      window.removeEventListener('blur', handleBlur);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, [googleClicked, googleLoading]);
+
+  const handleEmailSignIn = async () => {
+    if (!email || !password) return;
+    setLoading(true);
+    setError('');
+    try {
+      const result = await authApi.login(email, password);
+      localStorage.setItem('xelnova-auth-provider', 'email');
+      document.cookie = `xelnova-token=${result.accessToken}; path=/; max-age=${COOKIE_MAX_AGE}`;
+      document.cookie = `xelnova-refresh-token=${result.refreshToken}; path=/; max-age=${COOKIE_MAX_AGE}`;
+      window.location.href = redirectTo;
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } }; message?: string };
+      setError(e.response?.data?.message ?? e.message ?? 'Invalid email or password');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSendOtp = async () => {
+    if (phone.length !== 10) return;
+    setLoading(true);
+    setError('');
+    try {
+      await authApi.sendOtp(`+91${phone}`);
+      setOtpSent(true);
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } }; message?: string };
+      setError(e.response?.data?.message ?? e.message ?? 'Failed to send OTP');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerifyOtp = async () => {
+    const otpString = otp.join('');
+    if (otpString.length !== 6) return;
+    setLoading(true);
+    setError('');
+    try {
+      const result = await authApi.verifyOtp(`+91${phone}`, otpString);
+      if (result.isNewUser) {
+        setNeedsName(true);
+      } else {
+        localStorage.setItem('xelnova-auth-provider', 'phone');
+        document.cookie = `xelnova-token=${result.accessToken}; path=/; max-age=${COOKIE_MAX_AGE}`;
+        document.cookie = `xelnova-refresh-token=${result.refreshToken}; path=/; max-age=${COOKIE_MAX_AGE}`;
+        window.location.href = redirectTo;
+      }
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } }; message?: string };
+      setError(e.response?.data?.message ?? e.message ?? 'Invalid OTP');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const isValidEmail = (val: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val);
+
+  const handleCompleteRegistration = async () => {
+    const trimmedName = fullName.trim();
+    const trimmedEmail = regEmail.trim().toLowerCase();
+
+    if (!trimmedName || trimmedName.length < 2) {
+      setError('Please enter your full name (at least 2 characters)');
+      return;
+    }
+    if (!trimmedEmail || !isValidEmail(trimmedEmail)) {
+      setError('Please enter a valid email address');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+    try {
+      const result = await authApi.completePhoneRegistration(`+91${phone}`, trimmedName, trimmedEmail);
+      localStorage.setItem('xelnova-auth-provider', 'phone');
+      document.cookie = `xelnova-token=${result.accessToken}; path=/; max-age=${COOKIE_MAX_AGE}`;
+      document.cookie = `xelnova-refresh-token=${result.refreshToken}; path=/; max-age=${COOKIE_MAX_AGE}`;
+      window.location.href = redirectTo;
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } }; message?: string };
+      setError(e.response?.data?.message ?? e.message ?? 'Registration failed');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -145,7 +280,23 @@ function LoginPageContent() {
   };
 
   return (
-    <div className="min-h-screen flex">
+    <div className="min-h-screen flex relative">
+      {/* Full-page loading overlay for Google sign-in */}
+      {googleLoading && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-white/80 backdrop-blur-sm"
+        >
+          <div className="flex flex-col items-center gap-4 p-8 rounded-2xl bg-white shadow-2xl border border-gray-100">
+            <Image src="/xelnova-icon-dark.png" alt="Xelnova" width={64} height={64} className="w-16 h-16" />
+            <Loader2 size={32} className="animate-spin text-violet-600" />
+            <p className="text-lg font-semibold text-gray-900">Signing you in...</p>
+            <p className="text-sm text-gray-500">Please wait while we log you in with Google</p>
+          </div>
+        </motion.div>
+      )}
+
       {/* Left Panel - Branding */}
       <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-violet-600 via-purple-600 to-indigo-700 relative overflow-hidden">
         {/* Animated Background */}
@@ -162,11 +313,8 @@ function LoginPageContent() {
             transition={{ duration: 0.6 }}
           >
             {/* Logo */}
-            <Link href="/" className="flex items-center gap-3 mb-12">
-              <div className="w-12 h-12 rounded-2xl bg-white/20 backdrop-blur-sm flex items-center justify-center">
-                <span className="text-white font-bold text-2xl">X</span>
-              </div>
-              <span className="text-3xl font-bold text-white font-display">Xelnova</span>
+            <Link href="/" className="inline-block mb-12">
+              <Image src="/xelnova-logo-white.png" alt="Xelnova" width={280} height={80} className="h-12 w-auto" priority />
             </Link>
 
             <h1 className="text-4xl xl:text-5xl font-bold text-white font-display leading-tight mb-6">
@@ -220,52 +368,107 @@ function LoginPageContent() {
           className="w-full max-w-md"
         >
           {/* Mobile Logo */}
-          <Link href="/" className="lg:hidden flex items-center justify-center gap-3 mb-8">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center">
-              <span className="text-white font-bold text-2xl">X</span>
-            </div>
-            <span className="text-2xl font-bold text-gray-900 font-display">Xelnova</span>
+          <Link href="/" className="lg:hidden flex justify-center mb-8">
+            <Image src="/xelnova-logo-dark.png" alt="Xelnova" width={280} height={80} className="h-10 w-auto" />
           </Link>
 
           <div className="bg-white rounded-3xl shadow-xl border border-gray-100 p-8">
             <div className="text-center mb-8">
-              <h2 className="text-2xl font-bold text-gray-900 font-display">Welcome back</h2>
-              <p className="text-gray-500 mt-2">Sign in to continue shopping</p>
+              <h2 className="text-2xl font-bold text-gray-900 font-display">
+                {needsName ? 'Create your account' : 'Welcome back'}
+              </h2>
+              <p className="text-gray-500 mt-2">
+                {needsName ? 'Fill in your details to get started' : 'Sign in to continue shopping'}
+              </p>
             </div>
 
             {/* Login Mode Toggle */}
-            <div className="flex rounded-xl bg-gray-100 p-1 mb-6">
-              <button
-                onClick={() => { setMode('phone'); setOtpSent(false); }}
-                className={`flex-1 flex items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-medium transition-all ${
-                  mode === 'phone' 
-                    ? 'bg-white text-gray-900 shadow-sm' 
-                    : 'text-gray-600 hover:text-gray-900'
-                }`}
-              >
-                <Smartphone size={16} /> Phone
-              </button>
-              <button
-                onClick={() => { setMode('email'); setOtpSent(false); }}
-                className={`flex-1 flex items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-medium transition-all ${
-                  mode === 'email' 
-                    ? 'bg-white text-gray-900 shadow-sm' 
-                    : 'text-gray-600 hover:text-gray-900'
-                }`}
-              >
-                <Mail size={16} /> Email
-              </button>
-            </div>
+            {!needsName && (
+              <div className="flex rounded-xl bg-gray-100 p-1 mb-6">
+                <button
+                  onClick={() => { setMode('phone'); setOtpSent(false); }}
+                  className={`flex-1 flex items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-medium transition-all ${
+                    mode === 'phone' 
+                      ? 'bg-white text-gray-900 shadow-sm' 
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  <Smartphone size={16} /> Phone
+                </button>
+                <button
+                  onClick={() => { setMode('email'); setOtpSent(false); }}
+                  className={`flex-1 flex items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-medium transition-all ${
+                    mode === 'email' 
+                      ? 'bg-white text-gray-900 shadow-sm' 
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  <Mail size={16} /> Email
+                </button>
+              </div>
+            )}
 
             {mode === 'phone' ? (
-              !otpSent ? (
+              needsName ? (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="space-y-5"
+                >
+                  <div className="text-center">
+                    <div className="mx-auto w-14 h-14 rounded-full bg-violet-100 flex items-center justify-center mb-3">
+                      <Shield size={24} className="text-violet-600" />
+                    </div>
+                    <p className="text-sm text-gray-600">
+                      Phone <span className="font-medium text-gray-800">+91 {phone}</span> verified! Complete your profile to continue.
+                    </p>
+                  </div>
+                  <div>
+                    <label htmlFor="reg-name" className="block text-sm font-medium text-gray-700 mb-2">Full Name</label>
+                    <input
+                      id="reg-name"
+                      type="text"
+                      autoFocus
+                      value={fullName}
+                      onChange={(e) => setFullName(e.target.value)}
+                      placeholder="e.g. Rahul Sharma"
+                      className="w-full px-4 py-3.5 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 outline-none transition-all text-gray-900 placeholder:text-gray-400"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="reg-email" className="block text-sm font-medium text-gray-700 mb-2">Email Address</label>
+                    <div className="relative">
+                      <Mail size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
+                      <input
+                        id="reg-email"
+                        type="email"
+                        value={regEmail}
+                        onChange={(e) => setRegEmail(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && fullName.trim() && regEmail.trim() && handleCompleteRegistration()}
+                        placeholder="you@example.com"
+                        className="w-full pl-11 pr-4 py-3.5 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 outline-none transition-all text-gray-900 placeholder:text-gray-400"
+                      />
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleCompleteRegistration}
+                    disabled={fullName.trim().length < 2 || !isValidEmail(regEmail.trim()) || loading}
+                    className="w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-500 to-purple-600 py-3.5 text-sm font-semibold text-white hover:from-violet-600 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-violet-500/25"
+                  >
+                    {loading ? <Loader2 size={16} className="animate-spin" /> : <>Create Account & Sign In <ArrowRight size={16} /></>}
+                  </button>
+                </motion.div>
+              ) : !otpSent ? (
                 <div className="space-y-5">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Phone Number</label>
+                    <label htmlFor="login-phone" className="block text-sm font-medium text-gray-700 mb-2">Phone Number</label>
                     <div className="flex items-center rounded-xl border border-gray-200 bg-gray-50 overflow-hidden focus-within:border-violet-500 focus-within:ring-2 focus-within:ring-violet-500/20 transition-all">
                       <span className="px-4 py-3.5 text-sm text-gray-600 border-r border-gray-200 bg-gray-100">+91</span>
                       <input
+                        id="login-phone"
+                        name="phone"
                         type="tel"
+                        autoComplete="tel"
                         value={phone}
                         onChange={(e) => setPhone(e.target.value.replace(/\D/g, ''))}
                         placeholder="Enter your phone number"
@@ -275,11 +478,11 @@ function LoginPageContent() {
                     </div>
                   </div>
                   <button
-                    onClick={() => setOtpSent(true)}
-                    disabled={phone.length !== 10}
+                    onClick={handleSendOtp}
+                    disabled={phone.length !== 10 || loading}
                     className="w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-500 to-purple-600 py-3.5 text-sm font-semibold text-white hover:from-violet-600 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-violet-500/25"
                   >
-                    Send OTP <ArrowRight size={16} />
+                    {loading ? <Loader2 size={16} className="animate-spin" /> : <>Send OTP <ArrowRight size={16} /></>}
                   </button>
                 </div>
               ) : (
@@ -305,10 +508,11 @@ function LoginPageContent() {
                     </div>
                   </div>
                   <button
-                    disabled={otp.some(d => !d)}
+                    onClick={handleVerifyOtp}
+                    disabled={otp.some(d => !d) || loading}
                     className="w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-500 to-purple-600 py-3.5 text-sm font-semibold text-white hover:from-violet-600 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-violet-500/25"
                   >
-                    Verify & Sign In <ArrowRight size={16} />
+                    {loading ? <Loader2 size={16} className="animate-spin" /> : <>Verify & Sign In <ArrowRight size={16} /></>}
                   </button>
                   <div className="flex items-center justify-center gap-4 text-sm">
                     <button onClick={() => setOtpSent(false)} className="text-violet-600 hover:text-violet-700 font-medium">
@@ -324,26 +528,34 @@ function LoginPageContent() {
             ) : (
               <div className="space-y-5">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Email Address</label>
+                  <label htmlFor="login-email" className="block text-sm font-medium text-gray-700 mb-2">Email Address</label>
                   <div className="relative">
                     <Mail size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
                     <input
+                      id="login-email"
+                      name="email"
                       type="email"
+                      autoComplete="email"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && email && password && handleEmailSignIn()}
                       placeholder="you@example.com"
                       className="w-full pl-11 pr-4 py-3.5 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 outline-none transition-all text-gray-900 placeholder:text-gray-400"
                     />
                   </div>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Password</label>
+                  <label htmlFor="login-password" className="block text-sm font-medium text-gray-700 mb-2">Password</label>
                   <div className="relative">
                     <Lock size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
                     <input
+                      id="login-password"
+                      name="password"
                       type={showPassword ? 'text' : 'password'}
+                      autoComplete="current-password"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && email && password && handleEmailSignIn()}
                       placeholder="Enter your password"
                       className="w-full pl-11 pr-12 py-3.5 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 outline-none transition-all text-gray-900 placeholder:text-gray-400"
                     />
@@ -357,8 +569,10 @@ function LoginPageContent() {
                   </div>
                 </div>
                 <div className="flex items-center justify-between">
-                  <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+                  <label htmlFor="login-remember" className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
                     <input
+                      id="login-remember"
+                      name="remember"
                       type="checkbox"
                       className="w-4 h-4 rounded border-gray-300 text-violet-500 focus:ring-violet-500"
                     />
@@ -369,10 +583,11 @@ function LoginPageContent() {
                   </Link>
                 </div>
                 <button
-                  disabled={!email || !password}
+                  onClick={handleEmailSignIn}
+                  disabled={!email || !password || loading}
                   className="w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-500 to-purple-600 py-3.5 text-sm font-semibold text-white hover:from-violet-600 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-violet-500/25"
                 >
-                  Sign In <ArrowRight size={16} />
+                  {loading ? <Loader2 size={16} className="animate-spin" /> : <>Sign In <ArrowRight size={16} /></>}
                 </button>
               </div>
             )}
@@ -387,48 +602,55 @@ function LoginPageContent() {
               </motion.div>
             )}
 
-            {/* Divider */}
-            <div className="relative my-6">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-gray-200"></div>
-              </div>
-              <div className="relative flex justify-center text-xs">
-                <span className="bg-white px-3 text-gray-500">or continue with</span>
-              </div>
-            </div>
-
-            {/* Google Sign-In */}
-            <div className="space-y-3">
-              {googleLoading ? (
-                <div className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl border border-gray-200 bg-gray-50">
-                  <Loader2 size={20} className="animate-spin text-gray-500" />
-                  <span className="text-sm text-gray-500">Signing in with Google...</span>
+            {!needsName && (
+              <>
+                {/* Divider */}
+                <div className="relative my-6">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-gray-200"></div>
+                  </div>
+                  <div className="relative flex justify-center text-xs">
+                    <span className="bg-white px-3 text-gray-500">or continue with</span>
+                  </div>
                 </div>
-              ) : (
-                <div id="google-signin-button" className="flex justify-center" />
-              )}
-            </div>
 
-            <p className="mt-6 text-center text-sm text-gray-600">
-              New to Xelnova?{' '}
-              <Link href="/register" className="text-violet-600 hover:text-violet-700 font-semibold">
-                Create an account
-              </Link>
-            </p>
+                {/* Google Sign-In */}
+                <div className="space-y-3">
+                  {googleLoading ? (
+                    <div className="flex items-center justify-center gap-3 px-4 py-3.5 rounded-xl border border-violet-200 bg-violet-50">
+                      <Loader2 size={20} className="animate-spin text-violet-600" />
+                      <span className="text-sm font-medium text-violet-700">Signing you in with Google...</span>
+                    </div>
+                  ) : (
+                    <div className="relative">
+                      <div
+                        id="google-signin-button"
+                        className="flex justify-center"
+                      />
+                      {googleClicked && (
+                        <motion.div
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          className="mt-3 flex items-center justify-center gap-2 text-sm text-gray-500"
+                        >
+                          <Loader2 size={16} className="animate-spin" />
+                          <span>Waiting for Google sign-in...</span>
+                        </motion.div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <p className="mt-6 text-center text-sm text-gray-600">
+                  New to Xelnova?{' '}
+                  <Link href="/register" className="text-violet-600 hover:text-violet-700 font-semibold">
+                    Create an account
+                  </Link>
+                </p>
+              </>
+            )}
           </div>
 
-          {/* Staff Links */}
-          <p className="mt-6 text-center text-xs text-gray-500">
-            Staff?{' '}
-            <a href="http://localhost:3002/login" target="_blank" rel="noopener noreferrer" className="text-violet-600 hover:underline">
-              Admin
-            </a>
-            {' or '}
-            <a href="http://localhost:3003/login" target="_blank" rel="noopener noreferrer" className="text-violet-600 hover:underline">
-              Seller
-            </a>
-            {' dashboard'}
-          </p>
         </motion.div>
       </div>
     </div>

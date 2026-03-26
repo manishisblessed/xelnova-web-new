@@ -6,11 +6,20 @@ export class CategoriesService {
   constructor(private readonly prisma: PrismaService) {}
 
   async findAll() {
-    return this.prisma.category.findMany({
+    const categories = await this.prisma.category.findMany({
       where: { parentId: null },
-      include: { children: true },
+      include: {
+        children: true,
+        _count: { select: { products: { where: { isActive: true } } } },
+      },
       orderBy: { name: 'asc' },
     });
+
+    return categories.map((cat) => ({
+      ...cat,
+      productCount: cat._count.products,
+      _count: undefined,
+    }));
   }
 
   async findBySlug(slug: string) {

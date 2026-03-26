@@ -1,5 +1,5 @@
 import { Controller, Get, Param, Query } from '@nestjs/common';
-import { ApiTags, ApiOperation } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { ProductsService } from './products.service';
 import { ProductQueryDto } from './dto/product.dto';
 import {
@@ -24,6 +24,24 @@ export class ProductsController {
       page,
       limit,
       'Products fetched successfully',
+    );
+  }
+
+  @Get('stats')
+  @ApiOperation({ summary: 'Get marketplace stats (product/seller/customer counts)' })
+  async getStats() {
+    return successResponse(
+      await this.productsService.getStats(),
+      'Stats fetched successfully',
+    );
+  }
+
+  @Get('brands')
+  @ApiOperation({ summary: 'Get active brands' })
+  async getBrands() {
+    return successResponse(
+      await this.productsService.getBrands(),
+      'Brands fetched successfully',
     );
   }
 
@@ -56,10 +74,20 @@ export class ProductsController {
 
   @Get('banners')
   @ApiOperation({ summary: 'Get promotional banners' })
-  async getBanners() {
+  @ApiQuery({ name: 'position', required: false, description: 'Filter by position (hero, promo, side)' })
+  async getBanners(@Query('position') position?: string) {
+    const data = position
+      ? await this.productsService.getBannersByPosition(position)
+      : await this.productsService.getBanners();
+    return successResponse(data, 'Banners fetched successfully');
+  }
+
+  @Get('reviews/top')
+  @ApiOperation({ summary: 'Get top-rated reviews for testimonials' })
+  async getTopReviews() {
     return successResponse(
-      await this.productsService.getBanners(),
-      'Banners fetched successfully',
+      await this.productsService.getTopReviews(),
+      'Top reviews fetched successfully',
     );
   }
 

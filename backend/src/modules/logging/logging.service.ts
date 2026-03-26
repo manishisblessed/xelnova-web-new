@@ -90,6 +90,34 @@ export class LoggingService {
     return { ip };
   }
 
+  /** Audit line for admin-panel actions (shown on Performance → Recent Activity). */
+  async logAdminAudit(params: {
+    adminId: string;
+    adminRole: Role;
+    action: string;
+    message: string;
+    ipAddress: string;
+    userAgent: string;
+    meta?: Record<string, unknown>;
+    endpoint?: string;
+    method?: string;
+  }) {
+    const location = await this.getLocationFromIP(params.ipAddress);
+    return this.logActivity({
+      type: 'ADMIN',
+      action: params.action,
+      message: params.message,
+      userId: params.adminId,
+      userRole: params.adminRole,
+      ipAddress: params.ipAddress,
+      userAgent: params.userAgent,
+      location,
+      meta: params.meta,
+      endpoint: params.endpoint,
+      method: params.method,
+    });
+  }
+
   async logActivity(data: ActivityLogData) {
     try {
       return await this.prisma.activityLog.create({
@@ -499,7 +527,7 @@ export class LoggingService {
       this.prisma.activityLog.findMany({
         where: { createdAt: { gte: startDate } },
         orderBy: { createdAt: 'desc' },
-        take: 10,
+        take: 50,
         include: { user: { select: { id: true, name: true, email: true, role: true } } },
       }),
       this.prisma.apiRequestLog.groupBy({

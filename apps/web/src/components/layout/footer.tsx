@@ -4,19 +4,9 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { motion } from 'framer-motion';
 import { ArrowUp, Mail, Phone, MapPin, Send, Facebook, Youtube, Instagram, Smartphone, ShieldCheck } from 'lucide-react';
+import { useCategories } from '@/lib/api';
 
-const footerSections = [
-  {
-    title: 'Shop',
-    links: [
-      { name: 'Electronics', href: '/products?category=electronics' },
-      { name: 'Fashion', href: '/products?category=fashion' },
-      { name: 'Home & Kitchen', href: '/products?category=home-kitchen' },
-      { name: 'Beauty', href: '/products?category=beauty' },
-      { name: 'Sports', href: '/products?category=sports' },
-      { name: 'Books', href: '/products?category=books' },
-    ],
-  },
+const staticSections = [
   {
     title: 'Sell on Xelnova',
     links: [
@@ -67,6 +57,18 @@ const itemVariants = {
 };
 
 export function Footer() {
+  const { data: categories } = useCategories();
+
+  const shopSection = {
+    title: 'Shop',
+    links: (categories || []).slice(0, 8).map((cat) => ({
+      name: cat.name,
+      href: `/products?category=${cat.slug}`,
+    })),
+  };
+
+  const footerSections = [shopSection, ...staticSections];
+
   return (
     <footer className="bg-surface-dark text-white/80">
       {/* Back to top */}
@@ -84,13 +86,13 @@ export function Footer() {
           <div className="flex flex-col md:flex-row items-center justify-between gap-6">
             <div>
               <h3 className="text-xl font-bold text-white mb-1 font-display">Stay in the loop</h3>
-              <p className="text-sm text-white/40">Subscribe for exclusive offers, new arrivals & insider-only discounts.</p>
+              <p className="text-sm text-white/70">Subscribe for exclusive offers, new arrivals & insider-only discounts.</p>
             </div>
             <div className="flex w-full md:w-auto gap-2">
               <input
                 type="email"
                 placeholder="Enter your email"
-                className="flex-1 md:w-80 bg-white/[0.07] border border-white/10 rounded-xl py-3 pl-4 pr-4 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30 transition-all"
+                className="flex-1 md:w-80 bg-white/[0.07] border border-white/10 rounded-xl py-3 pl-4 pr-4 text-sm text-white placeholder:text-white/60 focus:outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30 transition-all"
               />
               <button className="inline-flex items-center gap-2 bg-primary-600 text-white px-6 py-3 rounded-xl font-semibold text-sm hover:bg-primary-500 transition-all shadow-lg shadow-primary-600/20 active:scale-[0.98]">
                 <Send className="w-4 h-4" />
@@ -113,21 +115,21 @@ export function Footer() {
           {/* Brand Column */}
           <motion.div variants={itemVariants} className="col-span-2 mb-4 lg:mb-0">
             <Link href="/" className="inline-block mb-5">
-              <Image src="/xelnova-logo.png" alt="Xelnova" width={140} height={40} className="h-9 w-auto brightness-0 invert" />
+              <Image src="/xelnova-logo-white.png" alt="Xelnova" width={280} height={80} className="h-10 w-auto" />
             </Link>
-            <p className="text-sm text-white/40 leading-relaxed mb-5">
+            <p className="text-sm text-white/70 leading-relaxed mb-5">
               India&apos;s premium marketplace for quality products. Discover authentic brands, unbeatable deals, and fast delivery.
             </p>
             <div className="space-y-2.5 mb-6">
-              <div className="flex items-center gap-2 text-xs text-white/40">
+              <div className="flex items-center gap-2 text-xs text-white/70">
                 <Mail size={13} className="text-primary-400" />
                 support@xelnova.in
               </div>
-              <div className="flex items-center gap-2 text-xs text-white/40">
+              <div className="flex items-center gap-2 text-xs text-white/70">
                 <Phone size={13} className="text-primary-400" />
                 1800-123-XELNOVA
               </div>
-              <div className="flex items-center gap-2 text-xs text-white/40">
+              <div className="flex items-center gap-2 text-xs text-white/70">
                 <MapPin size={13} className="text-primary-400" />
                 Mumbai, India
               </div>
@@ -140,7 +142,7 @@ export function Footer() {
               </div>
               <div>
                 <p className="text-xs font-semibold text-white/70">Download the App</p>
-                <p className="text-[10px] text-white/30">Get ₹200 off your first order</p>
+                <p className="text-[10px] text-white/60">Get ₹200 off your first order</p>
               </div>
             </div>
 
@@ -150,7 +152,7 @@ export function Footer() {
                   key={social.label}
                   href={social.href}
                   aria-label={social.label}
-                  className="w-9 h-9 rounded-full bg-white/[0.05] flex items-center justify-center text-white/30 hover:bg-primary-600 hover:text-white transition-all duration-200"
+                  className="w-9 h-9 rounded-full bg-white/[0.05] flex items-center justify-center text-white/70 hover:bg-primary-600 hover:text-white transition-all duration-200"
                 >
                   <social.icon className="w-4 h-4" />
                 </a>
@@ -165,7 +167,7 @@ export function Footer() {
               <ul className="space-y-2.5">
                 {section.links.map((link) => (
                   <li key={link.name}>
-                    <Link href={link.href} className="text-sm text-white/40 hover:text-primary-400 transition-colors">
+                    <Link href={link.href} className="text-sm text-white/70 hover:text-primary-300 transition-colors">
                       {link.name}
                     </Link>
                   </li>
@@ -180,7 +182,7 @@ export function Footer() {
       <div className="border-t border-white/[0.06]">
         <div className="mx-auto max-w-[1440px] px-6 py-6 lg:px-8">
           <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-            <div className="flex flex-wrap items-center justify-center gap-5 text-xs text-white/25">
+            <div className="flex flex-wrap items-center justify-center gap-5 text-xs text-white/65">
               <Link href="/terms" className="hover:text-primary-400 transition-colors">Terms of Use</Link>
               <Link href="/privacy" className="hover:text-primary-400 transition-colors">Privacy Policy</Link>
               <Link href="/returns" className="hover:text-primary-400 transition-colors">Return Policy</Link>
@@ -188,19 +190,19 @@ export function Footer() {
               <Link href="/sitemap" className="hover:text-primary-400 transition-colors">Sitemap</Link>
             </div>
             <div className="flex items-center gap-3">
-              <div className="flex items-center gap-1.5 text-[10px] text-white/20 mr-2">
+              <div className="flex items-center gap-1.5 text-[10px] text-white/60 mr-2">
                 <ShieldCheck size={12} className="text-primary-400" />
                 Safe & Secure
               </div>
               {['Visa', 'Mastercard', 'UPI', 'Rupay', 'Net Banking', 'Wallets'].map((method) => (
-                <span key={method} className="text-[10px] text-white/20 bg-white/[0.04] px-2 py-1 rounded font-medium">
+                <span key={method} className="text-[10px] text-white/65 bg-white/[0.06] px-2 py-1 rounded font-medium">
                   {method}
                 </span>
               ))}
             </div>
           </div>
           <div className="text-center mt-4">
-            <p className="text-[11px] text-white/20">
+            <p className="text-[11px] text-white/60">
               &copy; {new Date().getFullYear()} Xelnova Marketplace Pvt. Ltd. All rights reserved. CIN: U74999MH2024PTC000000
             </p>
           </div>

@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import Image from 'next/image';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowRight,
@@ -29,11 +30,26 @@ import {
   Wallet,
   Store,
   AlertCircle,
-  RefreshCw,
+  Pencil,
 } from 'lucide-react';
 import { Button } from '@xelnova/ui';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api/v1';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
+const RECAPTCHA_SITE_KEY = process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY || '';
+
+declare global {
+  interface Window {
+    grecaptcha?: {
+      ready?: (cb: () => void) => void;
+      render?: (container: string | HTMLElement, params: { sitekey: string; callback: (token: string) => void; 'expired-callback'?: () => void; theme?: string }) => number;
+      reset?: (widgetId?: number) => void;
+    };
+  }
+}
+
+function isPdfFile(file: File): boolean {
+  return file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+}
 
 const steps = [
   { id: 1, title: 'Account', description: 'Email & Phone Verification', icon: User },
@@ -97,8 +113,6 @@ interface OtpState {
 }
 
 interface CaptchaState {
-  sessionId?: string;
-  puzzle?: any;
   loading: boolean;
   solved: boolean;
   token?: string;
@@ -111,7 +125,7 @@ export default function RegisterPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [sellerId, setSellerId] = useState<string | null>(null);
-  
+
   const [formData, setFormData] = useState({
     fullName: '',
     email: '',
@@ -145,77 +159,202 @@ export default function RegisterPage() {
   const [phoneOtp, setPhoneOtp] = useState<OtpState>({ sent: false, verified: false, loading: false });
   const [emailOtpInput, setEmailOtpInput] = useState('');
   const [phoneOtpInput, setPhoneOtpInput] = useState('');
+  const [emailCooldown, setEmailCooldown] = useState(0);
+  const [phoneCooldown, setPhoneCooldown] = useState(0);
   const [captcha, setCaptcha] = useState<CaptchaState>({ loading: false, solved: false });
-  const [captchaAnswer, setCaptchaAnswer] = useState('');
+  const recaptchaWidgetId = useRef<number | null>(null);
+  const recaptchaContainerRef = useRef<HTMLDivElement>(null);
   const [gstVerification, setGstVerification] = useState<VerificationState>({ status: 'idle' });
   const [ifscVerification, setIfscVerification] = useState<VerificationState>({ status: 'idle' });
+  const [bankVerification, setBankVerification] = useState<VerificationState>({ status: 'idle' });
 
-  // Generate Captcha
-  const generateCaptcha = useCallback(async () => {
-    setCaptcha({ loading: true, solved: false });
-    setCaptchaAnswer('');
+  const [kycDocs, setKycDocs] = useState<{
+    panCard: { file?: File; preview?: string; uploading: boolean; uploaded: boolean; url?: string };
+    maskedAadhaar: { file?: File; preview?: string; uploading: boolean; uploaded: boolean; url?: string };
+  }>({
+    panCard: { uploading: false, uploaded: false },
+    maskedAadhaar: { uploading: false, uploaded: false },
+  });
+  const kycDocsRef = useRef(kycDocs);
+  kycDocsRef.current = kycDocs;
+
+  const resetToStep1 = useCallback(() => {
+    setSellerId(null);
+    setCurrentStep(1);
+    setLoading(false);
+    setErrors({});
+    setKycDocs({ panCard: { uploading: false, uploaded: false }, maskedAadhaar: { uploading: false, uploaded: false } });
+  }, []);
+
+  const handleKycFileSelect = (docType: 'panCard' | 'maskedAadhaar', file: File | null) => {
+    if (!file) return;
+    const validTypes = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
+    const typeOk =
+      validTypes.includes(file.type) ||
+      (!file.type && /\.(jpe?g|png|webp|pdf)$/i.test(file.name));
+    if (!typeOk) {
+      setErrors(prev => ({ ...prev, [docType]: 'Only JPG, PNG, WEBP, or PDF files are allowed' }));
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setErrors(prev => ({ ...prev, [docType]: 'File must be less than 5MB' }));
+      return;
+    }
+    const preview = isPdfFile(file) ? '' : URL.createObjectURL(file);
+    setKycDocs(prev => {
+      const prevPreview = prev[docType].preview;
+      if (prevPreview) URL.revokeObjectURL(prevPreview);
+      const next = { ...prev, [docType]: { file, preview, uploading: false, uploaded: false } };
+      kycDocsRef.current = next;
+      return next;
+    });
+    setErrors(prev => { const e = { ...prev }; delete e[docType]; return e; });
+  };
+
+  const uploadKycDocument = async (docType: 'panCard' | 'maskedAadhaar'): Promise<boolean> => {
+    const doc = kycDocsRef.current[docType];
+    if (!doc.file) return false;
+    if (!sellerId) {
+      setErrors(prev => ({ ...prev, [docType]: 'Session expired. Restarting from Step 1.' }));
+      resetToStep1();
+      return false;
+    }
+    if (doc.uploaded) return true;
+
+    setKycDocs(prev => ({ ...prev, [docType]: { ...prev[docType], uploading: true } }));
     try {
-      const res = await fetch(`${API_BASE}/seller-onboarding/captcha/generate`, {
+      const formPayload = new FormData();
+      formPayload.append('file', doc.file);
+      formPayload.append('type', docType === 'panCard' ? 'PAN_CARD' : 'MASKED_AADHAAR');
+
+      const res = await fetch(`${API_BASE}/seller-onboarding/document/${sellerId}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'ROCK_COUNT' }),
+        body: formPayload,
       });
       const data = await res.json();
       if (data.success) {
-        setCaptcha({
-          loading: false,
-          solved: false,
-          sessionId: data.data.sessionId,
-          puzzle: data.data.puzzle,
+        setKycDocs(prev => {
+          const next = {
+            ...prev,
+            [docType]: { ...prev[docType], uploading: false, uploaded: true, url: data.data?.fileUrl },
+          };
+          kycDocsRef.current = next;
+          return next;
         });
-      } else {
-        setCaptcha({ loading: false, solved: false, error: 'Failed to load captcha' });
+        return true;
       }
+      if (res.status === 404 || (data.message && /seller not found/i.test(data.message))) {
+        setErrors(prev => ({ ...prev, submit: 'Your registration session has expired. Restarting from Step 1.' }));
+        resetToStep1();
+        return false;
+      }
+      setErrors(prev => ({ ...prev, [docType]: data.message || 'Upload failed' }));
+      setKycDocs(prev => {
+        const next = { ...prev, [docType]: { ...prev[docType], uploading: false } };
+        kycDocsRef.current = next;
+        return next;
+      });
+      return false;
     } catch {
-      setCaptcha({ loading: false, solved: false, error: 'Failed to load captcha' });
+      setErrors(prev => ({ ...prev, [docType]: 'Upload failed. Try again.' }));
+      setKycDocs(prev => {
+        const next = { ...prev, [docType]: { ...prev[docType], uploading: false } };
+        kycDocsRef.current = next;
+        return next;
+      });
+      return false;
     }
-  }, []);
+  };
 
-  useEffect(() => {
-    if (currentStep === 1 && !captcha.sessionId && !captcha.loading) {
-      generateCaptcha();
-    }
-  }, [currentStep, captcha.sessionId, captcha.loading, generateCaptcha]);
-
-  // Verify Captcha
-  const verifyCaptcha = async () => {
-    if (!captcha.sessionId || !captchaAnswer) return;
-    
+  const handleRecaptchaVerify = useCallback(async (recaptchaToken: string) => {
     setCaptcha(prev => ({ ...prev, loading: true, error: undefined }));
     try {
       const res = await fetch(`${API_BASE}/seller-onboarding/captcha/verify`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId: captcha.sessionId, answer: captchaAnswer }),
+        body: JSON.stringify({ sessionId: 'recaptcha', answer: recaptchaToken }),
       });
       const data = await res.json();
       if (data.success) {
-        setCaptcha(prev => ({ ...prev, loading: false, solved: true, token: data.data.captchaToken }));
+        setCaptcha({ loading: false, solved: true, token: data.data.captchaToken });
       } else {
-        setCaptcha(prev => ({ ...prev, loading: false, error: data.message || 'Incorrect answer' }));
-        setCaptchaAnswer('');
+        setCaptcha({ loading: false, solved: false, error: data.message || 'Verification failed' });
+        if (window.grecaptcha?.reset && recaptchaWidgetId.current !== null) {
+          window.grecaptcha.reset(recaptchaWidgetId.current);
+        }
       }
     } catch {
-      setCaptcha(prev => ({ ...prev, loading: false, error: 'Verification failed' }));
+      setCaptcha({ loading: false, solved: false, error: 'Verification failed. Please try again.' });
+      if (window.grecaptcha?.reset && recaptchaWidgetId.current !== null) {
+        window.grecaptcha.reset(recaptchaWidgetId.current);
+      }
     }
-  };
+  }, []);
+
+  const renderRecaptcha = useCallback(() => {
+    if (!window.grecaptcha?.render || !recaptchaContainerRef.current || recaptchaWidgetId.current !== null) return;
+    recaptchaWidgetId.current = window.grecaptcha.render(recaptchaContainerRef.current, {
+      sitekey: RECAPTCHA_SITE_KEY,
+      callback: handleRecaptchaVerify,
+      'expired-callback': () => setCaptcha({ loading: false, solved: false, error: 'reCAPTCHA expired. Please verify again.' }),
+      theme: 'light',
+    });
+  }, [handleRecaptchaVerify]);
+
+  useEffect(() => {
+    if (currentStep !== 1 || captcha.solved) return;
+
+    const tryRender = () => {
+      if (window.grecaptcha && window.grecaptcha.render) {
+        renderRecaptcha();
+        return true;
+      }
+      return false;
+    };
+
+    if (tryRender()) return;
+
+    const existingScript = document.querySelector('script[src*="recaptcha/api.js"]');
+    if (!existingScript) {
+      const script = document.createElement('script');
+      script.src = 'https://www.google.com/recaptcha/api.js?render=explicit';
+      script.async = true;
+      script.defer = true;
+      document.head.appendChild(script);
+    }
+
+    const interval = setInterval(() => {
+      if (tryRender()) clearInterval(interval);
+    }, 200);
+
+    return () => clearInterval(interval);
+  }, [currentStep, captcha.solved, renderRecaptcha]);
+
+  // OTP cooldown timers
+  useEffect(() => {
+    if (emailCooldown <= 0) return;
+    const t = setTimeout(() => setEmailCooldown(c => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [emailCooldown]);
+
+  useEffect(() => {
+    if (phoneCooldown <= 0) return;
+    const t = setTimeout(() => setPhoneCooldown(c => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [phoneCooldown]);
 
   // Send OTP
   const sendOtp = async (type: 'EMAIL' | 'PHONE') => {
     const identifier = type === 'EMAIL' ? formData.email : formData.phone;
     const setOtpState = type === 'EMAIL' ? setEmailOtp : setPhoneOtp;
+    const setCooldown = type === 'EMAIL' ? setEmailCooldown : setPhoneCooldown;
     
     if (!identifier) {
       setErrors(prev => ({ ...prev, [type.toLowerCase()]: `${type === 'EMAIL' ? 'Email' : 'Phone'} is required` }));
       return;
     }
 
-    setOtpState({ sent: false, verified: false, loading: true });
+    setOtpState(prev => ({ ...prev, loading: true, error: undefined }));
     try {
       const res = await fetch(`${API_BASE}/seller-onboarding/otp/send`, {
         method: 'POST',
@@ -223,16 +362,22 @@ export default function RegisterPage() {
         body: JSON.stringify({ identifier, type, purpose: 'REGISTRATION' }),
       });
       const data = await res.json();
-      if (data.success) {
-        setOtpState({ sent: true, verified: false, loading: false, expiresIn: data.data.expiresIn });
-        if (data.data.devOtp) {
+      if (res.ok && data.success) {
+        setOtpState({ sent: true, verified: false, loading: false, expiresIn: data.data?.expiresIn });
+        setCooldown(60);
+        if (data.data?.devOtp) {
           alert(`[Dev Mode] Your OTP is: ${data.data.devOtp}`);
         }
       } else {
-        setOtpState({ sent: false, verified: false, loading: false, error: data.message });
+        setOtpState(prev => ({
+          ...prev,
+          loading: false,
+          error: data.message || data.error || `Failed to send OTP (${res.status})`,
+        }));
+        if (res.status === 429) setCooldown(60);
       }
     } catch {
-      setOtpState({ sent: false, verified: false, loading: false, error: 'Failed to send OTP' });
+      setOtpState(prev => ({ ...prev, loading: false, error: 'Failed to send OTP' }));
     }
   };
 
@@ -304,6 +449,35 @@ export default function RegisterPage() {
     }
   };
 
+  // Verify Bank Account (Penny Drop)
+  const verifyBankAccount = async () => {
+    if (!formData.accountNumber || !/^[0-9]{9,18}$/.test(formData.accountNumber)) return;
+    if (!formData.ifscCode || formData.ifscCode.length !== 11) return;
+
+    setBankVerification({ status: 'loading' });
+    try {
+      const res = await fetch(`${API_BASE}/verification/penny-drop`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          accountNumber: formData.accountNumber,
+          ifscCode: formData.ifscCode.toUpperCase(),
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setBankVerification({ status: 'verified', data: data.data });
+        if (data.data.nameAtBank && !formData.accountHolderName) {
+          setFormData(prev => ({ ...prev, accountHolderName: data.data.nameAtBank }));
+        }
+      } else {
+        setBankVerification({ status: 'error', error: data.message });
+      }
+    } catch {
+      setBankVerification({ status: 'error', error: 'Failed to verify bank account' });
+    }
+  };
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value, type } = e.target;
     const checked = (e.target as HTMLInputElement).checked;
@@ -311,8 +485,8 @@ export default function RegisterPage() {
       ...prev,
       [name]: type === 'checkbox' ? checked : value,
     }));
-    if (errors[name]) {
-      setErrors(prev => ({ ...prev, [name]: '' }));
+    if (errors[name] || errors.submit) {
+      setErrors(prev => { const e = { ...prev }; delete e[name]; delete e.submit; return e; });
     }
   };
 
@@ -347,6 +521,8 @@ export default function RegisterPage() {
         newErrors.panNumber = 'Invalid PAN format';
       }
       if (!formData.panName.trim()) newErrors.panName = 'Name on PAN required';
+      if (!kycDocs.panCard.file) newErrors.panCard = 'PAN card document is required';
+      if (!kycDocs.maskedAadhaar.file) newErrors.maskedAadhaar = 'Masked Aadhaar document is required';
     }
 
     if (step === 3) {
@@ -383,6 +559,9 @@ export default function RegisterPage() {
       } else if (ifscVerification.status !== 'verified') {
         newErrors.ifscCode = 'IFSC not verified';
       }
+      if (bankVerification.status !== 'verified') {
+        newErrors.accountNumber = newErrors.accountNumber || 'Bank account not verified via Penny Drop';
+      }
       if (!formData.agreeTerms) newErrors.agreeTerms = 'You must agree to terms';
     }
 
@@ -413,7 +592,8 @@ export default function RegisterPage() {
         const data = await res.json();
         if (data.success) {
           setSellerId(data.data.sellerId);
-          setCurrentStep(2);
+          const nextStep = data.data.nextStep ?? 2;
+          setCurrentStep(nextStep > 6 ? 6 : nextStep);
         } else {
           setErrors({ submit: data.message || 'Registration failed' });
         }
@@ -429,6 +609,17 @@ export default function RegisterPage() {
     if (sellerId) {
       setLoading(true);
       try {
+        if (currentStep === 2) {
+          if (kycDocsRef.current.panCard.file) {
+            const ok = await uploadKycDocument('panCard');
+            if (!ok) { setLoading(false); return; }
+          }
+          if (kycDocsRef.current.maskedAadhaar.file) {
+            const ok = await uploadKycDocument('maskedAadhaar');
+            if (!ok) { setLoading(false); return; }
+          }
+        }
+
         const stepEndpoints: Record<number, { url: string; body: any }> = {
           2: {
             url: `${API_BASE}/seller-onboarding/step-2/${sellerId}`,
@@ -478,6 +669,9 @@ export default function RegisterPage() {
           const data = await res.json();
           if (data.success) {
             setCurrentStep(prev => prev + 1);
+          } else if (res.status === 404 || (data.message && /seller not found/i.test(data.message))) {
+            setErrors({ submit: 'Your registration session has expired. Restarting from Step 1.' });
+            resetToStep1();
           } else {
             setErrors({ submit: data.message || 'Update failed' });
           }
@@ -498,7 +692,6 @@ export default function RegisterPage() {
 
     setLoading(true);
     try {
-      // Update bank details
       const bankRes = await fetch(`${API_BASE}/seller-onboarding/step-6/${sellerId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -515,7 +708,6 @@ export default function RegisterPage() {
         return;
       }
 
-      // Submit for review
       const submitRes = await fetch(`${API_BASE}/seller-onboarding/submit/${sellerId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -523,7 +715,46 @@ export default function RegisterPage() {
       const submitData = await submitRes.json();
 
       if (submitData.success) {
-        router.push('/login?registered=true');
+        try {
+          const loginRes = await fetch(`${API_BASE}/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: formData.email, password: formData.password }),
+          });
+          const loginData = await loginRes.json();
+
+          if (loginRes.ok && loginData.success && loginData.data) {
+            const u = loginData.data.user;
+            const dashboardUser = {
+              id: u.id,
+              name: u.name,
+              email: u.email,
+              role: 'seller',
+              avatar: u.avatar ?? null,
+            };
+
+            const sessionRes = await fetch('/api/session', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({
+                token: loginData.data.accessToken,
+                role: 'seller',
+                user: dashboardUser,
+              }),
+            });
+
+            if (sessionRes.ok) {
+              window.location.href = '/dashboard';
+              return;
+            }
+          }
+        } catch {
+          // Auto-login failed; fall through to login page
+        }
+
+        window.location.href = '/login?registered=true';
+        return;
       } else {
         setErrors({ submit: submitData.message || 'Submission failed' });
       }
@@ -535,9 +766,13 @@ export default function RegisterPage() {
   };
 
   const inputClass = (field: string) =>
-    `w-full px-4 py-3 rounded-xl border ${
+    `w-full min-w-0 px-4 py-3 rounded-xl border ${
       errors[field] ? 'border-red-400 bg-red-50' : 'border-gray-200 bg-gray-50'
     } focus:border-primary-400 focus:bg-white focus:ring-2 focus:ring-primary-400/20 outline-none transition-all text-gray-900 placeholder:text-gray-400`;
+
+  /** Native <select> needs text-base (16px) on iOS to avoid zoom; min-h matches other inputs */
+  const selectClass = (field: string) =>
+    `${inputClass(field)} min-h-[48px] cursor-pointer text-base bg-[length:1rem] bg-[right_0.75rem_center] bg-no-repeat pr-10 appearance-none`;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
@@ -545,10 +780,8 @@ export default function RegisterPage() {
       <header className="bg-white border-b border-gray-100 sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
-            <Link href="/" className="flex items-center gap-2">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center">
-                <Store size={24} className="text-white" />
-              </div>
+            <Link href="/" className="flex items-center gap-2.5">
+              <Image src="/xelnova-icon-dark.png" alt="Xelnova" width={40} height={40} className="h-9 w-9" />
               <span className="text-xl font-bold text-gray-900 font-display">
                 Xelnova <span className="text-primary-500">Seller</span>
               </span>
@@ -636,7 +869,7 @@ export default function RegisterPage() {
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
-              className="bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden"
+              className="relative z-0 bg-white rounded-2xl shadow-xl border border-gray-100 overflow-visible"
             >
               <form onSubmit={handleSubmit}>
                 <div className="p-6 sm:p-8">
@@ -648,7 +881,7 @@ export default function RegisterPage() {
                         <p className="text-gray-600 mt-1">Verify your email and phone to get started</p>
                       </div>
 
-                      {/* Puzzle CAPTCHA */}
+                      {/* reCAPTCHA */}
                       <div className="bg-gray-50 rounded-xl p-6 border border-gray-200">
                         <h3 className="font-medium text-gray-900 mb-4 flex items-center gap-2">
                           <Shield size={18} className="text-primary-500" />
@@ -658,60 +891,22 @@ export default function RegisterPage() {
                         {captcha.solved ? (
                           <div className="flex items-center gap-3 text-green-600">
                             <CheckCircle size={24} />
-                            <span className="font-medium">Puzzle completed successfully!</span>
+                            <span className="font-medium">Verification completed successfully!</span>
                           </div>
-                        ) : captcha.puzzle ? (
-                          <div className="space-y-4">
-                            <p className="text-base font-medium text-gray-800">{captcha.puzzle.instruction}</p>
-                            {captcha.puzzle.display && (
-                              <div className="text-2xl font-bold text-gray-900 bg-white rounded-xl p-4 border border-gray-200 text-center tracking-wider select-none">
-                                {captcha.puzzle.display}
+                        ) : (
+                          <div className="space-y-3">
+                            <div ref={recaptchaContainerRef} />
+                            {captcha.loading && (
+                              <div className="flex items-center gap-2 text-gray-500">
+                                <Loader2 size={16} className="animate-spin" />
+                                Verifying...
                               </div>
                             )}
-                            <div className="flex flex-wrap gap-3">
-                              {captcha.puzzle.options?.map((opt: number, idx: number) => (
-                                <button
-                                  key={`${opt}-${idx}`}
-                                  type="button"
-                                  onClick={() => setCaptchaAnswer(opt.toString())}
-                                  className={`min-w-[56px] h-14 px-4 rounded-xl border-2 text-lg font-bold transition-all ${
-                                    captchaAnswer === opt.toString()
-                                      ? 'border-primary-500 bg-primary-50 text-primary-600 shadow-md'
-                                      : 'border-gray-200 bg-white hover:border-gray-300 text-gray-700'
-                                  }`}
-                                >
-                                  {opt}
-                                </button>
-                              ))}
-                            </div>
-                            <div className="flex gap-2">
-                              <Button
-                                type="button"
-                                onClick={verifyCaptcha}
-                                disabled={!captchaAnswer || captcha.loading}
-                                size="sm"
-                              >
-                                {captcha.loading ? <Loader2 size={16} className="animate-spin" /> : 'Verify'}
-                              </Button>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                onClick={generateCaptcha}
-                              >
-                                <RefreshCw size={16} /> New Puzzle
-                              </Button>
-                            </div>
                             {captcha.error && (
                               <p className="text-red-500 text-sm flex items-center gap-1">
                                 <XCircle size={14} /> {captcha.error}
                               </p>
                             )}
-                          </div>
-                        ) : (
-                          <div className="flex items-center gap-2 text-gray-500">
-                            <Loader2 size={16} className="animate-spin" />
-                            Loading puzzle...
                           </div>
                         )}
                         {errors.captcha && <p className="text-red-500 text-sm mt-2">{errors.captcha}</p>}
@@ -738,8 +933,8 @@ export default function RegisterPage() {
                         {/* Email with OTP */}
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-1.5">Email Address *</label>
-                          <div className="flex gap-2">
-                            <div className="relative flex-1">
+                          <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:gap-3">
+                            <div className="relative min-w-0 flex-1">
                               <Mail size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
                               <input
                                 type="email"
@@ -754,30 +949,45 @@ export default function RegisterPage() {
                                 <CheckCircle size={18} className="absolute right-4 top-1/2 -translate-y-1/2 text-green-500" />
                               )}
                             </div>
-                            {!emailOtp.verified && (
+                            {emailOtp.verified ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEmailOtp({ sent: false, verified: false, loading: false });
+                                  setEmailOtpInput('');
+                                }}
+                                className="h-12 shrink-0 inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-4 text-sm font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors sm:min-w-[6.5rem]"
+                              >
+                                <Pencil size={14} /> Change
+                              </button>
+                            ) : (
                               <Button
                                 type="button"
-                                variant="outline"
                                 onClick={() => sendOtp('EMAIL')}
-                                disabled={emailOtp.loading || !formData.email}
-                                className="shrink-0"
+                                disabled={emailOtp.loading || !formData.email || emailCooldown > 0}
+                                className="h-12 w-full shrink-0 rounded-xl px-5 font-semibold shadow-md shadow-primary-500/20 sm:w-auto sm:min-w-[9rem]"
                               >
-                                {emailOtp.loading ? <Loader2 size={16} className="animate-spin" /> : emailOtp.sent ? 'Resend' : 'Send OTP'}
+                                {emailOtp.loading ? <Loader2 size={16} className="animate-spin" /> : emailCooldown > 0 ? `Resend (${emailCooldown}s)` : emailOtp.sent ? 'Resend OTP' : 'Send OTP'}
                               </Button>
                             )}
                           </div>
                           {emailOtp.sent && !emailOtp.verified && (
-                            <div className="mt-2 flex gap-2">
+                            <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
                               <input
                                 type="text"
                                 value={emailOtpInput}
                                 onChange={(e) => setEmailOtpInput(e.target.value.replace(/\D/g, '').slice(0, 6))}
                                 placeholder="Enter 6-digit OTP"
-                                className="flex-1 px-3 py-2 rounded-lg border border-gray-200 text-center tracking-widest"
+                                className="h-12 flex-1 rounded-xl border border-gray-200 bg-white px-3 text-center text-base tracking-[0.35em] outline-none transition focus:border-primary-400 focus:ring-2 focus:ring-primary-400/20"
                                 maxLength={6}
                               />
-                              <Button type="button" size="sm" onClick={() => verifyOtp('EMAIL')} disabled={emailOtp.loading}>
-                                {emailOtp.loading ? <Loader2 size={14} className="animate-spin" /> : 'Verify'}
+                              <Button
+                                type="button"
+                                onClick={() => verifyOtp('EMAIL')}
+                                disabled={emailOtp.loading}
+                                className="h-12 w-full shrink-0 rounded-xl px-6 font-semibold sm:w-auto sm:min-w-[6.5rem]"
+                              >
+                                {emailOtp.loading ? <Loader2 size={16} className="animate-spin" /> : 'Verify'}
                               </Button>
                             </div>
                           )}
@@ -788,8 +998,8 @@ export default function RegisterPage() {
                         {/* Phone with OTP */}
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-1.5">Mobile Number *</label>
-                          <div className="flex gap-2">
-                            <div className="relative flex-1">
+                          <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:gap-3">
+                            <div className="relative min-w-0 flex-1">
                               <Phone size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
                               <input
                                 type="tel"
@@ -805,30 +1015,45 @@ export default function RegisterPage() {
                                 <CheckCircle size={18} className="absolute right-4 top-1/2 -translate-y-1/2 text-green-500" />
                               )}
                             </div>
-                            {!phoneOtp.verified && (
+                            {phoneOtp.verified ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setPhoneOtp({ sent: false, verified: false, loading: false });
+                                  setPhoneOtpInput('');
+                                }}
+                                className="h-12 shrink-0 inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-4 text-sm font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors sm:min-w-[6.5rem]"
+                              >
+                                <Pencil size={14} /> Change
+                              </button>
+                            ) : (
                               <Button
                                 type="button"
-                                variant="outline"
                                 onClick={() => sendOtp('PHONE')}
-                                disabled={phoneOtp.loading || !formData.phone}
-                                className="shrink-0"
+                                disabled={phoneOtp.loading || !formData.phone || phoneCooldown > 0}
+                                className="h-12 w-full shrink-0 rounded-xl px-5 font-semibold shadow-md shadow-primary-500/20 sm:w-auto sm:min-w-[9rem]"
                               >
-                                {phoneOtp.loading ? <Loader2 size={16} className="animate-spin" /> : phoneOtp.sent ? 'Resend' : 'Send OTP'}
+                                {phoneOtp.loading ? <Loader2 size={16} className="animate-spin" /> : phoneCooldown > 0 ? `Resend (${phoneCooldown}s)` : phoneOtp.sent ? 'Resend OTP' : 'Send OTP'}
                               </Button>
                             )}
                           </div>
                           {phoneOtp.sent && !phoneOtp.verified && (
-                            <div className="mt-2 flex gap-2">
+                            <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
                               <input
                                 type="text"
                                 value={phoneOtpInput}
                                 onChange={(e) => setPhoneOtpInput(e.target.value.replace(/\D/g, '').slice(0, 6))}
                                 placeholder="Enter 6-digit OTP"
-                                className="flex-1 px-3 py-2 rounded-lg border border-gray-200 text-center tracking-widest"
+                                className="h-12 flex-1 rounded-xl border border-gray-200 bg-white px-3 text-center text-base tracking-[0.35em] outline-none transition focus:border-primary-400 focus:ring-2 focus:ring-primary-400/20"
                                 maxLength={6}
                               />
-                              <Button type="button" size="sm" onClick={() => verifyOtp('PHONE')} disabled={phoneOtp.loading}>
-                                {phoneOtp.loading ? <Loader2 size={14} className="animate-spin" /> : 'Verify'}
+                              <Button
+                                type="button"
+                                onClick={() => verifyOtp('PHONE')}
+                                disabled={phoneOtp.loading}
+                                className="h-12 w-full shrink-0 rounded-xl px-6 font-semibold sm:w-auto sm:min-w-[6.5rem]"
+                              >
+                                {phoneOtp.loading ? <Loader2 size={16} className="animate-spin" /> : 'Verify'}
                               </Button>
                             </div>
                           )}
@@ -870,8 +1095,16 @@ export default function RegisterPage() {
                               value={formData.confirmPassword}
                               onChange={handleChange}
                               placeholder="Re-enter password"
-                              className={`${inputClass('confirmPassword')} pl-11`}
+                              className={`${inputClass('confirmPassword')} pl-11 pr-11`}
                             />
+                            <button
+                              type="button"
+                              onClick={() => setShowPassword(!showPassword)}
+                              className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400"
+                              aria-label={showPassword ? 'Hide password' : 'Show password'}
+                            >
+                              {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                            </button>
                           </div>
                           {errors.confirmPassword && <p className="text-red-500 text-xs mt-1">{errors.confirmPassword}</p>}
                         </div>
@@ -992,13 +1225,166 @@ export default function RegisterPage() {
                           </div>
                         </div>
 
-                        <div className="p-4 rounded-xl bg-amber-50 border border-amber-200">
-                          <div className="flex gap-3">
-                            <AlertCircle size={20} className="text-amber-600 shrink-0 mt-0.5" />
-                            <div className="text-sm text-amber-800">
-                              <p className="font-medium">Document Upload Required</p>
-                              <p className="mt-1">You'll need to upload PAN card copy after registration for verification.</p>
+                        {/* KYC Document Upload */}
+                        <div className="space-y-4 pt-2">
+                          <div>
+                            <h3 className="text-lg font-semibold text-gray-900 mb-1">KYC Documents</h3>
+                            <p className="text-sm text-gray-500">Upload clear scans or photos (PDF or image) for verification</p>
+                          </div>
+
+                          {/* PAN Card Upload */}
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1.5">PAN Card *</label>
+                            <div className={`relative rounded-xl border-2 border-dashed transition-all ${
+                              kycDocs.panCard.uploaded ? 'border-green-300 bg-green-50' :
+                              kycDocs.panCard.file ? 'border-primary-300 bg-primary-50/30' :
+                              errors.panCard ? 'border-red-300 bg-red-50' :
+                              'border-gray-200 bg-gray-50 hover:border-primary-300 hover:bg-primary-50/30'
+                            } p-4`}>
+                              {kycDocs.panCard.file ? (
+                                <div className="flex items-center gap-4">
+                                  {kycDocs.panCard.preview && !isPdfFile(kycDocs.panCard.file) ? (
+                                    <img
+                                      src={kycDocs.panCard.preview}
+                                      alt="PAN Card"
+                                      className="w-24 h-16 object-cover rounded-lg border border-gray-200"
+                                    />
+                                  ) : (
+                                    <div className="w-24 h-16 flex items-center justify-center rounded-lg border border-gray-200 bg-gray-100">
+                                      <FileText className="w-10 h-10 text-red-600" aria-hidden />
+                                    </div>
+                                  )}
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-sm font-medium text-gray-900 truncate">{kycDocs.panCard.file?.name}</p>
+                                    <p className="text-xs text-gray-500">{((kycDocs.panCard.file?.size || 0) / 1024).toFixed(0)} KB</p>
+                                    {kycDocs.panCard.uploading && (
+                                      <p className="text-xs text-primary-600 font-medium flex items-center gap-1 mt-1">
+                                        <Loader2 size={12} className="animate-spin" /> Uploading...
+                                      </p>
+                                    )}
+                                    {kycDocs.panCard.uploaded && (
+                                      <p className="text-xs text-green-600 font-medium flex items-center gap-1 mt-1">
+                                        <CheckCircle size={12} /> Uploaded
+                                      </p>
+                                    )}
+                                    {!kycDocs.panCard.uploaded && !kycDocs.panCard.uploading && (
+                                      <p className="text-xs text-primary-600 font-medium flex items-center gap-1 mt-1">
+                                        <CheckCircle size={12} /> Ready &mdash; will upload on Continue
+                                      </p>
+                                    )}
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (kycDocs.panCard.preview) URL.revokeObjectURL(kycDocs.panCard.preview);
+                                      setKycDocs(prev => {
+                                        const next = { ...prev, panCard: { uploading: false, uploaded: false } };
+                                        kycDocsRef.current = next;
+                                        return next;
+                                      });
+                                    }}
+                                    className="p-2 rounded-lg hover:bg-gray-200 text-gray-500 shrink-0"
+                                  >
+                                    <XCircle size={16} />
+                                  </button>
+                                </div>
+                              ) : (
+                                <label className="flex flex-col items-center cursor-pointer py-3">
+                                  <Upload size={24} className="text-gray-400 mb-2" />
+                                  <p className="text-sm font-medium text-gray-700">Click to select PAN card</p>
+                                  <p className="text-xs text-gray-400 mt-1">JPG, PNG, WEBP, or PDF (max 5MB)</p>
+                                  <input
+                                    type="file"
+                                    accept="image/jpeg,image/png,image/webp,application/pdf,.pdf"
+                                    className="hidden"
+                                    onChange={(e) => handleKycFileSelect('panCard', e.target.files?.[0] || null)}
+                                  />
+                                </label>
+                              )}
                             </div>
+                            {errors.panCard && <p className="text-red-500 text-xs mt-1">{errors.panCard}</p>}
+                          </div>
+
+                          {/* Masked Aadhaar Upload */}
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1.5">Masked Aadhaar Card *</label>
+                            <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 mb-2">
+                              <div className="flex gap-2">
+                                <AlertCircle size={16} className="text-amber-600 shrink-0 mt-0.5" />
+                                <p className="text-xs text-amber-800">
+                                  Upload a <strong>masked Aadhaar</strong> where the first 8 digits are hidden (XXXX-XXXX-1234). 
+                                  Download from <a href="https://myaadhaar.uidai.gov.in" target="_blank" rel="noopener noreferrer" className="underline font-medium">myaadhaar.uidai.gov.in</a>
+                                </p>
+                              </div>
+                            </div>
+                            <div className={`relative rounded-xl border-2 border-dashed transition-all ${
+                              kycDocs.maskedAadhaar.uploaded ? 'border-green-300 bg-green-50' :
+                              kycDocs.maskedAadhaar.file ? 'border-primary-300 bg-primary-50/30' :
+                              errors.maskedAadhaar ? 'border-red-300 bg-red-50' :
+                              'border-gray-200 bg-gray-50 hover:border-primary-300 hover:bg-primary-50/30'
+                            } p-4`}>
+                              {kycDocs.maskedAadhaar.file ? (
+                                <div className="flex items-center gap-4">
+                                  {kycDocs.maskedAadhaar.preview && !isPdfFile(kycDocs.maskedAadhaar.file) ? (
+                                    <img
+                                      src={kycDocs.maskedAadhaar.preview}
+                                      alt="Masked Aadhaar"
+                                      className="w-24 h-16 object-cover rounded-lg border border-gray-200"
+                                    />
+                                  ) : (
+                                    <div className="w-24 h-16 flex items-center justify-center rounded-lg border border-gray-200 bg-gray-100">
+                                      <FileText className="w-10 h-10 text-amber-700" aria-hidden />
+                                    </div>
+                                  )}
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-sm font-medium text-gray-900 truncate">{kycDocs.maskedAadhaar.file?.name}</p>
+                                    <p className="text-xs text-gray-500">{((kycDocs.maskedAadhaar.file?.size || 0) / 1024).toFixed(0)} KB</p>
+                                    {kycDocs.maskedAadhaar.uploading && (
+                                      <p className="text-xs text-primary-600 font-medium flex items-center gap-1 mt-1">
+                                        <Loader2 size={12} className="animate-spin" /> Uploading...
+                                      </p>
+                                    )}
+                                    {kycDocs.maskedAadhaar.uploaded && (
+                                      <p className="text-xs text-green-600 font-medium flex items-center gap-1 mt-1">
+                                        <CheckCircle size={12} /> Uploaded
+                                      </p>
+                                    )}
+                                    {!kycDocs.maskedAadhaar.uploaded && !kycDocs.maskedAadhaar.uploading && (
+                                      <p className="text-xs text-primary-600 font-medium flex items-center gap-1 mt-1">
+                                        <CheckCircle size={12} /> Ready &mdash; will upload on Continue
+                                      </p>
+                                    )}
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (kycDocs.maskedAadhaar.preview) URL.revokeObjectURL(kycDocs.maskedAadhaar.preview);
+                                      setKycDocs(prev => {
+                                        const next = { ...prev, maskedAadhaar: { uploading: false, uploaded: false } };
+                                        kycDocsRef.current = next;
+                                        return next;
+                                      });
+                                    }}
+                                    className="p-2 rounded-lg hover:bg-gray-200 text-gray-500 shrink-0"
+                                  >
+                                    <XCircle size={16} />
+                                  </button>
+                                </div>
+                              ) : (
+                                <label className="flex flex-col items-center cursor-pointer py-3">
+                                  <Upload size={24} className="text-gray-400 mb-2" />
+                                  <p className="text-sm font-medium text-gray-700">Click to select masked Aadhaar</p>
+                                  <p className="text-xs text-gray-400 mt-1">JPG, PNG, WEBP, or PDF (max 5MB)</p>
+                                  <input
+                                    type="file"
+                                    accept="image/jpeg,image/png,image/webp,application/pdf,.pdf"
+                                    className="hidden"
+                                    onChange={(e) => handleKycFileSelect('maskedAadhaar', e.target.files?.[0] || null)}
+                                  />
+                                </label>
+                              )}
+                            </div>
+                            {errors.maskedAadhaar && <p className="text-red-500 text-xs mt-1">{errors.maskedAadhaar}</p>}
                           </div>
                         </div>
                       </div>
@@ -1042,14 +1428,17 @@ export default function RegisterPage() {
                           />
                         </div>
 
-                        <div className="grid sm:grid-cols-2 gap-4">
-                          <div>
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                          <div className="min-w-0">
                             <label className="block text-sm font-medium text-gray-700 mb-1.5">Business Type *</label>
                             <select
                               name="businessType"
                               value={formData.businessType}
                               onChange={handleChange}
-                              className={inputClass('businessType')}
+                              className={selectClass('businessType')}
+                              style={{
+                                backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`,
+                              }}
                             >
                               <option value="">Select type</option>
                               {businessTypes.map(type => (
@@ -1058,13 +1447,16 @@ export default function RegisterPage() {
                             </select>
                             {errors.businessType && <p className="text-red-500 text-xs mt-1">{errors.businessType}</p>}
                           </div>
-                          <div>
+                          <div className="min-w-0">
                             <label className="block text-sm font-medium text-gray-700 mb-1.5">Primary Category *</label>
                             <select
                               name="businessCategory"
                               value={formData.businessCategory}
                               onChange={handleChange}
-                              className={inputClass('businessCategory')}
+                              className={selectClass('businessCategory')}
+                              style={{
+                                backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`,
+                              }}
                             >
                               <option value="">Select category</option>
                               {categories.map(cat => (
@@ -1113,13 +1505,16 @@ export default function RegisterPage() {
                             />
                             {errors.city && <p className="text-red-500 text-xs mt-1">{errors.city}</p>}
                           </div>
-                          <div>
+                          <div className="min-w-0">
                             <label className="block text-sm font-medium text-gray-700 mb-1.5">State *</label>
                             <select
                               name="state"
                               value={formData.state}
                               onChange={handleChange}
-                              className={inputClass('state')}
+                              className={selectClass('state')}
+                              style={{
+                                backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`,
+                              }}
                             >
                               <option value="">Select state</option>
                               {indianStates.map(state => (
@@ -1258,19 +1653,6 @@ export default function RegisterPage() {
                       </div>
 
                       <div className="space-y-4">
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1.5">Account Holder Name *</label>
-                          <input
-                            type="text"
-                            name="accountHolderName"
-                            value={formData.accountHolderName}
-                            onChange={handleChange}
-                            placeholder="Name as per bank records (must match GST/PAN)"
-                            className={inputClass('accountHolderName')}
-                          />
-                          {errors.accountHolderName && <p className="text-red-500 text-xs mt-1">{errors.accountHolderName}</p>}
-                        </div>
-
                         <div className="grid sm:grid-cols-2 gap-4">
                           <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1.5">Account Number *</label>
@@ -1280,9 +1662,13 @@ export default function RegisterPage() {
                                 type="text"
                                 name="accountNumber"
                                 value={formData.accountNumber}
-                                onChange={handleChange}
+                                onChange={(e) => {
+                                  handleChange(e);
+                                  if (bankVerification.status !== 'idle') setBankVerification({ status: 'idle' });
+                                }}
                                 placeholder="Bank account number"
-                                className={`${inputClass('accountNumber')} pl-11`}
+                                disabled={bankVerification.status === 'verified'}
+                                className={`${inputClass('accountNumber')} pl-11 ${bankVerification.status === 'verified' ? 'bg-green-50 border-green-300' : ''}`}
                               />
                             </div>
                             {errors.accountNumber && <p className="text-red-500 text-xs mt-1">{errors.accountNumber}</p>}
@@ -1298,16 +1684,18 @@ export default function RegisterPage() {
                                 onChange={(e) => {
                                   handleChange(e);
                                   if (ifscVerification.status !== 'idle') setIfscVerification({ status: 'idle' });
+                                  if (bankVerification.status !== 'idle') setBankVerification({ status: 'idle' });
                                 }}
                                 placeholder="11-digit IFSC"
                                 maxLength={11}
-                                className={`${inputClass('ifscCode')} uppercase flex-1`}
+                                disabled={bankVerification.status === 'verified'}
+                                className={`${inputClass('ifscCode')} uppercase flex-1 ${bankVerification.status === 'verified' ? 'bg-green-50 border-green-300' : ''}`}
                               />
                               <Button
                                 type="button"
                                 variant="outline"
                                 onClick={verifyIfsc}
-                                disabled={formData.ifscCode.length !== 11 || ifscVerification.status === 'loading'}
+                                disabled={formData.ifscCode.length !== 11 || ifscVerification.status === 'loading' || bankVerification.status === 'verified'}
                               >
                                 {ifscVerification.status === 'loading' ? (
                                   <Loader2 size={16} className="animate-spin" />
@@ -1322,15 +1710,15 @@ export default function RegisterPage() {
                           </div>
                         </div>
 
-                        {ifscVerification.status === 'verified' && (
-                          <div className="p-4 rounded-xl bg-green-50 border border-green-200">
+                        {ifscVerification.status === 'verified' && bankVerification.status !== 'verified' && (
+                          <div className="p-4 rounded-xl bg-blue-50 border border-blue-200">
                             <div className="flex items-start gap-3">
-                              <CheckCircle size={20} className="text-green-600 mt-0.5" />
-                              <div>
-                                <p className="font-medium text-green-800">Bank Verified</p>
-                                <p className="text-sm text-green-700 mt-1">
-                                  <strong>{ifscVerification.data?.BANK}</strong> - {ifscVerification.data?.BRANCH}
+                              <CheckCircle size={20} className="text-blue-600 mt-0.5" />
+                              <div className="flex-1">
+                                <p className="font-medium text-blue-800">
+                                  {ifscVerification.data?.BANK} - {ifscVerification.data?.BRANCH}
                                 </p>
+                                <p className="text-sm text-blue-600 mt-1">IFSC verified. Now verify your bank account below.</p>
                               </div>
                             </div>
                           </div>
@@ -1340,6 +1728,88 @@ export default function RegisterPage() {
                             <XCircle size={14} /> {ifscVerification.error}
                           </p>
                         )}
+
+                        {ifscVerification.status === 'verified' && bankVerification.status !== 'verified' && (
+                          <div className="p-4 rounded-xl bg-amber-50 border border-amber-200">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-start gap-3">
+                                <Wallet size={20} className="text-amber-600 mt-0.5" />
+                                <div>
+                                  <p className="font-medium text-amber-800">Verify Bank Account (Penny Drop)</p>
+                                  <p className="text-sm text-amber-700 mt-1">
+                                    We&apos;ll deposit ₹1 to verify your account number and fetch the registered name.
+                                  </p>
+                                </div>
+                              </div>
+                              <Button
+                                type="button"
+                                onClick={verifyBankAccount}
+                                disabled={
+                                  bankVerification.status === 'loading' ||
+                                  !formData.accountNumber ||
+                                  !/^[0-9]{9,18}$/.test(formData.accountNumber)
+                                }
+                                className="shrink-0 ml-4"
+                              >
+                                {bankVerification.status === 'loading' ? (
+                                  <><Loader2 size={16} className="animate-spin" /> Verifying...</>
+                                ) : (
+                                  'Verify Account'
+                                )}
+                              </Button>
+                            </div>
+                            {bankVerification.status === 'error' && (
+                              <p className="text-red-500 text-sm mt-3 flex items-center gap-1">
+                                <XCircle size={14} /> {bankVerification.error}
+                              </p>
+                            )}
+                          </div>
+                        )}
+
+                        {bankVerification.status === 'verified' && (
+                          <div className="p-4 rounded-xl bg-green-50 border border-green-200">
+                            <div className="flex items-start gap-3">
+                              <CheckCircle size={20} className="text-green-600 mt-0.5" />
+                              <div>
+                                <p className="font-medium text-green-800">Bank Account Verified (₹1 credited)</p>
+                                <p className="text-sm text-green-700 mt-1">
+                                  <strong>Account Holder:</strong> {bankVerification.data?.nameAtBank}
+                                </p>
+                                <p className="text-sm text-green-700">
+                                  <strong>Bank:</strong> {bankVerification.data?.bankName || ifscVerification.data?.BANK}
+                                  {(bankVerification.data?.branch || ifscVerification.data?.BRANCH) && 
+                                    ` — ${bankVerification.data?.branch || ifscVerification.data?.BRANCH}`}
+                                </p>
+                                {bankVerification.data?.city && (
+                                  <p className="text-sm text-green-700">
+                                    <strong>City:</strong> {bankVerification.data.city}
+                                  </p>
+                                )}
+                                {bankVerification.data?.utr && (
+                                  <p className="text-xs text-green-600 mt-1">UTR: {bankVerification.data.utr}</p>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1.5">Account Holder Name *</label>
+                          <input
+                            type="text"
+                            name="accountHolderName"
+                            value={formData.accountHolderName}
+                            onChange={handleChange}
+                            placeholder={bankVerification.status === 'verified' ? 'Auto-filled from bank verification' : 'Name as per bank records'}
+                            className={`${inputClass('accountHolderName')} ${bankVerification.status === 'verified' ? 'bg-green-50 border-green-300' : ''}`}
+                          />
+                          {bankVerification.status === 'verified' && formData.accountHolderName !== bankVerification.data?.nameAtBank && (
+                            <p className="text-amber-600 text-xs mt-1 flex items-center gap-1">
+                              <AlertCircle size={12} /> Name differs from bank records: {bankVerification.data?.nameAtBank}
+                            </p>
+                          )}
+                          {errors.accountHolderName && <p className="text-red-500 text-xs mt-1">{errors.accountHolderName}</p>}
+                        </div>
 
                         <div className="pt-4 border-t border-gray-200">
                           <label className="flex items-start gap-3 cursor-pointer">
@@ -1374,8 +1844,8 @@ export default function RegisterPage() {
                   )}
                 </div>
 
-                {/* Navigation */}
-                <div className="px-6 sm:px-8 py-4 bg-gray-50 border-t border-gray-100 flex items-center justify-between">
+                {/* Navigation — rounded-b matches card; z-index below open native selects on some browsers */}
+                <div className="relative z-0 rounded-b-2xl px-6 sm:px-8 py-4 bg-gray-50 border-t border-gray-100 flex items-center justify-between">
                   {currentStep > 1 ? (
                     <Button
                       type="button"

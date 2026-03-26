@@ -9,7 +9,10 @@ export class OrdersService {
   async findAll(userId: string) {
     return this.prisma.order.findMany({
       where: { userId },
-      include: { items: true, shippingAddress: true },
+      include: {
+        items: { include: { product: { select: { name: true, images: true } } } },
+        shippingAddress: true,
+      },
       orderBy: { createdAt: 'desc' },
     });
   }
@@ -17,7 +20,10 @@ export class OrdersService {
   async findByOrderNumber(orderNumber: string, userId: string) {
     const order = await this.prisma.order.findUnique({
       where: { orderNumber },
-      include: { items: true, shippingAddress: true },
+      include: {
+        items: { include: { product: { select: { name: true, images: true } } } },
+        shippingAddress: true,
+      },
     });
     if (!order || order.userId !== userId) return null;
     return order;
@@ -83,6 +89,11 @@ export class OrdersService {
     if (existingAddress) {
       shippingAddressId = existingAddress.id;
     } else {
+      const VALID_TYPES = ['HOME', 'OFFICE', 'OTHER'] as const;
+      const TYPE_ALIASES: Record<string, (typeof VALID_TYPES)[number]> = { WORK: 'OFFICE' };
+      const rawType = dto.shippingAddress.type?.toUpperCase() || 'HOME';
+      const addrType = VALID_TYPES.includes(rawType as any) ? rawType : (TYPE_ALIASES[rawType] || 'HOME');
+
       const newAddress = await this.prisma.address.create({
         data: {
           userId,
@@ -94,7 +105,7 @@ export class OrdersService {
           state: dto.shippingAddress.state,
           pincode: dto.shippingAddress.pincode,
           landmark: dto.shippingAddress.landmark,
-          type: (dto.shippingAddress.type?.toUpperCase() as any) || 'HOME',
+          type: addrType as any,
         },
       });
       shippingAddressId = newAddress.id;

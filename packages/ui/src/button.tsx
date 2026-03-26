@@ -17,11 +17,11 @@ const variantStyles: Record<ButtonVariant, string> = {
   primary:
     "bg-primary-500 text-white hover:bg-primary-600 active:bg-primary-700 shadow-sm hover:shadow-md",
   secondary:
-    "bg-secondary-700 text-white hover:bg-secondary-600 active:bg-secondary-800",
+    "bg-gray-100 text-gray-700 hover:bg-gray-200 active:bg-gray-300 border border-gray-200",
   outline:
-    "border border-primary-500 text-primary-500 hover:bg-primary-500/10 active:bg-primary-500/20",
+    "border border-gray-300 text-gray-700 bg-white hover:bg-gray-50 active:bg-gray-100",
   ghost:
-    "text-secondary-300 hover:bg-white/5 active:bg-white/10",
+    "text-gray-600 hover:bg-gray-100 active:bg-gray-200",
   danger:
     "bg-danger-500 text-white hover:bg-danger-600 active:bg-danger-700",
 };
@@ -51,7 +51,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         ref={ref}
         disabled={disabled || loading}
         className={cn(
-          "inline-flex items-center justify-center gap-2 font-medium transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 focus-visible:ring-offset-dark disabled:opacity-50 disabled:cursor-not-allowed",
+          "inline-flex items-center justify-center gap-2 font-medium transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed",
           variantStyles[variant],
           sizeStyles[size],
           fullWidth && "w-full",

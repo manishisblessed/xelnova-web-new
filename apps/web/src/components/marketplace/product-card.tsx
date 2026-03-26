@@ -36,7 +36,7 @@ export function ProductCard({ product, index = 0 }: ProductCardProps) {
       slug: product.slug,
       price: product.price,
       comparePrice: product.comparePrice,
-      image: product.images[0],
+      image: product.images[0] || '',
       seller: product.seller.name,
     });
   };
@@ -59,7 +59,7 @@ export function ProductCard({ product, index = 0 }: ProductCardProps) {
           {/* Image */}
           <div className="relative aspect-[4/5] overflow-hidden bg-surface-raised">
             {!imgLoaded && !imgError && <div className="absolute inset-0 animate-shimmer" />}
-            {!imgError ? (
+            {!imgError && product.images[0] ? (
               <Image
                 src={product.images[0]}
                 alt={product.name}
@@ -73,8 +73,11 @@ export function ProductCard({ product, index = 0 }: ProductCardProps) {
                 onError={() => setImgError(true)}
               />
             ) : (
-              <div className="flex h-full items-center justify-center text-text-muted">
-                <ShoppingCart size={48} />
+              <div className="flex h-full flex-col items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100">
+                <div className="w-14 h-14 rounded-xl bg-white shadow-sm flex items-center justify-center mb-1">
+                  <ShoppingCart size={24} className="text-gray-300" />
+                </div>
+                <span className="text-[10px] text-text-muted">No image</span>
               </div>
             )}
 

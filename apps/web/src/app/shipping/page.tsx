@@ -50,7 +50,7 @@ export default function ShippingPage() {
               <Truck size={14} /> Delivery
             </span>
             <h1 className="text-4xl md:text-5xl font-extrabold text-white font-display mb-4">Shipping Information</h1>
-            <p className="text-lg text-white/50 max-w-xl mx-auto">Fast, reliable delivery across India with real-time tracking.</p>
+            <p className="text-lg text-white/80 max-w-xl mx-auto">Fast, reliable delivery across India with real-time tracking.</p>
           </motion.div>
         </div>
       </section>

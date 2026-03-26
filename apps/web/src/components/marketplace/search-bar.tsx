@@ -5,9 +5,10 @@ import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { Search, X, Clock, TrendingUp, ChevronDown } from "lucide-react";
 import { cn } from "@xelnova/utils";
+import { searchApi } from "@xelnova/api";
 import { useCategories, useProducts } from "@/lib/api";
 
-const POPULAR_SEARCHES = ["Samsung Galaxy", "Headphones", "Running Shoes", "Books", "Laptop", "Skincare"];
+const FALLBACK_SEARCHES: string[] = [];
 const STORAGE_KEY = "xelnova-recent-searches";
 
 export default function SearchBar({ className }: { className?: string }) {
@@ -20,12 +21,18 @@ export default function SearchBar({ className }: { className?: string }) {
   const [categoryOpen, setCategoryOpen] = useState(false);
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
 
+  const [popularSearches, setPopularSearches] = useState<string[]>(FALLBACK_SEARCHES);
   const { data: categories } = useCategories();
   const categoriesList = categories || [];
   const { data: productsData } = useProducts({ limit: 50 });
   const products = productsData?.products || [];
 
   useEffect(() => { try { const stored = localStorage.getItem(STORAGE_KEY); if (stored) setRecentSearches(JSON.parse(stored)); } catch {} }, []);
+  useEffect(() => {
+    searchApi.getPopularSearches()
+      .then((searches) => { if (searches?.length) setPopularSearches(searches); })
+      .catch(() => {});
+  }, []);
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => { if (containerRef.current && !containerRef.current.contains(e.target as Node)) { setOpen(false); setCategoryOpen(false); } };
     document.addEventListener("mousedown", handleClickOutside);
@@ -89,7 +96,7 @@ export default function SearchBar({ className }: { className?: string }) {
               <div className="border-t border-surface-300/30 p-2">
                 <p className="px-3 py-1.5 text-xs font-semibold text-surface-100 uppercase tracking-wide">Popular Searches</p>
                 <div className="flex flex-wrap gap-2 px-3 py-2">
-                  {POPULAR_SEARCHES.map((term) => (<button key={term} type="button" onClick={() => handleSuggestionClick(term)} className="inline-flex items-center gap-1.5 rounded-full border border-surface-300 px-3 py-1.5 text-xs text-surface-50 hover:border-gold-400/50 hover:bg-gold-400/5 hover:text-gold-400 transition-colors"><TrendingUp size={12} />{term}</button>))}
+                  {popularSearches.map((term) => (<button key={term} type="button" onClick={() => handleSuggestionClick(term)} className="inline-flex items-center gap-1.5 rounded-full border border-surface-300 px-3 py-1.5 text-xs text-surface-50 hover:border-gold-400/50 hover:bg-gold-400/5 hover:text-gold-400 transition-colors"><TrendingUp size={12} />{term}</button>))}
                 </div>
               </div>
             )}

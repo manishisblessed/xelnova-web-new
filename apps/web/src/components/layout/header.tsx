@@ -1,37 +1,60 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Search, ShoppingCart, Menu, X, Heart, Package, User, LogIn,
-  Sparkles, Phone, MapPin, ChevronDown, Flame, Bell, Download,
+  Search, ShoppingCart, Menu, X, Heart, Package, User, LogIn, LogOut,
+  Sparkles, Phone, MapPin, ChevronDown, Flame, Download,
 } from 'lucide-react';
 import { useCartStore } from '@/lib/store/cart-store';
 import { useWishlistStore } from '@/lib/store/wishlist-store';
 import { useCategories } from '@/lib/api';
+import { useAuth } from '@xelnova/api';
 
-const navCategories = [
-  { name: 'Electronics', slug: 'electronics', icon: '⚡' },
-  { name: 'Fashion', slug: 'fashion', icon: '👗' },
-  { name: 'Home & Kitchen', slug: 'home-kitchen', icon: '🏠' },
-  { name: 'Beauty', slug: 'beauty', icon: '✨' },
-  { name: 'Sports', slug: 'sports-outdoors', icon: '🏃' },
-  { name: 'Books', slug: 'books', icon: '📚' },
-];
-
-const searchCategories = ['All Categories', 'Electronics', 'Fashion', 'Home & Kitchen', 'Beauty', 'Sports', 'Books'];
+const categoryIcons: Record<string, string> = {
+  electronics: '⚡',
+  fashion: '👗',
+  'home-kitchen': '🏠',
+  beauty: '✨',
+  'sports-outdoors': '🏃',
+  books: '📚',
+  sports: '🏃',
+  toys: '🧸',
+  grocery: '🛒',
+  health: '💊',
+  automotive: '🚗',
+  'baby-kids': '👶',
+};
 
 export function Header() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchCategory, setSearchCategory] = useState('All Categories');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
+  const [isAccountOpen, setIsAccountOpen] = useState(false);
+  const accountRef = useRef<HTMLDivElement>(null);
 
-  const cartItemCount = useCartStore((s) => s.totalItems());
-  const wishlistCount = useWishlistStore((s) => s.items.length);
+  const [mounted, setMounted] = useState(false);
+  const rawCartCount = useCartStore((s) => s.totalItems());
+  const rawWishlistCount = useWishlistStore((s) => s.items.length);
+  const cartItemCount = mounted ? rawCartCount : 0;
+  const wishlistCount = mounted ? rawWishlistCount : 0;
   const { data: categories } = useCategories();
+  const { user, isAuthenticated, logout, loading: authLoading } = useAuth();
+
+  useEffect(() => setMounted(true), []);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (accountRef.current && !accountRef.current.contains(e.target as Node)) {
+        setIsAccountOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   useEffect(() => {
     const handleScroll = () => setIsScrolled(window.scrollY > 30);
@@ -53,32 +76,32 @@ export function Header() {
   };
 
   return (
-    <header className={`sticky top-0 z-50 transition-all duration-500 ${isScrolled ? 'shadow-elevated' : ''}`}>
+    <header className={`sticky top-0 z-50 bg-white transition-all duration-500 ${isScrolled ? 'shadow-elevated' : ''}`}>
       {/* Top Bar */}
       <div className="bg-gradient-to-r from-primary-800 via-primary-700 to-primary-800 text-[11px]">
         <div className="mx-auto max-w-[1440px] flex items-center justify-between px-4 py-1.5 sm:px-6">
-          <div className="flex items-center gap-3 text-white/75">
+          <div className="flex items-center gap-3 text-white/90">
             <button className="flex items-center gap-1 hover:text-white transition-colors group">
               <MapPin size={11} className="text-primary-300" />
               <span>Deliver to <strong className="text-white">Mumbai 400001</strong></span>
               <ChevronDown size={9} className="group-hover:rotate-180 transition-transform" />
             </button>
-            <span className="text-white/20 hidden sm:inline">|</span>
+            <span className="text-white/45 hidden sm:inline">|</span>
             <span className="hidden sm:flex items-center gap-1">
               <Phone size={10} />
               1800-123-XELNOVA
             </span>
           </div>
-          <div className="flex items-center gap-3 text-white/75">
+          <div className="flex items-center gap-3 text-white/90">
             <Link href="/download" className="hidden md:flex items-center gap-1 hover:text-white transition-colors">
               <Download size={10} />
               Get App
             </Link>
-            <span className="hidden md:inline text-white/20">|</span>
-            <Link href="/seller" className="hover:text-white transition-colors">Sell on Xelnova</Link>
-            <span className="text-white/20">|</span>
+            <span className="hidden md:inline text-white/45">|</span>
+            <a href="http://localhost:3003" className="hover:text-white transition-colors">Sell on Xelnova</a>
+            <span className="text-white/45">|</span>
             <Link href="/track-order" className="hover:text-white transition-colors">Track Order</Link>
-            <span className="text-white/20 hidden sm:inline">|</span>
+            <span className="text-white/45 hidden sm:inline">|</span>
             <Link href="/faq" className="hidden sm:inline hover:text-white transition-colors">Help</Link>
           </div>
         </div>
@@ -97,7 +120,7 @@ export function Header() {
 
           {/* Logo */}
           <Link href="/" className="flex-shrink-0">
-            <Image src="/xelnova-logo.png" alt="Xelnova" width={140} height={40} className="h-7 w-auto lg:h-9" priority />
+            <Image src="/xelnova-logo-dark.png" alt="Xelnova" width={280} height={80} className="h-8 w-auto lg:h-10" priority />
           </Link>
 
           {/* Search Bar with Category Dropdown */}
@@ -109,8 +132,9 @@ export function Header() {
                 className="h-11 bg-gray-50 border-r border-gray-200 px-3 pr-7 text-xs font-medium text-text-secondary outline-none cursor-pointer hover:bg-gray-100 transition-colors appearance-none"
                 style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 8px center' }}
               >
-                {searchCategories.map((cat) => (
-                  <option key={cat} value={cat}>{cat}</option>
+                <option value="All Categories">All Categories</option>
+                {(categories || []).map((cat) => (
+                  <option key={cat.slug} value={cat.name}>{cat.name}</option>
                 ))}
               </select>
               <input
@@ -131,18 +155,94 @@ export function Header() {
 
           {/* Right Actions */}
           <div className="flex items-center gap-0.5 lg:gap-1 ml-auto">
-            <Link
-              href="/login"
-              className="hidden lg:flex items-center gap-2.5 rounded-xl px-3 py-2 text-text-secondary hover:text-primary-600 hover:bg-primary-50 transition-all"
-            >
-              <div className="w-8 h-8 rounded-full bg-primary-50 flex items-center justify-center">
-                <User size={16} className="text-primary-600" />
+            {isAuthenticated && user ? (
+              <div ref={accountRef} className="relative hidden lg:block">
+                <button
+                  onClick={() => setIsAccountOpen(!isAccountOpen)}
+                  className="flex items-center gap-2.5 rounded-xl px-3 py-2 text-text-secondary hover:text-primary-600 hover:bg-primary-50 transition-all"
+                >
+                  {user.avatar ? (
+                    <img src={user.avatar} alt="" className="w-8 h-8 rounded-full object-cover ring-2 ring-primary-100" />
+                  ) : (
+                    <div className="w-8 h-8 rounded-full bg-primary-100 flex items-center justify-center">
+                      <span className="text-sm font-bold text-primary-700">{user.name?.charAt(0).toUpperCase()}</span>
+                    </div>
+                  )}
+                  <span className="text-xs leading-tight">
+                    <span className="block text-[10px] text-text-muted">Hello, {user.name?.split(' ')[0]}</span>
+                    <span className="block font-semibold text-text-primary">Account <ChevronDown size={10} className="inline" /></span>
+                  </span>
+                </button>
+
+                <AnimatePresence>
+                  {isAccountOpen && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 8, scale: 0.96 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 8, scale: 0.96 }}
+                      transition={{ duration: 0.15 }}
+                      className="absolute right-0 top-full mt-1.5 w-56 bg-white rounded-xl shadow-xl border border-gray-100 py-2 z-50"
+                    >
+                      <div className="px-4 py-2.5 border-b border-gray-100">
+                        <p className="text-sm font-semibold text-gray-900 truncate">{user.name}</p>
+                        <p className="text-xs text-gray-500 truncate">{user.email}</p>
+                      </div>
+                      <div className="py-1">
+                        <Link
+                          href="/account/profile"
+                          onClick={() => setIsAccountOpen(false)}
+                          className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-primary-50 hover:text-primary-700 transition-colors"
+                        >
+                          <User size={16} /> My Profile
+                        </Link>
+                        <Link
+                          href="/account/orders"
+                          onClick={() => setIsAccountOpen(false)}
+                          className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-primary-50 hover:text-primary-700 transition-colors"
+                        >
+                          <Package size={16} /> My Orders
+                        </Link>
+                        <Link
+                          href="/account/wishlist"
+                          onClick={() => setIsAccountOpen(false)}
+                          className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-primary-50 hover:text-primary-700 transition-colors"
+                        >
+                          <Heart size={16} /> Wishlist
+                        </Link>
+                      </div>
+                      <div className="border-t border-gray-100 pt-1">
+                        <button
+                          onClick={async () => {
+                            setIsAccountOpen(false);
+                            await logout();
+                            document.cookie = 'xelnova-token=; path=/; max-age=0';
+                            document.cookie = 'xelnova-refresh-token=; path=/; max-age=0';
+                            localStorage.removeItem('xelnova-auth-provider');
+                            window.location.href = '/';
+                          }}
+                          className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors"
+                        >
+                          <LogOut size={16} /> Sign Out
+                        </button>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
-              <span className="text-xs leading-tight">
-                <span className="block text-[10px] text-text-muted">Hello, Sign in</span>
-                <span className="block font-semibold text-text-primary">Account <ChevronDown size={10} className="inline" /></span>
-              </span>
-            </Link>
+            ) : (
+              <Link
+                href="/login"
+                className="hidden lg:flex items-center gap-2.5 rounded-xl px-3 py-2 text-text-secondary hover:text-primary-600 hover:bg-primary-50 transition-all"
+              >
+                <div className="w-8 h-8 rounded-full bg-primary-50 flex items-center justify-center">
+                  <User size={16} className="text-primary-600" />
+                </div>
+                <span className="text-xs leading-tight">
+                  <span className="block text-[10px] text-text-muted">Hello, Sign in</span>
+                  <span className="block font-semibold text-text-primary">Account <ChevronDown size={10} className="inline" /></span>
+                </span>
+              </Link>
+            )}
 
             <Link
               href="/account/wishlist"
@@ -212,13 +312,13 @@ export function Header() {
       {/* Category Navigation + Sale Badge */}
       <div className={`border-b border-border/40 transition-all duration-500 ${isScrolled ? 'glass' : 'bg-white'}`}>
         <div className="mx-auto max-w-[1440px] flex items-center gap-0.5 overflow-x-auto px-4 scrollbar-hide lg:px-6">
-          {navCategories.map((cat) => (
+          {(categories || []).map((cat) => (
             <Link
               key={cat.slug}
               href={`/products?category=${cat.slug}`}
               className="flex-shrink-0 flex items-center gap-1.5 px-3.5 py-2.5 text-sm text-text-secondary hover:text-primary-700 hover:bg-primary-50 transition-all rounded-lg font-medium"
             >
-              <span className="text-sm">{cat.icon}</span>
+              <span className="text-sm">{categoryIcons[cat.slug] || '🛍️'}</span>
               {cat.name}
             </Link>
           ))}
@@ -230,13 +330,13 @@ export function Header() {
               <Flame size={12} />
               Mega Sale — Up to 70% Off
             </Link>
-            <Link
-              href="/seller"
+            <a
+              href="http://localhost:3003"
               className="flex-shrink-0 flex items-center gap-1 px-3 py-2.5 text-sm font-semibold text-accent-600 hover:bg-accent-50 transition-colors rounded-lg"
             >
               <Sparkles size={14} />
               Sell on Xelnova
-            </Link>
+            </a>
           </div>
         </div>
       </div>
@@ -263,19 +363,37 @@ export function Header() {
               <div className="bg-gradient-to-r from-primary-700 to-primary-600 px-5 py-5">
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center">
-                      <User size={18} className="text-white" />
-                    </div>
-                    <div>
-                      <p className="text-sm font-semibold text-white">Hello, Guest</p>
-                      <Link href="/login" className="text-xs text-primary-200 hover:text-white transition-colors">
-                        Sign in or Register →
-                      </Link>
-                    </div>
+                    {isAuthenticated && user ? (
+                      <>
+                        {user.avatar ? (
+                          <img src={user.avatar} alt="" className="w-10 h-10 rounded-full object-cover ring-2 ring-white/30" />
+                        ) : (
+                          <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center">
+                            <span className="text-white font-bold">{user.name?.charAt(0).toUpperCase()}</span>
+                          </div>
+                        )}
+                        <div>
+                          <p className="text-sm font-semibold text-white">Hello, {user.name?.split(' ')[0]}</p>
+                          <p className="text-xs text-primary-200 truncate max-w-[160px]">{user.email}</p>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center">
+                          <User size={18} className="text-white" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold text-white">Hello, Guest</p>
+                          <Link href="/login" className="text-xs text-primary-200 hover:text-white transition-colors">
+                            Sign in or Register →
+                          </Link>
+                        </div>
+                      </>
+                    )}
                   </div>
                   <button
                     onClick={() => setIsMobileMenuOpen(false)}
-                    className="rounded-lg p-1.5 text-white/70 hover:text-white hover:bg-white/10 transition-colors"
+                    className="rounded-lg p-1.5 text-white/90 hover:text-white hover:bg-white/10 transition-colors"
                   >
                     <X size={20} />
                   </button>
@@ -303,12 +421,20 @@ export function Header() {
                 <div className="px-4 pb-1.5">
                   <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-text-muted">Your Account</p>
                 </div>
-                {[
-                  { href: '/login', icon: LogIn, label: 'Sign In' },
-                  { href: '/account/orders', icon: Package, label: 'Your Orders' },
-                  { href: '/account/wishlist', icon: Heart, label: 'Wishlist' },
-                  { href: '/track-order', icon: MapPin, label: 'Track Order' },
-                ].map((item) => (
+                {(isAuthenticated
+                  ? [
+                      { href: '/account/profile', icon: User, label: 'My Profile' },
+                      { href: '/account/orders', icon: Package, label: 'Your Orders' },
+                      { href: '/account/wishlist', icon: Heart, label: 'Wishlist' },
+                      { href: '/track-order', icon: MapPin, label: 'Track Order' },
+                    ]
+                  : [
+                      { href: '/login', icon: LogIn, label: 'Sign In' },
+                      { href: '/account/orders', icon: Package, label: 'Your Orders' },
+                      { href: '/account/wishlist', icon: Heart, label: 'Wishlist' },
+                      { href: '/track-order', icon: MapPin, label: 'Track Order' },
+                    ]
+                ).map((item) => (
                   <Link
                     key={item.href}
                     href={item.href}
@@ -319,17 +445,33 @@ export function Header() {
                     {item.label}
                   </Link>
                 ))}
+                {isAuthenticated && (
+                  <button
+                    onClick={async () => {
+                      setIsMobileMenuOpen(false);
+                      await logout();
+                      document.cookie = 'xelnova-token=; path=/; max-age=0';
+                      document.cookie = 'xelnova-refresh-token=; path=/; max-age=0';
+                      localStorage.removeItem('xelnova-auth-provider');
+                      window.location.href = '/';
+                    }}
+                    className="w-full flex items-center gap-3 px-5 py-3 text-sm text-red-600 hover:bg-red-50 transition-colors"
+                  >
+                    <LogOut size={16} />
+                    Sign Out
+                  </button>
+                )}
               </nav>
 
               <div className="border-t border-border p-4">
-                <Link
-                  href="/seller"
+                <a
+                  href="http://localhost:3003"
                   onClick={() => setIsMobileMenuOpen(false)}
                   className="flex items-center justify-center gap-2 rounded-xl bg-primary-600 px-4 py-3 text-sm font-semibold text-white hover:bg-primary-700 transition-colors shadow-primary"
                 >
                   <Sparkles size={14} />
                   Sell on Xelnova
-                </Link>
+                </a>
               </div>
             </motion.div>
           </>

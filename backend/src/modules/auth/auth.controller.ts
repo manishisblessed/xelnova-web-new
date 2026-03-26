@@ -1,4 +1,4 @@
-import { Controller, Post, Body, HttpCode, HttpStatus, Req, Headers, Get, UseGuards, Res, Query } from '@nestjs/common';
+import { Controller, Post, Body, HttpCode, HttpStatus, Req, Headers, Get, UseGuards, Res, Query, UnauthorizedException } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
 import { Request, Response } from 'express';
@@ -8,7 +8,9 @@ import {
   RegisterDto,
   SendOtpDto,
   VerifyOtpDto,
+  CompletePhoneRegistrationDto,
   RefreshTokenDto,
+  GoogleTokenDto,
 } from './dto/auth.dto';
 import { successResponse } from '../../common/helpers/response.helper';
 import { Auth } from '../../common/decorators/auth.decorator';
@@ -73,6 +75,14 @@ export class AuthController {
   async verifyOtp(@Body() dto: VerifyOtpDto) {
     const result = await this.authService.verifyOtp(dto.phone, dto.otp);
     return successResponse(result, 'OTP verified successfully');
+  }
+
+  @Post('complete-phone-registration')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Complete registration for new phone user (after OTP verification)' })
+  async completePhoneRegistration(@Body() dto: CompletePhoneRegistrationDto) {
+    const result = await this.authService.completePhoneRegistration(dto.phone, dto.name, dto.email);
+    return successResponse(result, 'Registration successful');
   }
 
   @Post('refresh')
@@ -170,25 +180,24 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Login with Google ID token (for frontend SDK)' })
   async googleTokenLogin(
-    @Body() body: { idToken: string; role?: string },
+    @Body() dto: GoogleTokenDto,
     @Req() req: Request,
     @Headers('user-agent') userAgent: string,
   ) {
     const ipAddress = this.getClientIp(req);
     
-    // Verify the Google ID token
     const { OAuth2Client } = await import('google-auth-library');
     const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
     
     try {
       const ticket = await client.verifyIdToken({
-        idToken: body.idToken,
+        idToken: dto.idToken,
         audience: process.env.GOOGLE_CLIENT_ID,
       });
       
       const payload = ticket.getPayload();
       if (!payload || !payload.email) {
-        throw new Error('Invalid token payload');
+        throw new UnauthorizedException('Invalid token payload');
       }
 
       const googleUser = {
@@ -199,13 +208,15 @@ export class AuthController {
       };
 
       let role: Role = 'CUSTOMER';
-      if (body.role === 'seller') role = 'SELLER';
-      else if (body.role === 'admin') role = 'ADMIN';
+      if (dto.role === 'seller') role = 'SELLER';
+      else if (dto.role === 'admin') role = 'ADMIN';
 
       const result = await this.authService.googleLogin(googleUser, role, ipAddress, userAgent);
       return successResponse(result, 'Google login successful');
     } catch (error) {
-      throw new Error('Invalid Google token');
+      if (error instanceof UnauthorizedException) throw error;
+      const message = error instanceof Error ? error.message : 'Invalid Google token';
+      throw new UnauthorizedException(message);
     }
   }
 }

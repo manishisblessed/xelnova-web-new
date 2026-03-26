@@ -85,7 +85,7 @@ export default function SellerLandingPage() {
               <h1 className="text-4xl md:text-6xl font-extrabold text-white font-display mb-6 leading-tight">
                 Grow Your Business with <span className="text-gradient-accent" style={{ WebkitTextFillColor: 'transparent', background: 'linear-gradient(135deg, #ffad20, #f98d07)', WebkitBackgroundClip: 'text', backgroundClip: 'text' }}>Xelnova</span>
               </h1>
-              <p className="text-lg text-white/50 mb-8 max-w-lg leading-relaxed">
+              <p className="text-lg text-white/80 mb-8 max-w-lg leading-relaxed">
                 Reach millions of customers across India and scale your business with our trusted marketplace. Start selling in minutes.
               </p>
               <div className="flex flex-col sm:flex-row gap-3">
@@ -106,11 +106,11 @@ export default function SellerLandingPage() {
                     <div className="grid grid-cols-2 gap-4 text-center">
                       <div>
                         <p className="text-2xl font-extrabold text-white font-display">₹2.5L+</p>
-                        <p className="text-[11px] text-white/50">Avg. monthly seller earnings</p>
+                        <p className="text-[11px] text-white/80">Avg. monthly seller earnings</p>
                       </div>
                       <div>
                         <p className="text-2xl font-extrabold text-white font-display">3 Days</p>
-                        <p className="text-[11px] text-white/50">Quick account setup</p>
+                        <p className="text-[11px] text-white/80">Quick account setup</p>
                       </div>
                     </div>
                   </div>
@@ -235,7 +235,7 @@ export default function SellerLandingPage() {
             </div>
             <div className="relative">
               <h2 className="text-3xl md:text-5xl font-extrabold text-white font-display mb-4">Ready to Start Selling?</h2>
-              <p className="text-white/50 mb-8 max-w-lg mx-auto text-lg">Join thousands of successful sellers on Xelnova today</p>
+              <p className="text-white/80 mb-8 max-w-lg mx-auto text-lg">Join thousands of successful sellers on Xelnova today</p>
               <div className="flex flex-col sm:flex-row gap-3 justify-center">
                 <Link href="/seller/register" className="inline-flex items-center justify-center gap-2 bg-white text-primary-700 px-10 py-4 rounded-xl font-bold text-base hover:bg-primary-50 transition-all shadow-lg">
                   Register Now — It&apos;s Free <ArrowRight size={18} />

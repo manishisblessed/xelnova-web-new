@@ -1,5 +1,15 @@
 import { randomUUID } from 'crypto';
 
+export interface SellerDocument {
+  id: string;
+  type: string;
+  fileName: string;
+  fileSize: number;
+  mimeType: string;
+  buffer: Buffer;
+  uploadedAt: string;
+}
+
 export interface SellerRecord {
   id: string;
   userId: string;
@@ -35,6 +45,7 @@ export interface SellerRecord {
   bankBranch?: string;
   verified: boolean;
   createdAt: string;
+  documents?: SellerDocument[];
 }
 
 const globalForSeller = globalThis as unknown as {
@@ -93,4 +104,26 @@ export function updateSeller(id: string, data: Partial<SellerRecord>): SellerRec
 
 export function getAllSellers(): SellerRecord[] {
   return Array.from(store.values());
+}
+
+export function addDocument(sellerId: string, doc: Omit<SellerDocument, 'id' | 'uploadedAt'>): SellerDocument | undefined {
+  const seller = store.get(sellerId);
+  if (!seller) return undefined;
+
+  if (!seller.documents) seller.documents = [];
+
+  seller.documents = seller.documents.filter(d => d.type !== doc.type);
+
+  const document: SellerDocument = {
+    ...doc,
+    id: randomUUID(),
+    uploadedAt: new Date().toISOString(),
+  };
+  seller.documents.push(document);
+  return document;
+}
+
+export function getDocuments(sellerId: string): SellerDocument[] {
+  const seller = store.get(sellerId);
+  return seller?.documents ?? [];
 }

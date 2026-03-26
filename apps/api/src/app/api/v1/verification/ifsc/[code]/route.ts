@@ -42,45 +42,13 @@ export async function GET(
         });
       }
     } catch {
-      // Fall through to mock
+      // External API unavailable
     }
 
-    // Mock response as fallback
-    const bankCode = ifscUpper.substring(0, 4);
-    const bankNames: Record<string, string> = {
-      SBIN: 'State Bank of India',
-      HDFC: 'HDFC Bank',
-      ICIC: 'ICICI Bank',
-      UTIB: 'Axis Bank',
-      PUNB: 'Punjab National Bank',
-      BARB: 'Bank of Baroda',
-      CNRB: 'Canara Bank',
-      UBIN: 'Union Bank of India',
-      IOBA: 'Indian Overseas Bank',
-      BKID: 'Bank of India',
-      KKBK: 'Kotak Mahindra Bank',
-      YESB: 'Yes Bank',
-      INDB: 'IndusInd Bank',
-      IDIB: 'Indian Bank',
-    };
-
-    return NextResponse.json({
-      success: true,
-      data: {
-        IFSC: ifscUpper,
-        BANK: bankNames[bankCode] || `${bankCode} Bank`,
-        BRANCH: 'Main Branch',
-        ADDRESS: 'India',
-        CITY: 'Metro City',
-        STATE: 'State',
-        CONTACT: '',
-        MICR: '',
-        UPI: true,
-        NEFT: true,
-        RTGS: true,
-        IMPS: true,
-      },
-    });
+    return NextResponse.json(
+      { success: false, message: 'Unable to verify IFSC code. Please try again later.' },
+      { status: 503 }
+    );
   } catch (error) {
     console.error('IFSC verification error:', error);
     return NextResponse.json(

@@ -243,7 +243,7 @@ export default function AboutPage() {
             </div>
             <div className="relative">
               <h2 className="text-2xl md:text-4xl font-extrabold text-white font-display mb-4">Ready to Start Shopping?</h2>
-              <p className="text-white/50 mb-8 max-w-lg mx-auto">Discover thousands of products from verified sellers with fast delivery across India.</p>
+              <p className="text-white/80 mb-8 max-w-lg mx-auto">Discover thousands of products from verified sellers with fast delivery across India.</p>
               <div className="flex flex-col sm:flex-row gap-3 justify-center">
                 <Link href="/products" className="inline-flex items-center justify-center gap-2 bg-white text-primary-700 px-8 py-3.5 rounded-xl font-semibold hover:bg-primary-50 transition-all shadow-lg">
                   Browse Products <ArrowRight size={16} />

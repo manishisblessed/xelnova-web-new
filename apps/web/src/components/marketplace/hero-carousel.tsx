@@ -5,9 +5,11 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronLeft, ChevronRight, ArrowRight } from 'lucide-react';
+import { productsApi } from '@xelnova/api';
+import type { Banner } from '@xelnova/api';
 
 interface Slide {
-  id: number;
+  id: string;
   image: string;
   title: string;
   subtitle: string;
@@ -17,38 +19,33 @@ interface Slide {
   accent: string;
 }
 
-const slides: Slide[] = [
+const fallbackSlides: Slide[] = [
   {
-    id: 1,
-    image: 'https://images.unsplash.com/photo-1468495244123-6c6c332eeece?w=1400&h=600&fit=crop',
-    title: 'Electronics\nMega Sale',
-    subtitle: 'Up to 70% off on smartphones, laptops & accessories',
-    badge: 'Limited Time',
-    cta: 'Shop Electronics',
-    href: '/products?category=electronics',
-    accent: 'bg-primary-500',
-  },
-  {
-    id: 2,
-    image: 'https://images.unsplash.com/photo-1483985988355-763728e1935b?w=1400&h=600&fit=crop',
-    title: 'New Season\nFashion',
-    subtitle: 'Trending styles at unbeatable prices — refresh your wardrobe',
-    badge: 'Trending Now',
-    cta: 'Explore Fashion',
-    href: '/products?category=fashion',
-    accent: 'bg-accent-500',
-  },
-  {
-    id: 3,
-    image: 'https://images.unsplash.com/photo-1556228453-efd6c1ff04f6?w=1400&h=600&fit=crop',
-    title: 'Home &\nLiving Fest',
-    subtitle: 'Transform your space with curated furniture & decor',
-    badge: 'Best Sellers',
-    cta: 'Discover More',
-    href: '/products?category=home-furniture',
+    id: 'fb-1',
+    image: '',
+    title: 'Welcome to\nXelnova',
+    subtitle: 'Discover amazing products from trusted sellers across India',
+    badge: 'Shop Now',
+    cta: 'Browse Products',
+    href: '/products',
     accent: 'bg-primary-500',
   },
 ];
+
+const accentColors = ['bg-primary-500', 'bg-accent-500', 'bg-primary-500', 'bg-accent-500'];
+
+function mapBannerToSlide(banner: Banner, index: number): Slide {
+  return {
+    id: banner.id,
+    image: banner.image || '',
+    title: banner.title,
+    subtitle: banner.subtitle || '',
+    badge: banner.ctaText || undefined,
+    cta: banner.ctaText || 'Shop Now',
+    href: banner.ctaLink || '/products',
+    accent: accentColors[index % accentColors.length],
+  };
+}
 
 const slideVariants = {
   enter: (direction: number) => ({ x: direction > 0 ? 300 : -300, opacity: 0, scale: 0.98 }),
@@ -58,6 +55,19 @@ const slideVariants = {
 
 export function HeroCarousel() {
   const [[page, direction], setPage] = useState([0, 0]);
+  const [slides, setSlides] = useState<Slide[]>(fallbackSlides);
+
+  useEffect(() => {
+    productsApi.getBanners('hero')
+      .then((banners) => {
+        const active = banners.filter((b) => b.isActive);
+        if (active.length > 0) {
+          setSlides(active.sort((a, b) => a.sortOrder - b.sortOrder).map(mapBannerToSlide));
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   const activeIndex = ((page % slides.length) + slides.length) % slides.length;
 
   const paginate = useCallback(
@@ -90,14 +100,18 @@ export function HeroCarousel() {
             }}
             className="absolute inset-0"
           >
-            <Image
-              src={slide.image}
-              alt={slide.title}
-              fill
-              priority
-              className="object-cover"
-              sizes="(max-width: 768px) 100vw, 1100px"
-            />
+            {slide.image ? (
+              <Image
+                src={slide.image}
+                alt={slide.title}
+                fill
+                priority
+                className="object-cover"
+                sizes="(max-width: 768px) 100vw, 1100px"
+              />
+            ) : (
+              <div className="absolute inset-0 bg-gradient-to-br from-primary-700 via-primary-600 to-primary-800" />
+            )}
             <div className="absolute inset-0 bg-gradient-to-r from-black/75 via-black/40 to-transparent" />
 
             <div className="absolute inset-0 flex items-center">

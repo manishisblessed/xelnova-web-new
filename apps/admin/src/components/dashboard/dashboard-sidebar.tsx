@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { motion } from 'framer-motion';
 import {
@@ -13,7 +14,7 @@ import {
   ShoppingCart,
   Users,
   Store,
-  Image,
+  Image as ImageIcon,
   Zap,
   Ticket,
   TrendingUp,
@@ -40,7 +41,7 @@ const NAV: { href: string; label: string; icon: React.ComponentType<{ size?: num
   { href: '/customers', label: 'Customers', icon: Users },
   { href: '/sellers', label: 'Sellers', icon: Store },
   { href: '/seller-onboarding', label: 'Seller Onboarding', icon: Store },
-  { href: '/banners', label: 'Banners', icon: Image },
+  { href: '/banners', label: 'Banners', icon: ImageIcon },
   { href: '/flash-deals', label: 'Flash Deals', icon: Zap },
   { href: '/coupons', label: 'Coupons', icon: Ticket },
   { href: '/revenue', label: 'Revenue', icon: TrendingUp },
@@ -56,14 +57,17 @@ export function DashboardSidebar() {
   const { user, logout } = useDashboardAuth();
 
   return (
-    <aside className="w-64 min-h-screen border-r border-border bg-surface flex flex-col">
-      <div className="p-6 border-b border-border">
-        <Link href="/dashboard" className="flex items-center gap-2">
-          <span className="text-xl font-bold text-primary-600 font-display">Xelnova</span>
-          <span className="text-xs text-text-muted font-medium uppercase tracking-wider">Admin</span>
+    <aside className="fixed inset-y-0 left-0 z-40 flex h-dvh w-64 flex-col overflow-hidden border-r border-border bg-surface">
+      <div className="shrink-0 border-b border-border p-6">
+        <Link href="/dashboard" className="flex items-center gap-2.5">
+          <Image src="/xelnova-icon-dark.png" alt="Xelnova" width={36} height={36} className="h-8 w-8" />
+          <div className="flex items-center gap-1.5">
+            <span className="text-xl font-bold text-primary-600 font-display">Xelnova</span>
+            <span className="text-xs text-text-muted font-medium uppercase tracking-wider">Admin</span>
+          </div>
         </Link>
       </div>
-      <nav className="flex-1 p-3 space-y-0.5 overflow-y-auto">
+      <nav className="min-h-0 flex-1 space-y-0.5 overflow-y-auto overflow-x-hidden overscroll-y-contain p-3">
         {NAV.map((item) => {
           const active = pathname === item.href || pathname.startsWith(item.href + '/');
           const Icon = item.icon;
@@ -84,13 +88,14 @@ export function DashboardSidebar() {
           );
         })}
       </nav>
-      <div className="p-3 border-t border-border">
+      <div className="shrink-0 space-y-0.5 border-t border-border bg-surface p-3">
         <div className="px-3 py-2 text-xs text-text-muted truncate" title={user?.email}>
           {user?.email}
         </div>
         <button
+          type="button"
           onClick={() => logout()}
-          className="flex items-center gap-3 w-full rounded-xl px-3 py-2.5 text-sm font-medium text-danger-600 hover:bg-danger-50 transition-colors"
+          className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-danger-600 transition-colors hover:bg-danger-50"
         >
           <LogOut size={18} />
           Log out

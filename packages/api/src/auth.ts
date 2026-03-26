@@ -24,12 +24,34 @@ export async function register(name: string, email: string, password: string, ph
 }
 
 export async function sendOtp(phone: string) {
-  const { data } = await api.post<ApiResponse<{ message: string; otp: string }>>('/auth/send-otp', { phone });
+  const { data } = await api.post<ApiResponse<{ message: string; otp?: string }>>('/auth/send-otp', { phone });
   return data.data;
 }
 
-export async function verifyOtp(phone: string, otp: string): Promise<LoginResponse & { isNewUser: boolean }> {
-  const { data } = await api.post<ApiResponse<LoginResponse & { isNewUser: boolean }>>('/auth/verify-otp', { phone, otp });
+export interface VerifyOtpResponse {
+  isNewUser: boolean;
+  phone?: string;
+  user?: AuthUser;
+  accessToken?: string;
+  refreshToken?: string;
+  hasSellerProfile?: boolean;
+}
+
+export async function verifyOtp(phone: string, otp: string): Promise<VerifyOtpResponse> {
+  const { data } = await api.post<ApiResponse<VerifyOtpResponse>>('/auth/verify-otp', { phone, otp });
+  const result = data.data;
+  if (!result.isNewUser && result.accessToken) {
+    setAccessToken(result.accessToken);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('xelnova-refresh-token', result.refreshToken!);
+      localStorage.setItem('xelnova-user', JSON.stringify(result.user));
+    }
+  }
+  return result;
+}
+
+export async function completePhoneRegistration(phone: string, name: string, email: string): Promise<LoginResponse> {
+  const { data } = await api.post<ApiResponse<LoginResponse>>('/auth/complete-phone-registration', { phone, name, email });
   const result = data.data;
   setAccessToken(result.accessToken);
   if (typeof window !== 'undefined') {

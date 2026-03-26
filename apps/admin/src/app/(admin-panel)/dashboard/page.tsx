@@ -2,41 +2,76 @@
 
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { DollarSign, ShoppingCart, Users, Store } from 'lucide-react';
+import { DollarSign, ShoppingCart, Users, Store, Package, Clock } from 'lucide-react';
 import { DashboardHeader } from '@/components/dashboard/dashboard-header';
 import { StatCard } from '@/components/dashboard/stat-card';
-import { ChartCard } from '@/components/dashboard/chart-card';
 import { DataTable, type Column } from '@/components/dashboard/data-table';
 import { Badge } from '@xelnova/ui';
 import { apiDashboard } from '@/lib/api';
 
-interface DashboardResponse {
-  kpis: Array<{ label: string; value: string | number; change?: number; changeLabel?: string }>;
-  revenueChart: Array<{ name: string; value: number }>;
-  ordersChart: Array<{ name: string; value: number }>;
-  recentOrders: Array<{ id: string; orderNumber: string; customer: string; total: number; status: string; createdAt: string }>;
-  recentUsers?: Array<{ id: string; name: string; email: string; role: string; joinedAt: string }>;
+interface DashboardData {
+  totalProducts: number;
+  totalOrders: number;
+  totalCustomers: number;
+  totalSellers: number;
+  monthOrders: number;
+  lastMonthOrders: number;
+  pendingOrders: number;
+  totalRevenue: number;
+  monthRevenue: number;
+  activeSellers: number;
+  pendingProducts: number;
+  recentOrders: Array<{
+    id: string;
+    orderNumber: string;
+    total: number;
+    status: string;
+    createdAt: string;
+    user: { name: string; email: string };
+  }>;
+  recentActivity: Array<{
+    id: string;
+    type: string;
+    action: string;
+    message: string;
+    createdAt: string;
+  }>;
 }
 
+const STATUS_VARIANT: Record<string, 'success' | 'danger' | 'warning' | 'info' | 'default'> = {
+  DELIVERED: 'success', SHIPPED: 'info', PROCESSING: 'warning', PENDING: 'default',
+  CONFIRMED: 'info', CANCELLED: 'danger', RETURNED: 'danger', REFUNDED: 'danger',
+};
+
 export default function DashboardPage() {
-  const [data, setData] = useState<DashboardResponse | null>(null);
+  const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
     apiDashboard()
-      .then(setData)
+      .then((d) => { if (!cancelled) setData(d as DashboardData); })
+      .catch(() => {})
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, []);
 
-  const kpis = data?.kpis ?? [];
-  const orderColumns: Column<DashboardResponse['recentOrders'][0]>[] = [
+  const orderChange = data && data.lastMonthOrders > 0
+    ? Math.round(((data.monthOrders - data.lastMonthOrders) / data.lastMonthOrders) * 100)
+    : 0;
+
+  const orderColumns: Column<DashboardData['recentOrders'][0]>[] = [
     { key: 'orderNumber', header: 'Order' },
-    { key: 'customer', header: 'Customer' },
+    { key: 'user', header: 'Customer', render: (row) => row.user?.name || '—' },
     { key: 'total', header: 'Total', render: (row) => `₹${row.total.toLocaleString()}` },
-    { key: 'status', header: 'Status', render: (row) => <Badge variant={row.status === 'Delivered' ? 'success' : row.status === 'Shipped' ? 'info' : 'warning'}>{row.status}</Badge> },
+    { key: 'status', header: 'Status', render: (row) => <Badge variant={STATUS_VARIANT[row.status] ?? 'default'}>{row.status.charAt(0) + row.status.slice(1).toLowerCase()}</Badge> },
     { key: 'createdAt', header: 'Date', render: (row) => new Date(row.createdAt).toLocaleDateString() },
+  ];
+
+  const activityColumns: Column<DashboardData['recentActivity'][0]>[] = [
+    { key: 'action', header: 'Action' },
+    { key: 'message', header: 'Details', render: (row) => <span className="text-xs">{row.message}</span> },
+    { key: 'createdAt', header: 'Time', render: (row) => new Date(row.createdAt).toLocaleString() },
   ];
 
   return (
@@ -44,34 +79,48 @@ export default function DashboardPage() {
       <DashboardHeader title="Admin Dashboard" />
       <div className="p-6 space-y-6">
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <StatCard loading={loading} label={kpis[0]?.label ?? 'Revenue'} value={kpis[0]?.value ?? '—'} change={kpis[0]?.change} changeLabel={kpis[0]?.changeLabel} icon={DollarSign} />
-          <StatCard loading={loading} label={kpis[1]?.label ?? 'Orders'} value={kpis[1]?.value ?? '—'} change={kpis[1]?.change} changeLabel={kpis[1]?.changeLabel} icon={ShoppingCart} />
-          <StatCard loading={loading} label={kpis[2]?.label ?? 'Customers'} value={kpis[2]?.value ?? '—'} change={kpis[2]?.change} changeLabel={kpis[2]?.changeLabel} icon={Users} />
-          <StatCard loading={loading} label={kpis[3]?.label ?? 'Sellers'} value={kpis[3]?.value ?? '—'} change={kpis[3]?.change} changeLabel={kpis[3]?.changeLabel} icon={Store} />
+          <StatCard loading={loading} label="Total Revenue" value={data ? `₹${data.totalRevenue.toLocaleString()}` : '—'} icon={DollarSign} />
+          <StatCard loading={loading} label="Total Orders" value={data?.totalOrders ?? '—'} change={orderChange || undefined} changeLabel="vs last month" icon={ShoppingCart} />
+          <StatCard loading={loading} label="Customers" value={data?.totalCustomers ?? '—'} icon={Users} />
+          <StatCard loading={loading} label="Sellers" value={data ? `${data.activeSellers} / ${data.totalSellers}` : '—'} icon={Store} />
         </motion.div>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <ChartCard title="Revenue (last 6 months)" data={data?.revenueChart ?? []} loading={loading} />
-          <ChartCard title="Orders (last 7 days)" data={data?.ordersChart ?? []} loading={loading} />
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="rounded-2xl border border-border bg-surface p-5 shadow-card">
+            <div className="flex items-center gap-3 mb-1">
+              <Package size={18} className="text-text-muted" />
+              <span className="text-sm text-text-muted">Products</span>
+            </div>
+            <p className="text-2xl font-bold text-text-primary">{loading ? '—' : data?.totalProducts}</p>
+            {!loading && data && data.pendingProducts > 0 && (
+              <p className="text-xs text-accent-600 mt-1">{data.pendingProducts} pending review</p>
+            )}
+          </div>
+          <div className="rounded-2xl border border-border bg-surface p-5 shadow-card">
+            <div className="flex items-center gap-3 mb-1">
+              <Clock size={18} className="text-text-muted" />
+              <span className="text-sm text-text-muted">Pending Orders</span>
+            </div>
+            <p className="text-2xl font-bold text-text-primary">{loading ? '—' : data?.pendingOrders}</p>
+          </div>
+          <div className="rounded-2xl border border-border bg-surface p-5 shadow-card">
+            <div className="flex items-center gap-3 mb-1">
+              <DollarSign size={18} className="text-text-muted" />
+              <span className="text-sm text-text-muted">This Month</span>
+            </div>
+            <p className="text-2xl font-bold text-text-primary">{loading ? '—' : `₹${(data?.monthRevenue ?? 0).toLocaleString()}`}</p>
+            <p className="text-xs text-text-muted mt-1">{data?.monthOrders ?? 0} orders</p>
+          </div>
         </div>
+
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="rounded-2xl border border-border bg-surface p-6 shadow-card">
             <h3 className="text-sm font-medium text-text-muted mb-4">Recent Orders</h3>
             <DataTable columns={orderColumns} data={data?.recentOrders ?? []} keyExtractor={(row) => row.id} loading={loading} emptyMessage="No orders yet" />
           </div>
           <div className="rounded-2xl border border-border bg-surface p-6 shadow-card">
-            <h3 className="text-sm font-medium text-text-muted mb-4">Recent Users</h3>
-            <DataTable
-              columns={[
-                { key: 'name', header: 'Name' },
-                { key: 'email', header: 'Email' },
-                { key: 'role', header: 'Role' },
-                { key: 'joinedAt', header: 'Joined', render: (row) => new Date(row.joinedAt).toLocaleDateString() },
-              ]}
-              data={data?.recentUsers ?? []}
-              keyExtractor={(row) => row.id}
-              loading={loading}
-              emptyMessage="No users yet"
-            />
+            <h3 className="text-sm font-medium text-text-muted mb-4">Recent Activity</h3>
+            <DataTable columns={activityColumns} data={data?.recentActivity ?? []} keyExtractor={(row) => row.id} loading={loading} emptyMessage="No recent activity" />
           </div>
         </div>
       </div>

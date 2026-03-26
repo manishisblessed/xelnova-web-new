@@ -3,17 +3,11 @@
 import { useEffect, useState, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import {
-  CheckCircle,
-  XCircle,
-  AlertCircle,
   Search,
   RefreshCw,
   Building2,
   CreditCard,
   FileText,
-  Clock,
-  User,
-  Filter,
 } from 'lucide-react';
 import { DashboardHeader } from '@/components/dashboard/dashboard-header';
 import { Badge } from '@xelnova/ui';
@@ -31,7 +25,7 @@ interface VerificationLog {
   createdAt: string;
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api/v1';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
 
 async function fetchWithAuth(endpoint: string) {
   const token = typeof window !== 'undefined' 
@@ -76,22 +70,6 @@ export default function VerificationsPage() {
   useEffect(() => {
     fetchLogs();
   }, [fetchLogs]);
-
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'VERIFIED':
-        return <CheckCircle size={16} className="text-green-500" />;
-      case 'INVALID':
-      case 'INVALID_FORMAT':
-      case 'NOT_FOUND':
-        return <XCircle size={16} className="text-red-500" />;
-      case 'ERROR':
-      case 'API_ERROR':
-        return <AlertCircle size={16} className="text-orange-500" />;
-      default:
-        return <Clock size={16} className="text-gray-500" />;
-    }
-  };
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -167,25 +145,25 @@ export default function VerificationsPage() {
       <div className="p-6 space-y-6">
         {/* Stats */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-          <div className="rounded-2xl border border-border bg-surface p-4">
+          <div className="rounded-2xl border border-border bg-surface p-4 shadow-card">
             <p className="text-sm text-text-muted">Total Verifications</p>
             <p className="text-2xl font-bold text-text-primary mt-1">{stats.total}</p>
           </div>
-          <div className="rounded-2xl border border-border bg-surface p-4">
+          <div className="rounded-2xl border border-border bg-surface p-4 shadow-card">
             <p className="text-sm text-text-muted">Verified</p>
-            <p className="text-2xl font-bold text-green-500 mt-1">{stats.verified}</p>
+            <p className="text-2xl font-bold text-emerald-600 mt-1">{stats.verified}</p>
           </div>
-          <div className="rounded-2xl border border-border bg-surface p-4">
+          <div className="rounded-2xl border border-border bg-surface p-4 shadow-card">
             <p className="text-sm text-text-muted">Failed</p>
-            <p className="text-2xl font-bold text-red-500 mt-1">{stats.failed}</p>
+            <p className="text-2xl font-bold text-red-600 mt-1">{stats.failed}</p>
           </div>
-          <div className="rounded-2xl border border-border bg-surface p-4">
+          <div className="rounded-2xl border border-border bg-surface p-4 shadow-card">
             <p className="text-sm text-text-muted">GSTIN Checks</p>
-            <p className="text-2xl font-bold text-blue-500 mt-1">{stats.gstin}</p>
+            <p className="text-2xl font-bold text-blue-600 mt-1">{stats.gstin}</p>
           </div>
-          <div className="rounded-2xl border border-border bg-surface p-4">
+          <div className="rounded-2xl border border-border bg-surface p-4 shadow-card">
             <p className="text-sm text-text-muted">IFSC Checks</p>
-            <p className="text-2xl font-bold text-purple-500 mt-1">{stats.ifsc}</p>
+            <p className="text-2xl font-bold text-purple-600 mt-1">{stats.ifsc}</p>
           </div>
         </div>
 
@@ -265,10 +243,7 @@ export default function VerificationsPage() {
                     </td>
                     <td className="py-3 px-4 font-mono text-xs">{log.identifier}</td>
                     <td className="py-3 px-4">
-                      <div className="flex items-center gap-2">
-                        {getStatusIcon(log.status)}
-                        {getStatusBadge(log.status)}
-                      </div>
+                      {getStatusBadge(log.status)}
                     </td>
                     <td className="py-3 px-4">
                       {log.user ? (

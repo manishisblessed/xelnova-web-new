@@ -15,6 +15,7 @@ export class UsersService {
         phone: true,
         avatar: true,
         role: true,
+        authProvider: true,
         createdAt: true,
       },
     });
@@ -62,6 +63,11 @@ export class UsersService {
       type: string;
     },
   ) {
+    const VALID_TYPES = ['HOME', 'OFFICE', 'OTHER'] as const;
+    const TYPE_ALIASES: Record<string, (typeof VALID_TYPES)[number]> = { WORK: 'OFFICE' };
+    const raw = address.type?.toUpperCase() || 'HOME';
+    const addressType = VALID_TYPES.includes(raw as any) ? raw : (TYPE_ALIASES[raw] || 'HOME');
+
     return this.prisma.address.create({
       data: {
         userId,
@@ -73,7 +79,7 @@ export class UsersService {
         state: address.state,
         pincode: address.pincode,
         landmark: address.landmark,
-        type: (address.type?.toUpperCase() as any) || 'HOME',
+        type: addressType as any,
       },
     });
   }
