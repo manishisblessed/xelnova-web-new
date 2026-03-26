@@ -519,7 +519,7 @@ function LoginPageContent() {
                       Change number
                     </button>
                     <span className="text-gray-300">|</span>
-                    <button className="text-gray-600 hover:text-gray-900">
+                    <button onClick={handleSendOtp} disabled={loading} className="text-gray-600 hover:text-gray-900 disabled:opacity-50">
                       Resend OTP
                     </button>
                   </div>
