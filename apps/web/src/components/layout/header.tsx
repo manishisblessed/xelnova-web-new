@@ -10,8 +10,10 @@ import {
 } from 'lucide-react';
 import { useCartStore } from '@/lib/store/cart-store';
 import { useWishlistStore } from '@/lib/store/wishlist-store';
+import { useLocationStore } from '@/lib/store/location-store';
 import { useCategories } from '@/lib/api';
 import { useAuth } from '@xelnova/api';
+import { LocationModal } from '@/components/location-modal';
 
 const categoryIcons: Record<string, string> = {
   electronics: '⚡',
@@ -37,14 +39,23 @@ export function Header() {
   const accountRef = useRef<HTMLDivElement>(null);
 
   const [mounted, setMounted] = useState(false);
+  const [locationModalOpen, setLocationModalOpen] = useState(false);
   const rawCartCount = useCartStore((s) => s.totalItems());
   const rawWishlistCount = useWishlistStore((s) => s.items.length);
   const cartItemCount = mounted ? rawCartCount : 0;
   const wishlistCount = mounted ? rawWishlistCount : 0;
+  const location = useLocationStore((s) => s.location);
   const { data: categories } = useCategories();
   const { user, isAuthenticated, logout, loading: authLoading } = useAuth();
 
   useEffect(() => setMounted(true), []);
+
+  useEffect(() => {
+    if (mounted && !location) {
+      const timer = setTimeout(() => setLocationModalOpen(true), 800);
+      return () => clearTimeout(timer);
+    }
+  }, [mounted, location]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -81,9 +92,16 @@ export function Header() {
       <div className="bg-gradient-to-r from-primary-800 via-primary-700 to-primary-800 text-[11px]">
         <div className="mx-auto max-w-[1440px] flex items-center justify-between px-4 py-1.5 sm:px-6">
           <div className="flex items-center gap-3 text-white/90">
-            <button className="flex items-center gap-1 hover:text-white transition-colors group">
+            <button
+              onClick={() => setLocationModalOpen(true)}
+              className="flex items-center gap-1 hover:text-white transition-colors group"
+            >
               <MapPin size={11} className="text-primary-300" />
-              <span>Deliver to <strong className="text-white">Mumbai 400001</strong></span>
+              {location ? (
+                <span>Deliver to <strong className="text-white">{location.city} {location.pincode}</strong></span>
+              ) : (
+                <span>Select your <strong className="text-white">location</strong></span>
+              )}
               <ChevronDown size={9} className="group-hover:rotate-180 transition-transform" />
             </button>
             <span className="text-white/45 hidden sm:inline">|</span>
@@ -477,6 +495,8 @@ export function Header() {
           </>
         )}
       </AnimatePresence>
+
+      <LocationModal open={locationModalOpen} onClose={() => setLocationModalOpen(false)} />
     </header>
   );
 }
