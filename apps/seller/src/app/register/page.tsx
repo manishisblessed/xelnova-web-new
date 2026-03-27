@@ -288,8 +288,12 @@ export default function RegisterPage() {
   const executeRecaptcha = useCallback(async () => {
     setCaptcha(prev => ({ ...prev, loading: true, error: undefined }));
     try {
+      if (!RECAPTCHA_SITE_KEY) {
+        throw new Error('RECAPTCHA_CONFIG');
+      }
+
       if (!window.grecaptcha?.enterprise) {
-        throw new Error('reCAPTCHA Enterprise not loaded');
+        throw new Error('RECAPTCHA_NOT_LOADED');
       }
 
       const recaptchaToken = await new Promise<string>((resolve, reject) => {
@@ -312,15 +316,22 @@ export default function RegisterPage() {
       if (data.success) {
         setCaptcha({ loading: false, solved: true, token: data.data.captchaToken });
       } else {
-        setCaptcha({ loading: false, solved: false, error: data.message || 'Verification failed' });
+        setCaptcha({ loading: false, solved: false, error: data.message || 'Verification failed. Please try again.' });
       }
-    } catch {
-      setCaptcha({ loading: false, solved: false, error: 'Verification failed. Please try again.' });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '';
+      if (msg === 'RECAPTCHA_CONFIG') {
+        setCaptcha({ loading: false, solved: false, error: 'Security verification is not configured. Please contact support.' });
+      } else if (msg === 'RECAPTCHA_NOT_LOADED') {
+        setCaptcha({ loading: false, solved: false, error: 'Security script is still loading. Please wait a moment and try again.' });
+      } else {
+        setCaptcha({ loading: false, solved: false, error: 'Verification failed. Please refresh the page and try again.' });
+      }
     }
   }, []);
 
   useEffect(() => {
-    if (recaptchaScriptLoaded.current) return;
+    if (recaptchaScriptLoaded.current || !RECAPTCHA_SITE_KEY) return;
     const existing = document.querySelector('script[src*="recaptcha/enterprise.js"]');
     if (existing) { recaptchaScriptLoaded.current = true; return; }
 
@@ -328,8 +339,12 @@ export default function RegisterPage() {
     script.src = `https://www.google.com/recaptcha/enterprise.js?render=${RECAPTCHA_SITE_KEY}`;
     script.async = true;
     script.defer = true;
+    script.onload = () => { recaptchaScriptLoaded.current = true; };
+    script.onerror = () => {
+      recaptchaScriptLoaded.current = false;
+      setCaptcha(prev => ({ ...prev, error: 'Security script failed to load. Please refresh the page.' }));
+    };
     document.head.appendChild(script);
-    recaptchaScriptLoaded.current = true;
   }, []);
 
   // OTP cooldown timers

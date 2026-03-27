@@ -263,32 +263,58 @@ export class SellerOnboardingService {
     const apiKey = process.env.RECAPTCHA_API_KEY;
     const siteKey = process.env.RECAPTCHA_SITE_KEY;
 
-    if (!projectId || !apiKey || !siteKey) {
+    const missing: string[] = [];
+    if (!projectId) missing.push('RECAPTCHA_PROJECT_ID');
+    if (!apiKey) missing.push('RECAPTCHA_API_KEY');
+    if (!siteKey) missing.push('RECAPTCHA_SITE_KEY');
+
+    if (missing.length > 0) {
+      console.error(`[reCAPTCHA] Missing env vars: ${missing.join(', ')}`);
       throw new HttpException(
-        'reCAPTCHA Enterprise is not configured. Set RECAPTCHA_PROJECT_ID, RECAPTCHA_API_KEY, and RECAPTCHA_SITE_KEY on the backend.',
+        'Security verification is temporarily unavailable. Please try again later.',
         HttpStatus.SERVICE_UNAVAILABLE,
       );
     }
 
     const url = `https://recaptchaenterprise.googleapis.com/v1/projects/${projectId}/assessments?key=${apiKey}`;
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        event: { token, siteKey, expectedAction: 'REGISTER' },
-      }),
-    });
+
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          event: { token, siteKey, expectedAction: 'REGISTER' },
+        }),
+      });
+    } catch (err) {
+      console.error('[reCAPTCHA] Network error calling Google API:', err);
+      throw new HttpException(
+        'Security verification service is unreachable. Please try again later.',
+        HttpStatus.BAD_GATEWAY,
+      );
+    }
 
     const data = await res.json();
 
+    if (!res.ok) {
+      console.error('[reCAPTCHA] Google API error:', JSON.stringify(data));
+      throw new HttpException(
+        'Security verification failed. Please try again.',
+        HttpStatus.BAD_GATEWAY,
+      );
+    }
+
     if (!data.tokenProperties?.valid) {
       const reason = data.tokenProperties?.invalidReason || 'UNKNOWN';
-      throw new HttpException(`reCAPTCHA verification failed (${reason}). Please try again.`, HttpStatus.BAD_REQUEST);
+      console.warn(`[reCAPTCHA] Token invalid: ${reason}`);
+      throw new HttpException('Verification failed. Please try again.', HttpStatus.BAD_REQUEST);
     }
 
     const score = data.riskAnalysis?.score ?? 0;
-    if (score < 0.5) {
-      throw new HttpException('reCAPTCHA score too low. Please try again.', HttpStatus.BAD_REQUEST);
+    if (score < 0.3) {
+      console.warn(`[reCAPTCHA] Score too low: ${score}`);
+      throw new HttpException('Verification failed. Please try again.', HttpStatus.BAD_REQUEST);
     }
 
     const captchaToken = uuidv4();

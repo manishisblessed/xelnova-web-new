@@ -180,16 +180,17 @@ sudo certbot --nginx -d admin.xelnova.in
 - [ ] `CORS_ORIGINS` lists all production domains
 - [ ] `GOOGLE_CALLBACK_URL` points to `https://api.xelnova.in/...`
 - [ ] `FRONTEND_URL`, `SELLER_URL`, `ADMIN_URL` are `https://...xelnova.in`
-- [ ] `RECAPTCHA_SITE_KEY` + `RECAPTCHA_SECRET_KEY` are **production** keys (not test)
+- [ ] `RECAPTCHA_SITE_KEY` is set in backend `.env` (must match `NEXT_PUBLIC_RECAPTCHA_SITE_KEY` in seller app)
+- [ ] `RECAPTCHA_PROJECT_ID` and `RECAPTCHA_API_KEY` are set in backend `.env`
 - [ ] `RESEND_API_KEY` is set (email OTP)
 - [ ] `FORTIUS_API_KEY` is set (SMS OTP)
 - [ ] Frontend apps have `NEXT_PUBLIC_API_URL=https://api.xelnova.in/api/v1`
-- [ ] Frontend apps have production `NEXT_PUBLIC_RECAPTCHA_SITE_KEY`
+- [ ] Seller app has `NEXT_PUBLIC_RECAPTCHA_SITE_KEY` matching backend's `RECAPTCHA_SITE_KEY`
 - [ ] Nginx config uses `.xelnova.in` domains
 - [ ] SSL certs are issued for all 4 subdomains
 - [ ] DNS A records point `api.xelnova.in`, `seller.xelnova.in`, `admin.xelnova.in` to EC2 IP
 - [ ] Google OAuth console has `https://api.xelnova.in/api/v1/auth/google/callback` as redirect URI
-- [ ] Google reCAPTCHA console has `seller.xelnova.in` as allowed domain
+- [ ] Google reCAPTCHA Enterprise console has `seller.xelnova.in` as allowed domain
 
 ---
 
@@ -235,6 +236,14 @@ pm2 restart xelnova-api
 
 **CORS errors in browser**
 - Check `CORS_ORIGINS` in `~/backend/.env` includes the exact origin (with `https://`)
+- Restart: `pm2 restart xelnova-api`
+
+**reCAPTCHA verification failing on seller registration**
+- Check `pm2 logs xelnova-api` for `[reCAPTCHA]` errors
+- Verify all three vars are set in `~/backend/.env`: `RECAPTCHA_SITE_KEY`, `RECAPTCHA_PROJECT_ID`, `RECAPTCHA_API_KEY`
+- Verify `RECAPTCHA_SITE_KEY` matches `NEXT_PUBLIC_RECAPTCHA_SITE_KEY` in seller app
+- Verify the key is a **reCAPTCHA Enterprise** key (not v2/v3) at https://console.cloud.google.com/security/recaptcha
+- Verify `seller.xelnova.in` is listed as an allowed domain in the reCAPTCHA Enterprise console
 - Restart: `pm2 restart xelnova-api`
 
 **Google Sign-In not working**
