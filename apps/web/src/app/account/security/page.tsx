@@ -93,9 +93,18 @@ export default function SecurityPage() {
 
     setSaving(true);
     try {
-      await new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("Password change is not yet available. This feature is coming soon.")), 500)
-      );
+      await usersApi.changePassword({
+        newPassword,
+        ...(isGoogleOrPhone ? {} : { currentPassword }),
+      });
+      setSuccess(true);
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      if (isGoogleOrPhone) {
+        const profile = await usersApi.getProfile();
+        setProvider(profile.authProvider ?? null);
+      }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to change password.");
     } finally {

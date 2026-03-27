@@ -1,5 +1,6 @@
 import { api } from './client';
 import type { ApiResponse, AuthUser, Address, Product } from './types';
+import { isAxiosError } from 'axios';
 
 export async function getProfile(): Promise<AuthUser> {
   const { data, status } = await api.get<ApiResponse<AuthUser | null>>('/users/profile');
@@ -23,6 +24,25 @@ export async function updateProfile(body: { name?: string; email?: string; phone
     throw err;
   }
   return data.data;
+}
+
+export async function changePassword(body: {
+  newPassword: string;
+  currentPassword?: string;
+}): Promise<void> {
+  try {
+    const { data } = await api.patch<ApiResponse<unknown>>('/users/password', body);
+    if (!data.success) {
+      throw new Error(data.message || 'Failed to update password');
+    }
+  } catch (e: unknown) {
+    if (isAxiosError(e)) {
+      const raw = (e.response?.data as { message?: string | string[] } | undefined)?.message;
+      const msg = Array.isArray(raw) ? raw.join('. ') : raw;
+      throw new Error(msg || e.message || 'Failed to update password');
+    }
+    throw e;
+  }
 }
 
 export async function getAddresses(): Promise<Address[]> {

@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Resend } from 'resend';
 
@@ -11,18 +11,30 @@ export interface EmailOptions {
 
 @Injectable()
 export class EmailService {
-  private resend: Resend;
+  /** Lazily created so the app can boot without RESEND_API_KEY (local dev). */
+  private resend: Resend | null = null;
   private readonly logger = new Logger(EmailService.name);
   private readonly fromEmail: string;
 
   constructor(private readonly config: ConfigService) {
-    this.resend = new Resend(this.config.get('RESEND_API_KEY') || '');
     this.fromEmail = this.config.get('EMAIL_FROM') || 'XelNova <noreply@xelnova.com>';
+  }
+
+  private getResend(): Resend {
+    if (this.resend) return this.resend;
+    const key = this.config.get<string>('RESEND_API_KEY')?.trim();
+    if (!key || key === 're_xxxxx') {
+      throw new ServiceUnavailableException(
+        'Email is not configured. Set RESEND_API_KEY and EMAIL_FROM on the backend.',
+      );
+    }
+    this.resend = new Resend(key);
+    return this.resend;
   }
 
   async sendEmail(options: EmailOptions) {
     try {
-      const result = await this.resend.emails.send({
+      const result = await this.getResend().emails.send({
         from: options.from || this.fromEmail,
         to: options.to,
         subject: options.subject,

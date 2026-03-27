@@ -18,8 +18,8 @@ import {
   Step4AddressDto,
   Step5ShippingDto,
   Step6BankDetailsDto,
-  SendOtpDto,
-  VerifyOtpDto,
+  SellerOnboardingSendOtpDto,
+  SellerOnboardingVerifyOtpDto,
   AdminReviewDto,
 } from './dto/seller-onboarding.dto';
 
@@ -32,7 +32,7 @@ export class SellerOnboardingService {
 
   // ========== OTP Services ==========
 
-  async sendOtp(dto: SendOtpDto, ipAddress?: string) {
+  async sendOtp(dto: SellerOnboardingSendOtpDto, ipAddress?: string) {
     const { identifier, type, purpose = 'REGISTRATION' } = dto;
 
     // Rate limiting: only count unverified OTPs sent in the last 60 seconds
@@ -96,7 +96,7 @@ export class SellerOnboardingService {
     };
   }
 
-  async verifyOtp(dto: VerifyOtpDto) {
+  async verifyOtp(dto: SellerOnboardingVerifyOtpDto) {
     const { identifier, type, otp } = dto;
 
     const otpRecord = await this.prisma.otpVerification.findFirst({

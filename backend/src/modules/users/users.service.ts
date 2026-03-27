@@ -1,5 +1,12 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  UnauthorizedException,
+} from '@nestjs/common';
+import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../prisma/prisma.service';
+import { ChangePasswordDto } from './dto/change-password.dto';
 
 @Injectable()
 export class UsersService {
@@ -21,6 +28,36 @@ export class UsersService {
     });
     if (!user) throw new NotFoundException('User not found');
     return user;
+  }
+
+  async changePassword(userId: string, dto: ChangePasswordDto) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, password: true, authProvider: true },
+    });
+    if (!user) throw new NotFoundException('User not found');
+
+    const needsCurrent = user.authProvider === 'EMAIL';
+    if (needsCurrent) {
+      if (!dto.currentPassword?.trim()) {
+        throw new BadRequestException('Current password is required');
+      }
+      const ok = await bcrypt.compare(dto.currentPassword, user.password);
+      if (!ok) {
+        throw new UnauthorizedException('Current password is incorrect');
+      }
+    }
+
+    const hashed = await bcrypt.hash(dto.newPassword, 10);
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        password: hashed,
+        ...(user.authProvider !== 'EMAIL' ? { authProvider: 'EMAIL' as const } : {}),
+      },
+    });
+
+    return { ok: true as const };
   }
 
   async updateProfile(

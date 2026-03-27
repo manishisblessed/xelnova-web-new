@@ -1,9 +1,10 @@
-import { Controller, Get, Put, Post, Body } from '@nestjs/common';
+import { Controller, Get, Put, Post, Patch, Body } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { UsersService } from './users.service';
 import { successResponse } from '../../common/helpers/response.helper';
 import { Auth } from '../../common/decorators/auth.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { ChangePasswordDto } from './dto/change-password.dto';
 
 @ApiTags('Users')
 @Controller('users')
@@ -31,6 +32,14 @@ export class UsersController {
       await this.usersService.updateProfile(userId, body),
       'Profile updated successfully',
     );
+  }
+
+  @Patch('password')
+  @Auth()
+  @ApiOperation({ summary: 'Set or change password (OAuth/phone: no current password; email: requires current)' })
+  async changePassword(@CurrentUser('id') userId: string, @Body() body: ChangePasswordDto) {
+    await this.usersService.changePassword(userId, body);
+    return successResponse(null, 'Password updated successfully');
   }
 
   @Get('addresses')

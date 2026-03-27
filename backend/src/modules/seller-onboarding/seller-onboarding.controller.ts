@@ -18,8 +18,8 @@ import { Request } from 'express';
 import { SellerOnboardingService } from './seller-onboarding.service';
 import { UploadService } from '../upload/upload.service';
 import {
-  SendOtpDto,
-  VerifyOtpDto,
+  SellerOnboardingSendOtpDto,
+  SellerOnboardingVerifyOtpDto,
   Step1AccountDto,
   Step2TaxDetailsDto,
   Step3StoreDetailsDto,
@@ -55,7 +55,7 @@ export class SellerOnboardingController {
   @Post('otp/send')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Send OTP for email or phone verification' })
-  async sendOtp(@Body() dto: SendOtpDto, @Req() req: Request) {
+  async sendOtp(@Body() dto: SellerOnboardingSendOtpDto, @Req() req: Request) {
     const result = await this.onboardingService.sendOtp(dto, this.getClientIp(req));
     return successResponse(result, 'OTP sent successfully');
   }
@@ -63,7 +63,7 @@ export class SellerOnboardingController {
   @Post('otp/verify')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Verify OTP' })
-  async verifyOtp(@Body() dto: VerifyOtpDto) {
+  async verifyOtp(@Body() dto: SellerOnboardingVerifyOtpDto) {
     const result = await this.onboardingService.verifyOtp(dto);
     return successResponse(result, 'OTP verified successfully');
   }

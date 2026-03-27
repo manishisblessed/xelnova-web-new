@@ -1,7 +1,8 @@
 import { IsString, IsEmail, IsOptional, IsBoolean, MinLength, MaxLength, Matches, IsNumber, IsEnum } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
-export class SendOtpDto {
+/** Distinct name for Swagger (avoids clash with auth SendOtpDto). */
+export class SellerOnboardingSendOtpDto {
   @ApiProperty({ description: 'Email or phone number' })
   @IsString()
   identifier: string;
@@ -16,7 +17,7 @@ export class SendOtpDto {
   purpose?: string;
 }
 
-export class VerifyOtpDto {
+export class SellerOnboardingVerifyOtpDto {
   @ApiProperty()
   @IsString()
   identifier: string;
