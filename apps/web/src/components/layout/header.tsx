@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import { useCartStore } from '@/lib/store/cart-store';
 import { useWishlistStore } from '@/lib/store/wishlist-store';
-import { useLocationStore } from '@/lib/store/location-store';
+import { useLocationStore, autoDetectLocation } from '@/lib/store/location-store';
 import { useCategories } from '@/lib/api';
 import { useAuth } from '@xelnova/api';
 import { LocationModal } from '@/components/location-modal';
@@ -45,17 +45,26 @@ export function Header() {
   const cartItemCount = mounted ? rawCartCount : 0;
   const wishlistCount = mounted ? rawWishlistCount : 0;
   const location = useLocationStore((s) => s.location);
+  const setLocation = useLocationStore((s) => s.setLocation);
+  const autoDetected = useLocationStore((s) => s.autoDetected);
+  const setAutoDetected = useLocationStore((s) => s.setAutoDetected);
   const { data: categories } = useCategories();
   const { user, isAuthenticated, logout, loading: authLoading } = useAuth();
 
   useEffect(() => setMounted(true), []);
 
   useEffect(() => {
-    if (mounted && !location) {
-      const timer = setTimeout(() => setLocationModalOpen(true), 800);
-      return () => clearTimeout(timer);
-    }
-  }, [mounted, location]);
+    if (!mounted || location || autoDetected) return;
+    let cancelled = false;
+    autoDetectLocation().then((detected) => {
+      if (cancelled) return;
+      setAutoDetected(true);
+      if (detected) {
+        setLocation(detected);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [mounted, location, autoDetected, setLocation, setAutoDetected]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {

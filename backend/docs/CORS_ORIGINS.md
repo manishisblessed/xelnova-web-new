@@ -1,40 +1,32 @@
-# CORS origins – Domain configuration
+# CORS_ORIGINS
 
-## What is CORS?
+**CORS (Cross-Origin Resource Sharing)** is a browser security rule. When your frontend (e.g. `https://admin.xelnova.in`) calls your API (`https://api.xelnova.in`), the browser sends an `Origin` header. The API can reply with `Access-Control-Allow-Origin` to say which origins are allowed. If the request's origin isn't in that list, the browser blocks the response and your frontend can't read it.
 
-**CORS (Cross-Origin Resource Sharing)** is a browser security rule. When your frontend (e.g. `https://admin.xelnova.com`) calls your API (`https://api.xelnova.com`), the browser sends an `Origin` header. The API can reply with `Access-Control-Allow-Origin` to say which origins are allowed. If the request’s origin isn’t in that list, the browser blocks the response and your frontend can’t read it.
+## What origins do you need?
 
-So: **CORS origins = the list of frontend domains that are allowed to call your API.**
+Your production origins:
 
-## What to put in `CORS_ORIGINS`
+- **Storefront (web):** `https://xelnova.in` or `https://www.xelnova.in` (use the one you actually use)
+- **Admin dashboard:** `https://admin.xelnova.in`
+- **Seller dashboard:** `https://seller.xelnova.in`
 
-Set it to the **exact** URLs where your apps run, separated by commas (no spaces):
+## Setting CORS_ORIGINS
 
-- **Storefront (web):** `https://xelnova.com` or `https://www.xelnova.com` (use the one you actually use)
-- **Admin dashboard:** `https://admin.xelnova.com` or `https://xelnova.com/admin`
-- **Seller dashboard:** `https://seller.xelnova.com` or `https://xelnova.com/seller`
+If your API is at `https://api.xelnova.in` and your apps are:
 
-### Example
+- Store: `https://xelnova.in`
+- Admin: `https://admin.xelnova.in`
+- Seller: `https://seller.xelnova.in`
 
-If your API is at `https://api.xelnova.com` and your apps are:
+Set in your backend `.env`:
 
-- Store: `https://xelnova.com`
-- Admin: `https://admin.xelnova.com`
-- Seller: `https://seller.xelnova.com`
-
-then set:
-
-```env
-CORS_ORIGINS="https://xelnova.online,https://admin.xelnova.online,https://seller.xelnova.online"
+```
+CORS_ORIGINS="https://xelnova.in,https://www.xelnova.in,https://seller.xelnova.in,https://admin.xelnova.in"
 ```
 
-## Notes
+### Tips
 
-- Use **HTTPS** in production (no `http://`).
-- No trailing slashes: use `https://xelnova.com` not `https://xelnova.com/`.
-- If you use `www`, include both if both are used:  
-  `CORS_ORIGINS="https://xelnova.com,https://www.xelnova.com,..."`
-- For local development, your `.env` (not production) might have:  
-  `CORS_ORIGINS="http://localhost:3000,http://localhost:3001,http://localhost:3002"`
-
-After changing `CORS_ORIGINS`, restart the backend so the new value is applied.
+- No trailing slashes: use `https://xelnova.in` not `https://xelnova.in/`.
+- Include `www` if you use it:
+  `CORS_ORIGINS="https://xelnova.in,https://www.xelnova.in,..."`
+- For local development, add `http://localhost:3000,http://localhost:3002,http://localhost:3003`.

@@ -530,7 +530,7 @@ function LoginFormInner() {
               <p className="text-center text-sm text-gray-600 mb-3">Don&apos;t have an account?</p>
               <Link
                 href="/register"
-                className="group flex w-full items-center justify-center gap-2 rounded-xl border-2 border-primary-500 bg-gradient-to-b from-primary-50 to-white px-4 py-3.5 text-sm font-semibold text-primary-700 shadow-sm transition-all duration-200 hover:border-primary-600 hover:bg-primary-500 hover:text-white hover:shadow-md hover:shadow-primary-500/25 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
+                className="group flex w-full items-center justify-center gap-2 rounded-xl border-2 border-primary-500 bg-primary-50 px-4 py-3.5 text-sm font-semibold text-primary-700 shadow-sm transition-all duration-200 hover:border-primary-600 hover:bg-primary-600 hover:text-white hover:shadow-md hover:shadow-primary-500/25 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
               >
                 Start selling today
                 <ArrowRight

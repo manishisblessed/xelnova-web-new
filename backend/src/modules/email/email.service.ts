@@ -17,7 +17,7 @@ export class EmailService {
   private readonly fromEmail: string;
 
   constructor(private readonly config: ConfigService) {
-    this.fromEmail = this.config.get('EMAIL_FROM') || 'XelNova <noreply@xelnova.com>';
+    this.fromEmail = this.config.get('EMAIL_FROM') || 'XelNova <noreply@xelnova.in>';
   }
 
   private getResend(): Resend {

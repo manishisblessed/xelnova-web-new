@@ -40,9 +40,10 @@ const RECAPTCHA_SITE_KEY = process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY || '';
 declare global {
   interface Window {
     grecaptcha?: {
-      ready?: (cb: () => void) => void;
-      render?: (container: string | HTMLElement, params: { sitekey: string; callback: (token: string) => void; 'expired-callback'?: () => void; theme?: string }) => number;
-      reset?: (widgetId?: number) => void;
+      enterprise?: {
+        ready: (cb: () => void) => void;
+        execute: (siteKey: string, options: { action: string }) => Promise<string>;
+      };
     };
   }
 }
@@ -66,6 +67,25 @@ const benefits = [
   { icon: Shield, text: 'Secure payments' },
   { icon: Package, text: 'Easy inventory management' },
 ];
+
+function StepHeader({ step, title, description }: { step: number; title: string; description: string }) {
+  const meta = steps.find((s) => s.id === step);
+  const Icon = meta?.icon ?? User;
+  return (
+    <div className="relative mb-6 pb-6 border-b border-gray-100">
+      <div className="flex items-start gap-4">
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary-500 to-primary-600 text-white shadow-md shadow-primary-500/20">
+          <Icon size={20} strokeWidth={2} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-primary-600 mb-1">Step {step} of 6</p>
+          <h2 className="text-xl sm:text-2xl font-extrabold text-gray-900 font-display tracking-tight leading-tight">{title}</h2>
+          <p className="text-gray-500 mt-1.5 text-sm leading-relaxed">{description}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 const businessTypes = [
   { value: 'individual', label: 'Individual/Proprietorship' },
@@ -162,8 +182,7 @@ export default function RegisterPage() {
   const [emailCooldown, setEmailCooldown] = useState(0);
   const [phoneCooldown, setPhoneCooldown] = useState(0);
   const [captcha, setCaptcha] = useState<CaptchaState>({ loading: false, solved: false });
-  const recaptchaWidgetId = useRef<number | null>(null);
-  const recaptchaContainerRef = useRef<HTMLDivElement>(null);
+  const recaptchaScriptLoaded = useRef(false);
   const [gstVerification, setGstVerification] = useState<VerificationState>({ status: 'idle' });
   const [ifscVerification, setIfscVerification] = useState<VerificationState>({ status: 'idle' });
   const [bankVerification, setBankVerification] = useState<VerificationState>({ status: 'idle' });
@@ -266,9 +285,24 @@ export default function RegisterPage() {
     }
   };
 
-  const handleRecaptchaVerify = useCallback(async (recaptchaToken: string) => {
+  const executeRecaptcha = useCallback(async () => {
     setCaptcha(prev => ({ ...prev, loading: true, error: undefined }));
     try {
+      if (!window.grecaptcha?.enterprise) {
+        throw new Error('reCAPTCHA Enterprise not loaded');
+      }
+
+      const recaptchaToken = await new Promise<string>((resolve, reject) => {
+        window.grecaptcha!.enterprise!.ready(async () => {
+          try {
+            const token = await window.grecaptcha!.enterprise!.execute(RECAPTCHA_SITE_KEY, { action: 'REGISTER' });
+            resolve(token);
+          } catch (err) {
+            reject(err);
+          }
+        });
+      });
+
       const res = await fetch(`${API_BASE}/seller-onboarding/captcha/verify`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -279,56 +313,24 @@ export default function RegisterPage() {
         setCaptcha({ loading: false, solved: true, token: data.data.captchaToken });
       } else {
         setCaptcha({ loading: false, solved: false, error: data.message || 'Verification failed' });
-        if (window.grecaptcha?.reset && recaptchaWidgetId.current !== null) {
-          window.grecaptcha.reset(recaptchaWidgetId.current);
-        }
       }
     } catch {
       setCaptcha({ loading: false, solved: false, error: 'Verification failed. Please try again.' });
-      if (window.grecaptcha?.reset && recaptchaWidgetId.current !== null) {
-        window.grecaptcha.reset(recaptchaWidgetId.current);
-      }
     }
   }, []);
 
-  const renderRecaptcha = useCallback(() => {
-    if (!window.grecaptcha?.render || !recaptchaContainerRef.current || recaptchaWidgetId.current !== null) return;
-    recaptchaWidgetId.current = window.grecaptcha.render(recaptchaContainerRef.current, {
-      sitekey: RECAPTCHA_SITE_KEY,
-      callback: handleRecaptchaVerify,
-      'expired-callback': () => setCaptcha({ loading: false, solved: false, error: 'reCAPTCHA expired. Please verify again.' }),
-      theme: 'light',
-    });
-  }, [handleRecaptchaVerify]);
-
   useEffect(() => {
-    if (currentStep !== 1 || captcha.solved) return;
+    if (recaptchaScriptLoaded.current) return;
+    const existing = document.querySelector('script[src*="recaptcha/enterprise.js"]');
+    if (existing) { recaptchaScriptLoaded.current = true; return; }
 
-    const tryRender = () => {
-      if (window.grecaptcha && window.grecaptcha.render) {
-        renderRecaptcha();
-        return true;
-      }
-      return false;
-    };
-
-    if (tryRender()) return;
-
-    const existingScript = document.querySelector('script[src*="recaptcha/api.js"]');
-    if (!existingScript) {
-      const script = document.createElement('script');
-      script.src = 'https://www.google.com/recaptcha/api.js?render=explicit';
-      script.async = true;
-      script.defer = true;
-      document.head.appendChild(script);
-    }
-
-    const interval = setInterval(() => {
-      if (tryRender()) clearInterval(interval);
-    }, 200);
-
-    return () => clearInterval(interval);
-  }, [currentStep, captcha.solved, renderRecaptcha]);
+    const script = document.createElement('script');
+    script.src = `https://www.google.com/recaptcha/enterprise.js?render=${RECAPTCHA_SITE_KEY}`;
+    script.async = true;
+    script.defer = true;
+    document.head.appendChild(script);
+    recaptchaScriptLoaded.current = true;
+  }, []);
 
   // OTP cooldown timers
   useEffect(() => {
@@ -361,7 +363,23 @@ export default function RegisterPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ identifier, type, purpose: 'REGISTRATION' }),
       });
-      const data = await res.json();
+      const raw = await res.text();
+      let data: {
+        success?: boolean;
+        message?: string;
+        error?: string;
+        data?: { expiresIn?: number; devOtp?: string };
+      } = {};
+      try {
+        data = raw ? (JSON.parse(raw) as typeof data) : {};
+      } catch {
+        setOtpState(prev => ({
+          ...prev,
+          loading: false,
+          error: `Invalid response from server (HTTP ${res.status}). Is the Nest backend running and NEXT_PUBLIC_API_URL set to …/api/v1?`,
+        }));
+        return;
+      }
       if (res.ok && data.success) {
         setOtpState({ sent: true, verified: false, loading: false, expiresIn: data.data?.expiresIn });
         setCooldown(60);
@@ -376,8 +394,19 @@ export default function RegisterPage() {
         }));
         if (res.status === 429) setCooldown(60);
       }
-    } catch {
-      setOtpState(prev => ({ ...prev, loading: false, error: 'Failed to send OTP' }));
+    } catch (e) {
+      const net =
+        e instanceof TypeError ||
+        (e instanceof Error && /network|fetch|failed/i.test(e.message));
+      setOtpState(prev => ({
+        ...prev,
+        loading: false,
+        error: net
+          ? `Cannot reach the API (${API_BASE}). Start the backend on port 4000 and set NEXT_PUBLIC_API_URL in apps/seller/.env.`
+          : e instanceof Error
+            ? e.message
+            : 'Failed to send OTP',
+      }));
     }
   };
 
@@ -765,79 +794,103 @@ export default function RegisterPage() {
     }
   };
 
+  const labelClass = 'block text-sm font-semibold text-gray-800 mb-2';
+
   const inputClass = (field: string) =>
-    `w-full min-w-0 px-4 py-3 rounded-xl border ${
-      errors[field] ? 'border-red-400 bg-red-50' : 'border-gray-200 bg-gray-50'
-    } focus:border-primary-400 focus:bg-white focus:ring-2 focus:ring-primary-400/20 outline-none transition-all text-gray-900 placeholder:text-gray-400`;
+    `w-full min-w-0 px-4 py-3.5 rounded-xl border text-[15px] ${
+      errors[field]
+        ? 'border-red-300 bg-red-50/80 ring-1 ring-red-200/60'
+        : 'border-gray-200/90 bg-white shadow-sm hover:border-gray-300/90'
+    } focus:border-primary-400 focus:ring-4 focus:ring-primary-500/10 focus:shadow-md outline-none transition-all duration-200 text-gray-900 placeholder:text-gray-400`;
 
   /** Native <select> needs text-base (16px) on iOS to avoid zoom; min-h matches other inputs */
   const selectClass = (field: string) =>
-    `${inputClass(field)} min-h-[48px] cursor-pointer text-base bg-[length:1rem] bg-[right_0.75rem_center] bg-no-repeat pr-10 appearance-none`;
+    `${inputClass(field)} min-h-[52px] cursor-pointer text-base bg-[length:1rem] bg-[right_0.75rem_center] bg-no-repeat pr-10 appearance-none`;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
+    <div className="min-h-screen bg-[#f8fafc] bg-[radial-gradient(ellipse_120%_80%_at_50%_-20%,rgba(16,185,129,0.08),transparent)]">
       {/* Header */}
-      <header className="bg-white border-b border-gray-100 sticky top-0 z-50">
+      <header className="sticky top-0 z-50 border-b border-gray-200/60 bg-white/85 backdrop-blur-xl supports-[backdrop-filter]:bg-white/70">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-16">
-            <Link href="/" className="flex items-center gap-2.5">
-              <Image src="/xelnova-icon-dark.png" alt="Xelnova" width={40} height={40} className="h-9 w-9" />
-              <span className="text-xl font-bold text-gray-900 font-display">
-                Xelnova <span className="text-primary-500">Seller</span>
+          <div className="flex items-center justify-between h-16 lg:h-[4.25rem]">
+            <Link href="/" className="flex items-center gap-2.5 transition-opacity hover:opacity-90">
+              <Image src="/xelnova-logo-dark.png" alt="Xelnova" width={140} height={36} className="h-7 w-auto" />
+              <span className="hidden sm:inline text-xs font-bold uppercase tracking-wider text-primary-600 pl-2 border-l border-gray-200">
+                Seller
               </span>
             </Link>
-            <Link href="/login" className="text-sm text-gray-600 hover:text-primary-500">
-              Already registered? <span className="font-medium text-primary-500">Sign in</span>
+            <Link
+              href="/login"
+              className="text-sm font-medium text-[#475569] hover:text-primary-600 transition-colors"
+            >
+              Already registered?{' '}
+              <span className="text-primary-600 font-semibold underline decoration-primary-600/30 underline-offset-2 hover:decoration-primary-600">
+                Sign in
+              </span>
             </Link>
           </div>
         </div>
       </header>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="grid lg:grid-cols-4 gap-8">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 lg:py-8">
+        <div className="grid lg:grid-cols-4 gap-8 lg:gap-10">
           {/* Left Sidebar - Progress */}
           <div className="hidden lg:block">
-            <div className="sticky top-24">
-              <div className="bg-white rounded-2xl border border-gray-100 p-6">
-                <h3 className="font-semibold text-gray-900 mb-6">Registration Progress</h3>
-                <div className="space-y-4">
-                  {steps.map((step, index) => (
-                    <div key={step.id} className="flex items-start gap-3">
-                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 transition-all ${
-                        currentStep > step.id
-                          ? 'bg-primary-500 text-white'
-                          : currentStep === step.id
-                          ? 'bg-primary-100 text-primary-600 ring-2 ring-primary-500'
-                          : 'bg-gray-100 text-gray-400'
-                      }`}>
-                        {currentStep > step.id ? (
-                          <CheckCircle2 size={16} />
-                        ) : (
-                          <span className="text-sm font-medium">{step.id}</span>
+            <div className="sticky top-20 space-y-5">
+              <div className="rounded-2xl border border-gray-200/80 bg-white p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04),0_12px_32px_-8px_rgba(0,0,0,0.06)]">
+                <div className="flex items-center justify-between gap-3 mb-6">
+                  <h3 className="font-display font-bold text-gray-900">Your progress</h3>
+                  <span className="text-xs font-bold tabular-nums text-primary-700 bg-primary-50 px-2.5 py-1 rounded-lg border border-primary-100">
+                    {Math.round((currentStep / 6) * 100)}%
+                  </span>
+                </div>
+                <div className="relative">
+                  {steps.map((step, index) => {
+                    const done = currentStep > step.id;
+                    const active = currentStep === step.id;
+                    return (
+                      <div key={step.id} className="relative flex gap-4 pb-8 last:pb-0">
+                        {index < steps.length - 1 && (
+                          <div
+                            className={`absolute left-[15px] top-10 w-0.5 h-[calc(100%-0.5rem)] rounded-full ${
+                              done ? 'bg-primary-200' : 'bg-gray-200'
+                            }`}
+                            aria-hidden
+                          />
                         )}
+                        <div
+                          className={`relative z-[1] w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 transition-all duration-300 ${
+                            done
+                              ? 'bg-primary-500 text-white shadow-md shadow-primary-500/25 scale-100'
+                              : active
+                                ? 'bg-white text-primary-600 ring-2 ring-primary-500 ring-offset-2 ring-offset-white shadow-sm scale-105'
+                                : 'bg-gray-100 text-gray-400'
+                          }`}
+                        >
+                          {done ? <CheckCircle2 size={16} strokeWidth={2.5} /> : <span className="text-sm font-bold">{step.id}</span>}
+                        </div>
+                        <div className="flex-1 min-w-0 pt-0.5">
+                          <p className={`text-sm font-semibold transition-colors ${active || done ? 'text-gray-900' : 'text-gray-400'}`}>
+                            {step.title}
+                          </p>
+                          <p className={`text-xs mt-0.5 leading-snug ${active ? 'text-gray-600' : 'text-gray-400'}`}>{step.description}</p>
+                        </div>
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <p className={`text-sm font-medium ${
-                          currentStep >= step.id ? 'text-gray-900' : 'text-gray-400'
-                        }`}>
-                          {step.title}
-                        </p>
-                        <p className="text-xs text-gray-500 truncate">{step.description}</p>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
 
-              <div className="mt-6 bg-gradient-to-br from-primary-500 to-primary-600 rounded-2xl p-6 text-white">
-                <h3 className="font-semibold mb-4">Why Sell on Xelnova?</h3>
-                <div className="space-y-3">
+              <div className="rounded-2xl bg-gradient-to-br from-primary-600 via-primary-600 to-emerald-800 p-6 text-white shadow-lg shadow-primary-900/20 overflow-hidden relative">
+                <div className="absolute -right-8 -top-8 h-32 w-32 rounded-full bg-white/10 blur-2xl" aria-hidden />
+                <h3 className="font-display font-bold mb-4 relative">Why sell on Xelnova?</h3>
+                <div className="space-y-3 relative">
                   {benefits.map((benefit, i) => (
-                    <div key={i} className="flex items-center gap-3 text-sm">
-                      <div className="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center">
+                    <div key={i} className="flex items-center gap-3 text-sm text-white/95">
+                      <div className="w-9 h-9 rounded-xl bg-white/15 flex items-center justify-center ring-1 ring-white/20">
                         <benefit.icon size={16} />
                       </div>
-                      <span>{benefit.text}</span>
+                      <span className="font-medium">{benefit.text}</span>
                     </div>
                   ))}
                 </div>
@@ -849,14 +902,24 @@ export default function RegisterPage() {
           <div className="lg:col-span-3">
             {/* Mobile Progress */}
             <div className="lg:hidden mb-6">
-              <div className="flex items-center justify-between bg-white rounded-xl p-4 border border-gray-100">
-                <span className="text-sm text-gray-600">Step {currentStep} of {steps.length}</span>
-                <div className="flex gap-1">
+              <div className="rounded-2xl border border-gray-200/80 bg-white p-4 shadow-sm">
+                <div className="flex items-center justify-between gap-3 mb-3">
+                  <div>
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-primary-600">Onboarding</p>
+                    <p className="text-sm font-semibold text-gray-900">
+                      Step {currentStep} · {steps[currentStep - 1]?.title}
+                    </p>
+                  </div>
+                  <span className="text-xs font-bold tabular-nums text-primary-700 bg-primary-50 px-2.5 py-1.5 rounded-lg">
+                    {Math.round((currentStep / 6) * 100)}%
+                  </span>
+                </div>
+                <div className="flex gap-1.5 h-2 rounded-full bg-gray-100 p-0.5 overflow-hidden">
                   {steps.map((step) => (
                     <div
                       key={step.id}
-                      className={`w-8 h-1.5 rounded-full ${
-                        currentStep >= step.id ? 'bg-primary-500' : 'bg-gray-200'
+                      className={`flex-1 rounded-full transition-all duration-500 ease-out ${
+                        currentStep > step.id ? 'bg-primary-400' : currentStep === step.id ? 'bg-primary-500 shadow-sm' : 'bg-transparent'
                       }`}
                     />
                   ))}
@@ -864,28 +927,32 @@ export default function RegisterPage() {
               </div>
             </div>
 
-            <motion.div
-              key={currentStep}
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-              className="relative z-0 bg-white rounded-2xl shadow-xl border border-gray-100 overflow-visible"
-            >
+            <div className="relative z-0 rounded-2xl border border-gray-200/80 bg-white shadow-[0_1px_3px_rgba(0,0,0,0.04),0_24px_48px_-12px_rgba(15,23,42,0.08)] overflow-hidden">
+              <div className="h-1 w-full bg-gradient-to-r from-primary-400 via-primary-500 to-emerald-600" aria-hidden />
               <form onSubmit={handleSubmit}>
-                <div className="p-6 sm:p-8">
+                <div className="p-5 sm:p-7 lg:p-8">
+                  <AnimatePresence mode="wait">
+                    <motion.div
+                      key={currentStep}
+                      initial={{ opacity: 0, y: 14 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -10 }}
+                      transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
+                    >
                   {/* Step 1: Account */}
                   {currentStep === 1 && (
                     <div className="space-y-6">
-                      <div>
-                        <h2 className="text-2xl font-bold text-gray-900">Create Your Account</h2>
-                        <p className="text-gray-600 mt-1">Verify your email and phone to get started</p>
-                      </div>
+                      <StepHeader
+                        step={1}
+                        title="Create your account"
+                        description="Verify your email and phone, then set a secure password."
+                      />
 
-                      {/* reCAPTCHA */}
-                      <div className="bg-gray-50 rounded-xl p-6 border border-gray-200">
-                        <h3 className="font-medium text-gray-900 mb-4 flex items-center gap-2">
-                          <Shield size={18} className="text-primary-500" />
-                          Security Verification
+                      {/* reCAPTCHA Enterprise */}
+                      <div className="rounded-xl border border-emerald-100/80 bg-gradient-to-b from-emerald-50/60 to-white p-4 sm:p-5">
+                        <h3 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                          <Shield size={16} className="text-primary-600" />
+                          Security verification
                         </h3>
                         
                         {captcha.solved ? (
@@ -895,13 +962,18 @@ export default function RegisterPage() {
                           </div>
                         ) : (
                           <div className="space-y-3">
-                            <div ref={recaptchaContainerRef} />
-                            {captcha.loading && (
-                              <div className="flex items-center gap-2 text-gray-500">
-                                <Loader2 size={16} className="animate-spin" />
-                                Verifying...
-                              </div>
-                            )}
+                            <button
+                              type="button"
+                              onClick={executeRecaptcha}
+                              disabled={captcha.loading}
+                              className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-5 py-3 text-sm font-medium text-gray-700 shadow-sm transition-all hover:border-primary-300 hover:bg-primary-50 disabled:opacity-60"
+                            >
+                              {captcha.loading ? (
+                                <><Loader2 size={16} className="animate-spin" /> Verifying...</>
+                              ) : (
+                                <><Shield size={16} className="text-primary-600" /> Verify I&apos;m not a robot</>
+                              )}
+                            </button>
                             {captcha.error && (
                               <p className="text-red-500 text-sm flex items-center gap-1">
                                 <XCircle size={14} /> {captcha.error}
@@ -915,7 +987,7 @@ export default function RegisterPage() {
                       {/* Personal Info */}
                       <div className="grid sm:grid-cols-2 gap-4">
                         <div className="sm:col-span-2">
-                          <label className="block text-sm font-medium text-gray-700 mb-1.5">Full Name *</label>
+                          <label className={labelClass}>Full Name *</label>
                           <div className="relative">
                             <User size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
                             <input
@@ -932,7 +1004,7 @@ export default function RegisterPage() {
 
                         {/* Email with OTP */}
                         <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1.5">Email Address *</label>
+                          <label className={labelClass}>Email Address *</label>
                           <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:gap-3">
                             <div className="relative min-w-0 flex-1">
                               <Mail size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -997,7 +1069,7 @@ export default function RegisterPage() {
 
                         {/* Phone with OTP */}
                         <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1.5">Mobile Number *</label>
+                          <label className={labelClass}>Mobile Number *</label>
                           <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:gap-3">
                             <div className="relative min-w-0 flex-1">
                               <Phone size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -1063,7 +1135,7 @@ export default function RegisterPage() {
 
                         {/* Password */}
                         <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1.5">Password *</label>
+                          <label className={labelClass}>Password *</label>
                           <div className="relative">
                             <Lock size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
                             <input
@@ -1086,7 +1158,7 @@ export default function RegisterPage() {
                         </div>
 
                         <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1.5">Confirm Password *</label>
+                          <label className={labelClass}>Confirm Password *</label>
                           <div className="relative">
                             <Lock size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
                             <input
@@ -1114,15 +1186,16 @@ export default function RegisterPage() {
 
                   {/* Step 2: Tax Details */}
                   {currentStep === 2 && (
-                    <div className="space-y-6">
-                      <div>
-                        <h2 className="text-2xl font-bold text-gray-900">Tax Details</h2>
-                        <p className="text-gray-600 mt-1">Verify your GST and PAN for compliance</p>
-                      </div>
+                    <div className="space-y-8">
+                      <StepHeader
+                        step={2}
+                        title="Tax & identity"
+                        description="GST, PAN, and KYC documents help us verify your business and pay you on time."
+                      />
 
-                      <div className="space-y-4">
+                      <div className="space-y-5">
                         {/* Non-GST Option */}
-                        <label className="flex items-center gap-3 p-4 rounded-xl border border-gray-200 cursor-pointer hover:bg-gray-50">
+                        <label className="flex items-center gap-3 p-4 rounded-2xl border border-gray-200/90 bg-white shadow-sm cursor-pointer hover:border-primary-200 hover:bg-primary-50/40 transition-all duration-200">
                           <input
                             type="checkbox"
                             name="sellsNonGstProducts"
@@ -1139,7 +1212,7 @@ export default function RegisterPage() {
                         {/* GST Number */}
                         {!formData.sellsNonGstProducts && (
                           <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1.5">GST Number *</label>
+                            <label className={labelClass}>GST Number *</label>
                             <div className="flex gap-2">
                               <div className="relative flex-1">
                                 <FileText size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -1199,7 +1272,7 @@ export default function RegisterPage() {
                         {/* PAN Number */}
                         <div className="grid sm:grid-cols-2 gap-4">
                           <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1.5">PAN Number *</label>
+                            <label className={labelClass}>PAN Number *</label>
                             <input
                               type="text"
                               name="panNumber"
@@ -1212,7 +1285,7 @@ export default function RegisterPage() {
                             {errors.panNumber && <p className="text-red-500 text-xs mt-1">{errors.panNumber}</p>}
                           </div>
                           <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1.5">Name as on PAN *</label>
+                            <label className={labelClass}>Name as on PAN *</label>
                             <input
                               type="text"
                               name="panName"
@@ -1227,14 +1300,14 @@ export default function RegisterPage() {
 
                         {/* KYC Document Upload */}
                         <div className="space-y-4 pt-2">
-                          <div>
-                            <h3 className="text-lg font-semibold text-gray-900 mb-1">KYC Documents</h3>
-                            <p className="text-sm text-gray-500">Upload clear scans or photos (PDF or image) for verification</p>
+                          <div className="rounded-2xl border border-gray-100 bg-slate-50/80 px-4 py-3 sm:px-5 sm:py-4">
+                            <h3 className="text-base font-bold text-gray-900 font-display">KYC documents</h3>
+                            <p className="text-sm text-gray-600 mt-1">Upload clear scans or photos (PDF or image). Files are encrypted in transit.</p>
                           </div>
 
                           {/* PAN Card Upload */}
                           <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1.5">PAN Card *</label>
+                            <label className={labelClass}>PAN Card *</label>
                             <div className={`relative rounded-xl border-2 border-dashed transition-all ${
                               kycDocs.panCard.uploaded ? 'border-green-300 bg-green-50' :
                               kycDocs.panCard.file ? 'border-primary-300 bg-primary-50/30' :
@@ -1307,7 +1380,7 @@ export default function RegisterPage() {
 
                           {/* Masked Aadhaar Upload */}
                           <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1.5">Masked Aadhaar Card *</label>
+                            <label className={labelClass}>Masked Aadhaar Card *</label>
                             <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 mb-2">
                               <div className="flex gap-2">
                                 <AlertCircle size={16} className="text-amber-600 shrink-0 mt-0.5" />
@@ -1393,15 +1466,16 @@ export default function RegisterPage() {
 
                   {/* Step 3: Store Details */}
                   {currentStep === 3 && (
-                    <div className="space-y-6">
-                      <div>
-                        <h2 className="text-2xl font-bold text-gray-900">Store Details</h2>
-                        <p className="text-gray-600 mt-1">Set up your store identity</p>
-                      </div>
+                    <div className="space-y-8">
+                      <StepHeader
+                        step={3}
+                        title="Your storefront"
+                        description="Choose a name and category customers will see when they discover your products."
+                      />
 
-                      <div className="space-y-4">
+                      <div className="space-y-5">
                         <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1.5">Store Name *</label>
+                          <label className={labelClass}>Store Name *</label>
                           <div className="relative">
                             <Store size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
                             <input
@@ -1417,7 +1491,7 @@ export default function RegisterPage() {
                         </div>
 
                         <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1.5">Store Description</label>
+                          <label className={labelClass}>Store Description</label>
                           <textarea
                             name="description"
                             value={formData.description}
@@ -1430,7 +1504,7 @@ export default function RegisterPage() {
 
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                           <div className="min-w-0">
-                            <label className="block text-sm font-medium text-gray-700 mb-1.5">Business Type *</label>
+                            <label className={labelClass}>Business Type *</label>
                             <select
                               name="businessType"
                               value={formData.businessType}
@@ -1448,7 +1522,7 @@ export default function RegisterPage() {
                             {errors.businessType && <p className="text-red-500 text-xs mt-1">{errors.businessType}</p>}
                           </div>
                           <div className="min-w-0">
-                            <label className="block text-sm font-medium text-gray-700 mb-1.5">Primary Category *</label>
+                            <label className={labelClass}>Primary Category *</label>
                             <select
                               name="businessCategory"
                               value={formData.businessCategory}
@@ -1472,16 +1546,17 @@ export default function RegisterPage() {
 
                   {/* Step 4: Address */}
                   {currentStep === 4 && (
-                    <div className="space-y-6">
-                      <div>
-                        <h2 className="text-2xl font-bold text-gray-900">Pickup Address</h2>
-                        <p className="text-gray-600 mt-1">Where orders will be picked up from</p>
-                      </div>
+                    <div className="space-y-8">
+                      <StepHeader
+                        step={4}
+                        title="Pickup address"
+                        description="This is where our logistics partner collects shipments—use your warehouse or primary dispatch location."
+                      />
 
-                      <div className="space-y-4">
+                      <div className="space-y-5">
                         <div className="grid sm:grid-cols-3 gap-4">
                           <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1.5">Pincode *</label>
+                            <label className={labelClass}>Pincode *</label>
                             <input
                               type="text"
                               name="pincode"
@@ -1494,7 +1569,7 @@ export default function RegisterPage() {
                             {errors.pincode && <p className="text-red-500 text-xs mt-1">{errors.pincode}</p>}
                           </div>
                           <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1.5">City *</label>
+                            <label className={labelClass}>City *</label>
                             <input
                               type="text"
                               name="city"
@@ -1506,7 +1581,7 @@ export default function RegisterPage() {
                             {errors.city && <p className="text-red-500 text-xs mt-1">{errors.city}</p>}
                           </div>
                           <div className="min-w-0">
-                            <label className="block text-sm font-medium text-gray-700 mb-1.5">State *</label>
+                            <label className={labelClass}>State *</label>
                             <select
                               name="state"
                               value={formData.state}
@@ -1526,7 +1601,7 @@ export default function RegisterPage() {
                         </div>
 
                         <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1.5">Full Address *</label>
+                          <label className={labelClass}>Full Address *</label>
                           <div className="relative">
                             <MapPin size={18} className="absolute left-4 top-4 text-gray-400" />
                             <textarea
@@ -1546,16 +1621,19 @@ export default function RegisterPage() {
 
                   {/* Step 5: Shipping */}
                   {currentStep === 5 && (
-                    <div className="space-y-6">
-                      <div>
-                        <h2 className="text-2xl font-bold text-gray-900">Shipping Preferences</h2>
-                        <p className="text-gray-600 mt-1">Choose how you want to fulfill orders</p>
-                      </div>
+                    <div className="space-y-8">
+                      <StepHeader
+                        step={5}
+                        title="Shipping & delivery"
+                        description="Pick how you fulfill orders and whether you offer free delivery to buyers."
+                      />
 
-                      <div className="space-y-4">
+                      <div className="space-y-5">
                         <div className="space-y-3">
-                          <label className={`flex items-start gap-4 p-4 rounded-xl border-2 cursor-pointer transition-all ${
-                            formData.shippingMethod === 'easy_ship' ? 'border-primary-500 bg-primary-50' : 'border-gray-200 hover:border-gray-300'
+                          <label className={`flex items-start gap-4 p-5 rounded-2xl border-2 cursor-pointer shadow-sm transition-all duration-200 ${
+                            formData.shippingMethod === 'easy_ship'
+                              ? 'border-primary-500 bg-primary-50/80 ring-2 ring-primary-500/20'
+                              : 'border-gray-200/90 bg-white hover:border-gray-300 hover:shadow-md'
                           }`}>
                             <input
                               type="radio"
@@ -1576,8 +1654,10 @@ export default function RegisterPage() {
                             </div>
                           </label>
 
-                          <label className={`flex items-start gap-4 p-4 rounded-xl border-2 cursor-pointer transition-all ${
-                            formData.shippingMethod === 'self_ship' ? 'border-primary-500 bg-primary-50' : 'border-gray-200 hover:border-gray-300'
+                          <label className={`flex items-start gap-4 p-5 rounded-2xl border-2 cursor-pointer shadow-sm transition-all duration-200 ${
+                            formData.shippingMethod === 'self_ship'
+                              ? 'border-primary-500 bg-primary-50/80 ring-2 ring-primary-500/20'
+                              : 'border-gray-200/90 bg-white hover:border-gray-300 hover:shadow-md'
                           }`}>
                             <input
                               type="radio"
@@ -1615,7 +1695,7 @@ export default function RegisterPage() {
                         {!formData.offerFreeDelivery && (
                           <div className="grid sm:grid-cols-2 gap-4 p-4 bg-gray-50 rounded-xl">
                             <div>
-                              <label className="block text-sm font-medium text-gray-700 mb-1.5">1-3 Days Delivery (₹) *</label>
+                              <label className={labelClass}>1-3 Days Delivery (₹) *</label>
                               <input
                                 type="number"
                                 name="deliveryCharge1to3Days"
@@ -1627,7 +1707,7 @@ export default function RegisterPage() {
                               {errors.deliveryCharge1to3Days && <p className="text-red-500 text-xs mt-1">{errors.deliveryCharge1to3Days}</p>}
                             </div>
                             <div>
-                              <label className="block text-sm font-medium text-gray-700 mb-1.5">3+ Days Delivery (₹) *</label>
+                              <label className={labelClass}>3+ Days Delivery (₹) *</label>
                               <input
                                 type="number"
                                 name="deliveryCharge3PlusDays"
@@ -1646,16 +1726,17 @@ export default function RegisterPage() {
 
                   {/* Step 6: Bank Details */}
                   {currentStep === 6 && (
-                    <div className="space-y-6">
-                      <div>
-                        <h2 className="text-2xl font-bold text-gray-900">Bank Account Details</h2>
-                        <p className="text-gray-600 mt-1">For receiving your sales payments</p>
-                      </div>
+                    <div className="space-y-8">
+                      <StepHeader
+                        step={6}
+                        title="Bank account"
+                        description="Payouts are sent to this account after each settlement cycle. Verify IFSC and account for faster approval."
+                      />
 
-                      <div className="space-y-4">
+                      <div className="space-y-5">
                         <div className="grid sm:grid-cols-2 gap-4">
                           <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1.5">Account Number *</label>
+                            <label className={labelClass}>Account Number *</label>
                             <div className="relative">
                               <CreditCard size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
                               <input
@@ -1675,7 +1756,7 @@ export default function RegisterPage() {
                           </div>
 
                           <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1.5">IFSC Code *</label>
+                            <label className={labelClass}>IFSC Code *</label>
                             <div className="flex gap-2">
                               <input
                                 type="text"
@@ -1794,7 +1875,7 @@ export default function RegisterPage() {
                         )}
 
                         <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1.5">Account Holder Name *</label>
+                          <label className={labelClass}>Account Holder Name *</label>
                           <input
                             type="text"
                             name="accountHolderName"
@@ -1834,37 +1915,43 @@ export default function RegisterPage() {
                     </div>
                   )}
 
+                    </motion.div>
+                  </AnimatePresence>
+
                   {/* Error Message */}
                   {errors.submit && (
-                    <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-xl">
-                      <p className="text-red-600 text-sm flex items-center gap-2">
-                        <XCircle size={16} /> {errors.submit}
+                    <div className="mt-6 p-4 bg-red-50 border border-red-200/80 rounded-xl shadow-sm">
+                      <p className="text-red-600 text-sm flex items-center gap-2 font-medium">
+                        <XCircle size={16} className="shrink-0" /> {errors.submit}
                       </p>
                     </div>
                   )}
                 </div>
 
-                {/* Navigation — rounded-b matches card; z-index below open native selects on some browsers */}
-                <div className="relative z-0 rounded-b-2xl px-6 sm:px-8 py-4 bg-gray-50 border-t border-gray-100 flex items-center justify-between">
+                {/* Navigation */}
+                <div
+                  className={`relative z-0 px-6 sm:px-8 py-5 bg-gradient-to-r from-slate-50/95 via-white to-slate-50/95 border-t border-gray-200/80 flex flex-col-reverse gap-3 sm:flex-row sm:items-center ${
+                    currentStep === 1 ? 'sm:justify-end' : 'sm:justify-between'
+                  }`}
+                >
                   {currentStep > 1 ? (
                     <Button
                       type="button"
                       variant="outline"
                       onClick={() => setCurrentStep(prev => prev - 1)}
                       disabled={loading}
+                      className="w-full sm:w-auto min-h-[48px] border-gray-300 hover:bg-gray-50 font-semibold"
                     >
                       <ArrowLeft size={18} /> Back
                     </Button>
-                  ) : (
-                    <div />
-                  )}
+                  ) : null}
 
                   {currentStep < 6 ? (
                     <Button
                       type="button"
                       onClick={handleNext}
                       disabled={loading}
-                      className="shadow-lg shadow-primary-500/25"
+                      className="w-full sm:w-auto min-h-[48px] shadow-lg shadow-primary-500/20 font-semibold px-8"
                     >
                       {loading ? <Loader2 size={18} className="animate-spin" /> : 'Continue'}
                       <ArrowRight size={18} />
@@ -1873,15 +1960,15 @@ export default function RegisterPage() {
                     <Button
                       type="submit"
                       disabled={loading}
-                      className="shadow-lg shadow-primary-500/25"
+                      className="w-full sm:w-auto min-h-[48px] shadow-lg shadow-primary-500/20 font-semibold px-8"
                     >
-                      {loading ? <Loader2 size={18} className="animate-spin" /> : 'Complete Registration'}
+                      {loading ? <Loader2 size={18} className="animate-spin" /> : 'Complete registration'}
                       <ArrowRight size={18} />
                     </Button>
                   )}
                 </div>
               </form>
-            </motion.div>
+            </div>
           </div>
         </div>
       </div>

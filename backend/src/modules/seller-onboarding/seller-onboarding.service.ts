@@ -161,7 +161,7 @@ export class SellerOnboardingService {
         Authorization: `Bearer ${resendApiKey}`,
       },
       body: JSON.stringify({
-        from: process.env.EMAIL_FROM || 'Xelnova <noreply@xelnova.com>',
+        from: process.env.EMAIL_FROM || 'Xelnova <noreply@xelnova.in>',
         to: email,
         subject: 'Verify your email - Xelnova Seller',
         html: `
@@ -259,22 +259,36 @@ export class SellerOnboardingService {
   }
 
   private async verifyRecaptchaToken(token: string) {
-    const secret = process.env.RECAPTCHA_SECRET_KEY;
-    if (!secret) {
-      throw new HttpException('reCAPTCHA is not configured. Set RECAPTCHA_SECRET_KEY on the backend.', HttpStatus.SERVICE_UNAVAILABLE);
+    const projectId = process.env.RECAPTCHA_PROJECT_ID;
+    const apiKey = process.env.RECAPTCHA_API_KEY;
+    const siteKey = process.env.RECAPTCHA_SITE_KEY;
+
+    if (!projectId || !apiKey || !siteKey) {
+      throw new HttpException(
+        'reCAPTCHA Enterprise is not configured. Set RECAPTCHA_PROJECT_ID, RECAPTCHA_API_KEY, and RECAPTCHA_SITE_KEY on the backend.',
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
     }
 
-    const params = new URLSearchParams({ secret, response: token });
-    const res = await fetch('https://www.google.com/recaptcha/api/siteverify', {
+    const url = `https://recaptchaenterprise.googleapis.com/v1/projects/${projectId}/assessments?key=${apiKey}`;
+    const res = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: params.toString(),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        event: { token, siteKey, expectedAction: 'REGISTER' },
+      }),
     });
 
     const data = await res.json();
 
-    if (!data.success) {
-      throw new HttpException('reCAPTCHA verification failed. Please try again.', HttpStatus.BAD_REQUEST);
+    if (!data.tokenProperties?.valid) {
+      const reason = data.tokenProperties?.invalidReason || 'UNKNOWN';
+      throw new HttpException(`reCAPTCHA verification failed (${reason}). Please try again.`, HttpStatus.BAD_REQUEST);
+    }
+
+    const score = data.riskAnalysis?.score ?? 0;
+    if (score < 0.5) {
+      throw new HttpException('reCAPTCHA score too low. Please try again.', HttpStatus.BAD_REQUEST);
     }
 
     const captchaToken = uuidv4();
