@@ -71,6 +71,8 @@ export default function CheckoutPage() {
   const totalItems = useCartStore((s) => s.totalItems);
   const clearCart = useCartStore((s) => s.clearCart);
 
+  const razorpayLoaded = useRef(false);
+
   useEffect(() => setMounted(true), []);
 
   useEffect(() => {
@@ -105,6 +107,78 @@ export default function CheckoutPage() {
       }
     }).catch(() => {});
   }, [authLoading, isAuthenticated, router, pathname]);
+
+  useEffect(() => {
+    if (razorpayLoaded.current || typeof window === "undefined") return;
+    if (document.querySelector('script[src="https://checkout.razorpay.com/v1/checkout.js"]')) {
+      razorpayLoaded.current = true;
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = "https://checkout.razorpay.com/v1/checkout.js";
+    script.async = true;
+    script.onload = () => { razorpayLoaded.current = true; };
+    document.head.appendChild(script);
+  }, []);
+
+  const syncToken = useCallback(() => {
+    const m = document.cookie.match(/(?:^|;\s*)xelnova-token=([^;]*)/);
+    if (m) setAccessToken(decodeURIComponent(m[1]));
+  }, []);
+
+  const openRazorpay = useCallback((paymentOrder: {
+    razorpayOrderId: string;
+    amount: number;
+    currency: string;
+    keyId: string;
+    orderId: string;
+  }, dbOrderNumber: string) => {
+    return new Promise<void>((resolve, reject) => {
+      if (!window.Razorpay) {
+        reject(new Error("Payment gateway is loading. Please try again."));
+        return;
+      }
+
+      const addr = addresses.find((a) => a.id === selectedAddress);
+      const options: Record<string, unknown> = {
+        key: paymentOrder.keyId,
+        amount: paymentOrder.amount,
+        currency: paymentOrder.currency,
+        name: "Xelnova",
+        description: `Order #${dbOrderNumber}`,
+        order_id: paymentOrder.razorpayOrderId,
+        prefill: {
+          name: addr?.name || "",
+          contact: addr?.phone || "",
+        },
+        theme: { color: "#10b981" },
+        handler: async (response: { razorpay_order_id: string; razorpay_payment_id: string; razorpay_signature: string }) => {
+          try {
+            syncToken();
+            await paymentApi.verifyPayment({
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature: response.razorpay_signature,
+            });
+            resolve();
+          } catch {
+            reject(new Error("Payment verification failed. If money was deducted, it will be refunded within 5-7 days."));
+          }
+        },
+        modal: {
+          ondismiss: () => {
+            reject(new Error("Payment was cancelled. Your order has been saved — you can retry payment from your orders page."));
+          },
+        },
+      };
+
+      const rzp = new window.Razorpay(options);
+      rzp.on("payment.failed", () => {
+        reject(new Error("Payment failed. Please try again or choose a different payment method."));
+      });
+      rzp.open();
+    });
+  }, [addresses, selectedAddress, syncToken]);
 
   if (!mounted || !authChecked) {
     return (
@@ -221,79 +295,6 @@ export default function CheckoutPage() {
     if (currentStep === "payment") return !!paymentMethod;
     return !placingOrder;
   };
-
-  const razorpayLoaded = useRef(false);
-  useEffect(() => {
-    if (razorpayLoaded.current || typeof window === "undefined") return;
-    if (document.querySelector('script[src="https://checkout.razorpay.com/v1/checkout.js"]')) {
-      razorpayLoaded.current = true;
-      return;
-    }
-    const script = document.createElement("script");
-    script.src = "https://checkout.razorpay.com/v1/checkout.js";
-    script.async = true;
-    script.onload = () => { razorpayLoaded.current = true; };
-    document.head.appendChild(script);
-  }, []);
-
-  const syncToken = useCallback(() => {
-    const m = document.cookie.match(/(?:^|;\s*)xelnova-token=([^;]*)/);
-    if (m) setAccessToken(decodeURIComponent(m[1]));
-  }, []);
-
-  const openRazorpay = useCallback((paymentOrder: {
-    razorpayOrderId: string;
-    amount: number;
-    currency: string;
-    keyId: string;
-    orderId: string;
-  }, dbOrderNumber: string) => {
-    return new Promise<void>((resolve, reject) => {
-      if (!window.Razorpay) {
-        reject(new Error("Payment gateway is loading. Please try again."));
-        return;
-      }
-
-      const addr = addresses.find((a) => a.id === selectedAddress);
-      const options: Record<string, unknown> = {
-        key: paymentOrder.keyId,
-        amount: paymentOrder.amount,
-        currency: paymentOrder.currency,
-        name: "Xelnova",
-        description: `Order #${dbOrderNumber}`,
-        order_id: paymentOrder.razorpayOrderId,
-        prefill: {
-          name: addr?.name || "",
-          contact: addr?.phone || "",
-        },
-        theme: { color: "#10b981" },
-        handler: async (response: { razorpay_order_id: string; razorpay_payment_id: string; razorpay_signature: string }) => {
-          try {
-            syncToken();
-            await paymentApi.verifyPayment({
-              razorpay_order_id: response.razorpay_order_id,
-              razorpay_payment_id: response.razorpay_payment_id,
-              razorpay_signature: response.razorpay_signature,
-            });
-            resolve();
-          } catch {
-            reject(new Error("Payment verification failed. If money was deducted, it will be refunded within 5-7 days."));
-          }
-        },
-        modal: {
-          ondismiss: () => {
-            reject(new Error("Payment was cancelled. Your order has been saved — you can retry payment from your orders page."));
-          },
-        },
-      };
-
-      const rzp = new window.Razorpay(options);
-      rzp.on("payment.failed", () => {
-        reject(new Error("Payment failed. Please try again or choose a different payment method."));
-      });
-      rzp.open();
-    });
-  }, [addresses, selectedAddress, syncToken]);
 
   const placeOrder = async () => {
     const addr = addresses.find((a) => a.id === selectedAddress);
