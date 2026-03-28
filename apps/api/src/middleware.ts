@@ -5,6 +5,10 @@ const allowedOrigins = [
   'http://localhost:3001',
   'http://localhost:3002',
   'http://localhost:3003',
+  'https://xelnova.in',
+  'https://www.xelnova.in',
+  'https://seller.xelnova.in',
+  'https://admin.xelnova.in',
 ];
 
 export function middleware(request: NextRequest) {

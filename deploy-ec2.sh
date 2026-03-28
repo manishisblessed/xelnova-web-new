@@ -18,9 +18,19 @@ grep -q '^RECAPTCHA_SITE_KEY=' .env || echo 'RECAPTCHA_SITE_KEY="6Lc4s5osAAAAAOi
 grep -q '^RECAPTCHA_PROJECT_ID=' .env || echo 'RECAPTCHA_PROJECT_ID="xelnova-1774475911864"' >> .env
 grep -q '^RECAPTCHA_API_KEY=' .env || echo 'RECAPTCHA_API_KEY="AIzaSyAlaRrvDRMvMVUzURqhs1rx9SfAdaZ14bg"' >> .env
 
-echo "Backend .env updated. Restarting..."
+echo "Building backend..."
+cd ~/xelnova-web-new/backend
+npx prisma generate
+npm run build 2>&1 | tail -5
+
+echo "Syncing backend dist..."
+rsync -av --delete ~/xelnova-web-new/backend/dist/ ~/backend/dist/ > /dev/null
+cp ~/xelnova-web-new/backend/package.json ~/backend/package.json
+
+echo "Restarting backend..."
+cd ~/backend
 pm2 restart xelnova-api
-sleep 3
+sleep 5
 pm2 logs xelnova-api --lines 3 --nostream
 
 echo ""

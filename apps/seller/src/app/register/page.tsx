@@ -324,6 +324,8 @@ export default function RegisterPage() {
         setCaptcha({ loading: false, solved: false, error: 'Security verification is not configured. Please contact support.' });
       } else if (msg === 'RECAPTCHA_NOT_LOADED') {
         setCaptcha({ loading: false, solved: false, error: 'Security script is still loading. Please wait a moment and try again.' });
+      } else if (err instanceof TypeError && msg.includes('fetch')) {
+        setCaptcha({ loading: false, solved: false, error: 'Unable to reach the verification server. Please check your connection and try again.' });
       } else {
         setCaptcha({ loading: false, solved: false, error: 'Verification failed. Please refresh the page and try again.' });
       }
