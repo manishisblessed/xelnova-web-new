@@ -137,6 +137,8 @@ interface CaptchaState {
   solved: boolean;
   token?: string;
   error?: string;
+  mode?: 'recaptcha' | 'math';
+  mathPuzzle?: { sessionId: string; instruction: string };
 }
 
 export default function RegisterPage() {
@@ -181,7 +183,8 @@ export default function RegisterPage() {
   const [phoneOtpInput, setPhoneOtpInput] = useState('');
   const [emailCooldown, setEmailCooldown] = useState(0);
   const [phoneCooldown, setPhoneCooldown] = useState(0);
-  const [captcha, setCaptcha] = useState<CaptchaState>({ loading: false, solved: false });
+  const [captcha, setCaptcha] = useState<CaptchaState>({ loading: false, solved: false, mode: 'recaptcha' });
+  const [mathAnswer, setMathAnswer] = useState('');
   const recaptchaScriptLoaded = useRef(false);
   const [gstVerification, setGstVerification] = useState<VerificationState>({ status: 'idle' });
   const [ifscVerification, setIfscVerification] = useState<VerificationState>({ status: 'idle' });
@@ -285,52 +288,104 @@ export default function RegisterPage() {
     }
   };
 
-  const executeRecaptcha = useCallback(async () => {
+  const loadMathCaptcha = useCallback(async () => {
+    setCaptcha(prev => ({ ...prev, loading: true, error: undefined, mode: 'math' }));
+    setMathAnswer('');
+    try {
+      const res = await fetch(`${API_BASE}/seller-onboarding/captcha/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'MATH' }),
+      });
+      if (!res.ok) {
+        setCaptcha({ loading: false, solved: false, mode: 'math', error: 'Failed to load captcha. Please try again.' });
+        return;
+      }
+      const data = await res.json();
+      const puzzle = data.data;
+      setCaptcha({
+        loading: false,
+        solved: false,
+        mode: 'math',
+        mathPuzzle: { sessionId: puzzle.sessionId, instruction: puzzle.puzzle.instruction },
+      });
+    } catch {
+      setCaptcha({ loading: false, solved: false, mode: 'math', error: 'Unable to reach the server. Please try again.' });
+    }
+  }, []);
+
+  const solveMathCaptcha = useCallback(async (answer: string) => {
+    if (!captcha.mathPuzzle || !answer.trim()) return;
     setCaptcha(prev => ({ ...prev, loading: true, error: undefined }));
     try {
-      if (!RECAPTCHA_SITE_KEY) {
-        throw new Error('RECAPTCHA_CONFIG');
-      }
-
-      if (!window.grecaptcha?.enterprise) {
-        throw new Error('RECAPTCHA_NOT_LOADED');
-      }
-
-      const recaptchaToken = await new Promise<string>((resolve, reject) => {
-        window.grecaptcha!.enterprise!.ready(async () => {
-          try {
-            const token = await window.grecaptcha!.enterprise!.execute(RECAPTCHA_SITE_KEY, { action: 'REGISTER' });
-            resolve(token);
-          } catch (err) {
-            reject(err);
-          }
-        });
+      const res = await fetch(`${API_BASE}/seller-onboarding/captcha/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: captcha.mathPuzzle!.sessionId, answer: answer.trim() }),
       });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setCaptcha({ loading: false, solved: true, token: data.data.captchaToken, mode: 'math' });
+      } else {
+        setCaptcha(prev => ({ ...prev, loading: false, error: data.message || 'Incorrect answer. Try again.' }));
+      }
+    } catch {
+      setCaptcha(prev => ({ ...prev, loading: false, error: 'Unable to reach the server. Please try again.' }));
+    }
+  }, [captcha.mathPuzzle]);
+
+  const executeRecaptcha = useCallback(async () => {
+    setCaptcha(prev => ({ ...prev, loading: true, error: undefined, mode: 'recaptcha' }));
+    try {
+      if (!RECAPTCHA_SITE_KEY || !window.grecaptcha?.enterprise) {
+        console.warn('[reCAPTCHA] Not available, falling back to math captcha');
+        loadMathCaptcha();
+        return;
+      }
+
+      let recaptchaToken: string;
+      try {
+        recaptchaToken = await new Promise<string>((resolve, reject) => {
+          window.grecaptcha!.enterprise!.ready(async () => {
+            try {
+              const token = await window.grecaptcha!.enterprise!.execute(RECAPTCHA_SITE_KEY, { action: 'REGISTER' });
+              resolve(token);
+            } catch (err) {
+              reject(err);
+            }
+          });
+        });
+      } catch (execErr) {
+        console.warn('[reCAPTCHA] execute() failed, falling back to math captcha:', execErr);
+        loadMathCaptcha();
+        return;
+      }
 
       const res = await fetch(`${API_BASE}/seller-onboarding/captcha/verify`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionId: 'recaptcha', answer: recaptchaToken }),
       });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => null);
+        console.warn('[reCAPTCHA] Backend rejected token, falling back to math captcha:', errorData?.message);
+        loadMathCaptcha();
+        return;
+      }
+
       const data = await res.json();
       if (data.success) {
-        setCaptcha({ loading: false, solved: true, token: data.data.captchaToken });
+        setCaptcha({ loading: false, solved: true, token: data.data.captchaToken, mode: 'recaptcha' });
       } else {
-        setCaptcha({ loading: false, solved: false, error: data.message || 'Verification failed. Please try again.' });
+        console.warn('[reCAPTCHA] Verification unsuccessful, falling back to math captcha');
+        loadMathCaptcha();
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : '';
-      if (msg === 'RECAPTCHA_CONFIG') {
-        setCaptcha({ loading: false, solved: false, error: 'Security verification is not configured. Please contact support.' });
-      } else if (msg === 'RECAPTCHA_NOT_LOADED') {
-        setCaptcha({ loading: false, solved: false, error: 'Security script is still loading. Please wait a moment and try again.' });
-      } else if (err instanceof TypeError && msg.includes('fetch')) {
-        setCaptcha({ loading: false, solved: false, error: 'Unable to reach the verification server. Please check your connection and try again.' });
-      } else {
-        setCaptcha({ loading: false, solved: false, error: 'Verification failed. Please refresh the page and try again.' });
-      }
+      console.warn('[reCAPTCHA] Error, falling back to math captcha:', err);
+      loadMathCaptcha();
     }
-  }, []);
+  }, [loadMathCaptcha]);
 
   useEffect(() => {
     if (recaptchaScriptLoaded.current || !RECAPTCHA_SITE_KEY) return;
@@ -976,6 +1031,35 @@ export default function RegisterPage() {
                           <div className="flex items-center gap-3 text-green-600">
                             <CheckCircle size={24} />
                             <span className="font-medium">Verification completed successfully!</span>
+                          </div>
+                        ) : captcha.mode === 'math' && captcha.mathPuzzle ? (
+                          <div className="space-y-3">
+                            <p className="text-sm text-gray-700 font-medium">{captcha.mathPuzzle.instruction}</p>
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="text"
+                                inputMode="numeric"
+                                value={mathAnswer}
+                                onChange={(e) => setMathAnswer(e.target.value)}
+                                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); solveMathCaptcha(mathAnswer); } }}
+                                placeholder="Your answer"
+                                className="w-32 rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-primary-400 focus:ring-1 focus:ring-primary-400 outline-none"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => solveMathCaptcha(mathAnswer)}
+                                disabled={captcha.loading || !mathAnswer.trim()}
+                                className="flex items-center gap-2 rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-all hover:bg-primary-700 disabled:opacity-60"
+                              >
+                                {captcha.loading ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
+                                Verify
+                              </button>
+                            </div>
+                            {captcha.error && (
+                              <p className="text-red-500 text-sm flex items-center gap-1">
+                                <XCircle size={14} /> {captcha.error}
+                              </p>
+                            )}
                           </div>
                         ) : (
                           <div className="space-y-3">
