@@ -13,7 +13,7 @@ sed -i 's|APP_URL="http://localhost:3000"|APP_URL="https://xelnova.in"|' .env
 sed -i 's|CORS_ORIGINS="http://localhost:3000,http://localhost:3002,http://localhost:3003"|CORS_ORIGINS="https://xelnova.in,https://www.xelnova.in,https://seller.xelnova.in,https://admin.xelnova.in"|' .env
 
 # reCAPTCHA Enterprise — site key is public, secret/API keys are set manually in ~/backend/.env
-grep -q '^RECAPTCHA_SITE_KEY=' .env || echo 'RECAPTCHA_SITE_KEY="6LcdW5ssAAAAAK-yhUVJVBV79E99dk8I5iaPu4F4"' >> .env
+grep -q '^RECAPTCHA_SITE_KEY=' .env || echo 'RECAPTCHA_SITE_KEY="6Lc4s5osAAAAAOi73vFTn5BLso8XKxXidIoDPiTm"' >> .env
 grep -q '^RECAPTCHA_PROJECT_ID=' .env || echo 'RECAPTCHA_PROJECT_ID="xelnova-1774475911864"' >> .env
 grep -q '^RECAPTCHA_API_KEY=' .env || { echo "WARNING: RECAPTCHA_API_KEY not found in .env — set it manually"; }
 
@@ -38,7 +38,7 @@ cd ~/xelnova-web-new/apps/seller
 cat > .env.local << 'ENVEOF'
 NEXT_PUBLIC_API_URL=https://api.xelnova.in/api/v1
 NEXT_PUBLIC_GOOGLE_CLIENT_ID=435713810993-9c2c2j1nh7hcm374mruihfuf4807fuat.apps.googleusercontent.com
-NEXT_PUBLIC_RECAPTCHA_SITE_KEY=6LcdW5ssAAAAAK-yhUVJVBV79E99dk8I5iaPu4F4
+NEXT_PUBLIC_RECAPTCHA_SITE_KEY=6Lc4s5osAAAAAOi73vFTn5BLso8XKxXidIoDPiTm
 ENVEOF
 npm run build 2>&1 | tail -15
 
