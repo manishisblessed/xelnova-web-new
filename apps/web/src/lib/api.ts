@@ -6,6 +6,44 @@ import type { Product as ApiProduct, Category as ApiCategory } from '@xelnova/ap
 import type { Product, ProductReview } from './data/products';
 import type { Category } from './data/categories';
 
+// ─── In-flight request deduplication cache ───
+
+const requestCache = new Map<string, { promise: Promise<any>; ts: number }>();
+const CACHE_TTL = 30_000;
+
+function deduplicatedFetch<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
+  const now = Date.now();
+  const cached = requestCache.get(key);
+  if (cached && now - cached.ts < CACHE_TTL) return cached.promise as Promise<T>;
+  const promise = fetcher().catch((err) => {
+    requestCache.delete(key);
+    throw err;
+  });
+  requestCache.set(key, { promise, ts: now });
+  return promise;
+}
+
+// ─── Variant normalizer: handle old image/bigImage → images[] migration ───
+
+function normalizeVariants(raw: unknown): Product['variants'] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((v: any) => {
+    if (!v || typeof v !== 'object') return v;
+    const options = Array.isArray(v.options)
+      ? v.options.map((o: any) => {
+          if (!o || typeof o !== 'object') return o;
+          if (Array.isArray(o.images) && o.images.length > 0) return o;
+          const imgs: string[] = [];
+          if (o.bigImage && typeof o.bigImage === 'string') imgs.push(o.bigImage);
+          if (o.image && typeof o.image === 'string' && !imgs.includes(o.image)) imgs.push(o.image);
+          if (imgs.length > 0) return { ...o, images: imgs };
+          return o;
+        })
+      : v.options;
+    return { ...v, options };
+  });
+}
+
 // ─── Product mapper: API → Frontend ───
 
 export function mapProduct(p: ApiProduct): Product {
@@ -18,7 +56,7 @@ export function mapProduct(p: ApiProduct): Product {
     id: p.id,
     slug: p.slug,
     name: p.name,
-    description: p.description || '',
+    description: p.description || p.shortDescription || '',
     price: p.price,
     comparePrice,
     discount,
@@ -34,7 +72,7 @@ export function mapProduct(p: ApiProduct): Product {
       name: (p.seller as any)?.storeName || 'Xelnova Seller',
       rating: (p.seller as any)?.rating || 4.5,
     },
-    variants: Array.isArray(p.variants) ? p.variants : [],
+    variants: normalizeVariants(p.variants),
     specifications: (p.specifications && typeof p.specifications === 'object') ? p.specifications as Record<string, string> : {},
     reviews: [],
     tags: p.tags || [],
@@ -68,17 +106,18 @@ interface FetchState<T> {
 function useFetch<T>(fetcher: () => Promise<T>, deps: any[] = []): FetchState<T> & { refetch: () => void } {
   const [state, setState] = useState<FetchState<T>>({ data: null, loading: true, error: null });
   const [trigger, setTrigger] = useState(0);
+  const depsKey = JSON.stringify(deps);
 
   const refetch = useCallback(() => setTrigger(t => t + 1), []);
 
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
     setState(s => ({ ...s, loading: true, error: null }));
     fetcher()
-      .then(data => { if (!cancelled) setState({ data, loading: false, error: null }); })
-      .catch(err => { if (!cancelled) setState({ data: null, loading: false, error: err?.response?.data?.message || err.message || 'Failed to load' }); });
-    return () => { cancelled = true; };
-  }, [...deps, trigger]);
+      .then(data => { if (!controller.signal.aborted) setState({ data, loading: false, error: null }); })
+      .catch(err => { if (!controller.signal.aborted) setState({ data: null, loading: false, error: err?.response?.data?.message || err.message || 'Failed to load' }); });
+    return () => { controller.abort(); };
+  }, [depsKey, trigger]);
 
   return { ...state, refetch };
 }
@@ -116,14 +155,14 @@ export function useProductBySlug(slug: string) {
 
 export function useFeaturedProducts() {
   return useFetch(async () => {
-    const products = await productsApi.getFeaturedProducts();
+    const products = await deduplicatedFetch('featured', () => productsApi.getFeaturedProducts());
     return products.map(mapProduct);
   }, []);
 }
 
 export function useFlashDeals() {
   return useFetch(async () => {
-    const products = await productsApi.getFlashDeals();
+    const products = await deduplicatedFetch('flashDeals', () => productsApi.getFlashDeals());
     return products.map(mapProduct);
   }, []);
 }
@@ -132,7 +171,7 @@ export function useFlashDeals() {
 
 export function useCategories() {
   return useFetch(async () => {
-    const cats = await categoriesApi.getCategories();
+    const cats = await deduplicatedFetch('categories', () => categoriesApi.getCategories());
     return cats.map(mapCategory);
   }, []);
 }

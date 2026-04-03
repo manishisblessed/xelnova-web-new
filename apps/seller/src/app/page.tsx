@@ -637,7 +637,7 @@ export default function SellerLandingPage() {
       {/* ─── Category Marquee ─── */}
       <section className="py-5 bg-primary-600 overflow-hidden">
         <div className="flex animate-marquee">
-          {[...categories, ...categories, ...categories, ...categories].map((cat, i) => (
+          {[...categories, ...categories].map((cat, i) => (
             <span key={i} className="mx-6 text-white/90 text-sm font-semibold tracking-wide flex items-center gap-2 whitespace-nowrap uppercase">
               <span className="w-1.5 h-1.5 rounded-full bg-white/40" />
               {cat}

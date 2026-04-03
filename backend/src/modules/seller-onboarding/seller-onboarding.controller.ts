@@ -21,12 +21,10 @@ import {
   SellerOnboardingSendOtpDto,
   SellerOnboardingVerifyOtpDto,
   Step1AccountDto,
-  Step2TaxDetailsDto,
-  Step3StoreDetailsDto,
-  Step4AddressDto,
-  Step5ShippingDto,
-  Step6BankDetailsDto,
+  Step2BusinessVerificationDto,
+  Step3FinalSetupDto,
   AdminReviewDto,
+  AdminVerifySignatureDto,
   GenerateCaptchaDto,
   VerifyCaptchaDto,
 } from './dto/seller-onboarding.dto';
@@ -84,6 +82,8 @@ export class SellerOnboardingController {
     return successResponse(result, 'Captcha verified');
   }
 
+  // ========== Step 1: Account Creation ==========
+
   @Post('register/step-1')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Step 1: Create seller account with verified email and phone' })
@@ -99,62 +99,33 @@ export class SellerOnboardingController {
     return successResponse(result, 'Account created successfully');
   }
 
-  // ========== Authenticated Seller Endpoints ==========
+  // ========== Step 2: Business Verification ==========
 
   @Put('step-2/:sellerId')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Step 2: Update tax details (GST/PAN)' })
-  async updateTaxDetails(
+  @ApiOperation({ summary: 'Step 2: Business verification (GST + Aadhaar + PAN + Store + Category)' })
+  async updateBusinessVerification(
     @Param('sellerId') sellerId: string,
-    @Body() dto: Step2TaxDetailsDto,
+    @Body() dto: Step2BusinessVerificationDto,
   ) {
-    const result = await this.onboardingService.updateTaxDetails(sellerId, dto);
-    return successResponse(result, 'Tax details updated');
+    const result = await this.onboardingService.updateBusinessVerification(sellerId, dto);
+    return successResponse(result, 'Business verification details updated');
   }
+
+  // ========== Step 3: Final Setup ==========
 
   @Put('step-3/:sellerId')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Step 3: Update store details' })
-  async updateStoreDetails(
+  @ApiOperation({ summary: 'Step 3: Final setup (Signature + Shipping + Bank)' })
+  async updateFinalSetup(
     @Param('sellerId') sellerId: string,
-    @Body() dto: Step3StoreDetailsDto,
+    @Body() dto: Step3FinalSetupDto,
   ) {
-    const result = await this.onboardingService.updateStoreDetails(sellerId, dto);
-    return successResponse(result, 'Store details updated');
+    const result = await this.onboardingService.updateFinalSetup(sellerId, dto);
+    return successResponse(result, 'Final setup completed');
   }
 
-  @Put('step-4/:sellerId')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Step 4: Update pickup/business address' })
-  async updateAddress(
-    @Param('sellerId') sellerId: string,
-    @Body() dto: Step4AddressDto,
-  ) {
-    const result = await this.onboardingService.updateAddress(sellerId, dto);
-    return successResponse(result, 'Address updated');
-  }
-
-  @Put('step-5/:sellerId')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Step 5: Update shipping preferences' })
-  async updateShipping(
-    @Param('sellerId') sellerId: string,
-    @Body() dto: Step5ShippingDto,
-  ) {
-    const result = await this.onboardingService.updateShippingPreferences(sellerId, dto);
-    return successResponse(result, 'Shipping preferences updated');
-  }
-
-  @Put('step-6/:sellerId')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Step 6: Update bank details' })
-  async updateBankDetails(
-    @Param('sellerId') sellerId: string,
-    @Body() dto: Step6BankDetailsDto,
-  ) {
-    const result = await this.onboardingService.updateBankDetails(sellerId, dto);
-    return successResponse(result, 'Bank details verified and saved');
-  }
+  // ========== Document Upload ==========
 
   @Post('document/:sellerId')
   @HttpCode(HttpStatus.OK)
@@ -165,7 +136,7 @@ export class SellerOnboardingController {
       type: 'object',
       properties: {
         file: { type: 'string', format: 'binary' },
-        type: { type: 'string', enum: ['PAN_CARD', 'MASKED_AADHAAR', 'GST_CERTIFICATE', 'CANCELLED_CHEQUE', 'BUSINESS_LICENSE', 'ADDRESS_PROOF', 'IDENTITY_PROOF'] },
+        type: { type: 'string', enum: ['PAN_CARD', 'MASKED_AADHAAR', 'GST_CERTIFICATE', 'CANCELLED_CHEQUE', 'BUSINESS_LICENSE', 'ADDRESS_PROOF', 'IDENTITY_PROOF', 'SIGNATURE'] },
       },
     },
   })
@@ -190,6 +161,8 @@ export class SellerOnboardingController {
     return successResponse({ ...result, fileUrl: url }, 'Document uploaded');
   }
 
+  // ========== Submit for Review ==========
+
   @Post('submit/:sellerId')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Submit application for admin review' })
@@ -203,6 +176,14 @@ export class SellerOnboardingController {
   async getOnboardingStatus(@Param('sellerId') sellerId: string) {
     const result = await this.onboardingService.getSellerOnboardingStatus(sellerId);
     return successResponse(result, 'Onboarding status retrieved');
+  }
+
+  @Post('progress')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Check registration progress by email (public, for resume flow)' })
+  async getProgressByEmail(@Body('email') email: string) {
+    const result = await this.onboardingService.getProgressByEmail(email);
+    return successResponse(result, 'Progress checked');
   }
 
   // ========== Admin Endpoints ==========
@@ -259,5 +240,23 @@ export class SellerOnboardingController {
   ) {
     const result = await this.onboardingService.reviewSeller(sellerId, adminId, dto);
     return successResponse(result, `Seller ${dto.decision.toLowerCase()}`);
+  }
+
+  @Post('admin/verify-signature/:sellerId')
+  @Auth('ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Verify or reject seller signature (Admin only)' })
+  async verifySignature(
+    @Param('sellerId') sellerId: string,
+    @Body() dto: AdminVerifySignatureDto,
+    @CurrentUser('id') adminId: string,
+  ) {
+    const result = await this.onboardingService.verifySignature(
+      sellerId,
+      adminId,
+      dto.decision,
+      dto.comment,
+    );
+    return successResponse(result, `Signature ${dto.decision.toLowerCase()}`);
   }
 }

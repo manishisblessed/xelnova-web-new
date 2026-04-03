@@ -5,11 +5,25 @@ import { v2 as cloudinary } from 'cloudinary';
 @Injectable()
 export class UploadService {
   constructor(private readonly config: ConfigService) {
-    cloudinary.config({
-      cloud_name: this.config.get('CLOUDINARY_CLOUD_NAME'),
-      api_key: this.config.get('CLOUDINARY_API_KEY'),
-      api_secret: this.config.get('CLOUDINARY_API_SECRET'),
-    });
+    let cloudName = this.config.get('CLOUDINARY_CLOUD_NAME');
+    let apiKey = this.config.get('CLOUDINARY_API_KEY');
+    let apiSecret = this.config.get('CLOUDINARY_API_SECRET');
+
+    const isPlaceholder = (v?: string) => !v || /^your[- ]/.test(v);
+
+    if (isPlaceholder(cloudName) || isPlaceholder(apiKey) || isPlaceholder(apiSecret)) {
+      const url = this.config.get<string>('CLOUDINARY_URL');
+      if (url) {
+        const match = url.match(/^cloudinary:\/\/(\d+):([^@]+)@(.+)$/);
+        if (match) {
+          apiKey = match[1];
+          apiSecret = match[2];
+          cloudName = match[3];
+        }
+      }
+    }
+
+    cloudinary.config({ cloud_name: cloudName, api_key: apiKey, api_secret: apiSecret });
   }
 
   async uploadImage(file: Express.Multer.File, folder = 'xelnova'): Promise<{ url: string; publicId: string }> {

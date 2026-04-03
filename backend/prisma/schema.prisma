@@ -38,6 +38,7 @@ enum AddressType {
 
 enum ProductStatus {
   ACTIVE
+  ON_HOLD
   PENDING
   DRAFT
   REJECTED
@@ -75,6 +76,7 @@ enum DocumentType {
   BUSINESS_LICENSE
   ADDRESS_PROOF
   IDENTITY_PROOF
+  SIGNATURE
 }
 
 enum AuthProvider {
@@ -83,26 +85,48 @@ enum AuthProvider {
   GOOGLE
 }
 
+enum ShippingMode {
+  SELF_SHIP
+  XELNOVA_COURIER
+  DELHIVERY
+  SHIPROCKET
+  XPRESSBEES
+  EKART
+}
+
+enum ShipmentStatus {
+  PENDING
+  BOOKED
+  PICKUP_SCHEDULED
+  PICKED_UP
+  IN_TRANSIT
+  OUT_FOR_DELIVERY
+  DELIVERED
+  RTO_INITIATED
+  RTO_DELIVERED
+  CANCELLED
+}
+
 // ─── User & Auth ───
 
 model User {
-  id            String    @id @default(cuid())
-  name          String
-  email         String    @unique
-  phone         String?   @unique
-  password      String
-  avatar        String?
-  role          Role         @default(CUSTOMER)
-  authProvider  AuthProvider @default(EMAIL)
-  emailVerified Boolean      @default(false)
-  phoneVerified Boolean      @default(false)
-  lastLoginAt   DateTime?
-  lastLoginIp   String?
+  id                String       @id @default(cuid())
+  name              String
+  email             String       @unique
+  phone             String?      @unique
+  password          String
+  avatar            String?
+  role              Role         @default(CUSTOMER)
+  authProvider      AuthProvider @default(EMAIL)
+  emailVerified     Boolean      @default(false)
+  phoneVerified     Boolean      @default(false)
+  lastLoginAt       DateTime?
+  lastLoginIp       String?
   lastLoginLocation Json?
-  loginCount    Int       @default(0)
-  isActive      Boolean   @default(true)
-  isBanned      Boolean   @default(false)
-  banReason     String?
+  loginCount        Int          @default(0)
+  isActive          Boolean      @default(true)
+  isBanned          Boolean      @default(false)
+  banReason         String?
 
   addresses        Address[]
   orders           Order[]
@@ -153,7 +177,7 @@ model Address {
   type         AddressType @default(HOME)
   isDefault    Boolean     @default(false)
 
-  orders    Order[]
+  orders Order[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -180,60 +204,81 @@ model SellerProfile {
   totalSales  Int     @default(0)
 
   // Onboarding status
-  onboardingStatus  SellerOnboardingStatus @default(PENDING_VERIFICATION)
-  onboardingStep    Int      @default(1)
+  onboardingStatus      SellerOnboardingStatus @default(PENDING_VERIFICATION)
+  onboardingStep        Int                    @default(1)
   onboardingCompletedAt DateTime?
-  rejectionReason   String?
-  reviewedBy        String?
-  reviewedAt        DateTime?
+  rejectionReason       String?
+  reviewedBy            String?
+  reviewedAt            DateTime?
 
   // GST Details
-  gstNumber         String?
-  gstVerified       Boolean @default(false)
-  gstVerifiedAt     DateTime?
-  gstVerifiedData   Json?
-  gstCertificateUrl String?
-  sellsNonGstProducts Boolean @default(false)
-  
+  gstNumber           String?
+  gstVerified         Boolean   @default(false)
+  gstVerifiedAt       DateTime?
+  gstVerifiedData     Json?
+  gstCertificateUrl   String?
+  sellsNonGstProducts Boolean   @default(false)
+
   // PAN Details
-  panNumber         String?
-  panName           String?
-  panVerified       Boolean @default(false)
-  panVerifiedAt     DateTime?
-  panDocumentUrl    String?
-  maskedAadhaarUrl  String?
-  
+  panNumber        String?
+  panName          String?
+  panVerified      Boolean   @default(false)
+  panVerifiedAt    DateTime?
+  panVerifiedData  Json?
+  panDocumentUrl   String?
+  maskedAadhaarUrl String?
+
+  // Aadhaar Details
+  aadhaarNumber       String?
+  aadhaarVerified     Boolean   @default(false)
+  aadhaarVerifiedAt   DateTime?
+  aadhaarVerifiedData Json?
+
+  // Signature
+  signatureUrl           String?
+  signatureData          String?   @db.Text
+  signatureVerified      Boolean   @default(false)
+  signatureVerifiedAt    DateTime?
+  signatureVerifiedBy    String?
+  signatureRejectionNote String?
+
+  // Category Selection
+  categorySelectionType String?
+  selectedCategories    String[]
+
   // Bank Details
-  bankAccountName   String?
-  bankAccountNumber String?
-  bankIfscCode      String?
-  bankVerified      Boolean @default(false)
-  bankVerifiedAt    DateTime?
-  bankVerifiedData  Json?
-  bankVerifiedName  String?
-  bankName          String?
-  bankBranch        String?
+  bankAccountName    String?
+  bankAccountNumber  String?
+  bankIfscCode       String?
+  bankVerified       Boolean   @default(false)
+  bankVerifiedAt     DateTime?
+  bankVerifiedData   Json?
+  bankVerifiedName   String?
+  bankName           String?
+  bankBranch         String?
   cancelledChequeUrl String?
-  
-  commissionRate    Float   @default(10)
-  
+
+  commissionRate Float @default(10)
+
   // Business Address (Pickup Address)
-  businessAddress   String?
-  businessCity      String?
-  businessState     String?
-  businessPincode   String?
-  businessType      String?
-  businessCategory  String?
-  
+  businessAddress  String?
+  businessCity     String?
+  businessState    String?
+  businessPincode  String?
+  businessType     String?
+  businessCategory String?
+
   // Shipping Preferences
-  shippingMethod    String?  @default("easy_ship")
-  offerFreeDelivery Boolean  @default(true)
-  deliveryCharge1to3Days Float?
+  shippingMethod          String? @default("easy_ship")
+  offerFreeDelivery       Boolean @default(true)
+  deliveryCharge1to3Days  Float?
   deliveryCharge3PlusDays Float?
 
-  products   Product[]
-  payouts    Payout[]
-  documents  SellerDocument[]
+  products       Product[]
+  payouts        Payout[]
+  documents      SellerDocument[]
+  courierConfigs SellerCourierConfig[]
+  shipments      Shipment[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -243,7 +288,7 @@ model SellerProfile {
 
 // Seller Documents for verification
 model SellerDocument {
-  id            String       @id @default(cuid())
+  id            String        @id @default(cuid())
   sellerId      String
   seller        SellerProfile @relation(fields: [sellerId], references: [id], onDelete: Cascade)
   type          DocumentType
@@ -251,7 +296,7 @@ model SellerDocument {
   fileUrl       String
   fileSize      Int?
   mimeType      String?
-  verified      Boolean      @default(false)
+  verified      Boolean       @default(false)
   verifiedAt    DateTime?
   verifiedBy    String?
   rejectionNote String?
@@ -266,16 +311,16 @@ model SellerDocument {
 
 // OTP Verification
 model OtpVerification {
-  id          String   @id @default(cuid())
-  identifier  String   // email or phone
-  type        String   // EMAIL or PHONE
+  id          String    @id @default(cuid())
+  identifier  String // email or phone
+  type        String // EMAIL or PHONE
   otp         String
-  purpose     String   // REGISTRATION, LOGIN, PASSWORD_RESET
+  purpose     String // REGISTRATION, LOGIN, PASSWORD_RESET
   expiresAt   DateTime
-  verified    Boolean  @default(false)
+  verified    Boolean   @default(false)
   verifiedAt  DateTime?
-  attempts    Int      @default(0)
-  maxAttempts Int      @default(5)
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(5)
   userId      String?
   ipAddress   String?
 
@@ -288,13 +333,13 @@ model OtpVerification {
 
 // Puzzle CAPTCHA Sessions
 model CaptchaSession {
-  id          String   @id @default(cuid())
-  sessionId   String   @unique
-  puzzleType  String   // ROCK_COUNT, IMAGE_MATCH, etc.
+  id          String    @id @default(cuid())
+  sessionId   String    @unique
+  puzzleType  String // ROCK_COUNT, IMAGE_MATCH, etc.
   answer      String
-  attempts    Int      @default(0)
-  maxAttempts Int      @default(3)
-  solved      Boolean  @default(false)
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(3)
+  solved      Boolean   @default(false)
   solvedAt    DateTime?
   expiresAt   DateTime
   ipAddress   String?
@@ -340,15 +385,15 @@ model Product {
   images           String[]
 
   categoryId String
-  category   Category      @relation(fields: [categoryId], references: [id])
+  category   Category @relation(fields: [categoryId], references: [id])
   brand      String?
 
   sellerId String
   seller   SellerProfile @relation(fields: [sellerId], references: [id])
 
-  rating      Float   @default(0)
-  reviewCount Int     @default(0)
-  stock       Int     @default(0)
+  rating      Float @default(0)
+  reviewCount Int   @default(0)
+  stock       Int   @default(0)
 
   isFeatured      Boolean   @default(false)
   isTrending      Boolean   @default(false)
@@ -384,17 +429,17 @@ model Product {
 // ─── Review ───
 
 model Review {
-  id        String  @id @default(cuid())
+  id        String   @id @default(cuid())
   productId String
-  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
   userId    String
-  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   rating    Int
   title     String?
   comment   String?
   images    String[]
-  verified  Boolean @default(false)
-  helpful   Int     @default(0)
+  verified  Boolean  @default(false)
+  helpful   Int      @default(0)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -407,17 +452,17 @@ model Review {
 // ─── Order ───
 
 model Order {
-  id          String      @id @default(cuid())
-  orderNumber String      @unique
+  id          String @id @default(cuid())
+  orderNumber String @unique
   userId      String
-  user        User        @relation(fields: [userId], references: [id])
+  user        User   @relation(fields: [userId], references: [id])
 
   items OrderItem[]
 
   subtotal Float
-  discount Float       @default(0)
-  shipping Float       @default(0)
-  tax      Float       @default(0)
+  discount Float @default(0)
+  shipping Float @default(0)
+  tax      Float @default(0)
   total    Float
 
   status        OrderStatus @default(PENDING)
@@ -431,6 +476,8 @@ model Order {
 
   paymentId     String?
   paymentStatus PaymentStatus @default(PENDING)
+
+  shipment Shipment?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -512,7 +559,7 @@ model Coupon {
 // ─── Banner ───
 
 model Banner {
-  id          String  @id @default(cuid())
+  id          String    @id @default(cuid())
   title       String
   subtitle    String?
   description String?
@@ -520,11 +567,11 @@ model Banner {
   ctaText     String?
   ctaLink     String?
   bgColor     String?
-  isActive    Boolean @default(true)
-  sortOrder   Int     @default(0)
-  position    String  @default("hero")
-  clicks      Int     @default(0)
-  impressions Int     @default(0)
+  isActive    Boolean   @default(true)
+  sortOrder   Int       @default(0)
+  position    String    @default("hero")
+  clicks      Int       @default(0)
+  impressions Int       @default(0)
   startDate   DateTime?
   endDate     DateTime?
 
@@ -553,15 +600,15 @@ model Brand {
 // ─── Payout ───
 
 model Payout {
-  id       String       @id @default(cuid())
+  id       String        @id @default(cuid())
   sellerId String
   seller   SellerProfile @relation(fields: [sellerId], references: [id])
   amount   Float
-  status   PayoutStatus @default(PENDING)
-  method   String       @default("bank_transfer")
+  status   PayoutStatus  @default(PENDING)
+  method   String        @default("bank_transfer")
   note     String?
 
-  requestedAt DateTime @default(now())
+  requestedAt DateTime  @default(now())
   paidAt      DateTime?
 
   @@index([sellerId])
@@ -687,11 +734,11 @@ model ApiRequestLog {
 // ─── Admin Role (custom roles for RBAC) ───
 
 model AdminRole {
-  id          String   @id @default(cuid())
-  name        String   @unique
+  id          String  @id @default(cuid())
+  name        String  @unique
   permissions String
-  isSystem    Boolean  @default(false)
-  users       Int      @default(0)
+  isSystem    Boolean @default(false)
+  users       Int     @default(0)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -702,7 +749,7 @@ model AdminRole {
 // ─── System Performance Log ───
 
 model PerformanceLog {
-  id            String @id @default(cuid())
+  id            String  @id @default(cuid())
   type          String
   metric        String
   value         Float
@@ -727,15 +774,15 @@ model PerformanceLog {
 // ─── Verification Log ───
 
 model VerificationLog {
-  id             String  @id @default(cuid())
-  type           String
-  identifier     String
-  status         String
-  response       Json?
-  userId         String?
-  user           User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
-  verifiedData   Json?
-  errorMessage   String?
+  id           String  @id @default(cuid())
+  type         String
+  identifier   String
+  status       String
+  response     Json?
+  userId       String?
+  user         User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+  verifiedData Json?
+  errorMessage String?
 
   createdAt DateTime @default(now())
 
@@ -743,6 +790,116 @@ model VerificationLog {
   @@index([identifier])
   @@index([userId])
   @@map("verification_logs")
+}
+
+// ─── Shipment ───
+
+model Shipment {
+  id       String        @id @default(cuid())
+  orderId  String        @unique
+  order    Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  sellerId String
+  seller   SellerProfile @relation(fields: [sellerId], references: [id])
+
+  shippingMode    ShippingMode
+  courierProvider String?
+  awbNumber       String?
+  trackingUrl     String?
+  shipmentStatus  ShipmentStatus @default(PENDING)
+  courierOrderId  String?
+  labelUrl        String?
+  manifestUrl     String?
+  pickupDate      DateTime?
+  deliveredAt     DateTime?
+  weight          Float?
+  dimensions      String?
+  courierCharges  Float?
+  statusHistory   Json           @default("[]")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([sellerId])
+  @@index([awbNumber])
+  @@index([shipmentStatus])
+  @@map("shipments")
+}
+
+// ─── Seller Courier Config ───
+
+model SellerCourierConfig {
+  id          String        @id @default(cuid())
+  sellerId    String
+  seller      SellerProfile @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  provider    ShippingMode
+  apiKey      String
+  apiSecret   String?
+  accountId   String?
+  isActive    Boolean       @default(true)
+  warehouseId String?
+  metadata    Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([sellerId, provider])
+  @@index([sellerId])
+  @@map("seller_courier_configs")
+}
+
+// ─── Wallet ───
+
+enum WalletOwnerType {
+  ADMIN
+  SELLER
+}
+
+enum WalletTransactionType {
+  CREDIT
+  DEBIT
+}
+
+enum WalletReferenceType {
+  PAYOUT
+  SHIPPING_PAYMENT
+  COMMISSION
+  MANUAL
+  REFUND
+}
+
+model Wallet {
+  id        String          @id @default(cuid())
+  ownerId   String
+  ownerType WalletOwnerType
+  balance   Float           @default(0)
+
+  transactions WalletTransaction[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([ownerId, ownerType])
+  @@index([ownerId])
+  @@map("wallets")
+}
+
+model WalletTransaction {
+  id            String                @id @default(cuid())
+  walletId      String
+  wallet        Wallet                @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  type          WalletTransactionType
+  amount        Float
+  balanceAfter  Float
+  description   String
+  referenceType WalletReferenceType   @default(MANUAL)
+  referenceId   String?
+  createdBy     String?
+
+  createdAt DateTime @default(now())
+
+  @@index([walletId])
+  @@index([referenceType])
+  @@map("wallet_transactions")
 }
 
 // ─── Site-wide admin settings (singleton row id = 1) ───

@@ -4,11 +4,11 @@ import { useState } from 'react';
 import { Badge } from '@xelnova/ui';
 import { AdminListPage } from '@/components/dashboard/admin-list-page';
 import { ActionModal } from '@/components/dashboard/action-modal';
-import { FormField, FormSelect } from '@/components/dashboard/form-field';
-import { Eye } from 'lucide-react';
+import { FormField, FormInput, FormSelect } from '@/components/dashboard/form-field';
+import { Eye, Truck } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Column } from '@/components/dashboard/data-table';
-import { apiUpdate } from '@/lib/api';
+import { apiUpdate, apiUpdateShipment } from '@/lib/api';
 
 interface OrderUser {
   name: string;
@@ -26,6 +26,17 @@ interface OrderItem {
   price: number;
 }
 
+interface Shipment {
+  id: string;
+  shippingMode: string;
+  courierProvider: string | null;
+  awbNumber: string | null;
+  trackingUrl: string | null;
+  shipmentStatus: string;
+  weight: number | null;
+  dimensions: string | null;
+}
+
 interface Order {
   id: string;
   orderNumber: string;
@@ -35,6 +46,7 @@ interface Order {
   createdAt: string;
   user: OrderUser;
   items: OrderItem[];
+  shipment?: Shipment | null;
 }
 
 const STATUS_VARIANT: Record<string, 'success' | 'danger' | 'warning' | 'info' | 'default'> = {
@@ -69,12 +81,30 @@ function firstImageUrl(images: unknown): string | undefined {
   return undefined;
 }
 
+const SHIPMENT_STATUSES = ['PENDING', 'BOOKED', 'PICKED_UP', 'IN_TRANSIT', 'OUT_FOR_DELIVERY', 'DELIVERED', 'RTO', 'RTO_DELIVERED', 'CANCELLED'] as const;
+
 export default function OrdersPage() {
   const [detailOpen, setDetailOpen] = useState(false);
   const [selected, setSelected] = useState<Order | null>(null);
   const [newStatus, setNewStatus] = useState('');
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [updating, setUpdating] = useState(false);
+
+  const [shipAwb, setShipAwb] = useState('');
+  const [shipCarrier, setShipCarrier] = useState('');
+  const [shipTrackingUrl, setShipTrackingUrl] = useState('');
+  const [shipStatus, setShipStatus] = useState('');
+  const [shipmentSaving, setShipmentSaving] = useState(false);
+
+  const openDetail = (order: Order) => {
+    setSelected(order);
+    setNewStatus(order.status);
+    setShipAwb(order.shipment?.awbNumber ?? '');
+    setShipCarrier(order.shipment?.courierProvider ?? '');
+    setShipTrackingUrl(order.shipment?.trackingUrl ?? '');
+    setShipStatus(order.shipment?.shipmentStatus ?? '');
+    setDetailOpen(true);
+  };
 
   const handleUpdateStatus = async () => {
     if (!selected) return;
@@ -88,6 +118,25 @@ export default function OrdersPage() {
       toast.error(err instanceof Error ? err.message : 'Failed to update order');
     } finally {
       setUpdating(false);
+    }
+  };
+
+  const handleUpdateShipment = async () => {
+    if (!selected) return;
+    setShipmentSaving(true);
+    try {
+      await apiUpdateShipment(selected.id, {
+        awbNumber: shipAwb.trim() || undefined,
+        courierProvider: shipCarrier.trim() || undefined,
+        trackingUrl: shipTrackingUrl.trim() || undefined,
+        shipmentStatus: shipStatus || undefined,
+      });
+      toast.success('Shipment details updated');
+      setRefreshTrigger((n) => n + 1);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update shipment');
+    } finally {
+      setShipmentSaving(false);
     }
   };
 
@@ -127,11 +176,7 @@ export default function OrdersPage() {
         renderActions={(r) => (
           <button
             type="button"
-            onClick={() => {
-              setSelected(r);
-              setNewStatus(r.status);
-              setDetailOpen(true);
-            }}
+            onClick={() => openDetail(r)}
             className="p-1.5 rounded-lg hover:bg-surface-muted text-text-muted hover:text-primary-600"
           >
             <Eye size={15} />
@@ -221,6 +266,54 @@ export default function OrdersPage() {
                 </FormSelect>
               </FormField>
             </div>
+
+            {/* Shipment details (only if shipment exists) */}
+            {selected.shipment && (
+              <div className="border-t border-border pt-4 space-y-3">
+                <div className="flex items-center gap-2">
+                  <Truck size={16} className="text-primary-600" />
+                  <h3 className="text-sm font-semibold text-text-primary">Shipment Details</h3>
+                  <Badge variant="info" className="text-[10px]">{selected.shipment.shippingMode.replace(/_/g, ' ')}</Badge>
+                </div>
+
+                {selected.shipment.weight != null && (
+                  <p className="text-xs text-text-muted">
+                    Weight: {selected.shipment.weight} kg
+                    {selected.shipment.dimensions && ` · Dimensions: ${selected.shipment.dimensions}`}
+                  </p>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <FormField label="AWB Number">
+                    <FormInput value={shipAwb} onChange={(e) => setShipAwb(e.target.value)} placeholder="Enter AWB / tracking number" />
+                  </FormField>
+                  <FormField label="Carrier / Courier">
+                    <FormInput value={shipCarrier} onChange={(e) => setShipCarrier(e.target.value)} placeholder="e.g. Delhivery, BlueDart" />
+                  </FormField>
+                  <FormField label="Tracking URL">
+                    <FormInput value={shipTrackingUrl} onChange={(e) => setShipTrackingUrl(e.target.value)} placeholder="https://..." />
+                  </FormField>
+                  <FormField label="Shipment Status">
+                    <FormSelect value={shipStatus} onChange={(e) => setShipStatus(e.target.value)}>
+                      {SHIPMENT_STATUSES.map((s) => (
+                        <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>
+                      ))}
+                    </FormSelect>
+                  </FormField>
+                </div>
+
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => void handleUpdateShipment()}
+                    disabled={shipmentSaving}
+                    className="px-4 py-2 text-xs font-semibold text-white bg-primary-600 rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
+                  >
+                    {shipmentSaving ? 'Saving…' : 'Update Shipment'}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </ActionModal>

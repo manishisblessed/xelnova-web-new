@@ -6,34 +6,29 @@ function isSellerSession(request: NextRequest): boolean {
   return role?.toLowerCase() === 'seller';
 }
 
-function withCoopHeader(response: NextResponse): NextResponse {
-  response.headers.set('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
-  return response;
-}
-
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const token = request.cookies.get('xelnova-dashboard-token')?.value;
 
-  const publicPaths = ['/', '/login', '/register'];
+  const publicPaths = ['/', '/login', '/register', '/register/digilocker-callback'];
   if (publicPaths.includes(pathname)) {
     if (token && pathname === '/login' && isSellerSession(request)) {
-      return withCoopHeader(NextResponse.redirect(new URL('/dashboard', request.url)));
+      return NextResponse.redirect(new URL('/dashboard', request.url));
     }
-    return withCoopHeader(NextResponse.next());
+    return NextResponse.next();
   }
 
-  const protectedPaths = ['/dashboard', '/orders', '/inventory', '/payouts', '/profile'];
+  const protectedPaths = ['/dashboard', '/orders', '/inventory', '/payouts', '/wallet', '/profile', '/shipping'];
   const isProtected = protectedPaths.some((p) => pathname === p || pathname.startsWith(p + '/'));
   if (isProtected) {
     if (!token || !isSellerSession(request)) {
       const loginUrl = new URL('/login', request.url);
       loginUrl.searchParams.set('redirect', pathname);
-      return withCoopHeader(NextResponse.redirect(loginUrl));
+      return NextResponse.redirect(loginUrl);
     }
   }
 
-  return withCoopHeader(NextResponse.next());
+  return NextResponse.next();
 }
 
 export const config = {
@@ -41,6 +36,7 @@ export const config = {
     '/',
     '/login',
     '/register',
+    '/register/digilocker-callback',
     '/dashboard',
     '/dashboard/:path*',
     '/orders',
@@ -49,7 +45,11 @@ export const config = {
     '/inventory/:path*',
     '/payouts',
     '/payouts/:path*',
+    '/wallet',
+    '/wallet/:path*',
     '/profile',
     '/profile/:path*',
+    '/shipping',
+    '/shipping/:path*',
   ],
 };

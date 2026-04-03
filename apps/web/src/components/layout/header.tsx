@@ -36,6 +36,7 @@ export function Header() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
   const [isAccountOpen, setIsAccountOpen] = useState(false);
+  const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
   const accountRef = useRef<HTMLDivElement>(null);
 
   const [mounted, setMounted] = useState(false);
@@ -52,6 +53,10 @@ export function Header() {
   const { user, isAuthenticated, logout, loading: authLoading } = useAuth();
 
   useEffect(() => setMounted(true), []);
+
+  useEffect(() => {
+    setAvatarLoadFailed(false);
+  }, [user?.id, user?.avatar]);
 
   useEffect(() => {
     if (!mounted || location || autoDetected) return;
@@ -125,7 +130,14 @@ export function Header() {
               Get App
             </Link>
             <span className="hidden md:inline text-white/45">|</span>
-            <a href="https://seller.xelnova.in" className="hover:text-white transition-colors">Sell on Xelnova</a>
+            <a
+              href="https://seller.xelnova.in"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-white transition-colors"
+            >
+              Sell on Xelnova
+            </a>
             <span className="text-white/45">|</span>
             <Link href="/track-order" className="hover:text-white transition-colors">Track Order</Link>
             <span className="text-white/45 hidden sm:inline">|</span>
@@ -185,19 +197,36 @@ export function Header() {
             {isAuthenticated && user ? (
               <div ref={accountRef} className="relative hidden lg:block">
                 <button
+                  type="button"
                   onClick={() => setIsAccountOpen(!isAccountOpen)}
-                  className="flex items-center gap-2.5 rounded-xl px-3 py-2 text-text-secondary hover:text-primary-600 hover:bg-primary-50 transition-all"
+                  aria-expanded={isAccountOpen}
+                  aria-haspopup="menu"
+                  className="group flex items-center gap-2.5 rounded-2xl border border-primary-100/90 bg-gradient-to-br from-white to-primary-50/40 px-2 py-1.5 pr-2.5 shadow-sm transition-all hover:border-primary-200 hover:shadow-md"
                 >
-                  {user.avatar ? (
-                    <img src={user.avatar} alt="" className="w-8 h-8 rounded-full object-cover ring-2 ring-primary-100" />
-                  ) : (
-                    <div className="w-8 h-8 rounded-full bg-primary-100 flex items-center justify-center">
-                      <span className="text-sm font-bold text-primary-700">{user.name?.charAt(0).toUpperCase()}</span>
-                    </div>
-                  )}
-                  <span className="text-xs leading-tight">
-                    <span className="block text-[10px] text-text-muted">Hello, {user.name?.split(' ')[0]}</span>
-                    <span className="block font-semibold text-text-primary">Account <ChevronDown size={10} className="inline" /></span>
+                  <div className="relative shrink-0">
+                    {user.avatar && !avatarLoadFailed ? (
+                      <img
+                        src={user.avatar}
+                        alt=""
+                        referrerPolicy="no-referrer"
+                        onError={() => setAvatarLoadFailed(true)}
+                        className="h-9 w-9 rounded-full object-cover ring-2 ring-white shadow-sm transition-all group-hover:ring-primary-100"
+                      />
+                    ) : (
+                      <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-primary-500 to-primary-700 text-sm font-bold text-white shadow-md ring-2 ring-primary-100/80">
+                        {user.name?.charAt(0).toUpperCase() ?? '?'}
+                      </div>
+                    )}
+                  </div>
+                  <span className="flex min-w-0 max-w-[9.5rem] items-center gap-1 text-left">
+                    <span className="truncate font-display text-sm font-bold tracking-tight text-primary-900">
+                      Hi, {user.name?.split(/\s+/)[0] || 'there'}
+                    </span>
+                    <ChevronDown
+                      size={15}
+                      className={`shrink-0 text-primary-500 transition-transform duration-200 ${isAccountOpen ? 'rotate-180' : ''}`}
+                      aria-hidden
+                    />
                   </span>
                 </button>
 
@@ -359,6 +388,8 @@ export function Header() {
             </Link>
             <a
               href="https://seller.xelnova.in"
+              target="_blank"
+              rel="noopener noreferrer"
               className="flex-shrink-0 flex items-center gap-1 px-3 py-2.5 text-sm font-semibold text-accent-600 hover:bg-accent-50 transition-colors rounded-lg"
             >
               <Sparkles size={14} />
@@ -392,16 +423,24 @@ export function Header() {
                   <div className="flex items-center gap-3">
                     {isAuthenticated && user ? (
                       <>
-                        {user.avatar ? (
-                          <img src={user.avatar} alt="" className="w-10 h-10 rounded-full object-cover ring-2 ring-white/30" />
+                        {user.avatar && !avatarLoadFailed ? (
+                          <img
+                            src={user.avatar}
+                            alt=""
+                            referrerPolicy="no-referrer"
+                            onError={() => setAvatarLoadFailed(true)}
+                            className="h-11 w-11 rounded-full object-cover ring-2 ring-white/50 shadow-lg"
+                          />
                         ) : (
-                          <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center">
-                            <span className="text-white font-bold">{user.name?.charAt(0).toUpperCase()}</span>
+                          <div className="flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-br from-white/30 to-white/10 text-lg font-bold text-white shadow-lg ring-2 ring-white/40 backdrop-blur-sm">
+                            {user.name?.charAt(0).toUpperCase() ?? '?'}
                           </div>
                         )}
-                        <div>
-                          <p className="text-sm font-semibold text-white">Hello, {user.name?.split(' ')[0]}</p>
-                          <p className="text-xs text-primary-200 truncate max-w-[160px]">{user.email}</p>
+                        <div className="min-w-0">
+                          <p className="font-display text-base font-bold leading-tight text-white drop-shadow-sm">
+                            Hi, {user.name?.split(/\s+/)[0] || 'there'}
+                          </p>
+                          <p className="mt-0.5 truncate text-xs text-primary-100/90">{user.email}</p>
                         </div>
                       </>
                     ) : (
@@ -493,6 +532,8 @@ export function Header() {
               <div className="border-t border-border p-4">
                 <a
                   href="https://seller.xelnova.in"
+                  target="_blank"
+                  rel="noopener noreferrer"
                   onClick={() => setIsMobileMenuOpen(false)}
                   className="flex items-center justify-center gap-2 rounded-xl bg-primary-600 px-4 py-3 text-sm font-semibold text-white hover:bg-primary-700 transition-colors shadow-primary"
                 >

@@ -1,11 +1,12 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, memo } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { motion } from 'framer-motion';
-import { Zap } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Zap, ShoppingCart, Check } from 'lucide-react';
 import type { Product } from '@/lib/data/products';
+import { useCartStore } from '@/lib/store/cart-store';
 
 function useCountdown(endAt: string) {
   const [timeLeft, setTimeLeft] = useState({ h: 0, m: 0, s: 0, expired: false });
@@ -31,13 +32,32 @@ function useCountdown(endAt: string) {
   return timeLeft;
 }
 
-export function FlashDealCard({ product }: { product: Product }) {
+export const FlashDealCard = memo(function FlashDealCard({ product }: { product: Product }) {
   const endAt = useMemo(
     () => product.flashDealEndsAt || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
     [product.flashDealEndsAt],
   );
   const { h, m, s, expired } = useCountdown(endAt);
   const [imgLoaded, setImgLoaded] = useState(false);
+  const [added, setAdded] = useState(false);
+  const addItem = useCartStore((s) => s.addItem);
+
+  const handleAddToCart = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    addItem({
+      id: `${product.id}-default`,
+      productId: product.id,
+      name: product.name,
+      slug: product.slug,
+      price: product.price,
+      comparePrice: product.comparePrice,
+      image: product.images[0] || '',
+      seller: product.seller?.name || 'Xelnova',
+    });
+    setAdded(true);
+    setTimeout(() => setAdded(false), 1500);
+  };
 
   const discount = product.comparePrice > product.price
     ? Math.round(((product.comparePrice - product.price) / product.comparePrice) * 100)
@@ -98,15 +118,39 @@ export function FlashDealCard({ product }: { product: Product }) {
         <div className="flex flex-col gap-2.5 p-3">
           <h4 className="line-clamp-1 text-sm font-medium text-text-primary">{product.name}</h4>
 
-          <div className="flex items-baseline gap-2">
-            <span className="text-base font-bold text-text-primary">
-              ₹{product.price.toLocaleString('en-IN')}
-            </span>
-            {product.comparePrice > product.price && (
-              <span className="text-xs text-text-muted line-through">
-                ₹{product.comparePrice.toLocaleString('en-IN')}
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-baseline gap-2 min-w-0">
+              <span className="text-base font-bold text-text-primary">
+                ₹{product.price.toLocaleString('en-IN')}
               </span>
-            )}
+              {product.comparePrice > product.price && (
+                <span className="text-xs text-text-muted line-through">
+                  ₹{product.comparePrice.toLocaleString('en-IN')}
+                </span>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={handleAddToCart}
+              className={`shrink-0 flex items-center justify-center w-8 h-8 rounded-lg transition-all active:scale-90 ${
+                added
+                  ? 'bg-green-500 text-white'
+                  : 'bg-primary-50 text-primary-600 hover:bg-primary-100'
+              }`}
+              aria-label="Add to cart"
+            >
+              <AnimatePresence mode="wait">
+                {added ? (
+                  <motion.span key="check" initial={{ scale: 0 }} animate={{ scale: 1 }} exit={{ scale: 0 }}>
+                    <Check size={16} strokeWidth={3} />
+                  </motion.span>
+                ) : (
+                  <motion.span key="cart" initial={{ scale: 0 }} animate={{ scale: 1 }} exit={{ scale: 0 }}>
+                    <ShoppingCart size={16} />
+                  </motion.span>
+                )}
+              </AnimatePresence>
+            </button>
           </div>
 
           {/* Countdown */}
@@ -137,4 +181,4 @@ export function FlashDealCard({ product }: { product: Product }) {
       </motion.div>
     </Link>
   );
-}
+});

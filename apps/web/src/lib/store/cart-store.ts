@@ -14,11 +14,19 @@ export interface CartItem {
   seller: string;
 }
 
+type NewCartItem = Omit<CartItem, "quantity">;
+
+function sameProduct(a: { productId: string; variant?: string }, b: { productId: string; variant?: string }) {
+  return a.productId === b.productId && (a.variant ?? "") === (b.variant ?? "");
+}
+
 interface CartState {
   items: CartItem[];
-  addItem: (item: Omit<CartItem, "quantity">) => void;
+  addItem: (item: NewCartItem, quantity?: number) => void;
+  setItemQuantity: (item: NewCartItem, quantity: number) => void;
   removeItem: (id: string) => void;
   updateQuantity: (id: string, quantity: number) => void;
+  getItemQuantity: (productId: string, variant?: string) => number;
   clearCart: () => void;
   totalItems: () => number;
   totalPrice: () => number;
@@ -30,20 +38,32 @@ export const useCartStore = create<CartState>()(
     (set, get) => ({
       items: [],
 
-      addItem: (item) =>
+      addItem: (item, quantity = 1) =>
         set((state) => {
-          const existingIdx = state.items.findIndex(
-            (i) => i.productId === item.productId && i.variant === item.variant
-          );
-          if (existingIdx > -1) {
+          const qty = Math.max(1, quantity);
+          const idx = state.items.findIndex((i) => sameProduct(i, item));
+          if (idx > -1) {
             const updated = [...state.items];
-            updated[existingIdx] = {
-              ...updated[existingIdx],
-              quantity: updated[existingIdx].quantity + 1,
-            };
+            updated[idx] = { ...updated[idx], quantity: updated[idx].quantity + qty };
             return { items: updated };
           }
-          return { items: [...state.items, { ...item, quantity: 1 }] };
+          return { items: [...state.items, { ...item, quantity: qty }] };
+        }),
+
+      setItemQuantity: (item, quantity) =>
+        set((state) => {
+          const idx = state.items.findIndex((i) => sameProduct(i, item));
+          if (quantity <= 0) {
+            return idx > -1
+              ? { items: state.items.filter((_, j) => j !== idx) }
+              : state;
+          }
+          if (idx > -1) {
+            const updated = [...state.items];
+            updated[idx] = { ...updated[idx], quantity };
+            return { items: updated };
+          }
+          return { items: [...state.items, { ...item, quantity }] };
         }),
 
       removeItem: (id) =>
@@ -58,6 +78,9 @@ export const useCartStore = create<CartState>()(
               ? state.items.filter((i) => i.id !== id)
               : state.items.map((i) => (i.id === id ? { ...i, quantity } : i)),
         })),
+
+      getItemQuantity: (productId, variant) =>
+        get().items.find((i) => sameProduct(i, { productId, variant }))?.quantity ?? 0,
 
       clearCart: () => set({ items: [] }),
 

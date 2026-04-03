@@ -9,9 +9,10 @@ import {
   Download, Filter,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import dynamic from 'next/dynamic';
 import { DashboardHeader } from '@/components/dashboard/dashboard-header';
 import { StatCard } from '@/components/dashboard/stat-card';
-import { ChartCard } from '@/components/dashboard/chart-card';
+const ChartCard = dynamic(() => import('@/components/dashboard/chart-card').then((m) => m.ChartCard), { ssr: false, loading: () => <div className="rounded-2xl border border-border bg-surface p-6 shadow-card h-[280px] flex items-center justify-center"><div className="w-full h-full max-w-[400px] rounded-xl bg-surface-muted animate-pulse" /></div> });
 import { Badge } from '@xelnova/ui';
 import { apiGetRevenue, apiGetOrders } from '@/lib/api';
 

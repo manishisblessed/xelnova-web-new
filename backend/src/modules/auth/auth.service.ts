@@ -201,7 +201,28 @@ export class AuthService {
 
     this.otpStore.delete(phone);
 
-    const user = await this.prisma.user.findUnique({ where: { phone } });
+    // Build all plausible phone variants so we can find the user regardless
+    // of whether the DB stores "+919090702705" or "9090702705".
+    const phoneVariants = this.getPhoneVariants(phone);
+
+    let user = await this.prisma.user.findFirst({
+      where: { phone: { in: phoneVariants } },
+    });
+
+    // If no user found by phone on User table, check SellerProfile phone and link it
+    if (!user) {
+      const sellerProfile = await this.prisma.sellerProfile.findFirst({
+        where: { phone: { in: phoneVariants } },
+        include: { user: true },
+      });
+
+      if (sellerProfile?.user) {
+        user = await this.prisma.user.update({
+          where: { id: sellerProfile.user.id },
+          data: { phone, phoneVerified: true },
+        });
+      }
+    }
 
     if (!user) {
       this.verifiedPhones.set(phone, Date.now() + 10 * 60 * 1000);
@@ -248,14 +269,48 @@ export class AuthService {
     }
     this.verifiedPhones.delete(phone);
 
-    const existingPhone = await this.prisma.user.findUnique({ where: { phone } });
+    const phoneVariants = this.getPhoneVariants(phone);
+    const existingPhone = await this.prisma.user.findFirst({
+      where: { phone: { in: phoneVariants } },
+    });
     if (existingPhone) {
       throw new ConflictException('An account with this phone number already exists');
     }
 
     const existingEmail = await this.prisma.user.findUnique({ where: { email } });
+
     if (existingEmail) {
-      throw new ConflictException('An account with this email already exists');
+      // Account exists (e.g. registered via Google) — link the verified phone and log them in
+      if (existingEmail.isBanned) {
+        throw new UnauthorizedException('Your account has been suspended');
+      }
+
+      const user = await this.prisma.user.update({
+        where: { id: existingEmail.id },
+        data: { phone, phoneVerified: true },
+      });
+
+      if (user.role === 'SELLER') {
+        await this.ensureSellerProfileForSellerUser(user.id, user.name, user.email, phone);
+      }
+
+      const tokens = await this.generateTokens(user.id, user.email, user.role);
+      await this.saveRefreshToken(user.id, tokens.refreshToken);
+      const hasSellerProfile = await this.userHasSellerProfile(user.id);
+
+      return {
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          phone: user.phone,
+          avatar: user.avatar,
+          role: user.role,
+          authProvider: user.authProvider,
+        },
+        ...tokens,
+        hasSellerProfile,
+      };
     }
 
     const tempPassword = await bcrypt.hash(
@@ -488,6 +543,28 @@ export class AuthService {
         onboardingStep: 2,
       },
     });
+  }
+
+  /**
+   * Given a phone string like "+919090702705" or "9090702705", returns all
+   * plausible stored variants so lookups succeed regardless of format.
+   */
+  private getPhoneVariants(phone: string): string[] {
+    const digits = phone.replace(/\D/g, '');
+    const variants = new Set<string>();
+    variants.add(phone);
+
+    if (digits.startsWith('91') && digits.length === 12) {
+      variants.add(`+${digits}`);       // +919090702705
+      variants.add(digits);              // 919090702705
+      variants.add(digits.slice(2));     // 9090702705
+    } else if (digits.length === 10) {
+      variants.add(digits);              // 9090702705
+      variants.add(`+91${digits}`);      // +919090702705
+      variants.add(`91${digits}`);       // 919090702705
+    }
+
+    return Array.from(variants);
   }
 
   private async generateTokens(userId: string, email: string, role: string) {

@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -12,8 +11,6 @@ import {
   Mail,
   Phone,
   Lock,
-  Building2,
-  MapPin,
   FileText,
   CreditCard,
   Eye,
@@ -27,14 +24,18 @@ import {
   CheckCircle,
   Upload,
   Package,
-  Wallet,
   Store,
   AlertCircle,
   Pencil,
+  Fingerprint,
+  PenTool,
+  Trash2,
+  Undo2,
 } from 'lucide-react';
 import { Button } from '@xelnova/ui';
+import { publicApiBase } from '@/lib/public-api-base';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
+const API_BASE = publicApiBase();
 const RECAPTCHA_SITE_KEY = process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY || '';
 
 declare global {
@@ -48,17 +49,10 @@ declare global {
   }
 }
 
-function isPdfFile(file: File): boolean {
-  return file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
-}
-
 const steps = [
   { id: 1, title: 'Account', description: 'Email & Phone Verification', icon: User },
-  { id: 2, title: 'Tax Details', description: 'GST & PAN Verification', icon: FileText },
-  { id: 3, title: 'Store', description: 'Store Name & Category', icon: Store },
-  { id: 4, title: 'Address', description: 'Pickup Location', icon: MapPin },
-  { id: 5, title: 'Shipping', description: 'Delivery Preferences', icon: Truck },
-  { id: 6, title: 'Bank', description: 'Payment Details', icon: CreditCard },
+  { id: 2, title: 'Business Verification', description: 'GST, KYC & Store Details', icon: FileText },
+  { id: 3, title: 'Final Setup', description: 'Signature, Shipping & Bank', icon: CreditCard },
 ];
 
 const benefits = [
@@ -66,33 +60,6 @@ const benefits = [
   { icon: Truck, text: 'Free logistics support' },
   { icon: Shield, text: 'Secure payments' },
   { icon: Package, text: 'Easy inventory management' },
-];
-
-function StepHeader({ step, title, description }: { step: number; title: string; description: string }) {
-  const meta = steps.find((s) => s.id === step);
-  const Icon = meta?.icon ?? User;
-  return (
-    <div className="relative mb-6 pb-6 border-b border-gray-100">
-      <div className="flex items-start gap-4">
-        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary-500 to-primary-600 text-white shadow-md shadow-primary-500/20">
-          <Icon size={20} strokeWidth={2} />
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-primary-600 mb-1">Step {step} of 6</p>
-          <h2 className="text-xl sm:text-2xl font-extrabold text-gray-900 font-display tracking-tight leading-tight">{title}</h2>
-          <p className="text-gray-500 mt-1.5 text-sm leading-relaxed">{description}</p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-const businessTypes = [
-  { value: 'individual', label: 'Individual/Proprietorship' },
-  { value: 'partnership', label: 'Partnership' },
-  { value: 'pvtLtd', label: 'Private Limited' },
-  { value: 'llp', label: 'LLP' },
-  { value: 'public', label: 'Public Limited' },
 ];
 
 const categories = [
@@ -108,14 +75,24 @@ const categories = [
   { value: 'automotive', label: 'Automotive' },
 ];
 
-const indianStates = [
-  'Andaman and Nicobar Islands', 'Andhra Pradesh', 'Arunachal Pradesh', 'Assam',
-  'Bihar', 'Chandigarh', 'Chhattisgarh', 'Delhi', 'Goa', 'Gujarat', 'Haryana',
-  'Himachal Pradesh', 'Jammu and Kashmir', 'Jharkhand', 'Karnataka', 'Kerala',
-  'Ladakh', 'Lakshadweep', 'Madhya Pradesh', 'Maharashtra', 'Manipur', 'Meghalaya',
-  'Mizoram', 'Nagaland', 'Odisha', 'Puducherry', 'Punjab', 'Rajasthan', 'Sikkim',
-  'Tamil Nadu', 'Telangana', 'Tripura', 'Uttar Pradesh', 'Uttarakhand', 'West Bengal',
-];
+function StepHeader({ step, title, description }: { step: number; title: string; description: string }) {
+  const meta = steps.find((s) => s.id === step);
+  const Icon = meta?.icon ?? User;
+  return (
+    <div className="relative mb-6 pb-6 border-b border-gray-100">
+      <div className="flex items-start gap-4">
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary-500 to-primary-600 text-white shadow-md shadow-primary-500/20">
+          <Icon size={20} strokeWidth={2} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-primary-600 mb-1">Step {step} of 3</p>
+          <h2 className="text-xl sm:text-2xl font-extrabold text-gray-900 font-display tracking-tight leading-tight">{title}</h2>
+          <p className="text-gray-500 mt-1.5 text-sm leading-relaxed">{description}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 interface VerificationState {
   status: 'idle' | 'loading' | 'verified' | 'error';
@@ -141,12 +118,21 @@ interface CaptchaState {
   mathPuzzle?: { sessionId: string; instruction: string };
 }
 
+interface AadhaarState {
+  status: 'idle' | 'loading' | 'redirecting' | 'polling' | 'verified' | 'error';
+  error?: string;
+  verificationId?: string;
+  referenceId?: number;
+  orderId?: string;
+  verifiedData?: any;
+}
+
 export default function RegisterPage() {
-  const router = useRouter();
   const [currentStep, setCurrentStep] = useState(1);
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [sellerId, setSellerId] = useState<string | null>(null);
+  const [resumeChecked, setResumeChecked] = useState(false);
 
   const [formData, setFormData] = useState({
     fullName: '',
@@ -154,18 +140,15 @@ export default function RegisterPage() {
     phone: '',
     password: '',
     confirmPassword: '',
+    // Step 2
     gstNumber: '',
     sellsNonGstProducts: false,
-    panNumber: '',
-    panName: '',
     storeName: '',
     description: '',
     businessType: '',
-    businessCategory: '',
-    pincode: '',
-    city: '',
-    state: '',
-    address: '',
+    categorySelectionType: 'all',
+    selectedCategories: [] as string[],
+    // Step 3
     shippingMethod: 'easy_ship',
     offerFreeDelivery: true,
     deliveryCharge1to3Days: '',
@@ -175,7 +158,7 @@ export default function RegisterPage() {
     ifscCode: '',
     agreeTerms: false,
   });
-  
+
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [emailOtp, setEmailOtp] = useState<OtpState>({ sent: false, verified: false, loading: false });
   const [phoneOtp, setPhoneOtp] = useState<OtpState>({ sent: false, verified: false, loading: false });
@@ -189,104 +172,58 @@ export default function RegisterPage() {
   const [gstVerification, setGstVerification] = useState<VerificationState>({ status: 'idle' });
   const [ifscVerification, setIfscVerification] = useState<VerificationState>({ status: 'idle' });
   const [bankVerification, setBankVerification] = useState<VerificationState>({ status: 'idle' });
+  const [aadhaar, setAadhaar] = useState<AadhaarState>({ status: 'idle' });
 
-  const [kycDocs, setKycDocs] = useState<{
-    panCard: { file?: File; preview?: string; uploading: boolean; uploaded: boolean; url?: string };
-    maskedAadhaar: { file?: File; preview?: string; uploading: boolean; uploaded: boolean; url?: string };
-  }>({
-    panCard: { uploading: false, uploaded: false },
-    maskedAadhaar: { uploading: false, uploaded: false },
-  });
-  const kycDocsRef = useRef(kycDocs);
-  kycDocsRef.current = kycDocs;
+  // Signature state
+  const [signatureMode, setSignatureMode] = useState<'draw' | 'upload'>('draw');
+  const [signatureFile, setSignatureFile] = useState<File | null>(null);
+  const [signaturePreview, setSignaturePreview] = useState<string>('');
+  const [signatureDataUrl, setSignatureDataUrl] = useState<string>('');
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const isDrawingRef = useRef(false);
+  const [signatureUploading, setSignatureUploading] = useState(false);
+  const [signatureUploadedUrl, setSignatureUploadedUrl] = useState('');
+  const [hasDrawn, setHasDrawn] = useState(false);
+  const pointsRef = useRef<{ x: number; y: number; t: number }[]>([]);
+  const strokeHistoryRef = useRef<ImageData[]>([]);
 
   const resetToStep1 = useCallback(() => {
     setSellerId(null);
     setCurrentStep(1);
     setLoading(false);
     setErrors({});
-    setKycDocs({ panCard: { uploading: false, uploaded: false }, maskedAadhaar: { uploading: false, uploaded: false } });
+    try { sessionStorage.removeItem('xelnova-reg'); } catch { /* ignore */ }
   }, []);
 
-  const handleKycFileSelect = (docType: 'panCard' | 'maskedAadhaar', file: File | null) => {
-    if (!file) return;
-    const validTypes = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
-    const typeOk =
-      validTypes.includes(file.type) ||
-      (!file.type && /\.(jpe?g|png|webp|pdf)$/i.test(file.name));
-    if (!typeOk) {
-      setErrors(prev => ({ ...prev, [docType]: 'Only JPG, PNG, WEBP, or PDF files are allowed' }));
-      return;
+  // Persist sellerId + step so the user can resume after page refresh
+  useEffect(() => {
+    if (sellerId && currentStep > 1) {
+      try {
+        sessionStorage.setItem('xelnova-reg', JSON.stringify({ sellerId, step: currentStep, email: formData.email }));
+      } catch { /* ignore */ }
     }
-    if (file.size > 5 * 1024 * 1024) {
-      setErrors(prev => ({ ...prev, [docType]: 'File must be less than 5MB' }));
-      return;
-    }
-    const preview = isPdfFile(file) ? '' : URL.createObjectURL(file);
-    setKycDocs(prev => {
-      const prevPreview = prev[docType].preview;
-      if (prevPreview) URL.revokeObjectURL(prevPreview);
-      const next = { ...prev, [docType]: { file, preview, uploading: false, uploaded: false } };
-      kycDocsRef.current = next;
-      return next;
-    });
-    setErrors(prev => { const e = { ...prev }; delete e[docType]; return e; });
-  };
+  }, [sellerId, currentStep, formData.email]);
 
-  const uploadKycDocument = async (docType: 'panCard' | 'maskedAadhaar'): Promise<boolean> => {
-    const doc = kycDocsRef.current[docType];
-    if (!doc.file) return false;
-    if (!sellerId) {
-      setErrors(prev => ({ ...prev, [docType]: 'Session expired. Restarting from Step 1.' }));
-      resetToStep1();
-      return false;
-    }
-    if (doc.uploaded) return true;
+  // On mount: try to resume from sessionStorage or URL param
+  useEffect(() => {
+    if (resumeChecked) return;
+    setResumeChecked(true);
 
-    setKycDocs(prev => ({ ...prev, [docType]: { ...prev[docType], uploading: true } }));
     try {
-      const formPayload = new FormData();
-      formPayload.append('file', doc.file);
-      formPayload.append('type', docType === 'panCard' ? 'PAN_CARD' : 'MASKED_AADHAAR');
+      const saved = sessionStorage.getItem('xelnova-reg');
+      if (saved) {
+        const { sellerId: savedId, step, email } = JSON.parse(saved);
+        if (savedId && step >= 2) {
+          setSellerId(savedId);
+          setCurrentStep(step);
+          if (email) setFormData(prev => ({ ...prev, email }));
+          return;
+        }
+      }
+    } catch { /* ignore */ }
+  }, [resumeChecked]);
 
-      const res = await fetch(`${API_BASE}/seller-onboarding/document/${sellerId}`, {
-        method: 'POST',
-        body: formPayload,
-      });
-      const data = await res.json();
-      if (data.success) {
-        setKycDocs(prev => {
-          const next = {
-            ...prev,
-            [docType]: { ...prev[docType], uploading: false, uploaded: true, url: data.data?.fileUrl },
-          };
-          kycDocsRef.current = next;
-          return next;
-        });
-        return true;
-      }
-      if (res.status === 404 || (data.message && /seller not found/i.test(data.message))) {
-        setErrors(prev => ({ ...prev, submit: 'Your registration session has expired. Restarting from Step 1.' }));
-        resetToStep1();
-        return false;
-      }
-      setErrors(prev => ({ ...prev, [docType]: data.message || 'Upload failed' }));
-      setKycDocs(prev => {
-        const next = { ...prev, [docType]: { ...prev[docType], uploading: false } };
-        kycDocsRef.current = next;
-        return next;
-      });
-      return false;
-    } catch {
-      setErrors(prev => ({ ...prev, [docType]: 'Upload failed. Try again.' }));
-      setKycDocs(prev => {
-        const next = { ...prev, [docType]: { ...prev[docType], uploading: false } };
-        kycDocsRef.current = next;
-        return next;
-      });
-      return false;
-    }
-  };
+  // ========== Captcha ==========
 
   const loadMathCaptcha = useCallback(async () => {
     setCaptcha(prev => ({ ...prev, loading: true, error: undefined, mode: 'math' }));
@@ -310,7 +247,7 @@ export default function RegisterPage() {
         mathPuzzle: { sessionId: puzzle.sessionId, instruction: puzzle.puzzle.instruction },
       });
     } catch {
-      setCaptcha({ loading: false, solved: false, mode: 'math', error: 'Unable to reach the server. Please try again.' });
+      setCaptcha({ loading: false, solved: false, mode: 'math', error: 'Unable to reach the server.' });
     }
   }, []);
 
@@ -327,10 +264,10 @@ export default function RegisterPage() {
       if (res.ok && data.success) {
         setCaptcha({ loading: false, solved: true, token: data.data.captchaToken, mode: 'math' });
       } else {
-        setCaptcha(prev => ({ ...prev, loading: false, error: data.message || 'Incorrect answer. Try again.' }));
+        setCaptcha(prev => ({ ...prev, loading: false, error: data.message || 'Incorrect answer.' }));
       }
     } catch {
-      setCaptcha(prev => ({ ...prev, loading: false, error: 'Unable to reach the server. Please try again.' }));
+      setCaptcha(prev => ({ ...prev, loading: false, error: 'Unable to reach the server.' }));
     }
   }, [captcha.mathPuzzle]);
 
@@ -338,11 +275,9 @@ export default function RegisterPage() {
     setCaptcha(prev => ({ ...prev, loading: true, error: undefined, mode: 'recaptcha' }));
     try {
       if (!RECAPTCHA_SITE_KEY || !window.grecaptcha?.enterprise) {
-        console.warn('[reCAPTCHA] Not available, falling back to math captcha');
         loadMathCaptcha();
         return;
       }
-
       let recaptchaToken: string;
       try {
         recaptchaToken = await new Promise<string>((resolve, reject) => {
@@ -350,39 +285,26 @@ export default function RegisterPage() {
             try {
               const token = await window.grecaptcha!.enterprise!.execute(RECAPTCHA_SITE_KEY, { action: 'REGISTER' });
               resolve(token);
-            } catch (err) {
-              reject(err);
-            }
+            } catch (err) { reject(err); }
           });
         });
-      } catch (execErr) {
-        console.warn('[reCAPTCHA] execute() failed, falling back to math captcha:', execErr);
+      } catch {
         loadMathCaptcha();
         return;
       }
-
       const res = await fetch(`${API_BASE}/seller-onboarding/captcha/verify`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionId: 'recaptcha', answer: recaptchaToken }),
       });
-
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => null);
-        console.warn('[reCAPTCHA] Backend rejected token, falling back to math captcha:', errorData?.message);
-        loadMathCaptcha();
-        return;
-      }
-
+      if (!res.ok) { loadMathCaptcha(); return; }
       const data = await res.json();
       if (data.success) {
         setCaptcha({ loading: false, solved: true, token: data.data.captchaToken, mode: 'recaptcha' });
       } else {
-        console.warn('[reCAPTCHA] Verification unsuccessful, falling back to math captcha');
         loadMathCaptcha();
       }
-    } catch (err) {
-      console.warn('[reCAPTCHA] Error, falling back to math captcha:', err);
+    } catch {
       loadMathCaptcha();
     }
   }, [loadMathCaptcha]);
@@ -391,16 +313,11 @@ export default function RegisterPage() {
     if (recaptchaScriptLoaded.current || !RECAPTCHA_SITE_KEY) return;
     const existing = document.querySelector('script[src*="recaptcha/enterprise.js"]');
     if (existing) { recaptchaScriptLoaded.current = true; return; }
-
     const script = document.createElement('script');
     script.src = `https://www.google.com/recaptcha/enterprise.js?render=${RECAPTCHA_SITE_KEY}`;
     script.async = true;
     script.defer = true;
     script.onload = () => { recaptchaScriptLoaded.current = true; };
-    script.onerror = () => {
-      recaptchaScriptLoaded.current = false;
-      setCaptcha(prev => ({ ...prev, error: 'Security script failed to load. Please refresh the page.' }));
-    };
     document.head.appendChild(script);
   }, []);
 
@@ -417,12 +334,13 @@ export default function RegisterPage() {
     return () => clearTimeout(t);
   }, [phoneCooldown]);
 
-  // Send OTP
+  // ========== OTP ==========
+
   const sendOtp = async (type: 'EMAIL' | 'PHONE') => {
     const identifier = type === 'EMAIL' ? formData.email : formData.phone;
     const setOtpState = type === 'EMAIL' ? setEmailOtp : setPhoneOtp;
     const setCooldown = type === 'EMAIL' ? setEmailCooldown : setPhoneCooldown;
-    
+
     if (!identifier) {
       setErrors(prev => ({ ...prev, [type.toLowerCase()]: `${type === 'EMAIL' ? 'Email' : 'Phone'} is required` }));
       return;
@@ -436,53 +354,24 @@ export default function RegisterPage() {
         body: JSON.stringify({ identifier, type, purpose: 'REGISTRATION' }),
       });
       const raw = await res.text();
-      let data: {
-        success?: boolean;
-        message?: string;
-        error?: string;
-        data?: { expiresIn?: number; devOtp?: string };
-      } = {};
-      try {
-        data = raw ? (JSON.parse(raw) as typeof data) : {};
-      } catch {
-        setOtpState(prev => ({
-          ...prev,
-          loading: false,
-          error: `Invalid response from server (HTTP ${res.status}). Is the Nest backend running and NEXT_PUBLIC_API_URL set to …/api/v1?`,
-        }));
+      let data: any = {};
+      try { data = raw ? JSON.parse(raw) : {}; } catch {
+        setOtpState(prev => ({ ...prev, loading: false, error: `Invalid response (HTTP ${res.status}).` }));
         return;
       }
       if (res.ok && data.success) {
         setOtpState({ sent: true, verified: false, loading: false, expiresIn: data.data?.expiresIn });
         setCooldown(60);
-        if (data.data?.devOtp) {
-          alert(`[Dev Mode] Your OTP is: ${data.data.devOtp}`);
-        }
+        if (data.data?.devOtp) alert(`[Dev Mode] Your OTP is: ${data.data.devOtp}`);
       } else {
-        setOtpState(prev => ({
-          ...prev,
-          loading: false,
-          error: data.message || data.error || `Failed to send OTP (${res.status})`,
-        }));
+        setOtpState(prev => ({ ...prev, loading: false, error: data.message || `Failed to send OTP (${res.status})` }));
         if (res.status === 429) setCooldown(60);
       }
     } catch (e) {
-      const net =
-        e instanceof TypeError ||
-        (e instanceof Error && /network|fetch|failed/i.test(e.message));
-      setOtpState(prev => ({
-        ...prev,
-        loading: false,
-        error: net
-          ? `Cannot reach the API (${API_BASE}). Start the backend on port 4000 and set NEXT_PUBLIC_API_URL in apps/seller/.env.`
-          : e instanceof Error
-            ? e.message
-            : 'Failed to send OTP',
-      }));
+      setOtpState(prev => ({ ...prev, loading: false, error: e instanceof Error ? e.message : 'Failed to send OTP' }));
     }
   };
 
-  // Verify OTP
   const verifyOtp = async (type: 'EMAIL' | 'PHONE') => {
     const identifier = type === 'EMAIL' ? formData.email : formData.phone;
     const otp = type === 'EMAIL' ? emailOtpInput : phoneOtpInput;
@@ -511,31 +400,157 @@ export default function RegisterPage() {
     }
   };
 
-  // Verify GST
+  // ========== GST ==========
+
+  const extractErrorMessage = (data: any, fallback: string): string => {
+    if (typeof data?.message === 'string') return data.message;
+    if (typeof data?.message?.message === 'string') return data.message.message;
+    return fallback;
+  };
+
   const verifyGst = async () => {
     if (!formData.gstNumber || formData.gstNumber.length !== 15) return;
-    
     setGstVerification({ status: 'loading' });
     try {
       const res = await fetch(`${API_BASE}/verification/gstin/${formData.gstNumber.toUpperCase()}`);
       const data = await res.json();
       if (data.success) {
         setGstVerification({ status: 'verified', data: data.data });
-        if (data.data.tradeName && !formData.storeName) {
-          setFormData(prev => ({ ...prev, storeName: data.data.tradeName }));
+        if (data.data.tradeName) {
+          setFormData(prev => ({ ...prev, storeName: prev.storeName || data.data.tradeName }));
         }
       } else {
-        setGstVerification({ status: 'error', error: data.message });
+        setGstVerification({ status: 'error', error: extractErrorMessage(data, 'GST verification failed') });
       }
     } catch {
-      setGstVerification({ status: 'error', error: 'Failed to verify GST' });
+      setGstVerification({ status: 'error', error: 'Unable to reach the server. Please check your connection and try again.' });
     }
   };
 
-  // Verify IFSC
+  // ========== Aadhaar (Digilocker) ==========
+
+  const startAadhaarDigilocker = async () => {
+    setAadhaar({ status: 'loading' });
+    try {
+      const res = await fetch(`${API_BASE}/verification/aadhaar/digilocker/create-url`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (!data.success) {
+        setAadhaar({ status: 'error', error: extractErrorMessage(data, 'Failed to start Aadhaar verification') });
+        return;
+      }
+
+      const { verificationId, referenceId, orderId, url } = data.data;
+
+      if (!url) {
+        setAadhaar({ status: 'error', error: 'Digilocker URL was not returned. Please try again.' });
+        return;
+      }
+
+      setAadhaar({ status: 'redirecting', verificationId, referenceId, orderId });
+
+      const popup = window.open(url, 'digilocker_aadhaar', 'width=600,height=700,scrollbars=yes');
+
+      if (!popup) {
+        setAadhaar(prev => ({ ...prev, status: 'error', error: 'Pop-up was blocked by your browser. Please allow pop-ups for this site and try again.' }));
+        return;
+      }
+
+      let resolved = false;
+
+      const closePopupSafely = () => {
+        try { popup.close(); } catch { /* cross-origin — browser may block */ }
+      };
+
+      const tryFetchDoc = async (): Promise<boolean> => {
+        try {
+          const docRes = await fetch(`${API_BASE}/verification/digilocker/get-document`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ verificationId, referenceId: String(referenceId), orderId, documentType: 'AADHAAR' }),
+          });
+          const docData = await docRes.json();
+          if (docData.success) {
+            resolved = true;
+            setAadhaar(prev => ({ ...prev, status: 'verified', verifiedData: docData.data }));
+            closePopupSafely();
+            return true;
+          }
+        } catch { /* network error — will retry */ }
+        return false;
+      };
+
+      const onDigilockerMessage = async (event: MessageEvent) => {
+        if (event.data?.type !== 'digilocker-done') return;
+        window.removeEventListener('message', onDigilockerMessage);
+        closePopupSafely();
+        if (!resolved) {
+          for (let i = 0; i < 5 && !resolved; i++) {
+            if (i > 0) await new Promise(r => setTimeout(r, 2000));
+            if (await tryFetchDoc()) return;
+          }
+        }
+      };
+      window.addEventListener('message', onDigilockerMessage);
+
+      let pollCount = 0;
+      const maxPolls = 60;
+      const docPollInterval = setInterval(async () => {
+        if (resolved || pollCount >= maxPolls) { clearInterval(docPollInterval); return; }
+        pollCount++;
+        if (pollCount >= 2) {
+          const success = await tryFetchDoc();
+          if (success) clearInterval(docPollInterval);
+        }
+      }, 4000);
+
+      const closePollInterval = setInterval(() => {
+        if (popup.closed) {
+          clearInterval(closePollInterval);
+          if (!resolved) {
+            setAadhaar(prev => ({ ...prev, status: 'polling' }));
+            (async () => {
+              for (let i = 0; i < 3 && !resolved; i++) {
+                if (i > 0) await new Promise(r => setTimeout(r, 2000));
+                if (await tryFetchDoc()) return;
+              }
+              if (!resolved) {
+                resolved = true;
+                clearInterval(docPollInterval);
+                setAadhaar(prev => ({ ...prev, status: 'error', error: 'Aadhaar verification was not completed. Please try again.' }));
+              }
+            })();
+          }
+        }
+      }, 1000);
+
+      setTimeout(() => {
+        clearInterval(docPollInterval);
+        clearInterval(closePollInterval);
+        window.removeEventListener('message', onDigilockerMessage);
+        if (!resolved) {
+          resolved = true;
+          closePopupSafely();
+          setAadhaar(prev => {
+            if (prev.status === 'redirecting' || prev.status === 'polling') {
+              return { ...prev, status: 'error', error: 'Verification timed out. Please try again.' };
+            }
+            return prev;
+          });
+        }
+      }, 5 * 60 * 1000);
+    } catch {
+      setAadhaar({ status: 'error', error: 'Unable to reach the server. Please check your connection and try again.' });
+    }
+  };
+
+  // ========== IFSC & Bank ==========
+
   const verifyIfsc = async () => {
     if (!formData.ifscCode || formData.ifscCode.length !== 11) return;
-    
     setIfscVerification({ status: 'loading' });
     try {
       const res = await fetch(`${API_BASE}/verification/ifsc/${formData.ifscCode.toUpperCase()}`);
@@ -543,27 +558,22 @@ export default function RegisterPage() {
       if (data.success) {
         setIfscVerification({ status: 'verified', data: data.data });
       } else {
-        setIfscVerification({ status: 'error', error: data.message });
+        setIfscVerification({ status: 'error', error: extractErrorMessage(data, 'IFSC verification failed') });
       }
     } catch {
-      setIfscVerification({ status: 'error', error: 'Failed to verify IFSC' });
+      setIfscVerification({ status: 'error', error: 'Unable to reach the server. Please check your connection and try again.' });
     }
   };
 
-  // Verify Bank Account (Penny Drop)
   const verifyBankAccount = async () => {
     if (!formData.accountNumber || !/^[0-9]{9,18}$/.test(formData.accountNumber)) return;
     if (!formData.ifscCode || formData.ifscCode.length !== 11) return;
-
     setBankVerification({ status: 'loading' });
     try {
       const res = await fetch(`${API_BASE}/verification/penny-drop`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          accountNumber: formData.accountNumber,
-          ifscCode: formData.ifscCode.toUpperCase(),
-        }),
+        body: JSON.stringify({ accountNumber: formData.accountNumber, ifscCode: formData.ifscCode.toUpperCase() }),
       });
       const data = await res.json();
       if (data.success) {
@@ -572,12 +582,237 @@ export default function RegisterPage() {
           setFormData(prev => ({ ...prev, accountHolderName: data.data.nameAtBank }));
         }
       } else {
-        setBankVerification({ status: 'error', error: data.message });
+        setBankVerification({ status: 'error', error: extractErrorMessage(data, 'Bank account verification failed') });
       }
     } catch {
-      setBankVerification({ status: 'error', error: 'Failed to verify bank account' });
+      setBankVerification({ status: 'error', error: 'Unable to reach the server. Please check your connection and try again.' });
     }
   };
+
+  // ========== Signature Canvas (Bézier + velocity-based width) ==========
+
+  const SIG_MIN_WIDTH = 1.2;
+  const SIG_MAX_WIDTH = 4.5;
+  const SIG_VELOCITY_FILTER = 0.7;
+  const SIG_INK_COLOR = '#1a1a2e';
+
+  const initCanvas = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return;
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, rect.width, rect.height);
+    strokeHistoryRef.current = [];
+    pointsRef.current = [];
+    setHasDrawn(false);
+    setSignatureDataUrl('');
+  }, []);
+
+  useEffect(() => {
+    if (currentStep !== 3 || signatureMode !== 'draw') return;
+
+    const raf = requestAnimationFrame(() => initCanvas());
+
+    const canvas = canvasRef.current;
+    if (!canvas) return () => cancelAnimationFrame(raf);
+
+    const ro = new ResizeObserver(() => initCanvas());
+    ro.observe(canvas);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      ro.disconnect();
+    };
+  }, [currentStep, signatureMode, initCanvas]);
+
+  const getPos = (e: React.MouseEvent | React.TouchEvent) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
+    const rect = canvas.getBoundingClientRect();
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+    return {
+      x: clientX - rect.left,
+      y: clientY - rect.top,
+    };
+  };
+
+  const widthFromVelocity = (v: number) => {
+    const clamped = Math.max(0, Math.min(v, 8));
+    return SIG_MAX_WIDTH - (SIG_MAX_WIDTH - SIG_MIN_WIDTH) * (clamped / 8);
+  };
+
+  const drawBezierSegment = (
+    ctx: CanvasRenderingContext2D,
+    p0: { x: number; y: number },
+    p1: { x: number; y: number },
+    p2: { x: number; y: number },
+    startW: number,
+    endW: number,
+  ) => {
+    const steps = Math.max(Math.ceil(Math.hypot(p2.x - p0.x, p2.y - p0.y) / 2), 1);
+    for (let i = 0; i < steps; i++) {
+      const t1 = i / steps;
+      const t2 = (i + 1) / steps;
+      const x1 = (1 - t1) * (1 - t1) * p0.x + 2 * (1 - t1) * t1 * p1.x + t1 * t1 * p2.x;
+      const y1 = (1 - t1) * (1 - t1) * p0.y + 2 * (1 - t1) * t1 * p1.y + t1 * t1 * p2.y;
+      const x2 = (1 - t2) * (1 - t2) * p0.x + 2 * (1 - t2) * t2 * p1.x + t2 * t2 * p2.x;
+      const y2 = (1 - t2) * (1 - t2) * p0.y + 2 * (1 - t2) * t2 * p1.y + t2 * t2 * p2.y;
+      const w = startW + (endW - startW) * t1;
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.lineWidth = w;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = SIG_INK_COLOR;
+      ctx.stroke();
+    }
+  };
+
+  const lastVelocityRef = useRef(0);
+
+  const startDrawing = (e: React.MouseEvent | React.TouchEvent) => {
+    e.preventDefault();
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    strokeHistoryRef.current.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
+    if (strokeHistoryRef.current.length > 30) strokeHistoryRef.current.shift();
+
+    isDrawingRef.current = true;
+    setHasDrawn(true);
+    const pos = getPos(e);
+    pointsRef.current = [{ ...pos, t: Date.now() }];
+    lastVelocityRef.current = 0;
+
+    ctx.beginPath();
+    ctx.arc(pos.x, pos.y, SIG_MAX_WIDTH / 2, 0, Math.PI * 2);
+    ctx.fillStyle = SIG_INK_COLOR;
+    ctx.fill();
+  };
+
+  const draw = (e: React.MouseEvent | React.TouchEvent) => {
+    e.preventDefault();
+    if (!isDrawingRef.current) return;
+    const ctx = canvasRef.current?.getContext('2d');
+    if (!ctx) return;
+
+    const pos = getPos(e);
+    const now = Date.now();
+    const pts = pointsRef.current;
+    pts.push({ ...pos, t: now });
+
+    if (pts.length < 3) return;
+
+    const p0 = pts[pts.length - 3];
+    const p1 = pts[pts.length - 2];
+    const p2 = pts[pts.length - 1];
+
+    const dt = Math.max(p2.t - p0.t, 1);
+    const dist = Math.hypot(p2.x - p0.x, p2.y - p0.y);
+    const rawV = dist / dt;
+    const velocity = SIG_VELOCITY_FILTER * rawV + (1 - SIG_VELOCITY_FILTER) * lastVelocityRef.current;
+    lastVelocityRef.current = velocity;
+
+    const midX = (p0.x + p1.x) / 2;
+    const midY = (p0.y + p1.y) / 2;
+    const midX2 = (p1.x + p2.x) / 2;
+    const midY2 = (p1.y + p2.y) / 2;
+
+    const startW = widthFromVelocity(lastVelocityRef.current);
+    const endW = widthFromVelocity(velocity);
+
+    drawBezierSegment(ctx, { x: midX, y: midY }, p1, { x: midX2, y: midY2 }, startW, endW);
+  };
+
+  const stopDrawing = () => {
+    if (!isDrawingRef.current) return;
+    isDrawingRef.current = false;
+    pointsRef.current = [];
+    if (canvasRef.current) {
+      setSignatureDataUrl(canvasRef.current.toDataURL('image/png'));
+    }
+  };
+
+  const undoStroke = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const prev = strokeHistoryRef.current.pop();
+    if (prev) {
+      ctx.putImageData(prev, 0, 0);
+      setSignatureDataUrl(canvas.toDataURL('image/png'));
+    } else {
+      const rect = canvas.getBoundingClientRect();
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, rect.width, rect.height);
+      setSignatureDataUrl('');
+      setHasDrawn(false);
+    }
+  };
+
+  const clearCanvas = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const rect = canvas.getBoundingClientRect();
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, rect.width, rect.height);
+    setSignatureDataUrl('');
+    setHasDrawn(false);
+    strokeHistoryRef.current = [];
+    pointsRef.current = [];
+  };
+
+  const uploadSignature = async (): Promise<string> => {
+    if (signatureUploadedUrl) return signatureUploadedUrl;
+    if (!sellerId) return '';
+
+    let fileToUpload: File | null = null;
+
+    if (signatureMode === 'upload' && signatureFile) {
+      fileToUpload = signatureFile;
+    } else if (signatureMode === 'draw' && signatureDataUrl) {
+      const blob = await (await fetch(signatureDataUrl)).blob();
+      fileToUpload = new File([blob], 'signature.png', { type: 'image/png' });
+    }
+
+    if (!fileToUpload) return '';
+
+    setSignatureUploading(true);
+    try {
+      const form = new FormData();
+      form.append('file', fileToUpload);
+      form.append('type', 'SIGNATURE');
+      const res = await fetch(`${API_BASE}/seller-onboarding/document/${sellerId}`, {
+        method: 'POST',
+        body: form,
+      });
+      const data = await res.json();
+      if (data.success && data.data?.fileUrl) {
+        setSignatureUploadedUrl(data.data.fileUrl);
+        return data.data.fileUrl;
+      }
+      return '';
+    } catch {
+      return '';
+    } finally {
+      setSignatureUploading(false);
+    }
+  };
+
+  // ========== Form Handling ==========
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value, type } = e.target;
@@ -591,6 +826,15 @@ export default function RegisterPage() {
     }
   };
 
+  const toggleCategory = (cat: string) => {
+    setFormData(prev => ({
+      ...prev,
+      selectedCategories: prev.selectedCategories.includes(cat)
+        ? prev.selectedCategories.filter(c => c !== cat)
+        : [...prev.selectedCategories, cat],
+    }));
+  };
+
   const validateStep = (step: number): boolean => {
     const newErrors: Record<string, string> = {};
 
@@ -602,7 +846,7 @@ export default function RegisterPage() {
       else if (!/^[6-9]\d{9}$/.test(formData.phone)) newErrors.phone = 'Invalid phone number';
       if (!formData.password) newErrors.password = 'Password is required';
       else if (formData.password.length < 6) newErrors.password = 'Min 6 characters';
-      if (formData.password !== formData.confirmPassword) newErrors.confirmPassword = 'Passwords don\'t match';
+      if (formData.password !== formData.confirmPassword) newErrors.confirmPassword = "Passwords don't match";
       if (!emailOtp.verified) newErrors.email = 'Email not verified';
       if (!phoneOtp.verified) newErrors.phone = 'Phone not verified';
       if (!captcha.solved) newErrors.captcha = 'Complete the puzzle';
@@ -611,58 +855,30 @@ export default function RegisterPage() {
     if (step === 2) {
       if (!formData.sellsNonGstProducts) {
         if (!formData.gstNumber.trim()) newErrors.gstNumber = 'GST number required';
-        else if (!/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/.test(formData.gstNumber.toUpperCase())) {
-          newErrors.gstNumber = 'Invalid GST format';
-        } else if (gstVerification.status !== 'verified') {
-          newErrors.gstNumber = 'GST not verified';
-        }
+        else if (gstVerification.status !== 'verified') newErrors.gstNumber = 'GST not verified';
       }
-      if (!formData.panNumber.trim()) newErrors.panNumber = 'PAN is required';
-      else if (!/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(formData.panNumber.toUpperCase())) {
-        newErrors.panNumber = 'Invalid PAN format';
+      if (!formData.storeName.trim()) newErrors.storeName = 'Store name required';
+      else if (formData.storeName.length < 3) newErrors.storeName = 'Min 3 characters';
+      if (formData.categorySelectionType === 'choose' && formData.selectedCategories.length === 0) {
+        newErrors.selectedCategories = 'Select at least one category';
       }
-      if (!formData.panName.trim()) newErrors.panName = 'Name on PAN required';
-      if (!kycDocs.panCard.file) newErrors.panCard = 'PAN card document is required';
-      if (!kycDocs.maskedAadhaar.file) newErrors.maskedAadhaar = 'Masked Aadhaar document is required';
     }
 
     if (step === 3) {
-      if (!formData.storeName.trim()) newErrors.storeName = 'Store name required';
-      else if (formData.storeName.length < 3) newErrors.storeName = 'Min 3 characters';
-      if (!formData.businessType) newErrors.businessType = 'Select business type';
-      if (!formData.businessCategory) newErrors.businessCategory = 'Select category';
-    }
-
-    if (step === 4) {
-      if (!formData.pincode.trim()) newErrors.pincode = 'Pincode required';
-      else if (!/^[1-9][0-9]{5}$/.test(formData.pincode)) newErrors.pincode = 'Invalid pincode';
-      if (!formData.city.trim()) newErrors.city = 'City required';
-      if (!formData.state) newErrors.state = 'State required';
-      if (!formData.address.trim()) newErrors.address = 'Address required';
-      else if (formData.address.length < 10) newErrors.address = 'Enter complete address';
-    }
-
-    if (step === 5) {
+      if (signatureMode === 'draw' && !signatureDataUrl) newErrors.signature = 'Please draw your signature';
+      if (signatureMode === 'upload' && !signatureFile) newErrors.signature = 'Please upload your signature';
       if (!formData.shippingMethod) newErrors.shippingMethod = 'Select shipping method';
       if (!formData.offerFreeDelivery) {
         if (!formData.deliveryCharge1to3Days) newErrors.deliveryCharge1to3Days = 'Enter delivery charge';
         if (!formData.deliveryCharge3PlusDays) newErrors.deliveryCharge3PlusDays = 'Enter delivery charge';
       }
-    }
-
-    if (step === 6) {
       if (!formData.accountHolderName.trim()) newErrors.accountHolderName = 'Account holder name required';
       if (!formData.accountNumber.trim()) newErrors.accountNumber = 'Account number required';
       else if (!/^[0-9]{9,18}$/.test(formData.accountNumber)) newErrors.accountNumber = 'Invalid account number';
       if (!formData.ifscCode.trim()) newErrors.ifscCode = 'IFSC required';
-      else if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(formData.ifscCode.toUpperCase())) {
-        newErrors.ifscCode = 'Invalid IFSC format';
-      } else if (ifscVerification.status !== 'verified') {
-        newErrors.ifscCode = 'IFSC not verified';
-      }
-      if (bankVerification.status !== 'verified') {
-        newErrors.accountNumber = newErrors.accountNumber || 'Bank account not verified via Penny Drop';
-      }
+      else if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(formData.ifscCode.toUpperCase())) newErrors.ifscCode = 'Invalid IFSC format';
+      else if (ifscVerification.status !== 'verified') newErrors.ifscCode = 'IFSC not verified';
+      if (bankVerification.status !== 'verified') newErrors.accountNumber = newErrors.accountNumber || 'Bank account not verified';
       if (!formData.agreeTerms) newErrors.agreeTerms = 'You must agree to terms';
     }
 
@@ -673,7 +889,6 @@ export default function RegisterPage() {
   const handleNext = async () => {
     if (!validateStep(currentStep)) return;
 
-    // Step 1 - Create account
     if (currentStep === 1) {
       setLoading(true);
       try {
@@ -692,9 +907,9 @@ export default function RegisterPage() {
         });
         const data = await res.json();
         if (data.success) {
+          const nextStep = data.data.nextStep || 2;
           setSellerId(data.data.sellerId);
-          const nextStep = data.data.nextStep ?? 2;
-          setCurrentStep(nextStep > 6 ? 6 : nextStep);
+          setCurrentStep(nextStep);
         } else {
           setErrors({ submit: data.message || 'Registration failed' });
         }
@@ -706,106 +921,82 @@ export default function RegisterPage() {
       return;
     }
 
-    // Other steps - Update seller profile
-    if (sellerId) {
+    if (currentStep === 2 && sellerId) {
       setLoading(true);
       try {
-        if (currentStep === 2) {
-          if (kycDocsRef.current.panCard.file) {
-            const ok = await uploadKycDocument('panCard');
-            if (!ok) { setLoading(false); return; }
-          }
-          if (kycDocsRef.current.maskedAadhaar.file) {
-            const ok = await uploadKycDocument('maskedAadhaar');
-            if (!ok) { setLoading(false); return; }
-          }
-        }
-
-        const stepEndpoints: Record<number, { url: string; body: any }> = {
-          2: {
-            url: `${API_BASE}/seller-onboarding/step-2/${sellerId}`,
-            body: {
-              gstNumber: formData.sellsNonGstProducts ? undefined : formData.gstNumber.toUpperCase(),
-              sellsNonGstProducts: formData.sellsNonGstProducts,
-              panNumber: formData.panNumber.toUpperCase(),
-              panName: formData.panName,
-            },
-          },
-          3: {
-            url: `${API_BASE}/seller-onboarding/step-3/${sellerId}`,
-            body: {
-              storeName: formData.storeName,
-              description: formData.description,
-              businessType: formData.businessType,
-              businessCategory: formData.businessCategory,
-            },
-          },
-          4: {
-            url: `${API_BASE}/seller-onboarding/step-4/${sellerId}`,
-            body: {
-              pincode: formData.pincode,
-              city: formData.city,
-              state: formData.state,
-              address: formData.address,
-            },
-          },
-          5: {
-            url: `${API_BASE}/seller-onboarding/step-5/${sellerId}`,
-            body: {
-              shippingMethod: formData.shippingMethod,
-              offerFreeDelivery: formData.offerFreeDelivery,
-              deliveryCharge1to3Days: formData.offerFreeDelivery ? undefined : parseFloat(formData.deliveryCharge1to3Days),
-              deliveryCharge3PlusDays: formData.offerFreeDelivery ? undefined : parseFloat(formData.deliveryCharge3PlusDays),
-            },
-          },
-        };
-
-        const endpoint = stepEndpoints[currentStep];
-        if (endpoint) {
-          const res = await fetch(endpoint.url, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(endpoint.body),
-          });
-          const data = await res.json();
-          if (data.success) {
-            setCurrentStep(prev => prev + 1);
-          } else if (res.status === 404 || (data.message && /seller not found/i.test(data.message))) {
-            setErrors({ submit: 'Your registration session has expired. Restarting from Step 1.' });
-            resetToStep1();
-          } else {
-            setErrors({ submit: data.message || 'Update failed' });
-          }
+        const gstData = gstVerification.status === 'verified' ? gstVerification.data : null;
+        const res = await fetch(`${API_BASE}/seller-onboarding/step-2/${sellerId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            gstNumber: formData.sellsNonGstProducts ? undefined : formData.gstNumber.toUpperCase(),
+            sellsNonGstProducts: formData.sellsNonGstProducts,
+            gstVerified: gstVerification.status === 'verified',
+            gstVerifiedData: gstData,
+            aadhaarNumber: aadhaar.verifiedData?.uid || '',
+            aadhaarVerified: aadhaar.status === 'verified',
+            aadhaarVerifiedData: aadhaar.verifiedData,
+            storeName: formData.storeName,
+            description: formData.description,
+            businessType: formData.businessType,
+            categorySelectionType: formData.categorySelectionType,
+            selectedCategories: formData.categorySelectionType === 'choose'
+              ? formData.selectedCategories
+              : categories.map((c) => c.value),
+            businessAddress: gstData?.address,
+            businessCity: gstData?.address?.split(', ').slice(-3, -2)[0],
+            businessState: gstData?.address?.split(', ').slice(-2, -1)[0],
+            businessPincode: gstData?.address?.split(', ').slice(-1)[0],
+          }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          setCurrentStep(3);
+        } else if (res.status === 404) {
+          setErrors({ submit: 'Session expired. Restarting.' });
+          resetToStep1();
         } else {
-          setCurrentStep(prev => prev + 1);
+          setErrors({ submit: data.message || 'Update failed' });
         }
       } catch {
         setErrors({ submit: 'Update failed. Please try again.' });
       } finally {
         setLoading(false);
       }
+      return;
     }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!validateStep(6) || !sellerId) return;
+    if (!validateStep(3) || !sellerId) return;
 
     setLoading(true);
     try {
-      const bankRes = await fetch(`${API_BASE}/seller-onboarding/step-6/${sellerId}`, {
+      const sigUrl = await uploadSignature();
+
+      const res = await fetch(`${API_BASE}/seller-onboarding/step-3/${sellerId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          signatureUrl: sigUrl || undefined,
+          signatureData: signatureMode === 'draw' ? signatureDataUrl : undefined,
+          shippingMethod: formData.shippingMethod,
+          offerFreeDelivery: formData.offerFreeDelivery,
+          deliveryCharge1to3Days: formData.offerFreeDelivery ? undefined : parseFloat(formData.deliveryCharge1to3Days),
+          deliveryCharge3PlusDays: formData.offerFreeDelivery ? undefined : parseFloat(formData.deliveryCharge3PlusDays),
           accountHolderName: formData.accountHolderName,
           accountNumber: formData.accountNumber,
           ifscCode: formData.ifscCode.toUpperCase(),
+          skipBankVerification: bankVerification.status === 'verified',
+          bankVerifiedData: bankVerification.status === 'verified' ? bankVerification.data : undefined,
         }),
       });
-      const bankData = await bankRes.json();
-      
+      const bankData = await res.json();
+
       if (!bankData.success) {
-        setErrors({ submit: bankData.message || 'Failed to save bank details' });
+        setErrors({ submit: bankData.message || 'Failed to save details' });
+        setLoading(false);
         return;
       }
 
@@ -823,17 +1014,8 @@ export default function RegisterPage() {
             body: JSON.stringify({ email: formData.email, password: formData.password }),
           });
           const loginData = await loginRes.json();
-
           if (loginRes.ok && loginData.success && loginData.data) {
             const u = loginData.data.user;
-            const dashboardUser = {
-              id: u.id,
-              name: u.name,
-              email: u.email,
-              role: 'seller',
-              avatar: u.avatar ?? null,
-            };
-
             const sessionRes = await fetch('/api/session', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -841,21 +1023,13 @@ export default function RegisterPage() {
               body: JSON.stringify({
                 token: loginData.data.accessToken,
                 role: 'seller',
-                user: dashboardUser,
+                user: { id: u.id, name: u.name, email: u.email, role: 'seller', avatar: u.avatar ?? null },
               }),
             });
-
-            if (sessionRes.ok) {
-              window.location.href = '/dashboard';
-              return;
-            }
+            if (sessionRes.ok) { window.location.href = '/dashboard'; return; }
           }
-        } catch {
-          // Auto-login failed; fall through to login page
-        }
-
+        } catch { /* fall through */ }
         window.location.href = '/login?registered=true';
-        return;
       } else {
         setErrors({ submit: submitData.message || 'Submission failed' });
       }
@@ -867,38 +1041,28 @@ export default function RegisterPage() {
   };
 
   const labelClass = 'block text-sm font-semibold text-gray-800 mb-2';
-
   const inputClass = (field: string) =>
     `w-full min-w-0 px-4 py-3.5 rounded-xl border text-[15px] ${
       errors[field]
         ? 'border-red-300 bg-red-50/80 ring-1 ring-red-200/60'
         : 'border-gray-200/90 bg-white shadow-sm hover:border-gray-300/90'
     } focus:border-primary-400 focus:ring-4 focus:ring-primary-500/10 focus:shadow-md outline-none transition-all duration-200 text-gray-900 placeholder:text-gray-400`;
-
-  /** Native <select> needs text-base (16px) on iOS to avoid zoom; min-h matches other inputs */
   const selectClass = (field: string) =>
     `${inputClass(field)} min-h-[52px] cursor-pointer text-base bg-[length:1rem] bg-[right_0.75rem_center] bg-no-repeat pr-10 appearance-none`;
 
+  // ========== Render ==========
+
   return (
     <div className="min-h-screen bg-[#f8fafc] bg-[radial-gradient(ellipse_120%_80%_at_50%_-20%,rgba(16,185,129,0.08),transparent)]">
-      {/* Header */}
       <header className="sticky top-0 z-50 border-b border-gray-200/60 bg-white/85 backdrop-blur-xl supports-[backdrop-filter]:bg-white/70">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16 lg:h-[4.25rem]">
             <Link href="/" className="flex items-center gap-2.5 transition-opacity hover:opacity-90">
               <Image src="/xelnova-logo-dark.png" alt="Xelnova" width={140} height={36} className="h-7 w-auto" />
-              <span className="hidden sm:inline text-xs font-bold uppercase tracking-wider text-primary-600 pl-2 border-l border-gray-200">
-                Seller
-              </span>
+              <span className="hidden sm:inline text-xs font-bold uppercase tracking-wider text-primary-600 pl-2 border-l border-gray-200">Seller</span>
             </Link>
-            <Link
-              href="/login"
-              className="text-sm font-medium text-[#475569] hover:text-primary-600 transition-colors"
-            >
-              Already registered?{' '}
-              <span className="text-primary-600 font-semibold underline decoration-primary-600/30 underline-offset-2 hover:decoration-primary-600">
-                Sign in
-              </span>
+            <Link href="/login" className="text-sm font-medium text-[#475569] hover:text-primary-600 transition-colors">
+              Already registered? <span className="text-primary-600 font-semibold underline decoration-primary-600/30 underline-offset-2 hover:decoration-primary-600">Sign in</span>
             </Link>
           </div>
         </div>
@@ -906,14 +1070,14 @@ export default function RegisterPage() {
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 lg:py-8">
         <div className="grid lg:grid-cols-4 gap-8 lg:gap-10">
-          {/* Left Sidebar - Progress */}
+          {/* Sidebar */}
           <div className="hidden lg:block">
             <div className="sticky top-20 space-y-5">
               <div className="rounded-2xl border border-gray-200/80 bg-white p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04),0_12px_32px_-8px_rgba(0,0,0,0.06)]">
                 <div className="flex items-center justify-between gap-3 mb-6">
                   <h3 className="font-display font-bold text-gray-900">Your progress</h3>
                   <span className="text-xs font-bold tabular-nums text-primary-700 bg-primary-50 px-2.5 py-1 rounded-lg border border-primary-100">
-                    {Math.round((currentStep / 6) * 100)}%
+                    {Math.round((currentStep / 3) * 100)}%
                   </span>
                 </div>
                 <div className="relative">
@@ -923,28 +1087,15 @@ export default function RegisterPage() {
                     return (
                       <div key={step.id} className="relative flex gap-4 pb-8 last:pb-0">
                         {index < steps.length - 1 && (
-                          <div
-                            className={`absolute left-[15px] top-10 w-0.5 h-[calc(100%-0.5rem)] rounded-full ${
-                              done ? 'bg-primary-200' : 'bg-gray-200'
-                            }`}
-                            aria-hidden
-                          />
+                          <div className={`absolute left-[15px] top-10 w-0.5 h-[calc(100%-0.5rem)] rounded-full ${done ? 'bg-primary-200' : 'bg-gray-200'}`} aria-hidden />
                         )}
-                        <div
-                          className={`relative z-[1] w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 transition-all duration-300 ${
-                            done
-                              ? 'bg-primary-500 text-white shadow-md shadow-primary-500/25 scale-100'
-                              : active
-                                ? 'bg-white text-primary-600 ring-2 ring-primary-500 ring-offset-2 ring-offset-white shadow-sm scale-105'
-                                : 'bg-gray-100 text-gray-400'
-                          }`}
-                        >
+                        <div className={`relative z-[1] w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 transition-all duration-300 ${
+                          done ? 'bg-primary-500 text-white shadow-md shadow-primary-500/25' : active ? 'bg-white text-primary-600 ring-2 ring-primary-500 ring-offset-2 ring-offset-white shadow-sm scale-105' : 'bg-gray-100 text-gray-400'
+                        }`}>
                           {done ? <CheckCircle2 size={16} strokeWidth={2.5} /> : <span className="text-sm font-bold">{step.id}</span>}
                         </div>
                         <div className="flex-1 min-w-0 pt-0.5">
-                          <p className={`text-sm font-semibold transition-colors ${active || done ? 'text-gray-900' : 'text-gray-400'}`}>
-                            {step.title}
-                          </p>
+                          <p className={`text-sm font-semibold transition-colors ${active || done ? 'text-gray-900' : 'text-gray-400'}`}>{step.title}</p>
                           <p className={`text-xs mt-0.5 leading-snug ${active ? 'text-gray-600' : 'text-gray-400'}`}>{step.description}</p>
                         </div>
                       </div>
@@ -952,7 +1103,6 @@ export default function RegisterPage() {
                   })}
                 </div>
               </div>
-
               <div className="rounded-2xl bg-gradient-to-br from-primary-600 via-primary-600 to-emerald-800 p-6 text-white shadow-lg shadow-primary-900/20 overflow-hidden relative">
                 <div className="absolute -right-8 -top-8 h-32 w-32 rounded-full bg-white/10 blur-2xl" aria-hidden />
                 <h3 className="font-display font-bold mb-4 relative">Why sell on Xelnova?</h3>
@@ -978,1098 +1128,548 @@ export default function RegisterPage() {
                 <div className="flex items-center justify-between gap-3 mb-3">
                   <div>
                     <p className="text-[11px] font-bold uppercase tracking-wider text-primary-600">Onboarding</p>
-                    <p className="text-sm font-semibold text-gray-900">
-                      Step {currentStep} · {steps[currentStep - 1]?.title}
-                    </p>
+                    <p className="text-sm font-semibold text-gray-900">Step {currentStep} · {steps[currentStep - 1]?.title}</p>
                   </div>
-                  <span className="text-xs font-bold tabular-nums text-primary-700 bg-primary-50 px-2.5 py-1.5 rounded-lg">
-                    {Math.round((currentStep / 6) * 100)}%
-                  </span>
+                  <span className="text-xs font-bold tabular-nums text-primary-700 bg-primary-50 px-2.5 py-1.5 rounded-lg">{Math.round((currentStep / 3) * 100)}%</span>
                 </div>
                 <div className="flex gap-1.5 h-2 rounded-full bg-gray-100 p-0.5 overflow-hidden">
                   {steps.map((step) => (
-                    <div
-                      key={step.id}
-                      className={`flex-1 rounded-full transition-all duration-500 ease-out ${
-                        currentStep > step.id ? 'bg-primary-400' : currentStep === step.id ? 'bg-primary-500 shadow-sm' : 'bg-transparent'
-                      }`}
-                    />
+                    <div key={step.id} className={`flex-1 rounded-full transition-all duration-500 ease-out ${currentStep >= step.id ? 'bg-primary-500' : 'bg-transparent'}`} />
                   ))}
                 </div>
               </div>
             </div>
 
-            <div className="relative z-0 rounded-2xl border border-gray-200/80 bg-white shadow-[0_1px_3px_rgba(0,0,0,0.04),0_24px_48px_-12px_rgba(15,23,42,0.08)] overflow-hidden">
-              <div className="h-1 w-full bg-gradient-to-r from-primary-400 via-primary-500 to-emerald-600" aria-hidden />
-              <form onSubmit={handleSubmit}>
-                <div className="p-5 sm:p-7 lg:p-8">
-                  <AnimatePresence mode="wait">
-                    <motion.div
-                      key={currentStep}
-                      initial={{ opacity: 0, y: 14 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -10 }}
-                      transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
-                    >
-                  {/* Step 1: Account */}
-                  {currentStep === 1 && (
-                    <div className="space-y-6">
-                      <StepHeader
-                        step={1}
-                        title="Create your account"
-                        description="Verify your email and phone, then set a secure password."
-                      />
+            <form onSubmit={currentStep === 3 ? handleSubmit : (e) => { e.preventDefault(); handleNext(); }}>
+              <AnimatePresence mode="wait">
+                <motion.div key={currentStep} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ duration: 0.3 }}
+                  className="rounded-2xl border border-gray-200/80 bg-white p-6 sm:p-8 shadow-[0_1px_3px_rgba(0,0,0,0.04),0_12px_32px_-8px_rgba(0,0,0,0.06)]">
 
-                      {/* reCAPTCHA Enterprise */}
-                      <div className="rounded-xl border border-emerald-100/80 bg-gradient-to-b from-emerald-50/60 to-white p-4 sm:p-5">
-                        <h3 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
-                          <Shield size={16} className="text-primary-600" />
-                          Security verification
-                        </h3>
-                        
+                  {/* ===== STEP 1: Account ===== */}
+                  {currentStep === 1 && (
+                    <>
+                      <StepHeader step={1} title="Create your account" description="Verify your email and phone, then set a secure password." />
+
+                      {/* Captcha */}
+                      <div className="mb-6 p-4 rounded-xl border border-gray-200 bg-gray-50/50">
+                        <div className="flex items-center gap-2 mb-3">
+                          <Shield size={18} className="text-primary-600" />
+                          <span className="text-sm font-semibold text-gray-800">Security verification</span>
+                        </div>
                         {captcha.solved ? (
-                          <div className="flex items-center gap-3 text-green-600">
-                            <CheckCircle size={24} />
-                            <span className="font-medium">Verification completed successfully!</span>
+                          <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 rounded-lg px-3 py-2">
+                            <CheckCircle size={16} /> Verified
                           </div>
                         ) : captcha.mode === 'math' && captcha.mathPuzzle ? (
-                          <div className="space-y-3">
-                            <p className="text-sm text-gray-700 font-medium">{captcha.mathPuzzle.instruction}</p>
-                            <div className="flex items-center gap-2">
-                              <input
-                                type="text"
-                                inputMode="numeric"
-                                value={mathAnswer}
-                                onChange={(e) => setMathAnswer(e.target.value)}
-                                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); solveMathCaptcha(mathAnswer); } }}
-                                placeholder="Your answer"
-                                className="w-32 rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-primary-400 focus:ring-1 focus:ring-primary-400 outline-none"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => solveMathCaptcha(mathAnswer)}
-                                disabled={captcha.loading || !mathAnswer.trim()}
-                                className="flex items-center gap-2 rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-all hover:bg-primary-700 disabled:opacity-60"
-                              >
-                                {captcha.loading ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
-                                Verify
-                              </button>
+                          <div className="space-y-2">
+                            <p className="text-sm text-gray-700">{captcha.mathPuzzle.instruction}</p>
+                            <div className="flex gap-2">
+                              <input type="text" value={mathAnswer} onChange={(e) => setMathAnswer(e.target.value)} placeholder="Your answer" className={inputClass('captcha')} onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), solveMathCaptcha(mathAnswer))} />
+                              <Button type="button" onClick={() => solveMathCaptcha(mathAnswer)} loading={captcha.loading} size="sm">Verify</Button>
                             </div>
-                            {captcha.error && (
-                              <p className="text-red-500 text-sm flex items-center gap-1">
-                                <XCircle size={14} /> {captcha.error}
-                              </p>
-                            )}
+                            {captcha.error && <p className="text-xs text-red-500">{captcha.error}</p>}
                           </div>
                         ) : (
-                          <div className="space-y-3">
-                            <button
-                              type="button"
-                              onClick={executeRecaptcha}
-                              disabled={captcha.loading}
-                              className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-5 py-3 text-sm font-medium text-gray-700 shadow-sm transition-all hover:border-primary-300 hover:bg-primary-50 disabled:opacity-60"
-                            >
-                              {captcha.loading ? (
-                                <><Loader2 size={16} className="animate-spin" /> Verifying...</>
-                              ) : (
-                                <><Shield size={16} className="text-primary-600" /> Verify I&apos;m not a robot</>
-                              )}
-                            </button>
-                            {captcha.error && (
-                              <p className="text-red-500 text-sm flex items-center gap-1">
-                                <XCircle size={14} /> {captcha.error}
-                              </p>
-                            )}
-                          </div>
+                          <button type="button" onClick={executeRecaptcha} disabled={captcha.loading}
+                            className="flex items-center gap-3 px-4 py-3 rounded-xl border border-gray-300 bg-white hover:bg-gray-50 transition-colors w-full">
+                            <div className={`w-6 h-6 rounded border-2 border-gray-300 flex items-center justify-center ${captcha.loading ? 'animate-spin' : ''}`}>
+                              {captcha.loading ? <Loader2 size={14} className="text-gray-400" /> : null}
+                            </div>
+                            <span className="text-sm text-gray-700">Verify I&apos;m not a robot</span>
+                          </button>
                         )}
-                        {errors.captcha && <p className="text-red-500 text-sm mt-2">{errors.captcha}</p>}
+                        {errors.captcha && <p className="text-xs text-red-500 mt-1">{errors.captcha}</p>}
                       </div>
 
-                      {/* Personal Info */}
-                      <div className="grid sm:grid-cols-2 gap-4">
-                        <div className="sm:col-span-2">
-                          <label className={labelClass}>Full Name *</label>
-                          <div className="relative">
-                            <User size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
-                            <input
-                              type="text"
-                              name="fullName"
-                              value={formData.fullName}
-                              onChange={handleChange}
-                              placeholder="As per government ID"
-                              className={`${inputClass('fullName')} pl-11`}
-                            />
-                          </div>
-                          {errors.fullName && <p className="text-red-500 text-xs mt-1">{errors.fullName}</p>}
+                      {/* Full Name */}
+                      <div className="mb-5">
+                        <label className={labelClass}>Full Name *</label>
+                        <div className="relative">
+                          <User size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                          <input type="text" name="fullName" value={formData.fullName} onChange={handleChange} placeholder="As per government ID" className={`${inputClass('fullName')} pl-11`} />
                         </div>
+                        {errors.fullName && <p className="text-xs text-red-500 mt-1">{errors.fullName}</p>}
+                      </div>
 
-                        {/* Email with OTP */}
-                        <div>
-                          <label className={labelClass}>Email Address *</label>
-                          <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:gap-3">
-                            <div className="relative min-w-0 flex-1">
-                              <Mail size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
-                              <input
-                                type="email"
-                                name="email"
-                                value={formData.email}
-                                onChange={handleChange}
-                                placeholder="you@example.com"
-                                disabled={emailOtp.verified}
-                                className={`${inputClass('email')} pl-11 ${emailOtp.verified ? 'bg-green-50 border-green-300' : ''}`}
-                              />
-                              {emailOtp.verified && (
-                                <CheckCircle size={18} className="absolute right-4 top-1/2 -translate-y-1/2 text-green-500" />
-                              )}
-                            </div>
-                            {emailOtp.verified ? (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setEmailOtp({ sent: false, verified: false, loading: false });
-                                  setEmailOtpInput('');
-                                }}
-                                className="h-12 shrink-0 inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-4 text-sm font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors sm:min-w-[6.5rem]"
-                              >
-                                <Pencil size={14} /> Change
-                              </button>
-                            ) : (
-                              <Button
-                                type="button"
-                                onClick={() => sendOtp('EMAIL')}
-                                disabled={emailOtp.loading || !formData.email || emailCooldown > 0}
-                                className="h-12 w-full shrink-0 rounded-xl px-5 font-semibold shadow-md shadow-primary-500/20 sm:w-auto sm:min-w-[9rem]"
-                              >
-                                {emailOtp.loading ? <Loader2 size={16} className="animate-spin" /> : emailCooldown > 0 ? `Resend (${emailCooldown}s)` : emailOtp.sent ? 'Resend OTP' : 'Send OTP'}
-                              </Button>
-                            )}
+                      {/* Email + OTP */}
+                      <div className="mb-5">
+                        <label className={labelClass}>Email Address *</label>
+                        {emailOtp.verified ? (
+                          <div className="flex items-center gap-3 px-4 py-3.5 rounded-xl border border-green-200 bg-green-50/50">
+                            <Mail size={18} className="text-green-600 shrink-0" />
+                            <span className="text-[15px] font-medium text-gray-900 flex-1 truncate">{formData.email}</span>
+                            <CheckCircle size={16} className="text-green-500 shrink-0" />
+                            <button type="button" onClick={() => { setEmailOtp({ sent: false, verified: false, loading: false }); setEmailOtpInput(''); setEmailCooldown(0); }}
+                              className="text-xs font-medium text-primary-600 hover:text-primary-700 underline underline-offset-2 decoration-primary-600/30 hover:decoration-primary-600 transition-colors whitespace-nowrap">
+                              Change
+                            </button>
                           </div>
-                          {emailOtp.sent && !emailOtp.verified && (
-                            <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
-                              <input
-                                type="text"
-                                value={emailOtpInput}
-                                onChange={(e) => setEmailOtpInput(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                                placeholder="Enter 6-digit OTP"
-                                className="h-12 flex-1 rounded-xl border border-gray-200 bg-white px-3 text-center text-base tracking-[0.35em] outline-none transition focus:border-primary-400 focus:ring-2 focus:ring-primary-400/20"
-                                maxLength={6}
-                              />
-                              <Button
-                                type="button"
-                                onClick={() => verifyOtp('EMAIL')}
-                                disabled={emailOtp.loading}
-                                className="h-12 w-full shrink-0 rounded-xl px-6 font-semibold sm:w-auto sm:min-w-[6.5rem]"
-                              >
-                                {emailOtp.loading ? <Loader2 size={16} className="animate-spin" /> : 'Verify'}
-                              </Button>
+                        ) : !emailOtp.sent ? (
+                          <div className="flex gap-2">
+                            <div className="relative flex-1">
+                              <Mail size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                              <input type="email" name="email" value={formData.email} onChange={handleChange} placeholder="you@example.com" className={`${inputClass('email')} pl-11`} />
                             </div>
-                          )}
-                          {emailOtp.error && <p className="text-red-500 text-xs mt-1">{emailOtp.error}</p>}
-                          {errors.email && <p className="text-red-500 text-xs mt-1">{errors.email}</p>}
-                        </div>
-
-                        {/* Phone with OTP */}
-                        <div>
-                          <label className={labelClass}>Mobile Number *</label>
-                          <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:gap-3">
-                            <div className="relative min-w-0 flex-1">
-                              <Phone size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
-                              <input
-                                type="tel"
-                                name="phone"
-                                value={formData.phone}
-                                onChange={handleChange}
-                                placeholder="10-digit number"
-                                disabled={phoneOtp.verified}
-                                maxLength={10}
-                                className={`${inputClass('phone')} pl-11 ${phoneOtp.verified ? 'bg-green-50 border-green-300' : ''}`}
-                              />
-                              {phoneOtp.verified && (
-                                <CheckCircle size={18} className="absolute right-4 top-1/2 -translate-y-1/2 text-green-500" />
-                              )}
-                            </div>
-                            {phoneOtp.verified ? (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setPhoneOtp({ sent: false, verified: false, loading: false });
-                                  setPhoneOtpInput('');
-                                }}
-                                className="h-12 shrink-0 inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-4 text-sm font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors sm:min-w-[6.5rem]"
-                              >
-                                <Pencil size={14} /> Change
-                              </button>
-                            ) : (
-                              <Button
-                                type="button"
-                                onClick={() => sendOtp('PHONE')}
-                                disabled={phoneOtp.loading || !formData.phone || phoneCooldown > 0}
-                                className="h-12 w-full shrink-0 rounded-xl px-5 font-semibold shadow-md shadow-primary-500/20 sm:w-auto sm:min-w-[9rem]"
-                              >
-                                {phoneOtp.loading ? <Loader2 size={16} className="animate-spin" /> : phoneCooldown > 0 ? `Resend (${phoneCooldown}s)` : phoneOtp.sent ? 'Resend OTP' : 'Send OTP'}
-                              </Button>
-                            )}
+                            <Button type="button" onClick={() => sendOtp('EMAIL')} loading={emailOtp.loading} disabled={emailCooldown > 0} size="sm" className="shrink-0">
+                              {emailCooldown > 0 ? `${emailCooldown}s` : 'Send OTP'}
+                            </Button>
                           </div>
-                          {phoneOtp.sent && !phoneOtp.verified && (
-                            <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
-                              <input
-                                type="text"
-                                value={phoneOtpInput}
-                                onChange={(e) => setPhoneOtpInput(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                                placeholder="Enter 6-digit OTP"
-                                className="h-12 flex-1 rounded-xl border border-gray-200 bg-white px-3 text-center text-base tracking-[0.35em] outline-none transition focus:border-primary-400 focus:ring-2 focus:ring-primary-400/20"
-                                maxLength={6}
-                              />
-                              <Button
-                                type="button"
-                                onClick={() => verifyOtp('PHONE')}
-                                disabled={phoneOtp.loading}
-                                className="h-12 w-full shrink-0 rounded-xl px-6 font-semibold sm:w-auto sm:min-w-[6.5rem]"
-                              >
-                                {phoneOtp.loading ? <Loader2 size={16} className="animate-spin" /> : 'Verify'}
-                              </Button>
+                        ) : (
+                          <div className="rounded-xl border border-primary-200 bg-primary-50/30 p-3 space-y-2.5">
+                            <div className="flex items-center gap-2 text-xs text-gray-600">
+                              <Mail size={14} className="text-primary-500 shrink-0" />
+                              <span className="truncate">OTP sent to <span className="font-semibold text-gray-800">{formData.email}</span></span>
+                              <button type="button" onClick={() => { setEmailOtp({ sent: false, verified: false, loading: false }); setEmailOtpInput(''); setEmailCooldown(0); }}
+                                className="ml-auto text-primary-600 hover:text-primary-700 font-medium whitespace-nowrap">Change</button>
                             </div>
-                          )}
-                          {phoneOtp.error && <p className="text-red-500 text-xs mt-1">{phoneOtp.error}</p>}
-                          {errors.phone && <p className="text-red-500 text-xs mt-1">{errors.phone}</p>}
-                        </div>
+                            <div className="flex gap-2">
+                              <input type="text" value={emailOtpInput} onChange={(e) => setEmailOtpInput(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                                placeholder="Enter 6-digit OTP" className="flex-1 min-w-0 px-3.5 py-2.5 rounded-lg border border-gray-200 bg-white text-sm text-center font-mono tracking-[0.3em] placeholder:tracking-normal placeholder:font-sans focus:border-primary-400 focus:ring-2 focus:ring-primary-500/10 outline-none transition-all"
+                                maxLength={6} autoFocus />
+                              <Button type="button" onClick={() => verifyOtp('EMAIL')} loading={emailOtp.loading} size="sm" className="shrink-0">Verify</Button>
+                            </div>
+                            <button type="button" onClick={() => sendOtp('EMAIL')} disabled={emailCooldown > 0}
+                              className="text-xs font-medium text-gray-400 hover:text-gray-600 disabled:text-gray-300 transition-colors">
+                              {emailCooldown > 0 ? `Resend in ${emailCooldown}s` : 'Resend OTP'}
+                            </button>
+                          </div>
+                        )}
+                        {emailOtp.error && <p className="text-xs text-red-500 mt-1.5">{emailOtp.error}</p>}
+                        {errors.email && <p className="text-xs text-red-500 mt-1.5">{errors.email}</p>}
+                      </div>
 
-                        {/* Password */}
+                      {/* Phone + OTP */}
+                      <div className="mb-5">
+                        <label className={labelClass}>Mobile Number *</label>
+                        {phoneOtp.verified ? (
+                          <div className="flex items-center gap-3 px-4 py-3.5 rounded-xl border border-green-200 bg-green-50/50">
+                            <Phone size={18} className="text-green-600 shrink-0" />
+                            <span className="text-[15px] font-medium text-gray-900 flex-1">+91 {formData.phone}</span>
+                            <CheckCircle size={16} className="text-green-500 shrink-0" />
+                            <button type="button" onClick={() => { setPhoneOtp({ sent: false, verified: false, loading: false }); setPhoneOtpInput(''); setPhoneCooldown(0); }}
+                              className="text-xs font-medium text-primary-600 hover:text-primary-700 underline underline-offset-2 decoration-primary-600/30 hover:decoration-primary-600 transition-colors whitespace-nowrap">
+                              Change
+                            </button>
+                          </div>
+                        ) : !phoneOtp.sent ? (
+                          <div className="flex gap-2">
+                            <div className="relative flex-1">
+                              <Phone size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                              <input type="tel" name="phone" value={formData.phone} onChange={handleChange} placeholder="10-digit number" className={`${inputClass('phone')} pl-11`} maxLength={10} />
+                            </div>
+                            <Button type="button" onClick={() => sendOtp('PHONE')} loading={phoneOtp.loading} disabled={phoneCooldown > 0} size="sm" className="shrink-0">
+                              {phoneCooldown > 0 ? `${phoneCooldown}s` : 'Send OTP'}
+                            </Button>
+                          </div>
+                        ) : (
+                          <div className="rounded-xl border border-primary-200 bg-primary-50/30 p-3 space-y-2.5">
+                            <div className="flex items-center gap-2 text-xs text-gray-600">
+                              <Phone size={14} className="text-primary-500 shrink-0" />
+                              <span>OTP sent to <span className="font-semibold text-gray-800">+91 {formData.phone}</span></span>
+                              <button type="button" onClick={() => { setPhoneOtp({ sent: false, verified: false, loading: false }); setPhoneOtpInput(''); setPhoneCooldown(0); }}
+                                className="ml-auto text-primary-600 hover:text-primary-700 font-medium whitespace-nowrap">Change</button>
+                            </div>
+                            <div className="flex gap-2">
+                              <input type="text" value={phoneOtpInput} onChange={(e) => setPhoneOtpInput(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                                placeholder="Enter 6-digit OTP" className="flex-1 min-w-0 px-3.5 py-2.5 rounded-lg border border-gray-200 bg-white text-sm text-center font-mono tracking-[0.3em] placeholder:tracking-normal placeholder:font-sans focus:border-primary-400 focus:ring-2 focus:ring-primary-500/10 outline-none transition-all"
+                                maxLength={6} autoFocus />
+                              <Button type="button" onClick={() => verifyOtp('PHONE')} loading={phoneOtp.loading} size="sm" className="shrink-0">Verify</Button>
+                            </div>
+                            <button type="button" onClick={() => sendOtp('PHONE')} disabled={phoneCooldown > 0}
+                              className="text-xs font-medium text-gray-400 hover:text-gray-600 disabled:text-gray-300 transition-colors">
+                              {phoneCooldown > 0 ? `Resend in ${phoneCooldown}s` : 'Resend OTP'}
+                            </button>
+                          </div>
+                        )}
+                        {phoneOtp.error && <p className="text-xs text-red-500 mt-1.5">{phoneOtp.error}</p>}
+                        {errors.phone && <p className="text-xs text-red-500 mt-1.5">{errors.phone}</p>}
+                      </div>
+
+                      {/* Password */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
                         <div>
                           <label className={labelClass}>Password *</label>
                           <div className="relative">
-                            <Lock size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
-                            <input
-                              type={showPassword ? 'text' : 'password'}
-                              name="password"
-                              value={formData.password}
-                              onChange={handleChange}
-                              placeholder="Min 6 characters"
-                              className={`${inputClass('password')} pl-11 pr-11`}
-                            />
-                            <button
-                              type="button"
-                              onClick={() => setShowPassword(!showPassword)}
-                              className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400"
-                            >
+                            <Lock size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                            <input type={showPassword ? 'text' : 'password'} name="password" value={formData.password} onChange={handleChange} placeholder="Min 6 characters" className={`${inputClass('password')} pl-11 pr-11`} />
+                            <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
                               {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                             </button>
                           </div>
-                          {errors.password && <p className="text-red-500 text-xs mt-1">{errors.password}</p>}
+                          {errors.password && <p className="text-xs text-red-500 mt-1">{errors.password}</p>}
                         </div>
-
                         <div>
                           <label className={labelClass}>Confirm Password *</label>
                           <div className="relative">
-                            <Lock size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
-                            <input
-                              type={showPassword ? 'text' : 'password'}
-                              name="confirmPassword"
-                              value={formData.confirmPassword}
-                              onChange={handleChange}
-                              placeholder="Re-enter password"
-                              className={`${inputClass('confirmPassword')} pl-11 pr-11`}
-                            />
-                            <button
-                              type="button"
-                              onClick={() => setShowPassword(!showPassword)}
-                              className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400"
-                              aria-label={showPassword ? 'Hide password' : 'Show password'}
-                            >
+                            <Lock size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                            <input type={showPassword ? 'text' : 'password'} name="confirmPassword" value={formData.confirmPassword} onChange={handleChange} placeholder="Re-enter password" className={`${inputClass('confirmPassword')} pl-11 pr-11`} />
+                            <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
                               {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                             </button>
                           </div>
-                          {errors.confirmPassword && <p className="text-red-500 text-xs mt-1">{errors.confirmPassword}</p>}
+                          {errors.confirmPassword && <p className="text-xs text-red-500 mt-1">{errors.confirmPassword}</p>}
                         </div>
                       </div>
-                    </div>
+                    </>
                   )}
 
-                  {/* Step 2: Tax Details */}
+                  {/* ===== STEP 2: Business Verification ===== */}
                   {currentStep === 2 && (
-                    <div className="space-y-8">
-                      <StepHeader
-                        step={2}
-                        title="Tax & identity"
-                        description="GST, PAN, and KYC documents help us verify your business and pay you on time."
-                      />
+                    <>
+                      <StepHeader step={2} title="Business Verification" description="Verify your GST, Aadhaar and set up your store." />
 
-                      <div className="space-y-5">
-                        {/* Non-GST Option */}
-                        <label className="flex items-center gap-3 p-4 rounded-2xl border border-gray-200/90 bg-white shadow-sm cursor-pointer hover:border-primary-200 hover:bg-primary-50/40 transition-all duration-200">
-                          <input
-                            type="checkbox"
-                            name="sellsNonGstProducts"
-                            checked={formData.sellsNonGstProducts}
-                            onChange={handleChange}
-                            className="w-5 h-5 rounded border-gray-300 text-primary-500"
-                          />
-                          <div>
-                            <p className="font-medium text-gray-900">I only sell non-GST categories (like Books)</p>
-                            <p className="text-sm text-gray-500">GST registration is not required for certain categories</p>
-                          </div>
+                      {/* GST */}
+                      <div className="mb-6 p-4 rounded-xl border border-gray-200 bg-gray-50/50">
+                        <h3 className="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-2"><FileText size={16} className="text-primary-600" /> GST Verification</h3>
+                        <label className="flex items-center gap-2 mb-3 cursor-pointer">
+                          <input type="checkbox" name="sellsNonGstProducts" checked={formData.sellsNonGstProducts} onChange={(e) => {
+                            handleChange(e);
+                            if (e.target.checked) {
+                              setFormData(prev => ({ ...prev, storeName: '', gstNumber: '' }));
+                              setGstVerification({ status: 'idle' });
+                            }
+                          }} className="rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+                          <span className="text-sm text-gray-700">I sell non-GST products (e.g., Books)</span>
                         </label>
-
-                        {/* GST Number */}
                         {!formData.sellsNonGstProducts && (
-                          <div>
-                            <label className={labelClass}>GST Number *</label>
-                            <div className="flex gap-2">
-                              <div className="relative flex-1">
-                                <FileText size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
-                                <input
-                                  type="text"
-                                  name="gstNumber"
-                                  value={formData.gstNumber}
-                                  onChange={(e) => {
-                                    handleChange(e);
-                                    if (gstVerification.status !== 'idle') setGstVerification({ status: 'idle' });
-                                  }}
-                                  placeholder="15-digit GST number"
-                                  maxLength={15}
-                                  className={`${inputClass('gstNumber')} pl-11 uppercase`}
-                                />
+                          <div className="flex gap-2">
+                            <input type="text" name="gstNumber" value={formData.gstNumber} onChange={handleChange} placeholder="15-digit GSTIN" className={`${inputClass('gstNumber')} flex-1 uppercase`} maxLength={15} />
+                            <Button type="button" onClick={verifyGst} loading={gstVerification.status === 'loading'} disabled={gstVerification.status === 'verified'} size="sm" className="shrink-0">
+                              {gstVerification.status === 'verified' ? <><CheckCircle size={14} /> Verified</> : 'Verify'}
+                            </Button>
+                          </div>
+                        )}
+                        {gstVerification.status === 'verified' && gstVerification.data && (
+                          <div className="mt-2 p-3 rounded-lg bg-green-50 border border-green-200 text-sm">
+                            <p className="font-medium text-green-800">Trade: {gstVerification.data.tradeName}</p>
+                            <p className="text-green-700">Legal: {gstVerification.data.legalName}</p>
+                            {gstVerification.data.address && <p className="text-green-600 text-xs mt-1">{gstVerification.data.address}</p>}
+                          </div>
+                        )}
+                        {gstVerification.status === 'error' && <p className="text-xs text-red-500 mt-1">{gstVerification.error}</p>}
+                        {errors.gstNumber && <p className="text-xs text-red-500 mt-1">{errors.gstNumber}</p>}
+                      </div>
+
+                      {/* Aadhaar (Digilocker) */}
+                      <div className="mb-6 p-4 rounded-xl border border-gray-200 bg-gray-50/50">
+                        <h3 className="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-2"><Fingerprint size={16} className="text-primary-600" /> Aadhaar KYC Verification</h3>
+                        <p className="text-xs text-gray-500 mb-3">Verify your Aadhaar via Digilocker — a secure government portal. No need to enter your Aadhaar number manually.</p>
+                        {aadhaar.status === 'verified' && aadhaar.verifiedData ? (
+                          <div className="p-3 rounded-lg bg-green-50 border border-green-200 text-sm">
+                            <div className="flex items-center gap-2 mb-1"><CheckCircle size={14} className="text-green-600" /><span className="font-medium text-green-800">Aadhaar Verified via Digilocker</span></div>
+                            <p className="text-green-700">Name: {aadhaar.verifiedData.name}</p>
+                            <p className="text-green-600 text-xs">DOB: {aadhaar.verifiedData.dob} | Gender: {aadhaar.verifiedData.gender}</p>
+                            {aadhaar.verifiedData.uid && <p className="text-green-600 text-xs">UID: xxxxxxxx{aadhaar.verifiedData.uid.slice(-4)}</p>}
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            <Button
+                              type="button"
+                              onClick={startAadhaarDigilocker}
+                              loading={aadhaar.status === 'loading' || aadhaar.status === 'redirecting' || aadhaar.status === 'polling'}
+                              disabled={aadhaar.status === 'redirecting' || aadhaar.status === 'polling'}
+                              size="sm"
+                              variant="outline"
+                              className="w-full"
+                            >
+                              <Fingerprint size={14} className="mr-1.5" />
+                              {aadhaar.status === 'redirecting' ? 'Complete verification in Digilocker window...' :
+                               aadhaar.status === 'polling' ? 'Fetching your Aadhaar data...' :
+                               'Verify Aadhaar via Digilocker'}
+                            </Button>
+                            {(aadhaar.status === 'redirecting' || aadhaar.status === 'polling') && (
+                              <div className="p-2 rounded-lg bg-blue-50 border border-blue-200 text-xs text-blue-700 flex items-center gap-2">
+                                <Loader2 size={14} className="animate-spin" />
+                                {aadhaar.status === 'redirecting'
+                                  ? 'A Digilocker window has opened. Complete the verification there, then close the popup window.'
+                                  : 'Fetching your verified Aadhaar data...'}
                               </div>
-                              <Button
-                                type="button"
-                                onClick={verifyGst}
-                                disabled={formData.gstNumber.length !== 15 || gstVerification.status === 'loading'}
-                              >
-                                {gstVerification.status === 'loading' ? (
-                                  <Loader2 size={16} className="animate-spin" />
-                                ) : gstVerification.status === 'verified' ? (
-                                  <CheckCircle size={16} />
-                                ) : (
-                                  'Verify'
-                                )}
-                              </Button>
-                            </div>
-                            {errors.gstNumber && <p className="text-red-500 text-xs mt-1">{errors.gstNumber}</p>}
-                            
-                            {gstVerification.status === 'verified' && (
-                              <div className="mt-3 p-4 rounded-xl bg-green-50 border border-green-200">
-                                <div className="flex items-start gap-3">
-                                  <CheckCircle size={20} className="text-green-600 mt-0.5" />
-                                  <div>
-                                    <p className="font-medium text-green-800">GST Verified</p>
-                                    <p className="text-sm text-green-700 mt-1">
-                                      <strong>Trade Name:</strong> {gstVerification.data?.tradeName}
-                                    </p>
-                                    <p className="text-sm text-green-700">
-                                      <strong>Legal Name:</strong> {gstVerification.data?.legalName}
-                                    </p>
-                                  </div>
-                                </div>
-                              </div>
-                            )}
-                            {gstVerification.status === 'error' && (
-                              <p className="text-red-500 text-sm mt-2 flex items-center gap-1">
-                                <XCircle size={14} /> {gstVerification.error}
-                              </p>
                             )}
                           </div>
                         )}
-
-                        {/* PAN Number */}
-                        <div className="grid sm:grid-cols-2 gap-4">
-                          <div>
-                            <label className={labelClass}>PAN Number *</label>
-                            <input
-                              type="text"
-                              name="panNumber"
-                              value={formData.panNumber}
-                              onChange={handleChange}
-                              placeholder="10-digit PAN"
-                              maxLength={10}
-                              className={`${inputClass('panNumber')} uppercase`}
-                            />
-                            {errors.panNumber && <p className="text-red-500 text-xs mt-1">{errors.panNumber}</p>}
-                          </div>
-                          <div>
-                            <label className={labelClass}>Name as on PAN *</label>
-                            <input
-                              type="text"
-                              name="panName"
-                              value={formData.panName}
-                              onChange={handleChange}
-                              placeholder="Exact name on PAN card"
-                              className={inputClass('panName')}
-                            />
-                            {errors.panName && <p className="text-red-500 text-xs mt-1">{errors.panName}</p>}
-                          </div>
-                        </div>
-
-                        {/* KYC Document Upload */}
-                        <div className="space-y-4 pt-2">
-                          <div className="rounded-2xl border border-gray-100 bg-slate-50/80 px-4 py-3 sm:px-5 sm:py-4">
-                            <h3 className="text-base font-bold text-gray-900 font-display">KYC documents</h3>
-                            <p className="text-sm text-gray-600 mt-1">Upload clear scans or photos (PDF or image). Files are encrypted in transit.</p>
-                          </div>
-
-                          {/* PAN Card Upload */}
-                          <div>
-                            <label className={labelClass}>PAN Card *</label>
-                            <div className={`relative rounded-xl border-2 border-dashed transition-all ${
-                              kycDocs.panCard.uploaded ? 'border-green-300 bg-green-50' :
-                              kycDocs.panCard.file ? 'border-primary-300 bg-primary-50/30' :
-                              errors.panCard ? 'border-red-300 bg-red-50' :
-                              'border-gray-200 bg-gray-50 hover:border-primary-300 hover:bg-primary-50/30'
-                            } p-4`}>
-                              {kycDocs.panCard.file ? (
-                                <div className="flex items-center gap-4">
-                                  {kycDocs.panCard.preview && !isPdfFile(kycDocs.panCard.file) ? (
-                                    <img
-                                      src={kycDocs.panCard.preview}
-                                      alt="PAN Card"
-                                      className="w-24 h-16 object-cover rounded-lg border border-gray-200"
-                                    />
-                                  ) : (
-                                    <div className="w-24 h-16 flex items-center justify-center rounded-lg border border-gray-200 bg-gray-100">
-                                      <FileText className="w-10 h-10 text-red-600" aria-hidden />
-                                    </div>
-                                  )}
-                                  <div className="flex-1 min-w-0">
-                                    <p className="text-sm font-medium text-gray-900 truncate">{kycDocs.panCard.file?.name}</p>
-                                    <p className="text-xs text-gray-500">{((kycDocs.panCard.file?.size || 0) / 1024).toFixed(0)} KB</p>
-                                    {kycDocs.panCard.uploading && (
-                                      <p className="text-xs text-primary-600 font-medium flex items-center gap-1 mt-1">
-                                        <Loader2 size={12} className="animate-spin" /> Uploading...
-                                      </p>
-                                    )}
-                                    {kycDocs.panCard.uploaded && (
-                                      <p className="text-xs text-green-600 font-medium flex items-center gap-1 mt-1">
-                                        <CheckCircle size={12} /> Uploaded
-                                      </p>
-                                    )}
-                                    {!kycDocs.panCard.uploaded && !kycDocs.panCard.uploading && (
-                                      <p className="text-xs text-primary-600 font-medium flex items-center gap-1 mt-1">
-                                        <CheckCircle size={12} /> Ready &mdash; will upload on Continue
-                                      </p>
-                                    )}
-                                  </div>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      if (kycDocs.panCard.preview) URL.revokeObjectURL(kycDocs.panCard.preview);
-                                      setKycDocs(prev => {
-                                        const next = { ...prev, panCard: { uploading: false, uploaded: false } };
-                                        kycDocsRef.current = next;
-                                        return next;
-                                      });
-                                    }}
-                                    className="p-2 rounded-lg hover:bg-gray-200 text-gray-500 shrink-0"
-                                  >
-                                    <XCircle size={16} />
-                                  </button>
-                                </div>
-                              ) : (
-                                <label className="flex flex-col items-center cursor-pointer py-3">
-                                  <Upload size={24} className="text-gray-400 mb-2" />
-                                  <p className="text-sm font-medium text-gray-700">Click to select PAN card</p>
-                                  <p className="text-xs text-gray-400 mt-1">JPG, PNG, WEBP, or PDF (max 5MB)</p>
-                                  <input
-                                    type="file"
-                                    accept="image/jpeg,image/png,image/webp,application/pdf,.pdf"
-                                    className="hidden"
-                                    onChange={(e) => handleKycFileSelect('panCard', e.target.files?.[0] || null)}
-                                  />
-                                </label>
-                              )}
-                            </div>
-                            {errors.panCard && <p className="text-red-500 text-xs mt-1">{errors.panCard}</p>}
-                          </div>
-
-                          {/* Masked Aadhaar Upload */}
-                          <div>
-                            <label className={labelClass}>Masked Aadhaar Card *</label>
-                            <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 mb-2">
-                              <div className="flex gap-2">
-                                <AlertCircle size={16} className="text-amber-600 shrink-0 mt-0.5" />
-                                <p className="text-xs text-amber-800">
-                                  Upload a <strong>masked Aadhaar</strong> where the first 8 digits are hidden (XXXX-XXXX-1234). 
-                                  Download from <a href="https://myaadhaar.uidai.gov.in" target="_blank" rel="noopener noreferrer" className="underline font-medium">myaadhaar.uidai.gov.in</a>
-                                </p>
-                              </div>
-                            </div>
-                            <div className={`relative rounded-xl border-2 border-dashed transition-all ${
-                              kycDocs.maskedAadhaar.uploaded ? 'border-green-300 bg-green-50' :
-                              kycDocs.maskedAadhaar.file ? 'border-primary-300 bg-primary-50/30' :
-                              errors.maskedAadhaar ? 'border-red-300 bg-red-50' :
-                              'border-gray-200 bg-gray-50 hover:border-primary-300 hover:bg-primary-50/30'
-                            } p-4`}>
-                              {kycDocs.maskedAadhaar.file ? (
-                                <div className="flex items-center gap-4">
-                                  {kycDocs.maskedAadhaar.preview && !isPdfFile(kycDocs.maskedAadhaar.file) ? (
-                                    <img
-                                      src={kycDocs.maskedAadhaar.preview}
-                                      alt="Masked Aadhaar"
-                                      className="w-24 h-16 object-cover rounded-lg border border-gray-200"
-                                    />
-                                  ) : (
-                                    <div className="w-24 h-16 flex items-center justify-center rounded-lg border border-gray-200 bg-gray-100">
-                                      <FileText className="w-10 h-10 text-amber-700" aria-hidden />
-                                    </div>
-                                  )}
-                                  <div className="flex-1 min-w-0">
-                                    <p className="text-sm font-medium text-gray-900 truncate">{kycDocs.maskedAadhaar.file?.name}</p>
-                                    <p className="text-xs text-gray-500">{((kycDocs.maskedAadhaar.file?.size || 0) / 1024).toFixed(0)} KB</p>
-                                    {kycDocs.maskedAadhaar.uploading && (
-                                      <p className="text-xs text-primary-600 font-medium flex items-center gap-1 mt-1">
-                                        <Loader2 size={12} className="animate-spin" /> Uploading...
-                                      </p>
-                                    )}
-                                    {kycDocs.maskedAadhaar.uploaded && (
-                                      <p className="text-xs text-green-600 font-medium flex items-center gap-1 mt-1">
-                                        <CheckCircle size={12} /> Uploaded
-                                      </p>
-                                    )}
-                                    {!kycDocs.maskedAadhaar.uploaded && !kycDocs.maskedAadhaar.uploading && (
-                                      <p className="text-xs text-primary-600 font-medium flex items-center gap-1 mt-1">
-                                        <CheckCircle size={12} /> Ready &mdash; will upload on Continue
-                                      </p>
-                                    )}
-                                  </div>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      if (kycDocs.maskedAadhaar.preview) URL.revokeObjectURL(kycDocs.maskedAadhaar.preview);
-                                      setKycDocs(prev => {
-                                        const next = { ...prev, maskedAadhaar: { uploading: false, uploaded: false } };
-                                        kycDocsRef.current = next;
-                                        return next;
-                                      });
-                                    }}
-                                    className="p-2 rounded-lg hover:bg-gray-200 text-gray-500 shrink-0"
-                                  >
-                                    <XCircle size={16} />
-                                  </button>
-                                </div>
-                              ) : (
-                                <label className="flex flex-col items-center cursor-pointer py-3">
-                                  <Upload size={24} className="text-gray-400 mb-2" />
-                                  <p className="text-sm font-medium text-gray-700">Click to select masked Aadhaar</p>
-                                  <p className="text-xs text-gray-400 mt-1">JPG, PNG, WEBP, or PDF (max 5MB)</p>
-                                  <input
-                                    type="file"
-                                    accept="image/jpeg,image/png,image/webp,application/pdf,.pdf"
-                                    className="hidden"
-                                    onChange={(e) => handleKycFileSelect('maskedAadhaar', e.target.files?.[0] || null)}
-                                  />
-                                </label>
-                              )}
-                            </div>
-                            {errors.maskedAadhaar && <p className="text-red-500 text-xs mt-1">{errors.maskedAadhaar}</p>}
-                          </div>
-                        </div>
+                        {aadhaar.error && <p className="text-xs text-red-500 mt-1">{aadhaar.error}</p>}
+                        {aadhaar.status !== 'verified' && process.env.NODE_ENV === 'development' && (
+                          <button
+                            type="button"
+                            onClick={() => setAadhaar({
+                              status: 'verified',
+                              verifiedData: { name: 'Test User', dob: '01-01-1990', gender: 'M', uid: '000000001234' },
+                            })}
+                            className="mt-2 text-xs font-medium text-amber-600 hover:text-amber-700 underline underline-offset-2"
+                          >
+                            Skip for testing
+                          </button>
+                        )}
                       </div>
-                    </div>
+
+                      {/* Store Name */}
+                      <div className="mb-5">
+                        <label className={labelClass}>Store Name *</label>
+                        {gstVerification.status === 'verified' && !formData.sellsNonGstProducts ? (
+                          <div className="flex items-center gap-3 px-4 py-3.5 rounded-xl border border-green-200 bg-green-50/50">
+                            <Store size={18} className="text-green-600 shrink-0" />
+                            <span className="text-[15px] font-medium text-gray-900">{formData.storeName}</span>
+                            <CheckCircle size={14} className="text-green-500 shrink-0 ml-auto" />
+                          </div>
+                        ) : formData.sellsNonGstProducts ? (
+                          <div className="relative">
+                            <Store size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                            <input type="text" name="storeName" value={formData.storeName} onChange={handleChange} placeholder="Enter your store name" className={`${inputClass('storeName')} pl-11`} />
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-3 px-4 py-3.5 rounded-xl border border-gray-200 bg-gray-50/80 text-gray-400">
+                            <Store size={18} className="shrink-0" />
+                            <span className="text-[15px]">Verify GST to auto-fill store name</span>
+                          </div>
+                        )}
+                        {!formData.sellsNonGstProducts && gstVerification.status === 'verified' && (
+                          <p className="text-xs text-green-600 mt-1">Auto-filled from GST trade name</p>
+                        )}
+                        {errors.storeName && <p className="text-xs text-red-500 mt-1">{errors.storeName}</p>}
+                      </div>
+
+                      {/* Category Selection */}
+                      <div className="mb-5">
+                        <label className={labelClass}>Category</label>
+                        <div className="flex gap-4 mb-3">
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input type="radio" name="categorySelectionType" value="all" checked={formData.categorySelectionType === 'all'} onChange={handleChange} className="text-primary-600 focus:ring-primary-500" />
+                            <span className="text-sm text-gray-700">All Categories</span>
+                          </label>
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input type="radio" name="categorySelectionType" value="choose" checked={formData.categorySelectionType === 'choose'} onChange={handleChange} className="text-primary-600 focus:ring-primary-500" />
+                            <span className="text-sm text-gray-700">Choose Categories</span>
+                          </label>
+                        </div>
+                        {formData.categorySelectionType === 'choose' && (
+                          <div className="flex flex-wrap gap-2">
+                            {categories.map((cat) => (
+                              <button key={cat.value} type="button" onClick={() => toggleCategory(cat.value)}
+                                className={`px-3 py-1.5 rounded-lg text-sm border transition-colors ${
+                                  formData.selectedCategories.includes(cat.value)
+                                    ? 'bg-primary-50 border-primary-300 text-primary-700 font-medium'
+                                    : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300'
+                                }`}>
+                                {cat.label}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        {errors.selectedCategories && <p className="text-xs text-red-500 mt-1">{errors.selectedCategories}</p>}
+                      </div>
+                    </>
                   )}
 
-                  {/* Step 3: Store Details */}
+                  {/* ===== STEP 3: Final Setup ===== */}
                   {currentStep === 3 && (
-                    <div className="space-y-8">
-                      <StepHeader
-                        step={3}
-                        title="Your storefront"
-                        description="Choose a name and category customers will see when they discover your products."
-                      />
+                    <>
+                      <StepHeader step={3} title="Final Setup" description="Add your signature, shipping preferences, and bank details." />
 
-                      <div className="space-y-5">
-                        <div>
-                          <label className={labelClass}>Store Name *</label>
-                          <div className="relative">
-                            <Store size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
-                            <input
-                              type="text"
-                              name="storeName"
-                              value={formData.storeName}
-                              onChange={handleChange}
-                              placeholder="Your store name (visible to customers)"
-                              className={`${inputClass('storeName')} pl-11`}
-                            />
-                          </div>
-                          {errors.storeName && <p className="text-red-500 text-xs mt-1">{errors.storeName}</p>}
-                        </div>
-
-                        <div>
-                          <label className={labelClass}>Store Description</label>
-                          <textarea
-                            name="description"
-                            value={formData.description}
-                            onChange={handleChange}
-                            placeholder="Tell customers about your store (optional)"
-                            rows={3}
-                            className={inputClass('description')}
-                          />
-                        </div>
-
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                          <div className="min-w-0">
-                            <label className={labelClass}>Business Type *</label>
-                            <select
-                              name="businessType"
-                              value={formData.businessType}
-                              onChange={handleChange}
-                              className={selectClass('businessType')}
-                              style={{
-                                backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`,
-                              }}
-                            >
-                              <option value="">Select type</option>
-                              {businessTypes.map(type => (
-                                <option key={type.value} value={type.value}>{type.label}</option>
-                              ))}
-                            </select>
-                            {errors.businessType && <p className="text-red-500 text-xs mt-1">{errors.businessType}</p>}
-                          </div>
-                          <div className="min-w-0">
-                            <label className={labelClass}>Primary Category *</label>
-                            <select
-                              name="businessCategory"
-                              value={formData.businessCategory}
-                              onChange={handleChange}
-                              className={selectClass('businessCategory')}
-                              style={{
-                                backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`,
-                              }}
-                            >
-                              <option value="">Select category</option>
-                              {categories.map(cat => (
-                                <option key={cat.value} value={cat.value}>{cat.label}</option>
-                              ))}
-                            </select>
-                            {errors.businessCategory && <p className="text-red-500 text-xs mt-1">{errors.businessCategory}</p>}
+                      {/* Signature */}
+                      <div className="mb-6 rounded-xl border border-gray-200 bg-gray-50/50 overflow-hidden">
+                        <div className="flex items-center justify-between px-4 pt-4 pb-3">
+                          <h3 className="text-sm font-semibold text-gray-800 flex items-center gap-2"><PenTool size={16} className="text-primary-600" /> Signature *</h3>
+                          <div className="flex rounded-lg border border-gray-200 bg-white p-0.5 shadow-sm">
+                            <button type="button" onClick={() => setSignatureMode('draw')} className={`px-3.5 py-1.5 rounded-md text-xs font-semibold transition-all duration-200 flex items-center gap-1.5 ${signatureMode === 'draw' ? 'bg-primary-600 text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+                              <Pencil size={12} />Draw
+                            </button>
+                            <button type="button" onClick={() => setSignatureMode('upload')} className={`px-3.5 py-1.5 rounded-md text-xs font-semibold transition-all duration-200 flex items-center gap-1.5 ${signatureMode === 'upload' ? 'bg-primary-600 text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+                              <Upload size={12} />Upload
+                            </button>
                           </div>
                         </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Step 4: Address */}
-                  {currentStep === 4 && (
-                    <div className="space-y-8">
-                      <StepHeader
-                        step={4}
-                        title="Pickup address"
-                        description="This is where our logistics partner collects shipments—use your warehouse or primary dispatch location."
-                      />
-
-                      <div className="space-y-5">
-                        <div className="grid sm:grid-cols-3 gap-4">
-                          <div>
-                            <label className={labelClass}>Pincode *</label>
-                            <input
-                              type="text"
-                              name="pincode"
-                              value={formData.pincode}
-                              onChange={handleChange}
-                              placeholder="6-digit pincode"
-                              maxLength={6}
-                              className={inputClass('pincode')}
-                            />
-                            {errors.pincode && <p className="text-red-500 text-xs mt-1">{errors.pincode}</p>}
-                          </div>
-                          <div>
-                            <label className={labelClass}>City *</label>
-                            <input
-                              type="text"
-                              name="city"
-                              value={formData.city}
-                              onChange={handleChange}
-                              placeholder="City"
-                              className={inputClass('city')}
-                            />
-                            {errors.city && <p className="text-red-500 text-xs mt-1">{errors.city}</p>}
-                          </div>
-                          <div className="min-w-0">
-                            <label className={labelClass}>State *</label>
-                            <select
-                              name="state"
-                              value={formData.state}
-                              onChange={handleChange}
-                              className={selectClass('state')}
-                              style={{
-                                backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`,
-                              }}
-                            >
-                              <option value="">Select state</option>
-                              {indianStates.map(state => (
-                                <option key={state} value={state}>{state}</option>
-                              ))}
-                            </select>
-                            {errors.state && <p className="text-red-500 text-xs mt-1">{errors.state}</p>}
-                          </div>
-                        </div>
-
-                        <div>
-                          <label className={labelClass}>Full Address *</label>
-                          <div className="relative">
-                            <MapPin size={18} className="absolute left-4 top-4 text-gray-400" />
-                            <textarea
-                              name="address"
-                              value={formData.address}
-                              onChange={handleChange}
-                              placeholder="Building name, floor, street, area, landmark"
-                              rows={3}
-                              className={`${inputClass('address')} pl-11`}
-                            />
-                          </div>
-                          {errors.address && <p className="text-red-500 text-xs mt-1">{errors.address}</p>}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Step 5: Shipping */}
-                  {currentStep === 5 && (
-                    <div className="space-y-8">
-                      <StepHeader
-                        step={5}
-                        title="Shipping & delivery"
-                        description="Pick how you fulfill orders and whether you offer free delivery to buyers."
-                      />
-
-                      <div className="space-y-5">
-                        <div className="space-y-3">
-                          <label className={`flex items-start gap-4 p-5 rounded-2xl border-2 cursor-pointer shadow-sm transition-all duration-200 ${
-                            formData.shippingMethod === 'easy_ship'
-                              ? 'border-primary-500 bg-primary-50/80 ring-2 ring-primary-500/20'
-                              : 'border-gray-200/90 bg-white hover:border-gray-300 hover:shadow-md'
-                          }`}>
-                            <input
-                              type="radio"
-                              name="shippingMethod"
-                              value="easy_ship"
-                              checked={formData.shippingMethod === 'easy_ship'}
-                              onChange={handleChange}
-                              className="mt-1"
-                            />
-                            <div>
-                              <p className="font-medium text-gray-900 flex items-center gap-2">
-                                You store, Xelnova ships (Easy Ship)
-                                <span className="px-2 py-0.5 bg-primary-500 text-white text-xs rounded-full">Recommended</span>
-                              </p>
-                              <p className="text-sm text-gray-600 mt-1">
-                                Store and pack orders at your location. We pick them and deliver to customers.
-                              </p>
-                            </div>
-                          </label>
-
-                          <label className={`flex items-start gap-4 p-5 rounded-2xl border-2 cursor-pointer shadow-sm transition-all duration-200 ${
-                            formData.shippingMethod === 'self_ship'
-                              ? 'border-primary-500 bg-primary-50/80 ring-2 ring-primary-500/20'
-                              : 'border-gray-200/90 bg-white hover:border-gray-300 hover:shadow-md'
-                          }`}>
-                            <input
-                              type="radio"
-                              name="shippingMethod"
-                              value="self_ship"
-                              checked={formData.shippingMethod === 'self_ship'}
-                              onChange={handleChange}
-                              className="mt-1"
-                            />
-                            <div>
-                              <p className="font-medium text-gray-900">You store, You ship (Self Ship)</p>
-                              <p className="text-sm text-gray-600 mt-1">
-                                Handle storage and delivery yourself or through your own courier partners.
-                              </p>
-                            </div>
-                          </label>
-                        </div>
-
-                        <div className="pt-4 border-t border-gray-200">
-                          <label className="flex items-center gap-3 cursor-pointer">
-                            <input
-                              type="checkbox"
-                              name="offerFreeDelivery"
-                              checked={formData.offerFreeDelivery}
-                              onChange={handleChange}
-                              className="w-5 h-5 rounded border-gray-300 text-primary-500"
-                            />
-                            <div>
-                              <p className="font-medium text-gray-900">Offer free delivery to customers</p>
-                              <p className="text-sm text-gray-500">Recommended for better conversion rates</p>
-                            </div>
-                          </label>
-                        </div>
-
-                        {!formData.offerFreeDelivery && (
-                          <div className="grid sm:grid-cols-2 gap-4 p-4 bg-gray-50 rounded-xl">
-                            <div>
-                              <label className={labelClass}>1-3 Days Delivery (₹) *</label>
-                              <input
-                                type="number"
-                                name="deliveryCharge1to3Days"
-                                value={formData.deliveryCharge1to3Days}
-                                onChange={handleChange}
-                                placeholder="e.g., 40"
-                                className={inputClass('deliveryCharge1to3Days')}
-                              />
-                              {errors.deliveryCharge1to3Days && <p className="text-red-500 text-xs mt-1">{errors.deliveryCharge1to3Days}</p>}
-                            </div>
-                            <div>
-                              <label className={labelClass}>3+ Days Delivery (₹) *</label>
-                              <input
-                                type="number"
-                                name="deliveryCharge3PlusDays"
-                                value={formData.deliveryCharge3PlusDays}
-                                onChange={handleChange}
-                                placeholder="e.g., 60"
-                                className={inputClass('deliveryCharge3PlusDays')}
-                              />
-                              {errors.deliveryCharge3PlusDays && <p className="text-red-500 text-xs mt-1">{errors.deliveryCharge3PlusDays}</p>}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Step 6: Bank Details */}
-                  {currentStep === 6 && (
-                    <div className="space-y-8">
-                      <StepHeader
-                        step={6}
-                        title="Bank account"
-                        description="Payouts are sent to this account after each settlement cycle. Verify IFSC and account for faster approval."
-                      />
-
-                      <div className="space-y-5">
-                        <div className="grid sm:grid-cols-2 gap-4">
-                          <div>
-                            <label className={labelClass}>Account Number *</label>
-                            <div className="relative">
-                              <CreditCard size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
-                              <input
-                                type="text"
-                                name="accountNumber"
-                                value={formData.accountNumber}
-                                onChange={(e) => {
-                                  handleChange(e);
-                                  if (bankVerification.status !== 'idle') setBankVerification({ status: 'idle' });
-                                }}
-                                placeholder="Bank account number"
-                                disabled={bankVerification.status === 'verified'}
-                                className={`${inputClass('accountNumber')} pl-11 ${bankVerification.status === 'verified' ? 'bg-green-50 border-green-300' : ''}`}
-                              />
-                            </div>
-                            {errors.accountNumber && <p className="text-red-500 text-xs mt-1">{errors.accountNumber}</p>}
-                          </div>
-
-                          <div>
-                            <label className={labelClass}>IFSC Code *</label>
-                            <div className="flex gap-2">
-                              <input
-                                type="text"
-                                name="ifscCode"
-                                value={formData.ifscCode}
-                                onChange={(e) => {
-                                  handleChange(e);
-                                  if (ifscVerification.status !== 'idle') setIfscVerification({ status: 'idle' });
-                                  if (bankVerification.status !== 'idle') setBankVerification({ status: 'idle' });
-                                }}
-                                placeholder="11-digit IFSC"
-                                maxLength={11}
-                                disabled={bankVerification.status === 'verified'}
-                                className={`${inputClass('ifscCode')} uppercase flex-1 ${bankVerification.status === 'verified' ? 'bg-green-50 border-green-300' : ''}`}
-                              />
-                              <Button
-                                type="button"
-                                variant="outline"
-                                onClick={verifyIfsc}
-                                disabled={formData.ifscCode.length !== 11 || ifscVerification.status === 'loading' || bankVerification.status === 'verified'}
-                              >
-                                {ifscVerification.status === 'loading' ? (
-                                  <Loader2 size={16} className="animate-spin" />
-                                ) : ifscVerification.status === 'verified' ? (
-                                  <CheckCircle size={16} className="text-green-500" />
-                                ) : (
-                                  'Verify'
-                                )}
-                              </Button>
-                            </div>
-                            {errors.ifscCode && <p className="text-red-500 text-xs mt-1">{errors.ifscCode}</p>}
-                          </div>
-                        </div>
-
-                        {ifscVerification.status === 'verified' && bankVerification.status !== 'verified' && (
-                          <div className="p-4 rounded-xl bg-blue-50 border border-blue-200">
-                            <div className="flex items-start gap-3">
-                              <CheckCircle size={20} className="text-blue-600 mt-0.5" />
-                              <div className="flex-1">
-                                <p className="font-medium text-blue-800">
-                                  {ifscVerification.data?.BANK} - {ifscVerification.data?.BRANCH}
-                                </p>
-                                <p className="text-sm text-blue-600 mt-1">IFSC verified. Now verify your bank account below.</p>
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                        {ifscVerification.status === 'error' && (
-                          <p className="text-red-500 text-sm flex items-center gap-1">
-                            <XCircle size={14} /> {ifscVerification.error}
-                          </p>
-                        )}
-
-                        {ifscVerification.status === 'verified' && bankVerification.status !== 'verified' && (
-                          <div className="p-4 rounded-xl bg-amber-50 border border-amber-200">
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-start gap-3">
-                                <Wallet size={20} className="text-amber-600 mt-0.5" />
-                                <div>
-                                  <p className="font-medium text-amber-800">Verify Bank Account (Penny Drop)</p>
-                                  <p className="text-sm text-amber-700 mt-1">
-                                    We&apos;ll deposit ₹1 to verify your account number and fetch the registered name.
-                                  </p>
+                        {signatureMode === 'draw' ? (
+                          <div className="px-4 pb-4">
+                            <div className="relative rounded-xl border border-gray-200 bg-white shadow-inner overflow-hidden group" style={{ touchAction: 'none' }}>
+                              {!hasDrawn && (
+                                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-10 select-none">
+                                  <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center mb-2">
+                                    <PenTool size={18} className="text-gray-300" />
+                                  </div>
+                                  <p className="text-sm text-gray-300 font-medium">Sign here</p>
                                 </div>
+                              )}
+                              <div className="absolute bottom-5 left-6 right-6 border-b border-dashed border-gray-200 pointer-events-none" />
+                              <canvas
+                                ref={canvasRef}
+                                className="w-full relative z-20"
+                                style={{ height: 200, cursor: 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'24\' height=\'24\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'%231a1a2e\' stroke-width=\'2\' stroke-linecap=\'round\' stroke-linejoin=\'round\'%3E%3Cpath d=\'M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z\'/%3E%3Cpath d=\'m15 5 4 4\'/%3E%3C/svg%3E") 2 22, crosshair' }}
+                                onMouseDown={startDrawing} onMouseMove={draw} onMouseUp={stopDrawing} onMouseLeave={stopDrawing}
+                                onTouchStart={startDrawing} onTouchMove={draw} onTouchEnd={stopDrawing}
+                              />
+                            </div>
+                            <div className="flex items-center justify-between mt-2.5 px-0.5">
+                              <p className="text-[11px] text-gray-400">Draw your signature above using mouse or touch</p>
+                              <div className="flex gap-1">
+                                <button type="button" onClick={undoStroke} disabled={strokeHistoryRef.current.length === 0 && !hasDrawn}
+                                  className="px-2.5 py-1 rounded-md text-xs font-medium text-gray-500 hover:text-primary-600 hover:bg-primary-50 disabled:opacity-30 disabled:hover:text-gray-500 disabled:hover:bg-transparent transition-colors flex items-center gap-1">
+                                  <Undo2 size={11} /> Undo
+                                </button>
+                                <button type="button" onClick={clearCanvas} disabled={!hasDrawn}
+                                  className="px-2.5 py-1 rounded-md text-xs font-medium text-gray-500 hover:text-red-600 hover:bg-red-50 disabled:opacity-30 disabled:hover:text-gray-500 disabled:hover:bg-transparent transition-colors flex items-center gap-1">
+                                  <Trash2 size={11} /> Clear
+                                </button>
                               </div>
-                              <Button
-                                type="button"
-                                onClick={verifyBankAccount}
-                                disabled={
-                                  bankVerification.status === 'loading' ||
-                                  !formData.accountNumber ||
-                                  !/^[0-9]{9,18}$/.test(formData.accountNumber)
-                                }
-                                className="shrink-0 ml-4"
-                              >
-                                {bankVerification.status === 'loading' ? (
-                                  <><Loader2 size={16} className="animate-spin" /> Verifying...</>
-                                ) : (
-                                  'Verify Account'
-                                )}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="px-4 pb-4">
+                            <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                setSignatureFile(file);
+                                setSignaturePreview(URL.createObjectURL(file));
+                              }
+                            }} className="hidden" id="sig-upload" />
+                            <label htmlFor="sig-upload" className="flex flex-col items-center justify-center p-8 rounded-xl border-2 border-dashed border-gray-200 bg-white cursor-pointer hover:border-primary-300 hover:bg-primary-50/30 transition-all duration-200 group">
+                              {signaturePreview ? (
+                                <div className="relative">
+                                  <img src={signaturePreview} alt="Signature" className="max-h-28 object-contain" />
+                                  <p className="text-xs text-gray-400 mt-3 text-center">Click to replace</p>
+                                </div>
+                              ) : (
+                                <>
+                                  <div className="w-12 h-12 rounded-full bg-gray-100 group-hover:bg-primary-100 flex items-center justify-center mb-3 transition-colors">
+                                    <Upload size={20} className="text-gray-400 group-hover:text-primary-500 transition-colors" />
+                                  </div>
+                                  <span className="text-sm font-medium text-gray-600 group-hover:text-primary-700 transition-colors">Click to upload signature</span>
+                                  <span className="text-xs text-gray-400 mt-1">PNG, JPG or WebP</span>
+                                </>
+                              )}
+                            </label>
+                          </div>
+                        )}
+                        {errors.signature && <p className="text-xs text-red-500 px-4 pb-3">{errors.signature}</p>}
+                      </div>
+
+                      {/* Shipping */}
+                      <div className="mb-6 p-4 rounded-xl border border-gray-200 bg-gray-50/50">
+                        <h3 className="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-2"><Truck size={16} className="text-primary-600" /> Shipping Preferences</h3>
+                        <div className="grid grid-cols-2 gap-3 mb-3">
+                          {[{ value: 'easy_ship', label: 'Easy Ship', desc: 'Xelnova handles shipping' }, { value: 'self_ship', label: 'Self Ship', desc: 'You handle shipping' }].map((opt) => (
+                            <label key={opt.value} className={`flex flex-col p-3 rounded-xl border cursor-pointer transition-colors ${formData.shippingMethod === opt.value ? 'border-primary-300 bg-primary-50' : 'border-gray-200 bg-white hover:border-gray-300'}`}>
+                              <div className="flex items-center gap-2">
+                                <input type="radio" name="shippingMethod" value={opt.value} checked={formData.shippingMethod === opt.value} onChange={handleChange} className="text-primary-600 focus:ring-primary-500" />
+                                <span className="text-sm font-medium text-gray-800">{opt.label}</span>
+                              </div>
+                              <span className="text-xs text-gray-500 ml-6">{opt.desc}</span>
+                            </label>
+                          ))}
+                        </div>
+                        <label className="flex items-center gap-2 mb-3 cursor-pointer">
+                          <input type="checkbox" name="offerFreeDelivery" checked={formData.offerFreeDelivery} onChange={handleChange} className="rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+                          <span className="text-sm text-gray-700">Offer free delivery</span>
+                        </label>
+                        {!formData.offerFreeDelivery && (
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="text-xs font-medium text-gray-600 mb-1 block">1-3 days (₹)</label>
+                              <input type="number" name="deliveryCharge1to3Days" value={formData.deliveryCharge1to3Days} onChange={handleChange} placeholder="e.g. 40" className={inputClass('deliveryCharge1to3Days')} />
+                              {errors.deliveryCharge1to3Days && <p className="text-xs text-red-500 mt-1">{errors.deliveryCharge1to3Days}</p>}
+                            </div>
+                            <div>
+                              <label className="text-xs font-medium text-gray-600 mb-1 block">3+ days (₹)</label>
+                              <input type="number" name="deliveryCharge3PlusDays" value={formData.deliveryCharge3PlusDays} onChange={handleChange} placeholder="e.g. 60" className={inputClass('deliveryCharge3PlusDays')} />
+                              {errors.deliveryCharge3PlusDays && <p className="text-xs text-red-500 mt-1">{errors.deliveryCharge3PlusDays}</p>}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Bank */}
+                      <div className="mb-6 p-4 rounded-xl border border-gray-200 bg-gray-50/50">
+                        <h3 className="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-2"><CreditCard size={16} className="text-primary-600" /> Bank Account Verification</h3>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+                          <div>
+                            <label className="text-xs font-medium text-gray-600 mb-1 block">Account Number *</label>
+                            <input type="text" name="accountNumber" value={formData.accountNumber} onChange={handleChange} placeholder="9-18 digit account number" className={inputClass('accountNumber')} />
+                            {errors.accountNumber && <p className="text-xs text-red-500 mt-1">{errors.accountNumber}</p>}
+                          </div>
+                          <div>
+                            <label className="text-xs font-medium text-gray-600 mb-1 block">IFSC Code *</label>
+                            <div className="flex gap-2">
+                              <input type="text" name="ifscCode" value={formData.ifscCode} onChange={handleChange} placeholder="e.g. SBIN0001234" className={`${inputClass('ifscCode')} flex-1 uppercase`} maxLength={11} />
+                              <Button type="button" onClick={verifyIfsc} loading={ifscVerification.status === 'loading'} disabled={ifscVerification.status === 'verified'} size="sm" className="shrink-0">
+                                {ifscVerification.status === 'verified' ? <CheckCircle size={14} /> : 'Verify'}
                               </Button>
                             </div>
-                            {bankVerification.status === 'error' && (
-                              <p className="text-red-500 text-sm mt-3 flex items-center gap-1">
-                                <XCircle size={14} /> {bankVerification.error}
-                              </p>
-                            )}
+                            {errors.ifscCode && <p className="text-xs text-red-500 mt-1">{errors.ifscCode}</p>}
+                          </div>
+                        </div>
+                        {ifscVerification.status === 'verified' && ifscVerification.data && (
+                          <p className="text-xs text-green-700 mb-2">{ifscVerification.data.BANK} — {ifscVerification.data.BRANCH}</p>
+                        )}
+                        <div className="flex gap-2 items-end mb-3">
+                          <div className="flex-1">
+                            <label className="text-xs font-medium text-gray-600 mb-1 block">Account Holder Name *</label>
+                            <input type="text" name="accountHolderName" value={formData.accountHolderName} onChange={handleChange} placeholder="Name as per bank records" className={inputClass('accountHolderName')} />
+                            {errors.accountHolderName && <p className="text-xs text-red-500 mt-1">{errors.accountHolderName}</p>}
+                          </div>
+                          <Button type="button" onClick={verifyBankAccount} loading={bankVerification.status === 'loading'} disabled={bankVerification.status === 'verified'} size="sm" className="shrink-0 mb-0.5">
+                            {bankVerification.status === 'verified' ? <><CheckCircle size={14} /> Verified</> : 'Verify Account'}
+                          </Button>
+                        </div>
+                        {bankVerification.status === 'verified' && bankVerification.data && (
+                          <div className="p-3 rounded-lg bg-green-50 border border-green-200 text-sm">
+                            <p className="font-medium text-green-800">₹1 credited — {bankVerification.data.nameAtBank}</p>
+                            <p className="text-green-700 text-xs">{bankVerification.data.bankName} — {bankVerification.data.branch}</p>
                           </div>
                         )}
-
-                        {bankVerification.status === 'verified' && (
-                          <div className="p-4 rounded-xl bg-green-50 border border-green-200">
-                            <div className="flex items-start gap-3">
-                              <CheckCircle size={20} className="text-green-600 mt-0.5" />
-                              <div>
-                                <p className="font-medium text-green-800">Bank Account Verified (₹1 credited)</p>
-                                <p className="text-sm text-green-700 mt-1">
-                                  <strong>Account Holder:</strong> {bankVerification.data?.nameAtBank}
-                                </p>
-                                <p className="text-sm text-green-700">
-                                  <strong>Bank:</strong> {bankVerification.data?.bankName || ifscVerification.data?.BANK}
-                                  {(bankVerification.data?.branch || ifscVerification.data?.BRANCH) && 
-                                    ` — ${bankVerification.data?.branch || ifscVerification.data?.BRANCH}`}
-                                </p>
-                                {bankVerification.data?.city && (
-                                  <p className="text-sm text-green-700">
-                                    <strong>City:</strong> {bankVerification.data.city}
-                                  </p>
-                                )}
-                                {bankVerification.data?.utr && (
-                                  <p className="text-xs text-green-600 mt-1">UTR: {bankVerification.data.utr}</p>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        )}
-
-                        <div>
-                          <label className={labelClass}>Account Holder Name *</label>
-                          <input
-                            type="text"
-                            name="accountHolderName"
-                            value={formData.accountHolderName}
-                            onChange={handleChange}
-                            placeholder={bankVerification.status === 'verified' ? 'Auto-filled from bank verification' : 'Name as per bank records'}
-                            className={`${inputClass('accountHolderName')} ${bankVerification.status === 'verified' ? 'bg-green-50 border-green-300' : ''}`}
-                          />
-                          {bankVerification.status === 'verified' && formData.accountHolderName !== bankVerification.data?.nameAtBank && (
-                            <p className="text-amber-600 text-xs mt-1 flex items-center gap-1">
-                              <AlertCircle size={12} /> Name differs from bank records: {bankVerification.data?.nameAtBank}
-                            </p>
-                          )}
-                          {errors.accountHolderName && <p className="text-red-500 text-xs mt-1">{errors.accountHolderName}</p>}
-                        </div>
-
-                        <div className="pt-4 border-t border-gray-200">
-                          <label className="flex items-start gap-3 cursor-pointer">
-                            <input
-                              type="checkbox"
-                              name="agreeTerms"
-                              checked={formData.agreeTerms}
-                              onChange={handleChange}
-                              className="mt-1 w-5 h-5 rounded border-gray-300 text-primary-500"
-                            />
-                            <span className="text-sm text-gray-600">
-                              I agree to the{' '}
-                              <a href="#" className="text-primary-500 hover:underline">Terms of Service</a>,{' '}
-                              <a href="#" className="text-primary-500 hover:underline">Privacy Policy</a>, and{' '}
-                              <a href="#" className="text-primary-500 hover:underline">Seller Agreement</a>.
-                              I confirm that all information provided is accurate.
-                            </span>
-                          </label>
-                          {errors.agreeTerms && <p className="text-red-500 text-xs mt-1">{errors.agreeTerms}</p>}
-                        </div>
+                        {bankVerification.status === 'error' && <p className="text-xs text-red-500 mt-1">{bankVerification.error}</p>}
                       </div>
-                    </div>
+
+                      {/* Terms */}
+                      <label className="flex items-start gap-3 cursor-pointer mb-2">
+                        <input type="checkbox" name="agreeTerms" checked={formData.agreeTerms} onChange={handleChange} className="rounded border-gray-300 text-primary-600 focus:ring-primary-500 mt-0.5" />
+                        <span className="text-sm text-gray-700">I agree to the <a href="#" className="text-primary-600 underline">Terms of Service</a> and <a href="#" className="text-primary-600 underline">Seller Agreement</a></span>
+                      </label>
+                      {errors.agreeTerms && <p className="text-xs text-red-500 ml-7">{errors.agreeTerms}</p>}
+                    </>
                   )}
 
-                    </motion.div>
-                  </AnimatePresence>
-
-                  {/* Error Message */}
+                  {/* Error */}
                   {errors.submit && (
-                    <div className="mt-6 p-4 bg-red-50 border border-red-200/80 rounded-xl shadow-sm">
-                      <p className="text-red-600 text-sm flex items-center gap-2 font-medium">
-                        <XCircle size={16} className="shrink-0" /> {errors.submit}
-                      </p>
+                    <div className="mt-4 p-3 rounded-xl bg-red-50 border border-red-200 flex items-start gap-2">
+                      <AlertCircle size={16} className="text-red-500 mt-0.5 shrink-0" />
+                      <p className="text-sm text-red-700">{errors.submit}</p>
                     </div>
                   )}
-                </div>
 
-                {/* Navigation */}
-                <div
-                  className={`relative z-0 px-6 sm:px-8 py-5 bg-gradient-to-r from-slate-50/95 via-white to-slate-50/95 border-t border-gray-200/80 flex flex-col-reverse gap-3 sm:flex-row sm:items-center ${
-                    currentStep === 1 ? 'sm:justify-end' : 'sm:justify-between'
-                  }`}
-                >
-                  {currentStep > 1 ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => setCurrentStep(prev => prev - 1)}
-                      disabled={loading}
-                      className="w-full sm:w-auto min-h-[48px] border-gray-300 hover:bg-gray-50 font-semibold"
-                    >
-                      <ArrowLeft size={18} /> Back
-                    </Button>
-                  ) : null}
-
-                  {currentStep < 6 ? (
-                    <Button
-                      type="button"
-                      onClick={handleNext}
-                      disabled={loading}
-                      className="w-full sm:w-auto min-h-[48px] shadow-lg shadow-primary-500/20 font-semibold px-8"
-                    >
-                      {loading ? <Loader2 size={18} className="animate-spin" /> : 'Continue'}
-                      <ArrowRight size={18} />
-                    </Button>
-                  ) : (
-                    <Button
-                      type="submit"
-                      disabled={loading}
-                      className="w-full sm:w-auto min-h-[48px] shadow-lg shadow-primary-500/20 font-semibold px-8"
-                    >
-                      {loading ? <Loader2 size={18} className="animate-spin" /> : 'Complete registration'}
-                      <ArrowRight size={18} />
-                    </Button>
-                  )}
-                </div>
-              </form>
-            </div>
+                  {/* Navigation */}
+                  <div className="flex items-center justify-between mt-8 pt-6 border-t border-gray-100">
+                    {currentStep > 1 ? (
+                      <button type="button" onClick={() => setCurrentStep(prev => prev - 1)} className="flex items-center gap-2 text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors group">
+                        <ArrowLeft size={16} className="group-hover:-translate-x-0.5 transition-transform" /> Back
+                      </button>
+                    ) : <div />}
+                    {currentStep === 3 ? (
+                      <button
+                        type="submit"
+                        disabled={loading || signatureUploading}
+                        className="relative inline-flex items-center justify-center gap-2.5 px-8 py-3.5 rounded-xl text-[15px] font-bold text-white bg-gradient-to-r from-primary-600 via-primary-600 to-emerald-600 shadow-lg shadow-primary-600/25 hover:shadow-xl hover:shadow-primary-600/30 hover:-translate-y-0.5 active:translate-y-0 disabled:opacity-60 disabled:pointer-events-none transition-all duration-200 min-w-[200px] overflow-hidden group"
+                      >
+                        <span className="absolute inset-0 bg-gradient-to-r from-primary-700 via-primary-700 to-emerald-700 opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
+                        {(loading || signatureUploading) ? (
+                          <span className="relative flex items-center gap-2">
+                            <Loader2 size={18} className="animate-spin" />
+                            Submitting...
+                          </span>
+                        ) : (
+                          <span className="relative flex items-center gap-2">
+                            <CheckCircle2 size={18} />
+                            Submit Application
+                          </span>
+                        )}
+                      </button>
+                    ) : (
+                      <Button type="submit" loading={loading} size="lg" className="min-w-[160px]">
+                        Continue <ArrowRight size={16} className="ml-1" />
+                      </Button>
+                    )}
+                  </div>
+                </motion.div>
+              </AnimatePresence>
+            </form>
           </div>
         </div>
       </div>

@@ -324,9 +324,22 @@ export default function CheckoutPage() {
         paymentMethod,
       });
 
+      if (!order?.id) {
+        throw new Error("Order creation failed. Please try again.");
+      }
+
       if (paymentMethod !== "cod") {
         syncToken();
-        const paymentOrder = await paymentApi.createPaymentOrder(order.id);
+        let paymentOrder;
+        try {
+          paymentOrder = await paymentApi.createPaymentOrder(order.id);
+        } catch (payErr: unknown) {
+          const msg = payErr instanceof Error ? payErr.message : "";
+          if (msg.toLowerCase().includes("not configured")) {
+            throw new Error("Payment gateway is not configured. Please try Cash on Delivery or contact support.");
+          }
+          throw new Error(msg || "Failed to initialize payment. Please try again.");
+        }
         await openRazorpay(paymentOrder, order.orderNumber);
       }
 
@@ -607,6 +620,9 @@ export default function CheckoutPage() {
                           </div>
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-medium text-text-primary truncate">{item.name}</p>
+                            {item.variant && (
+                              <p className="text-xs text-text-muted capitalize">{item.variant.replace(/-/g, ' / ')}</p>
+                            )}
                             <p className="text-xs text-text-muted">Qty: {item.quantity}</p>
                             <p className="text-sm font-semibold text-text-primary">{formatCurrency(item.price * item.quantity)}</p>
                           </div>

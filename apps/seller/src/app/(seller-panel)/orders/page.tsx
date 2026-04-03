@@ -7,11 +7,25 @@ import {
   ChevronDown, ArrowRight, MapPin, Phone, User, CreditCard,
   PackageCheck, PackageX, ClipboardList, Filter, RefreshCw,
   Copy, Calendar, ShoppingBag, AlertTriangle, Loader2, ChevronLeft,
+  ExternalLink, Download, Navigation, X, Weight, Ruler, Hash,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { DashboardHeader } from '@/components/dashboard/dashboard-header';
-import { Badge } from '@xelnova/ui';
-import { apiGetOrders, apiUpdateOrderStatus } from '@/lib/api';
+import { Badge, Button, Input, Modal } from '@xelnova/ui';
+import {
+  apiGetOrders,
+  apiUpdateOrderStatus,
+  apiShipOrder,
+  apiGetShipment,
+  apiTrackShipment,
+  apiUpdateShipmentAwb,
+  apiUpdateShipmentStatus,
+  apiCancelShipment,
+  apiGetCourierConfigs,
+  apiDownloadShippingLabel,
+  apiGetShippingRates,
+  type ShippingRates,
+} from '@/lib/api';
 
 interface OrderProduct {
   name: string;
@@ -52,6 +66,23 @@ interface SellerOrder {
   };
 }
 
+interface ShipmentData {
+  id: string;
+  shippingMode: string;
+  courierProvider: string | null;
+  awbNumber: string | null;
+  trackingUrl: string | null;
+  shipmentStatus: string;
+  courierOrderId: string | null;
+  labelUrl: string | null;
+  weight: number | null;
+  dimensions: string | null;
+  courierCharges: number | null;
+  statusHistory: Array<{ status: string; timestamp: string; location?: string; remark?: string }>;
+  createdAt: string;
+  deliveredAt: string | null;
+}
+
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; border: string; icon: typeof Package; variant: 'success' | 'warning' | 'danger' | 'info' | 'default' }> = {
   PENDING:    { label: 'Pending',    color: 'text-amber-700',   bg: 'bg-amber-50',   border: 'border-amber-200', icon: Clock,        variant: 'warning' },
   PROCESSING: { label: 'Processing', color: 'text-blue-700',    bg: 'bg-blue-50',    border: 'border-blue-200',  icon: Package,      variant: 'info' },
@@ -63,12 +94,31 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; 
   REFUNDED:   { label: 'Refunded',   color: 'text-gray-700',    bg: 'bg-gray-50',    border: 'border-gray-200',  icon: CreditCard,   variant: 'default' },
 };
 
+const SHIPMENT_STATUS_LABELS: Record<string, string> = {
+  PENDING: 'Pending',
+  BOOKED: 'Booked',
+  PICKUP_SCHEDULED: 'Pickup Scheduled',
+  PICKED_UP: 'Picked Up',
+  IN_TRANSIT: 'In Transit',
+  OUT_FOR_DELIVERY: 'Out for Delivery',
+  DELIVERED: 'Delivered',
+  RTO_INITIATED: 'RTO Initiated',
+  RTO_DELIVERED: 'RTO Delivered',
+  CANCELLED: 'Cancelled',
+};
+
 const FULFILLMENT_FLOW: Record<string, { nextStatus: string; actionLabel: string; actionIcon: typeof Package; actionColor: string }> = {
   PENDING:    { nextStatus: 'CONFIRMED',  actionLabel: 'Accept Order',    actionIcon: CheckCircle,  actionColor: 'bg-blue-600 hover:bg-blue-700' },
   PROCESSING: { nextStatus: 'CONFIRMED',  actionLabel: 'Confirm Order',   actionIcon: ClipboardList,actionColor: 'bg-blue-600 hover:bg-blue-700' },
-  CONFIRMED:  { nextStatus: 'SHIPPED',    actionLabel: 'Mark as Shipped', actionIcon: Truck,        actionColor: 'bg-purple-600 hover:bg-purple-700' },
-  SHIPPED:    { nextStatus: 'DELIVERED',   actionLabel: 'Mark Delivered',  actionIcon: PackageCheck, actionColor: 'bg-emerald-600 hover:bg-emerald-700' },
 };
+
+const COURIER_PROVIDERS = [
+  { id: 'XELNOVA_COURIER', name: 'Xelnova Courier', desc: 'We handle everything', alwaysAvailable: true },
+  { id: 'DELHIVERY', name: 'Delhivery', desc: 'Pan-India logistics' },
+  { id: 'SHIPROCKET', name: 'ShipRocket', desc: 'Multi-courier aggregator' },
+  { id: 'XPRESSBEES', name: 'XpressBees', desc: 'Fast delivery network' },
+  { id: 'EKART', name: 'Ekart', desc: 'Flipkart logistics' },
+];
 
 function normalizeOrders(res: unknown): SellerOrder[] {
   if (Array.isArray(res)) return res;
@@ -149,6 +199,11 @@ export default function SellerOrdersPage() {
     await handleStatusUpdate(orderId, 'CANCELLED');
   };
 
+  const handleShipped = (orderId: string) => {
+    setOrders((prev) => prev.map((o) => (o.id === orderId ? { ...o, status: 'SHIPPED' } : o)));
+    if (detail?.id === orderId) setDetail((d) => d ? { ...d, status: 'SHIPPED' } : d);
+  };
+
   const filtered = orders.filter((o) => {
     const tab = TABS.find((t) => t.id === activeTab)!;
     if (tab.statuses.length > 0 && !tab.statuses.includes(o.status)) return false;
@@ -168,14 +223,22 @@ export default function SellerOrdersPage() {
   };
 
   if (detail) {
-    return <OrderDetail order={detail} onBack={() => setDetail(null)} onStatusUpdate={handleStatusUpdate} onCancel={handleCancel} saving={saving} />;
+    return (
+      <OrderDetail
+        order={detail}
+        onBack={() => setDetail(null)}
+        onStatusUpdate={handleStatusUpdate}
+        onCancel={handleCancel}
+        onShipped={handleShipped}
+        saving={saving}
+      />
+    );
   }
 
   return (
     <>
       <DashboardHeader title="Order Management" />
       <div className="p-6 space-y-5">
-        {/* Stats bar */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {[
             { label: 'Action Required', count: counts.action_required, icon: AlertTriangle, color: 'text-amber-600', bg: 'bg-amber-50' },
@@ -200,7 +263,6 @@ export default function SellerOrdersPage() {
           ))}
         </div>
 
-        {/* Tabs + search */}
         <div className="rounded-2xl border border-border bg-white shadow-sm">
           <div className="flex items-center justify-between border-b border-border px-4">
             <div className="flex gap-1 overflow-x-auto">
@@ -209,9 +271,7 @@ export default function SellerOrdersPage() {
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
                   className={`relative px-4 py-3 text-sm font-medium whitespace-nowrap transition-colors ${
-                    activeTab === tab.id
-                      ? 'text-primary-600'
-                      : 'text-text-muted hover:text-text-primary'
+                    activeTab === tab.id ? 'text-primary-600' : 'text-text-muted hover:text-text-primary'
                   }`}
                 >
                   {tab.label}
@@ -249,7 +309,6 @@ export default function SellerOrdersPage() {
             </div>
           </div>
 
-          {/* Order list */}
           <div className="divide-y divide-border">
             {loading ? (
               Array.from({ length: 3 }).map((_, i) => (
@@ -274,6 +333,7 @@ export default function SellerOrdersPage() {
                 const cfg = STATUS_CONFIG[order.status] || STATUS_CONFIG.PENDING;
                 const flow = FULFILLMENT_FLOW[order.status];
                 const StatusIcon = cfg.icon;
+                const showShipBtn = order.status === 'CONFIRMED';
                 return (
                   <motion.div
                     key={order.id}
@@ -282,7 +342,6 @@ export default function SellerOrdersPage() {
                     className="p-4 hover:bg-gray-50/50 transition-colors"
                   >
                     <div className="flex items-start gap-4">
-                      {/* Item image */}
                       <div className="relative h-16 w-16 rounded-lg border border-border bg-gray-50 overflow-hidden shrink-0">
                         {order.items?.[0] && itemImg(order.items[0]) ? (
                           <img src={itemImg(order.items[0])!} alt="" className="h-full w-full object-cover" />
@@ -298,7 +357,6 @@ export default function SellerOrdersPage() {
                         )}
                       </div>
 
-                      {/* Info */}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-mono text-sm font-semibold text-text-primary">{order.orderNumber}</span>
@@ -317,7 +375,6 @@ export default function SellerOrdersPage() {
                         </div>
                       </div>
 
-                      {/* Actions */}
                       <div className="flex items-center gap-2 shrink-0">
                         {flow && (
                           <button
@@ -327,6 +384,15 @@ export default function SellerOrdersPage() {
                           >
                             <flow.actionIcon size={13} />
                             {flow.actionLabel}
+                          </button>
+                        )}
+                        {showShipBtn && (
+                          <button
+                            onClick={() => setDetail(order)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white rounded-lg bg-purple-600 hover:bg-purple-700 transition-colors"
+                          >
+                            <Truck size={13} />
+                            Ship Now
                           </button>
                         )}
                         <button
@@ -349,30 +415,139 @@ export default function SellerOrdersPage() {
   );
 }
 
+// ─── Order Detail ───
+
 function OrderDetail({
   order,
   onBack,
   onStatusUpdate,
   onCancel,
+  onShipped,
   saving,
 }: {
   order: SellerOrder;
   onBack: () => void;
   onStatusUpdate: (orderId: string, status: string) => Promise<void>;
   onCancel: (orderId: string) => Promise<void>;
+  onShipped: (orderId: string) => void;
   saving: boolean;
 }) {
+  const [shipModal, setShipModal] = useState(false);
+  const [shipment, setShipment] = useState<ShipmentData | null>(null);
+  const [shipmentLoading, setShipmentLoading] = useState(false);
+  const [trackingData, setTrackingData] = useState<any>(null);
+  const [trackingLoading, setTrackingLoading] = useState(false);
+  const [labelDownloading, setLabelDownloading] = useState(false);
+
+  // Self-ship status update
+  const [selfShipStatusModal, setSelfShipStatusModal] = useState(false);
+  const [selfShipStatus, setSelfShipStatus] = useState('');
+  const [selfShipLocation, setSelfShipLocation] = useState('');
+  const [selfShipRemark, setSelfShipRemark] = useState('');
+
+  // Self-ship AWB update
+  const [awbModal, setAwbModal] = useState(false);
+  const [awbNumber, setAwbNumber] = useState('');
+  const [awbCarrier, setAwbCarrier] = useState('');
+  const [awbTrackingUrl, setAwbTrackingUrl] = useState('');
+
   const cfg = STATUS_CONFIG[order.status] || STATUS_CONFIG.PENDING;
   const flow = FULFILLMENT_FLOW[order.status];
   const StatusIcon = cfg.icon;
-
   const statusSteps = ['PENDING', 'CONFIRMED', 'SHIPPED', 'DELIVERED'];
   const currentStepIdx = statusSteps.indexOf(order.status);
   const isCancelled = ['CANCELLED', 'RETURNED', 'REFUNDED'].includes(order.status);
+  const showShipAction = order.status === 'CONFIRMED';
 
-  const copyOrderNumber = () => {
-    navigator.clipboard.writeText(order.orderNumber);
-    toast.success('Order number copied');
+  useEffect(() => {
+    if (['SHIPPED', 'DELIVERED'].includes(order.status)) {
+      loadShipment();
+    }
+  }, [order.id, order.status]);
+
+  const loadShipment = async () => {
+    setShipmentLoading(true);
+    try {
+      const data = await apiGetShipment(order.id);
+      setShipment(data as ShipmentData);
+    } catch {
+      // No shipment yet
+    } finally {
+      setShipmentLoading(false);
+    }
+  };
+
+  const handleLiveTrack = async () => {
+    setTrackingLoading(true);
+    try {
+      const data = await apiTrackShipment(order.id);
+      setTrackingData(data);
+      toast.success('Tracking data refreshed');
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Failed to fetch tracking');
+    } finally {
+      setTrackingLoading(false);
+    }
+  };
+
+  const handleCancelShipment = async () => {
+    if (!confirm('Are you sure you want to cancel this shipment?')) return;
+    try {
+      await apiCancelShipment(order.id);
+      toast.success('Shipment cancellation requested');
+      loadShipment();
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Failed to cancel shipment');
+    }
+  };
+
+  const handleUpdateAwb = async () => {
+    if (!awbNumber.trim()) { toast.error('AWB number is required'); return; }
+    try {
+      await apiUpdateShipmentAwb(order.id, {
+        awbNumber: awbNumber.trim(),
+        carrierName: awbCarrier.trim() || undefined,
+        trackingUrl: awbTrackingUrl.trim() || undefined,
+      });
+      toast.success('AWB updated');
+      setAwbModal(false);
+      loadShipment();
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update AWB');
+    }
+  };
+
+  const handleUpdateSelfShipStatus = async () => {
+    if (!selfShipStatus) { toast.error('Select a status'); return; }
+    try {
+      await apiUpdateShipmentStatus(order.id, {
+        status: selfShipStatus,
+        location: selfShipLocation.trim() || undefined,
+        remark: selfShipRemark.trim() || undefined,
+      });
+      toast.success('Shipment status updated');
+      setSelfShipStatusModal(false);
+      loadShipment();
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update status');
+    }
+  };
+
+  const handleDownloadLabel = async () => {
+    setLabelDownloading(true);
+    try {
+      await apiDownloadShippingLabel(order.id);
+      toast.success('Shipping label downloaded');
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Failed to download label');
+    } finally {
+      setLabelDownloading(false);
+    }
+  };
+
+  const copyText = (text: string, label: string) => {
+    navigator.clipboard.writeText(text);
+    toast.success(`${label} copied`);
   };
 
   const addr = order.shippingAddress;
@@ -381,23 +556,18 @@ function OrderDetail({
     <>
       <DashboardHeader title="Order Details" />
       <div className="p-6 space-y-5 max-w-5xl">
-        {/* Back button */}
         <button onClick={onBack} className="flex items-center gap-1.5 text-sm text-text-muted hover:text-text-primary transition-colors">
           <ChevronLeft size={16} />
           Back to Orders
         </button>
 
         {/* Header card */}
-        <motion.div
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="rounded-2xl border border-border bg-white p-6 shadow-sm"
-        >
+        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="rounded-2xl border border-border bg-white p-6 shadow-sm">
           <div className="flex items-start justify-between flex-wrap gap-4">
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-xl font-bold text-text-primary">{order.orderNumber}</h2>
-                <button onClick={copyOrderNumber} className="p-1 rounded hover:bg-gray-100 text-text-muted">
+                <button onClick={() => copyText(order.orderNumber, 'Order number')} className="p-1 rounded hover:bg-gray-100 text-text-muted">
                   <Copy size={14} />
                 </button>
               </div>
@@ -412,6 +582,16 @@ function OrderDetail({
               </div>
             </div>
             <div className="flex items-center gap-2">
+              {['CONFIRMED', 'SHIPPED', 'DELIVERED'].includes(order.status) && (
+                <button
+                  onClick={handleDownloadLabel}
+                  disabled={labelDownloading}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-purple-700 border border-purple-200 rounded-lg bg-purple-50 hover:bg-purple-100 transition-colors disabled:opacity-50"
+                >
+                  {labelDownloading ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+                  {labelDownloading ? 'Generating…' : 'Shipping Label'}
+                </button>
+              )}
               <Badge variant={cfg.variant} className="text-sm px-3 py-1">
                 <StatusIcon size={13} className="mr-1" />
                 {cfg.label}
@@ -419,7 +599,6 @@ function OrderDetail({
             </div>
           </div>
 
-          {/* Progress tracker */}
           {!isCancelled && (
             <div className="mt-6 flex items-center gap-0">
               {statusSteps.map((step, i) => {
@@ -429,14 +608,8 @@ function OrderDetail({
                 return (
                   <div key={step} className="flex items-center flex-1">
                     <div className="flex flex-col items-center flex-1">
-                      <div className={`flex items-center justify-center h-8 w-8 rounded-full border-2 transition-colors ${
-                        done ? 'border-emerald-500 bg-emerald-50' : 'border-gray-200 bg-white'
-                      } ${active ? 'ring-2 ring-emerald-200' : ''}`}>
-                        {done ? (
-                          <CheckCircle size={16} className="text-emerald-600" />
-                        ) : (
-                          <StepIcon size={14} className="text-gray-400" />
-                        )}
+                      <div className={`flex items-center justify-center h-8 w-8 rounded-full border-2 transition-colors ${done ? 'border-emerald-500 bg-emerald-50' : 'border-gray-200 bg-white'} ${active ? 'ring-2 ring-emerald-200' : ''}`}>
+                        {done ? <CheckCircle size={16} className="text-emerald-600" /> : <StepIcon size={14} className="text-gray-400" />}
                       </div>
                       <span className={`text-[10px] mt-1 font-medium ${done ? 'text-emerald-700' : 'text-text-muted'}`}>
                         {STATUS_CONFIG[step]?.label || step}
@@ -459,12 +632,42 @@ function OrderDetail({
           )}
         </motion.div>
 
-        {/* Action bar */}
+        {/* Ship Order Action */}
+        {showShipAction && (
+          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}
+            className="rounded-2xl border-2 border-dashed border-purple-200 bg-purple-50/50 p-5"
+          >
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div>
+                <h3 className="text-sm font-bold text-text-primary flex items-center gap-2">
+                  <Truck size={16} className="text-purple-600" />
+                  Ship This Order
+                </h3>
+                <p className="text-xs text-text-muted mt-0.5">
+                  Choose your shipping method — ship it yourself or use a courier partner via Xelnova.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                {!isCancelled && !['DELIVERED'].includes(order.status) && (
+                  <button onClick={() => onCancel(order.id)} disabled={saving}
+                    className="px-4 py-2 text-sm font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
+                  >
+                    Cancel Order
+                  </button>
+                )}
+                <Button onClick={() => setShipModal(true)} className="gap-2">
+                  <Truck size={14} />
+                  Ship Now
+                  <ArrowRight size={14} />
+                </Button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {/* Accept/Confirm action for PENDING/PROCESSING */}
         {flow && (
-          <motion.div
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.05 }}
+          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}
             className="rounded-2xl border-2 border-dashed border-primary-200 bg-primary-50/50 p-5"
           >
             <div className="flex items-center justify-between flex-wrap gap-3">
@@ -473,30 +676,20 @@ function OrderDetail({
                 <p className="text-xs text-text-muted mt-0.5">
                   {order.status === 'PENDING' && 'Review the order details and accept it to start processing.'}
                   {order.status === 'PROCESSING' && 'Confirm the order to begin packing and preparation.'}
-                  {order.status === 'CONFIRMED' && 'Pack the items and mark as shipped with tracking details.'}
-                  {order.status === 'SHIPPED' && 'Once delivered, mark the order as delivered to complete fulfillment.'}
                 </p>
               </div>
               <div className="flex items-center gap-2">
-                {!['DELIVERED', 'CANCELLED', 'RETURNED', 'REFUNDED'].includes(order.status) && (
-                  <button
-                    onClick={() => onCancel(order.id)}
-                    disabled={saving}
+                {!isCancelled && !['DELIVERED'].includes(order.status) && (
+                  <button onClick={() => onCancel(order.id)} disabled={saving}
                     className="px-4 py-2 text-sm font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
                   >
                     Cancel Order
                   </button>
                 )}
-                <button
-                  onClick={() => onStatusUpdate(order.id, flow.nextStatus)}
-                  disabled={saving}
+                <button onClick={() => onStatusUpdate(order.id, flow.nextStatus)} disabled={saving}
                   className={`flex items-center gap-2 px-5 py-2 text-sm font-bold text-white rounded-lg transition-colors ${flow.actionColor}`}
                 >
-                  {saving ? (
-                    <Loader2 size={14} className="animate-spin" />
-                  ) : (
-                    <flow.actionIcon size={14} />
-                  )}
+                  {saving ? <Loader2 size={14} className="animate-spin" /> : <flow.actionIcon size={14} />}
                   {flow.actionLabel}
                   <ArrowRight size={14} />
                 </button>
@@ -505,83 +698,68 @@ function OrderDetail({
           </motion.div>
         )}
 
+        {/* Shipment Info Panel */}
+        {shipment && (
+          <ShipmentInfoPanel
+            shipment={shipment}
+            trackingData={trackingData}
+            trackingLoading={trackingLoading}
+            onLiveTrack={handleLiveTrack}
+            onCancelShipment={handleCancelShipment}
+            onUpdateAwb={() => { setAwbNumber(shipment.awbNumber || ''); setAwbCarrier(shipment.courierProvider || ''); setAwbModal(true); }}
+            onUpdateStatus={() => setSelfShipStatusModal(true)}
+            copyText={copyText}
+          />
+        )}
+
         <div className="grid gap-5 lg:grid-cols-3">
-          {/* Left: Items + Payment */}
           <div className="lg:col-span-2 space-y-5">
             {/* Order items */}
-            <motion.div
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.1 }}
+            <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
               className="rounded-2xl border border-border bg-white p-5 shadow-sm"
             >
-              <h3 className="text-sm font-bold text-text-primary mb-4">
-                Order Items ({order.items.length})
-              </h3>
+              <h3 className="text-sm font-bold text-text-primary mb-4">Order Items ({order.items.length})</h3>
               <div className="space-y-3">
                 {order.items.map((line, i) => {
                   const img = itemImg(line);
                   return (
                     <div key={i} className="flex gap-3 items-center rounded-xl border border-border p-3">
                       <div className="h-14 w-14 rounded-lg bg-gray-50 border border-border overflow-hidden shrink-0">
-                        {img ? (
-                          <img src={img} alt="" className="h-full w-full object-cover" />
-                        ) : (
-                          <div className="h-full w-full flex items-center justify-center">
-                            <Package size={18} className="text-gray-300" />
-                          </div>
+                        {img ? <img src={img} alt="" className="h-full w-full object-cover" /> : (
+                          <div className="h-full w-full flex items-center justify-center"><Package size={18} className="text-gray-300" /></div>
                         )}
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="font-medium text-text-primary text-sm truncate">{itemName(line)}</p>
-                        <p className="text-xs text-text-muted mt-0.5">
-                          Qty: {line.quantity} × {fmt(line.price)}
-                        </p>
+                        <p className="text-xs text-text-muted mt-0.5">Qty: {line.quantity} × {fmt(line.price)}</p>
                       </div>
-                      <p className="font-bold text-text-primary text-sm shrink-0">
-                        {fmt(line.quantity * line.price)}
-                      </p>
+                      <p className="font-bold text-text-primary text-sm shrink-0">{fmt(line.quantity * line.price)}</p>
                     </div>
                   );
                 })}
               </div>
-
-              {/* Price breakdown */}
               <div className="mt-4 pt-4 border-t border-border space-y-2 text-sm">
                 <div className="flex justify-between text-text-muted">
                   <span>Subtotal</span>
                   <span>{fmt(order.subtotal ?? order.items.reduce((s, l) => s + l.price * l.quantity, 0))}</span>
                 </div>
                 {(order.discount ?? 0) > 0 && (
-                  <div className="flex justify-between text-emerald-600">
-                    <span>Discount</span>
-                    <span>-{fmt(order.discount!)}</span>
-                  </div>
+                  <div className="flex justify-between text-emerald-600"><span>Discount</span><span>-{fmt(order.discount!)}</span></div>
                 )}
                 {(order.shipping ?? 0) > 0 && (
-                  <div className="flex justify-between text-text-muted">
-                    <span>Shipping</span>
-                    <span>{fmt(order.shipping!)}</span>
-                  </div>
+                  <div className="flex justify-between text-text-muted"><span>Shipping</span><span>{fmt(order.shipping!)}</span></div>
                 )}
                 {(order.tax ?? 0) > 0 && (
-                  <div className="flex justify-between text-text-muted">
-                    <span>Tax (GST)</span>
-                    <span>{fmt(order.tax!)}</span>
-                  </div>
+                  <div className="flex justify-between text-text-muted"><span>Tax (GST)</span><span>{fmt(order.tax!)}</span></div>
                 )}
                 <div className="flex justify-between font-bold text-text-primary text-base pt-2 border-t border-border">
-                  <span>Total</span>
-                  <span>{fmt(order.total)}</span>
+                  <span>Total</span><span>{fmt(order.total)}</span>
                 </div>
               </div>
             </motion.div>
 
             {/* Payment info */}
-            <motion.div
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.15 }}
+            <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}
               className="rounded-2xl border border-border bg-white p-5 shadow-sm"
             >
               <h3 className="text-sm font-bold text-text-primary mb-3">Payment Information</h3>
@@ -600,61 +778,41 @@ function OrderDetail({
             </motion.div>
           </div>
 
-          {/* Right sidebar: Customer + Address */}
           <div className="space-y-5">
             {/* Customer */}
-            <motion.div
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.1 }}
+            <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
               className="rounded-2xl border border-border bg-white p-5 shadow-sm"
             >
-              <h3 className="text-sm font-bold text-text-primary mb-3 flex items-center gap-1.5">
-                <User size={14} /> Customer
-              </h3>
+              <h3 className="text-sm font-bold text-text-primary mb-3 flex items-center gap-1.5"><User size={14} /> Customer</h3>
               <div className="space-y-2 text-sm">
                 <p className="font-medium text-text-primary">{order.user?.name || '—'}</p>
                 <p className="text-text-muted">{order.user?.email || '—'}</p>
                 {order.user?.phone && (
-                  <p className="flex items-center gap-1 text-text-muted">
-                    <Phone size={12} />
-                    {order.user.phone}
-                  </p>
+                  <p className="flex items-center gap-1 text-text-muted"><Phone size={12} />{order.user.phone}</p>
                 )}
               </div>
             </motion.div>
 
             {/* Shipping address */}
-            <motion.div
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.15 }}
+            <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}
               className="rounded-2xl border border-border bg-white p-5 shadow-sm"
             >
-              <h3 className="text-sm font-bold text-text-primary mb-3 flex items-center gap-1.5">
-                <MapPin size={14} /> Shipping Address
-              </h3>
+              <h3 className="text-sm font-bold text-text-primary mb-3 flex items-center gap-1.5"><MapPin size={14} /> Shipping Address</h3>
               {addr ? (
                 <div className="text-sm space-y-1">
                   <p className="font-medium text-text-primary">{addr.fullName}</p>
                   <p className="text-text-secondary">{addr.addressLine1}</p>
                   {addr.addressLine2 && <p className="text-text-secondary">{addr.addressLine2}</p>}
                   <p className="text-text-secondary">{addr.city}, {addr.state} — {addr.pincode}</p>
-                  <p className="flex items-center gap-1 text-text-muted mt-1.5">
-                    <Phone size={12} />
-                    {addr.phone}
-                  </p>
+                  <p className="flex items-center gap-1 text-text-muted mt-1.5"><Phone size={12} />{addr.phone}</p>
                 </div>
               ) : (
                 <p className="text-sm text-text-muted">No shipping address on file</p>
               )}
             </motion.div>
 
-            {/* Order timeline placeholder */}
-            <motion.div
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.2 }}
+            {/* Order timeline */}
+            <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
               className="rounded-2xl border border-border bg-white p-5 shadow-sm"
             >
               <h3 className="text-sm font-bold text-text-primary mb-3">Order Timeline</h3>
@@ -664,10 +822,10 @@ function OrderDetail({
                   <TimelineItem label="Order confirmed" time={order.createdAt} active />
                 )}
                 {['SHIPPED', 'DELIVERED'].includes(order.status) && (
-                  <TimelineItem label="Shipped" time={order.createdAt} active />
+                  <TimelineItem label="Shipped" time={shipment?.createdAt || order.createdAt} active />
                 )}
                 {order.status === 'DELIVERED' && (
-                  <TimelineItem label="Delivered" time={order.estimatedDelivery || order.createdAt} active />
+                  <TimelineItem label="Delivered" time={shipment?.deliveredAt || order.estimatedDelivery || order.createdAt} active />
                 )}
                 {isCancelled && (
                   <TimelineItem label={`Order ${order.status.toLowerCase()}`} time={order.createdAt} danger />
@@ -677,9 +835,528 @@ function OrderDetail({
           </div>
         </div>
       </div>
+
+      {/* Ship Order Modal */}
+      <ShipOrderModal
+        open={shipModal}
+        onClose={() => setShipModal(false)}
+        orderId={order.id}
+        onSuccess={() => {
+          setShipModal(false);
+          onShipped(order.id);
+          loadShipment();
+          toast.success('Order shipped successfully!');
+        }}
+      />
+
+      {/* AWB Update Modal */}
+      <Modal open={awbModal} onClose={() => setAwbModal(false)} title="Update AWB Number" size="md">
+        <div className="space-y-4">
+          <Input label="AWB Number *" value={awbNumber} onChange={(e) => setAwbNumber(e.target.value)} placeholder="Enter AWB / tracking number" />
+          <Input label="Carrier Name" value={awbCarrier} onChange={(e) => setAwbCarrier(e.target.value)} placeholder="e.g. BlueDart, DTDC" />
+          <Input label="Tracking URL" value={awbTrackingUrl} onChange={(e) => setAwbTrackingUrl(e.target.value)} placeholder="https://..." />
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setAwbModal(false)}>Cancel</Button>
+            <Button onClick={handleUpdateAwb}>Update AWB</Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Self-Ship Status Update Modal */}
+      <Modal open={selfShipStatusModal} onClose={() => setSelfShipStatusModal(false)} title="Update Shipment Status" size="md">
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-medium text-text-muted mb-1.5">Status *</label>
+            <select
+              value={selfShipStatus}
+              onChange={(e) => setSelfShipStatus(e.target.value)}
+              className="w-full rounded-xl border border-border bg-surface-raised px-4 py-3 text-sm text-text-primary outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30"
+            >
+              <option value="">Select status...</option>
+              {Object.entries(SHIPMENT_STATUS_LABELS).map(([k, v]) => (
+                <option key={k} value={k}>{v}</option>
+              ))}
+            </select>
+          </div>
+          <Input label="Location" value={selfShipLocation} onChange={(e) => setSelfShipLocation(e.target.value)} placeholder="e.g. Mumbai Hub" />
+          <Input label="Remark" value={selfShipRemark} onChange={(e) => setSelfShipRemark(e.target.value)} placeholder="Optional note" />
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setSelfShipStatusModal(false)}>Cancel</Button>
+            <Button onClick={handleUpdateSelfShipStatus}>Update Status</Button>
+          </div>
+        </div>
+      </Modal>
     </>
   );
 }
+
+// ─── Shipment Info Panel ───
+
+function ShipmentInfoPanel({
+  shipment,
+  trackingData,
+  trackingLoading,
+  onLiveTrack,
+  onCancelShipment,
+  onUpdateAwb,
+  onUpdateStatus,
+  copyText,
+}: {
+  shipment: ShipmentData;
+  trackingData: any;
+  trackingLoading: boolean;
+  onLiveTrack: () => void;
+  onCancelShipment: () => void;
+  onUpdateAwb: () => void;
+  onUpdateStatus: () => void;
+  copyText: (text: string, label: string) => void;
+}) {
+  const isSelfShip = shipment.shippingMode === 'SELF_SHIP';
+  const canCancel = !['DELIVERED', 'RTO_DELIVERED', 'CANCELLED'].includes(shipment.shipmentStatus);
+  const history = trackingData?.statusHistory || shipment.statusHistory || [];
+
+  return (
+    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.07 }}
+      className="rounded-2xl border border-purple-200 bg-white p-5 shadow-sm"
+    >
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-sm font-bold text-text-primary flex items-center gap-2">
+          <Truck size={16} className="text-purple-600" />
+          Shipment Details
+        </h3>
+        <div className="flex items-center gap-2">
+          {isSelfShip && (
+            <>
+              <Button size="sm" variant="outline" onClick={onUpdateAwb}>
+                <Hash size={12} /> Update AWB
+              </Button>
+              <Button size="sm" variant="outline" onClick={onUpdateStatus}>
+                Update Status
+              </Button>
+            </>
+          )}
+          {!isSelfShip && shipment.shippingMode !== 'XELNOVA_COURIER' && (
+            <Button size="sm" variant="outline" onClick={onLiveTrack} disabled={trackingLoading}>
+              {trackingLoading ? <Loader2 size={12} className="animate-spin" /> : <Navigation size={12} />}
+              Live Track
+            </Button>
+          )}
+          {canCancel && (
+            <Button size="sm" variant="danger" onClick={onCancelShipment}>
+              <X size={12} /> Cancel
+            </Button>
+          )}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+        <div>
+          <p className="text-text-muted text-xs">Shipping Mode</p>
+          <p className="font-medium text-text-primary">
+            {shipment.shippingMode === 'SELF_SHIP' ? 'Self Ship' : shipment.courierProvider || shipment.shippingMode}
+          </p>
+        </div>
+        <div>
+          <p className="text-text-muted text-xs">Status</p>
+          <Badge variant={shipment.shipmentStatus === 'DELIVERED' ? 'success' : shipment.shipmentStatus === 'CANCELLED' ? 'danger' : 'info'}>
+            {SHIPMENT_STATUS_LABELS[shipment.shipmentStatus] || shipment.shipmentStatus}
+          </Badge>
+        </div>
+        {shipment.awbNumber && (
+          <div>
+            <p className="text-text-muted text-xs">AWB Number</p>
+            <div className="flex items-center gap-1">
+              <p className="font-mono font-medium text-text-primary">{shipment.awbNumber}</p>
+              <button onClick={() => copyText(shipment.awbNumber!, 'AWB')} className="p-0.5 rounded hover:bg-gray-100 text-text-muted">
+                <Copy size={11} />
+              </button>
+            </div>
+          </div>
+        )}
+        {shipment.courierCharges != null && (
+          <div>
+            <p className="text-text-muted text-xs">Courier Charges</p>
+            <p className="font-medium text-text-primary">{fmt(shipment.courierCharges)}</p>
+          </div>
+        )}
+        {shipment.weight && (
+          <div>
+            <p className="text-text-muted text-xs">Weight</p>
+            <p className="font-medium text-text-primary">{shipment.weight} kg</p>
+          </div>
+        )}
+        {shipment.dimensions && (
+          <div>
+            <p className="text-text-muted text-xs">Dimensions</p>
+            <p className="font-medium text-text-primary">{shipment.dimensions} cm</p>
+          </div>
+        )}
+      </div>
+
+      {/* Action links */}
+      <div className="flex items-center gap-3 mt-4 pt-3 border-t border-border">
+        {shipment.trackingUrl && (
+          <a href={shipment.trackingUrl} target="_blank" rel="noopener noreferrer"
+            className="flex items-center gap-1 text-xs text-primary-600 hover:underline"
+          >
+            <ExternalLink size={11} /> Track on courier site
+          </a>
+        )}
+        {shipment.labelUrl && (
+          <a href={shipment.labelUrl} target="_blank" rel="noopener noreferrer"
+            className="flex items-center gap-1 text-xs text-primary-600 hover:underline"
+          >
+            <Download size={11} /> Download Label
+          </a>
+        )}
+      </div>
+
+      {/* Tracking Timeline */}
+      {history.length > 0 && (
+        <div className="mt-4 pt-3 border-t border-border">
+          <h4 className="text-xs font-bold text-text-primary mb-3">Tracking History</h4>
+          <div className="space-y-2 max-h-48 overflow-y-auto">
+            {[...history].reverse().map((entry: any, i: number) => (
+              <div key={i} className="flex gap-3 items-start">
+                <div className="flex flex-col items-center">
+                  <div className={`h-2 w-2 rounded-full mt-1.5 ${i === 0 ? 'bg-purple-500' : 'bg-gray-300'}`} />
+                  {i < history.length - 1 && <div className="w-px h-4 bg-gray-200" />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <p className={`text-xs font-medium ${i === 0 ? 'text-purple-700' : 'text-text-primary'}`}>
+                      {SHIPMENT_STATUS_LABELS[entry.status] || entry.status}
+                    </p>
+                    {entry.location && (
+                      <span className="text-[10px] text-text-muted">{entry.location}</span>
+                    )}
+                  </div>
+                  {entry.remark && <p className="text-[10px] text-text-muted">{entry.remark}</p>}
+                  <p className="text-[10px] text-text-muted">{new Date(entry.timestamp).toLocaleString()}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </motion.div>
+  );
+}
+
+// ─── Ship Order Modal ───
+
+function ShipOrderModal({
+  open,
+  onClose,
+  orderId,
+  onSuccess,
+}: {
+  open: boolean;
+  onClose: () => void;
+  orderId: string;
+  onSuccess: () => void;
+}) {
+  const [step, setStep] = useState<'mode' | 'courier' | 'details' | 'selfship' | 'result'>('mode');
+  const [shippingMode, setShippingMode] = useState<string>('');
+  const [selectedCourier, setSelectedCourier] = useState<string>('');
+  const [weight, setWeight] = useState('');
+  const [dimensions, setDimensions] = useState('');
+  const [awbNumber, setAwbNumber] = useState('');
+  const [carrierName, setCarrierName] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [result, setResult] = useState<any>(null);
+  const [configuredProviders, setConfiguredProviders] = useState<string[]>([]);
+  const [loadingConfigs, setLoadingConfigs] = useState(false);
+  const [shippingRates, setShippingRates] = useState<ShippingRates | null>(null);
+
+  useEffect(() => {
+    if (open) {
+      setStep('mode');
+      setShippingMode('');
+      setSelectedCourier('');
+      setWeight('');
+      setDimensions('');
+      setAwbNumber('');
+      setCarrierName('');
+      setResult(null);
+      loadConfigs();
+    }
+  }, [open]);
+
+  const loadConfigs = async () => {
+    setLoadingConfigs(true);
+    try {
+      const [configs, rates] = await Promise.allSettled([
+        apiGetCourierConfigs(),
+        apiGetShippingRates(),
+      ]);
+      const providers = configs.status === 'fulfilled' && Array.isArray(configs.value)
+        ? configs.value.filter((c: any) => c.isActive).map((c: any) => c.provider)
+        : [];
+      setConfiguredProviders(providers);
+      if (rates.status === 'fulfilled') setShippingRates(rates.value);
+    } catch {
+      setConfiguredProviders([]);
+    } finally {
+      setLoadingConfigs(false);
+    }
+  };
+
+  const estimatedShipping = (() => {
+    if (!shippingRates) return null;
+    const w = parseFloat(weight);
+    const parts = dimensions.split(/[x×X,\s]+/).map(Number);
+    const vol = parts.length === 3 && parts.every(n => n > 0) ? parts[0] * parts[1] * parts[2] : 0;
+
+    let weightCharge = 0;
+    if (w > 0) {
+      const slab = shippingRates.weightSlabs.find(s => w <= s.upToKg);
+      weightCharge = slab ? slab.rate : (shippingRates.weightSlabs[shippingRates.weightSlabs.length - 1]?.rate ?? 0);
+    }
+
+    let dimSurcharge = 0;
+    if (vol > 0) {
+      const slab = shippingRates.dimensionSlabs.find(s => vol <= s.upToCm3);
+      dimSurcharge = slab ? slab.rate : (shippingRates.dimensionSlabs[shippingRates.dimensionSlabs.length - 1]?.rate ?? 0);
+    }
+
+    if (weightCharge === 0 && dimSurcharge === 0) return null;
+    return { total: weightCharge + dimSurcharge, weightCharge, dimSurcharge };
+  })();
+
+  const handleSelectMode = (mode: string) => {
+    setShippingMode(mode);
+    if (mode === 'SELF_SHIP') {
+      setStep('selfship');
+    } else {
+      setStep('courier');
+    }
+  };
+
+  const handleSelectCourier = (courier: string) => {
+    setSelectedCourier(courier);
+    setStep('details');
+  };
+
+  const handleShip = async () => {
+    setSaving(true);
+    try {
+      const body: any = {
+        shippingMode: shippingMode === 'SELF_SHIP' ? 'SELF_SHIP' : selectedCourier,
+      };
+      if (shippingMode === 'SELF_SHIP') {
+        body.carrierName = carrierName.trim() || undefined;
+        body.awbNumber = awbNumber.trim() || undefined;
+      } else {
+        body.weight = weight ? parseFloat(weight) : undefined;
+        body.dimensions = dimensions.trim() || undefined;
+      }
+
+      const res = await apiShipOrder(orderId, body);
+      setResult(res);
+      setStep('result');
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Failed to ship order');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal open={open} onClose={onClose} title="Ship Order" size="lg">
+      <AnimatePresence mode="wait">
+        {step === 'mode' && (
+          <motion.div key="mode" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
+            <p className="text-sm text-text-muted">How would you like to ship this order?</p>
+            <div className="grid gap-3">
+              <button onClick={() => handleSelectMode('SELF_SHIP')}
+                className="flex items-start gap-4 p-4 rounded-xl border-2 border-border hover:border-primary-300 hover:bg-primary-50/30 transition-all text-left"
+              >
+                <div className="rounded-lg bg-gray-100 p-2.5"><Package size={20} className="text-gray-600" /></div>
+                <div>
+                  <h4 className="text-sm font-bold text-text-primary">Ship By Own</h4>
+                  <p className="text-xs text-text-muted mt-0.5">Ship using your own courier. You&apos;ll enter AWB and update status manually.</p>
+                </div>
+              </button>
+              <button onClick={() => handleSelectMode('XELNOVA')}
+                className="flex items-start gap-4 p-4 rounded-xl border-2 border-primary-200 bg-primary-50/30 hover:border-primary-400 transition-all text-left"
+              >
+                <div className="rounded-lg bg-primary-100 p-2.5"><Truck size={20} className="text-primary-600" /></div>
+                <div>
+                  <h4 className="text-sm font-bold text-text-primary">Ship By Xelnova</h4>
+                  <p className="text-xs text-text-muted mt-0.5">Choose from Xelnova Courier, Delhivery, ShipRocket, XpressBees, or Ekart.</p>
+                </div>
+              </button>
+            </div>
+          </motion.div>
+        )}
+
+        {step === 'courier' && (
+          <motion.div key="courier" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
+            <div className="flex items-center gap-2">
+              <button onClick={() => setStep('mode')} className="p-1 rounded hover:bg-gray-100 text-text-muted"><ChevronLeft size={16} /></button>
+              <p className="text-sm text-text-muted">Select a courier partner</p>
+            </div>
+            {loadingConfigs ? (
+              <div className="flex justify-center py-8"><Loader2 size={20} className="animate-spin text-primary-500" /></div>
+            ) : (
+              <div className="grid gap-3">
+                {COURIER_PROVIDERS.map((cp) => {
+                  const isAvailable = cp.alwaysAvailable || configuredProviders.includes(cp.id);
+                  return (
+                    <button key={cp.id} onClick={() => isAvailable && handleSelectCourier(cp.id)} disabled={!isAvailable}
+                      className={`flex items-center justify-between p-4 rounded-xl border-2 transition-all text-left ${
+                        isAvailable ? 'border-border hover:border-primary-300 hover:bg-primary-50/30' : 'border-gray-100 bg-gray-50 opacity-60 cursor-not-allowed'
+                      }`}
+                    >
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="text-sm font-bold text-text-primary">{cp.name}</h4>
+                          {cp.alwaysAvailable && <Badge variant="success">Always Available</Badge>}
+                          {!cp.alwaysAvailable && isAvailable && <Badge variant="info">Configured</Badge>}
+                          {!cp.alwaysAvailable && !isAvailable && <Badge variant="default">Not Configured</Badge>}
+                        </div>
+                        <p className="text-xs text-text-muted mt-0.5">{cp.desc}</p>
+                      </div>
+                      {isAvailable && <ArrowRight size={14} className="text-text-muted" />}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            <p className="text-xs text-text-muted">
+              Configure courier API keys in{' '}
+              <a href="/shipping" className="text-primary-600 hover:underline">Shipping Settings</a>
+            </p>
+          </motion.div>
+        )}
+
+        {step === 'details' && (
+          <motion.div key="details" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
+            <div className="flex items-center gap-2">
+              <button onClick={() => setStep('courier')} className="p-1 rounded hover:bg-gray-100 text-text-muted"><ChevronLeft size={16} /></button>
+              <p className="text-sm text-text-muted">
+                Shipping via <strong>{COURIER_PROVIDERS.find((c) => c.id === selectedCourier)?.name}</strong>
+              </p>
+            </div>
+            <div className="rounded-xl bg-blue-50 border border-blue-200 p-3">
+              <p className="text-xs text-blue-700">
+                {selectedCourier === 'XELNOVA_COURIER'
+                  ? 'Xelnova will handle pickup, delivery, and all status updates automatically.'
+                  : 'The shipment will be booked using your courier account. AWB and tracking will be auto-assigned.'}
+              </p>
+            </div>
+            <Input
+              label="Package Weight (kg)"
+              type="number"
+              value={weight}
+              onChange={(e) => setWeight(e.target.value)}
+              placeholder="e.g. 0.5"
+              icon={<Weight size={14} />}
+            />
+            <Input
+              label="Dimensions (LxBxH in cm)"
+              value={dimensions}
+              onChange={(e) => setDimensions(e.target.value)}
+              placeholder="e.g. 30x20x15"
+              icon={<Ruler size={14} />}
+            />
+            {estimatedShipping && (
+              <div className="rounded-xl border border-primary-200 bg-primary-50/60 p-3 space-y-1">
+                <p className="text-sm font-semibold text-primary-700">
+                  Est. shipping: ₹{estimatedShipping.total}
+                </p>
+                <p className="text-[11px] text-primary-600/80">
+                  Weight: ₹{estimatedShipping.weightCharge}
+                  {estimatedShipping.dimSurcharge > 0 && ` + Dimension surcharge: ₹${estimatedShipping.dimSurcharge}`}
+                </p>
+              </div>
+            )}
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" onClick={onClose}>Cancel</Button>
+              <Button onClick={handleShip} loading={saving}>
+                <Truck size={14} />
+                Book Shipment
+              </Button>
+            </div>
+          </motion.div>
+        )}
+
+        {step === 'selfship' && (
+          <motion.div key="selfship" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
+            <div className="flex items-center gap-2">
+              <button onClick={() => setStep('mode')} className="p-1 rounded hover:bg-gray-100 text-text-muted"><ChevronLeft size={16} /></button>
+              <p className="text-sm text-text-muted">Ship By Own</p>
+            </div>
+            <div className="rounded-xl bg-amber-50 border border-amber-200 p-3">
+              <p className="text-xs text-amber-700">
+                You&apos;ll ship this order yourself. Enter the AWB number now or add it later from the order details.
+              </p>
+            </div>
+            <Input
+              label="Carrier Name"
+              value={carrierName}
+              onChange={(e) => setCarrierName(e.target.value)}
+              placeholder="e.g. BlueDart, DTDC, India Post"
+            />
+            <Input
+              label="AWB / Tracking Number"
+              value={awbNumber}
+              onChange={(e) => setAwbNumber(e.target.value)}
+              placeholder="Enter AWB number (optional, can add later)"
+              icon={<Hash size={14} />}
+            />
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" onClick={onClose}>Cancel</Button>
+              <Button onClick={handleShip} loading={saving}>
+                <PackageCheck size={14} />
+                Confirm Self-Ship
+              </Button>
+            </div>
+          </motion.div>
+        )}
+
+        {step === 'result' && result && (
+          <motion.div key="result" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="space-y-4 text-center">
+            <div className="flex justify-center">
+              <div className="rounded-full bg-emerald-100 p-3">
+                <CheckCircle size={32} className="text-emerald-600" />
+              </div>
+            </div>
+            <h3 className="text-lg font-bold text-text-primary">Shipment Created!</h3>
+            {result.awbNumber && (
+              <div className="rounded-xl bg-gray-50 border border-border p-4">
+                <p className="text-xs text-text-muted mb-1">AWB Number</p>
+                <div className="flex items-center justify-center gap-2">
+                  <p className="text-lg font-mono font-bold text-text-primary">{result.awbNumber}</p>
+                  <button onClick={() => { navigator.clipboard.writeText(result.awbNumber); toast.success('AWB copied'); }}
+                    className="p-1 rounded hover:bg-gray-200 text-text-muted"
+                  >
+                    <Copy size={14} />
+                  </button>
+                </div>
+              </div>
+            )}
+            {result.trackingUrl ? (
+              <a href={result.trackingUrl} target="_blank" rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-sm text-primary-600 hover:underline"
+              >
+                <ExternalLink size={13} /> Track Shipment
+              </a>
+            ) : (
+              <p className="text-xs text-text-muted">
+                You can track this shipment from the order details page.
+              </p>
+            )}
+            <Button onClick={onSuccess} fullWidth>Done</Button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </Modal>
+  );
+}
+
+// ─── Timeline Item ───
 
 function TimelineItem({ label, time, active, danger }: { label: string; time: string; active?: boolean; danger?: boolean }) {
   return (

@@ -91,6 +91,15 @@ export class ProductsController {
     );
   }
 
+  @Get('shipping-rates')
+  @ApiOperation({ summary: 'Get shipping rate slabs (weight & dimension based)' })
+  async getShippingRates() {
+    return successResponse(
+      await this.productsService.getShippingRates(),
+      'Shipping rates fetched successfully',
+    );
+  }
+
   @Get(':slug')
   @ApiOperation({ summary: 'Get product detail by slug' })
   async findBySlug(@Param('slug') slug: string) {

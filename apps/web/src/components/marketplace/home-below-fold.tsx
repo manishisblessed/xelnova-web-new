@@ -62,17 +62,18 @@ export function HomeBelowFold() {
   const [topReviews, setTopReviews] = useState<{ id: string; rating: number; title: string | null; comment: string | null; helpful: number; createdAt: string; user: { id: string; name: string; avatar: string | null }; product: { name: string; slug: string; images: string[] } }[]>([]);
 
   useEffect(() => {
-    productsApi.getBanners('promo')
-      .then((b) => { if (b?.length) setPromoBanners(b); })
-      .catch(() => {});
-
-    productsApi.getBrands()
-      .then((b) => { if (b?.length) setBrands(b); })
-      .catch(() => {});
-
-    productsApi.getTopReviews()
-      .then((r) => { if (r?.length) setTopReviews(r); })
-      .catch(() => {});
+    let cancelled = false;
+    Promise.allSettled([
+      productsApi.getBanners('promo'),
+      productsApi.getBrands(),
+      productsApi.getTopReviews(),
+    ]).then(([bannersResult, brandsResult, reviewsResult]) => {
+      if (cancelled) return;
+      if (bannersResult.status === 'fulfilled' && bannersResult.value?.length) setPromoBanners(bannersResult.value);
+      if (brandsResult.status === 'fulfilled' && brandsResult.value?.length) setBrands(brandsResult.value);
+      if (reviewsResult.status === 'fulfilled' && reviewsResult.value?.length) setTopReviews(reviewsResult.value);
+    });
+    return () => { cancelled = true; };
   }, []);
 
   const allProducts = productsData?.products || [];
@@ -81,7 +82,13 @@ export function HomeBelowFold() {
   const bestSellers = allProducts.filter((p) => p.rating >= 4.5).sort((a, b) => b.reviewCount - a.reviewCount).slice(0, 8);
   const recommended = allProducts.filter((p) => p.rating >= 4.0).slice(0, 8);
   const dealProduct = allProducts.find((p) => p.discount >= 30 && p.rating >= 4.5) || allProducts[0];
-  const dealCountdown = useDealCountdown(dealProduct?.flashDealEndsAt);
+  const dealEndAt = (() => {
+    if (dealProduct?.flashDealEndsAt) return dealProduct.flashDealEndsAt;
+    const eod = new Date();
+    eod.setHours(23, 59, 59, 999);
+    return eod.toISOString();
+  })();
+  const dealCountdown = useDealCountdown(dealEndAt);
 
   const topSelections = (categories || []).slice(0, 3).map((cat) => ({
     id: cat.id,

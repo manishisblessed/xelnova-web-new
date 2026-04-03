@@ -125,8 +125,26 @@ export default function PerformancePage() {
   useEffect(() => {
     setLoading(true);
     fetchData();
-    const interval = setInterval(fetchData, 30_000);
-    return () => clearInterval(interval);
+    let interval: ReturnType<typeof setInterval> | null = null;
+
+    function startPolling() {
+      if (interval) clearInterval(interval);
+      interval = setInterval(fetchData, 30_000);
+    }
+    function stopPolling() {
+      if (interval) { clearInterval(interval); interval = null; }
+    }
+    function handleVisibility() {
+      if (document.visibilityState === 'visible') { fetchData(); startPolling(); }
+      else stopPolling();
+    }
+
+    startPolling();
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      stopPolling();
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
   }, [fetchData]);
 
   const st = performanceStats?.stats;

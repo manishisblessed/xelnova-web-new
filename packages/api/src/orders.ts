@@ -43,6 +43,9 @@ export interface CreateOrderPayload {
 }
 
 export async function createOrder(payload: CreateOrderPayload): Promise<Order> {
-  const { data } = await api.post<ApiResponse<Order>>('/orders', payload);
+  const { data, status } = await api.post<ApiResponse<Order>>('/orders', payload);
+  if (!data.success || !data.data) {
+    throw apiError(data.message || 'Failed to create order', status >= 400 ? status : 500);
+  }
   return data.data;
 }

@@ -2,7 +2,6 @@ import {
   Injectable,
   HttpException,
   HttpStatus,
-  BadRequestException,
   BadGatewayException,
   ServiceUnavailableException,
 } from '@nestjs/common';
@@ -13,11 +12,8 @@ import * as bcrypt from 'bcrypt';
 import { v4 as uuidv4 } from 'uuid';
 import {
   Step1AccountDto,
-  Step2TaxDetailsDto,
-  Step3StoreDetailsDto,
-  Step4AddressDto,
-  Step5ShippingDto,
-  Step6BankDetailsDto,
+  Step2BusinessVerificationDto,
+  Step3FinalSetupDto,
   SellerOnboardingSendOtpDto,
   SellerOnboardingVerifyOtpDto,
   AdminReviewDto,
@@ -35,7 +31,6 @@ export class SellerOnboardingService {
   async sendOtp(dto: SellerOnboardingSendOtpDto, ipAddress?: string) {
     const { identifier, type, purpose = 'REGISTRATION' } = dto;
 
-    // Rate limiting: only count unverified OTPs sent in the last 60 seconds
     const recentOtps = await this.prisma.otpVerification.count({
       where: {
         identifier,
@@ -49,11 +44,9 @@ export class SellerOnboardingService {
       throw new HttpException('Please wait 60 seconds before requesting another OTP', HttpStatus.TOO_MANY_REQUESTS);
     }
 
-    // Generate 6-digit OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
-    // Invalidate previous OTPs
     await this.prisma.otpVerification.updateMany({
       where: { identifier, type, verified: false },
       data: { expiresAt: new Date() },
@@ -125,13 +118,11 @@ export class SellerOnboardingService {
       throw new HttpException('Invalid OTP', HttpStatus.BAD_REQUEST);
     }
 
-    // Mark as verified
     await this.prisma.otpVerification.update({
       where: { id: otpRecord.id },
       data: { verified: true, verifiedAt: new Date() },
     });
 
-    // Generate verification token
     const verificationToken = uuidv4();
 
     return {
@@ -321,14 +312,13 @@ export class SellerOnboardingService {
     return { success: true, captchaToken };
   }
 
-  // ========== Onboarding Steps ==========
+  // ========== Step 1: Account Creation ==========
 
   async createSellerAccount(dto: Step1AccountDto, ipAddress?: string, userAgent?: string) {
     dto.email = dto.email.trim().toLowerCase();
     dto.fullName = dto.fullName.trim();
     dto.phone = dto.phone.trim();
 
-    // Check for an existing SellerProfile by email (independent of User)
     const existingSeller = await this.prisma.sellerProfile.findUnique({
       where: { email: dto.email },
     });
@@ -343,10 +333,10 @@ export class SellerOnboardingService {
         );
       }
 
-      // Early-stage seller profile exists — allow re-registration (user has
-      // re-verified email/phone via OTP in this flow, so reset the profile).
       const hashedPassword = await bcrypt.hash(dto.password, 12);
       const user = await this.findOrCreateUser(dto, hashedPassword, ipAddress);
+
+      const resumeStep = Math.max(existingSeller.onboardingStep ?? 2, 2);
 
       await this.prisma.sellerProfile.update({
         where: { id: existingSeller.id },
@@ -354,22 +344,21 @@ export class SellerOnboardingService {
           userId: user.id,
           email: dto.email,
           phone: dto.phone,
-          storeName: dto.fullName + "'s Store",
-          onboardingStatus: 'EMAIL_VERIFIED',
-          onboardingStep: 2,
+          storeName: existingSeller.storeName || dto.fullName + "'s Store",
+          onboardingStatus: resumeStep >= 3 ? existingSeller.onboardingStatus : 'EMAIL_VERIFIED',
+          onboardingStep: resumeStep,
         },
       });
 
       return {
         success: true,
-        message: 'Seller registration reset',
+        message: resumeStep > 2 ? 'Resuming registration' : 'Seller registration reset',
         userId: user.id,
         sellerId: existingSeller.id,
-        nextStep: 2,
+        nextStep: resumeStep,
       };
     }
 
-    // No existing seller profile — create fresh
     const hashedPassword = await bcrypt.hash(dto.password, 12);
     const user = await this.findOrCreateUser(dto, hashedPassword, ipAddress);
 
@@ -395,10 +384,6 @@ export class SellerOnboardingService {
     };
   }
 
-  /**
-   * Finds an existing User by email or creates a new one. Updates role to
-   * SELLER and refreshes login metadata in both cases.
-   */
   private async findOrCreateUser(
     dto: Step1AccountDto,
     hashedPassword: string,
@@ -437,7 +422,9 @@ export class SellerOnboardingService {
     });
   }
 
-  async updateTaxDetails(sellerId: string, dto: Step2TaxDetailsDto) {
+  // ========== Step 2: Business Verification ==========
+
+  async updateBusinessVerification(sellerId: string, dto: Step2BusinessVerificationDto) {
     const seller = await this.prisma.sellerProfile.findUnique({
       where: { id: sellerId },
     });
@@ -446,11 +433,10 @@ export class SellerOnboardingService {
       throw new HttpException('Seller not found', HttpStatus.NOT_FOUND);
     }
 
-    let gstVerified = false;
-    let gstVerifiedData: any = null;
+    let gstVerified = dto.gstVerified || false;
+    let gstVerifiedData: any = dto.gstVerifiedData || null;
 
-    // Verify GST if provided
-    if (dto.gstNumber && !dto.sellsNonGstProducts) {
+    if (dto.gstNumber && !dto.sellsNonGstProducts && !gstVerified) {
       try {
         const gstData = await this.verificationService.verifyGSTIN(dto.gstNumber, seller.userId ?? undefined);
         gstVerified = true;
@@ -458,6 +444,21 @@ export class SellerOnboardingService {
       } catch (error) {
         throw new HttpException(`GST verification failed: ${error.message}`, HttpStatus.BAD_REQUEST);
       }
+    }
+
+    const slug = this.generateSlug(dto.storeName);
+    const existingSlug = await this.prisma.sellerProfile.findFirst({
+      where: { slug, id: { not: sellerId } },
+    });
+    if (existingSlug) {
+      throw new HttpException('Store name already taken', HttpStatus.CONFLICT);
+    }
+
+    // Mask Aadhaar for storage (keep last 4 digits)
+    let maskedAadhaar: string | undefined;
+    if (dto.aadhaarNumber) {
+      const cleaned = dto.aadhaarNumber.replace(/\s/g, '');
+      maskedAadhaar = 'XXXX-XXXX-' + cleaned.slice(-4);
     }
 
     await this.prisma.sellerProfile.update({
@@ -470,114 +471,42 @@ export class SellerOnboardingService {
         sellsNonGstProducts: dto.sellsNonGstProducts || false,
         panNumber: dto.panNumber,
         panName: dto.panName,
+        panVerified: dto.panVerified || false,
+        panVerifiedAt: dto.panVerified ? new Date() : null,
+        panVerifiedData: dto.panVerifiedData || undefined,
+        aadhaarNumber: maskedAadhaar,
+        aadhaarVerified: dto.aadhaarVerified || false,
+        aadhaarVerifiedAt: dto.aadhaarVerified ? new Date() : null,
+        aadhaarVerifiedData: dto.aadhaarVerifiedData || undefined,
+        storeName: dto.storeName,
+        slug,
+        description: dto.description,
+        businessType: dto.businessType,
+        categorySelectionType: dto.categorySelectionType,
+        selectedCategories: dto.selectedCategories || [],
+        businessAddress: dto.businessAddress,
+        businessCity: dto.businessCity,
+        businessState: dto.businessState,
+        businessPincode: dto.businessPincode,
+        location: dto.businessCity && dto.businessState
+          ? `${dto.businessCity}, ${dto.businessState}`
+          : undefined,
         onboardingStep: 3,
       },
     });
 
     return {
       success: true,
-      message: 'Tax details updated',
+      message: 'Business verification details updated',
       gstVerified,
+      slug,
       nextStep: 3,
     };
   }
 
-  async updateStoreDetails(sellerId: string, dto: Step3StoreDetailsDto) {
-    const seller = await this.prisma.sellerProfile.findUnique({
-      where: { id: sellerId },
-    });
+  // ========== Step 3: Final Setup ==========
 
-    if (!seller) {
-      throw new HttpException('Seller not found', HttpStatus.NOT_FOUND);
-    }
-
-    const slug = this.generateSlug(dto.storeName);
-
-    // Check if slug is unique
-    const existingSlug = await this.prisma.sellerProfile.findFirst({
-      where: { slug, id: { not: sellerId } },
-    });
-
-    if (existingSlug) {
-      throw new HttpException('Store name already taken', HttpStatus.CONFLICT);
-    }
-
-    await this.prisma.sellerProfile.update({
-      where: { id: sellerId },
-      data: {
-        storeName: dto.storeName,
-        slug,
-        description: dto.description,
-        businessType: dto.businessType,
-        businessCategory: dto.businessCategory,
-        onboardingStep: 4,
-      },
-    });
-
-    return {
-      success: true,
-      message: 'Store details updated',
-      slug,
-      nextStep: 4,
-    };
-  }
-
-  async updateAddress(sellerId: string, dto: Step4AddressDto) {
-    const seller = await this.prisma.sellerProfile.findUnique({
-      where: { id: sellerId },
-    });
-
-    if (!seller) {
-      throw new HttpException('Seller not found', HttpStatus.NOT_FOUND);
-    }
-
-    await this.prisma.sellerProfile.update({
-      where: { id: sellerId },
-      data: {
-        businessPincode: dto.pincode,
-        businessCity: dto.city,
-        businessState: dto.state,
-        businessAddress: dto.address,
-        location: `${dto.city}, ${dto.state}`,
-        onboardingStep: 5,
-      },
-    });
-
-    return {
-      success: true,
-      message: 'Address updated',
-      nextStep: 5,
-    };
-  }
-
-  async updateShippingPreferences(sellerId: string, dto: Step5ShippingDto) {
-    const seller = await this.prisma.sellerProfile.findUnique({
-      where: { id: sellerId },
-    });
-
-    if (!seller) {
-      throw new HttpException('Seller not found', HttpStatus.NOT_FOUND);
-    }
-
-    await this.prisma.sellerProfile.update({
-      where: { id: sellerId },
-      data: {
-        shippingMethod: dto.shippingMethod,
-        offerFreeDelivery: dto.offerFreeDelivery,
-        deliveryCharge1to3Days: dto.deliveryCharge1to3Days,
-        deliveryCharge3PlusDays: dto.deliveryCharge3PlusDays,
-        onboardingStep: 6,
-      },
-    });
-
-    return {
-      success: true,
-      message: 'Shipping preferences updated',
-      nextStep: 6,
-    };
-  }
-
-  async updateBankDetails(sellerId: string, dto: Step6BankDetailsDto) {
+  async updateFinalSetup(sellerId: string, dto: Step3FinalSetupDto) {
     const seller = await this.prisma.sellerProfile.findUnique({
       where: { id: sellerId },
       include: { user: true },
@@ -587,46 +516,59 @@ export class SellerOnboardingService {
       throw new HttpException('Seller not found', HttpStatus.NOT_FOUND);
     }
 
-    let bankData;
-    try {
-      bankData = await this.verificationService.verifyBankAccount(
-        dto.accountNumber,
-        dto.ifscCode,
-        seller.userId ?? undefined,
-      );
-    } catch (error) {
-      throw new HttpException(
-        `Bank account verification failed: ${error.message}`,
-        HttpStatus.BAD_REQUEST,
-      );
+    // Verify bank account (skip if already verified on frontend)
+    let bankData: any;
+    if (dto.skipBankVerification && dto.bankVerifiedData) {
+      bankData = dto.bankVerifiedData;
+    } else {
+      try {
+        bankData = await this.verificationService.verifyBankAccount(
+          dto.accountNumber,
+          dto.ifscCode,
+          seller.userId ?? undefined,
+        );
+      } catch (error) {
+        throw new HttpException(
+          `Bank account verification failed: ${error.message}`,
+          HttpStatus.BAD_REQUEST,
+        );
+      }
     }
 
     await this.prisma.sellerProfile.update({
       where: { id: sellerId },
       data: {
+        signatureUrl: dto.signatureUrl,
+        signatureData: dto.signatureData,
+        shippingMethod: dto.shippingMethod,
+        offerFreeDelivery: dto.offerFreeDelivery,
+        deliveryCharge1to3Days: dto.deliveryCharge1to3Days,
+        deliveryCharge3PlusDays: dto.deliveryCharge3PlusDays,
         bankAccountName: dto.accountHolderName,
         bankAccountNumber: dto.accountNumber,
         bankIfscCode: dto.ifscCode,
         bankVerified: true,
         bankVerifiedAt: new Date(),
         bankVerifiedData: bankData as any,
-        bankVerifiedName: bankData.nameAtBank,
-        bankName: bankData.bankName || '',
-        bankBranch: bankData.branch || '',
+        bankVerifiedName: bankData?.nameAtBank || dto.accountHolderName,
+        bankName: bankData?.bankName || '',
+        bankBranch: bankData?.branch || '',
         onboardingStatus: 'DOCUMENTS_SUBMITTED',
-        onboardingStep: 7,
+        onboardingStep: 4,
       },
     });
 
     return {
       success: true,
       message: 'Bank account verified — ₹1 credited to account',
-      bankName: bankData.bankName,
-      branch: bankData.branch,
-      city: bankData.city,
-      nameAtBank: bankData.nameAtBank,
+      bankName: bankData?.bankName,
+      branch: bankData?.branch,
+      city: bankData?.city,
+      nameAtBank: bankData?.nameAtBank || dto.accountHolderName,
     };
   }
+
+  // ========== Submit for Review ==========
 
   async submitForReview(sellerId: string) {
     const seller = await this.prisma.sellerProfile.findUnique({
@@ -638,15 +580,10 @@ export class SellerOnboardingService {
       throw new HttpException('Seller not found', HttpStatus.NOT_FOUND);
     }
 
-    // Validate all required fields
     const missingFields: string[] = [];
     if (!seller.storeName) missingFields.push('storeName');
-    if (!seller.panNumber) missingFields.push('panNumber');
     if (!seller.bankAccountNumber) missingFields.push('bankAccountNumber');
-    if (!seller.businessAddress) missingFields.push('businessAddress');
-    if (!seller.businessCity) missingFields.push('businessCity');
-    if (!seller.businessState) missingFields.push('businessState');
-    if (!seller.businessPincode) missingFields.push('businessPincode');
+    if (!seller.signatureUrl && !seller.signatureData) missingFields.push('signature');
 
     if (missingFields.length > 0) {
       throw new HttpException(`Missing required fields: ${missingFields.join(', ')}`, HttpStatus.BAD_REQUEST);
@@ -699,7 +636,6 @@ export class SellerOnboardingService {
       throw new HttpException('Seller not found', HttpStatus.NOT_FOUND);
     }
 
-    // Upsert document
     const existingDoc = await this.prisma.sellerDocument.findFirst({
       where: { sellerId, type: type as any },
     });
@@ -734,6 +670,7 @@ export class SellerOnboardingService {
     if (type === 'MASKED_AADHAAR') updateData.maskedAadhaarUrl = fileUrl;
     if (type === 'GST_CERTIFICATE') updateData.gstCertificateUrl = fileUrl;
     if (type === 'CANCELLED_CHEQUE') updateData.cancelledChequeUrl = fileUrl;
+    if (type === 'SIGNATURE') updateData.signatureUrl = fileUrl;
 
     if (Object.keys(updateData).length > 0) {
       await this.prisma.sellerProfile.update({
@@ -800,6 +737,10 @@ export class SellerOnboardingService {
       reviewedAt: new Date(),
     };
 
+    if (dto.commissionRate !== undefined && dto.commissionRate !== null) {
+      updateData.commissionRate = dto.commissionRate;
+    }
+
     if (dto.decision === 'APPROVED') {
       updateData.onboardingStatus = 'APPROVED';
       updateData.verified = true;
@@ -814,12 +755,57 @@ export class SellerOnboardingService {
       data: updateData,
     });
 
-    // TODO: Send notification email to seller
+    if (dto.decision === 'APPROVED' && seller.userId) {
+      await this.prisma.wallet.upsert({
+        where: { ownerId_ownerType: { ownerId: seller.userId, ownerType: 'SELLER' } },
+        create: { ownerId: seller.userId, ownerType: 'SELLER', balance: 0 },
+        update: {},
+      });
+    }
 
     return {
       success: true,
       message: `Seller ${dto.decision.toLowerCase()}`,
       status: updateData.onboardingStatus,
+    };
+  }
+
+  async verifySignature(sellerId: string, adminId: string, decision: 'VERIFIED' | 'REJECTED', comment?: string) {
+    const seller = await this.prisma.sellerProfile.findUnique({
+      where: { id: sellerId },
+    });
+
+    if (!seller) {
+      throw new HttpException('Seller not found', HttpStatus.NOT_FOUND);
+    }
+
+    if (!seller.signatureUrl && !seller.signatureData) {
+      throw new HttpException('No signature found for this seller', HttpStatus.BAD_REQUEST);
+    }
+
+    const updateData: any = {
+      signatureVerifiedBy: adminId,
+    };
+
+    if (decision === 'VERIFIED') {
+      updateData.signatureVerified = true;
+      updateData.signatureVerifiedAt = new Date();
+      updateData.signatureRejectionNote = null;
+    } else {
+      updateData.signatureVerified = false;
+      updateData.signatureVerifiedAt = null;
+      updateData.signatureRejectionNote = comment || 'Signature rejected by admin';
+    }
+
+    await this.prisma.sellerProfile.update({
+      where: { id: sellerId },
+      data: updateData,
+    });
+
+    return {
+      success: true,
+      message: `Signature ${decision.toLowerCase()}`,
+      signatureVerified: decision === 'VERIFIED',
     };
   }
 
@@ -844,14 +830,11 @@ export class SellerOnboardingService {
 
   private getCompletedSteps(seller: any) {
     const steps: number[] = [];
-    
+
     if (seller.user?.emailVerified && seller.user?.phoneVerified) steps.push(1);
     if (seller.panNumber && (seller.gstVerified || seller.sellsNonGstProducts)) steps.push(2);
-    if (seller.storeName && seller.slug) steps.push(3);
-    if (seller.businessAddress && seller.businessCity && seller.businessPincode) steps.push(4);
-    if (seller.shippingMethod) steps.push(5);
-    if (seller.bankVerified) steps.push(6);
-    
+    if (seller.bankVerified && (seller.signatureUrl || seller.signatureData)) steps.push(3);
+
     return steps;
   }
 
@@ -862,9 +845,41 @@ export class SellerOnboardingService {
       .replace(/[^\w\s-]/g, '')
       .replace(/\s+/g, '-')
       .substring(0, 40);
-    
+
     const uniqueSuffix = Math.random().toString(36).substring(2, 8);
     return `${baseSlug}-${uniqueSuffix}`;
+  }
+
+  async getProgressByEmail(email: string) {
+    const seller = await this.prisma.sellerProfile.findUnique({
+      where: { email: email.trim().toLowerCase() },
+      select: {
+        id: true,
+        onboardingStep: true,
+        onboardingStatus: true,
+        storeName: true,
+        gstVerified: true,
+        sellsNonGstProducts: true,
+      },
+    });
+
+    if (!seller) {
+      return { found: false };
+    }
+
+    const completedStatuses = ['APPROVED', 'UNDER_REVIEW', 'DOCUMENTS_SUBMITTED'];
+    if (completedStatuses.includes(seller.onboardingStatus)) {
+      return { found: true, complete: true, status: seller.onboardingStatus };
+    }
+
+    return {
+      found: true,
+      complete: false,
+      sellerId: seller.id,
+      onboardingStep: seller.onboardingStep,
+      onboardingStatus: seller.onboardingStatus,
+      storeName: seller.storeName,
+    };
   }
 
   async getOnboardingStats() {
@@ -901,7 +916,7 @@ export class SellerOnboardingService {
     const skip = (page - 1) * limit;
 
     const where: any = {};
-    
+
     if (status) where.onboardingStatus = status;
     if (verified !== undefined) where.verified = verified;
     if (search) {

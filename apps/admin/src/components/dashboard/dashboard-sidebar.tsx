@@ -47,6 +47,7 @@ const NAV: { href: string; label: string; icon: React.ComponentType<{ size?: num
   { href: '/revenue', label: 'Revenue', icon: TrendingUp },
   { href: '/commission', label: 'Commission', icon: Percent },
   { href: '/payouts', label: 'Payouts', icon: Wallet },
+  { href: '/wallets', label: 'Wallets', icon: Wallet },
   { href: '/pages', label: 'CMS Pages', icon: FileCode },
   { href: '/roles', label: 'Roles', icon: Shield },
   { href: '/settings', label: 'Settings', icon: Settings },

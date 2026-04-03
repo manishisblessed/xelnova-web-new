@@ -58,26 +58,30 @@ export default function HomePage() {
   const [sidePromos, setSidePromos] = useState(defaultSidePromos);
 
   useEffect(() => {
-    searchApi.getPopularSearches()
-      .then((searches) => { if (searches?.length) setTrendingSearches(searches); })
-      .catch(() => {});
-
-    productsApi.getStats()
-      .then((data) => {
+    let cancelled = false;
+    Promise.allSettled([
+      searchApi.getPopularSearches(),
+      productsApi.getStats(),
+      productsApi.getBanners('side'),
+    ]).then(([searchesResult, statsResult, bannersResult]) => {
+      if (cancelled) return;
+      if (searchesResult.status === 'fulfilled' && searchesResult.value?.length) {
+        setTrendingSearches(searchesResult.value);
+      }
+      if (statsResult.status === 'fulfilled') {
+        const data = statsResult.value;
         const keys = ['products', 'sellers', 'customers', 'orders'] as const;
         setStats(keys.map((key, i) => ({
           icon: statIcons[i],
           value: key === 'orders' ? 'FREE' : formatStatValue(key, data[key]),
           label: statLabels[key],
         })));
-      })
-      .catch(() => {});
-
-    productsApi.getBanners('side')
-      .then((banners) => {
+      }
+      if (bannersResult.status === 'fulfilled') {
+        const banners = bannersResult.value;
         if (banners?.length >= 2) {
           const accentColors = ['from-primary-500/80 to-primary-700/90', 'from-accent-500/80 to-accent-700/90'];
-          setSidePromos(banners.slice(0, 2).map((b, i) => ({
+          setSidePromos(banners.slice(0, 2).map((b: any, i: number) => ({
             image: b.image || defaultSidePromos[i]?.image || '',
             title: b.title,
             subtitle: b.subtitle || '',
@@ -86,8 +90,9 @@ export default function HomePage() {
             accent: accentColors[i % 2],
           })));
         }
-      })
-      .catch(() => {});
+      }
+    });
+    return () => { cancelled = true; };
   }, []);
 
   return (

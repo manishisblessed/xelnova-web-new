@@ -12,9 +12,10 @@ export class PaymentService {
     private readonly config: ConfigService,
     private readonly prisma: PrismaService,
   ) {
-    const keyId = this.config.get('RAZORPAY_KEY_ID');
-    const keySecret = this.config.get('RAZORPAY_KEY_SECRET');
-    if (keyId && keySecret) {
+    const keyId = this.config.get('RAZORPAY_KEY_ID') || '';
+    const keySecret = this.config.get('RAZORPAY_KEY_SECRET') || '';
+    const isPlaceholder = (v: string) => !v || v.startsWith('your-') || v === 'test' || v.length < 10;
+    if (!isPlaceholder(keyId) && !isPlaceholder(keySecret)) {
       this.razorpay = new Razorpay({ key_id: keyId, key_secret: keySecret });
     }
   }

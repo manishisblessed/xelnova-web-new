@@ -56,6 +56,8 @@ export function AdminListPage<T extends object>({
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('');
 
+  const queryParamsKey = JSON.stringify(queryParams);
+
   const fetchData = useCallback(async () => {
     try {
       const result = await apiGet<T[]>(section, queryParams);
@@ -65,7 +67,7 @@ export function AdminListPage<T extends object>({
     } finally {
       setLoading(false);
     }
-  }, [section, queryParams, normalizeItems]);
+  }, [section, queryParamsKey, normalizeItems]);
 
   useEffect(() => { fetchData(); }, [fetchData, refreshTrigger]);
 

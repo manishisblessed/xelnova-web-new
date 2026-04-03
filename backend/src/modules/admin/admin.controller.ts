@@ -9,7 +9,7 @@ import { successResponse, paginatedResponse } from '../../common/helpers/respons
 import { getClientIp } from '../../common/helpers/client-ip';
 import {
   AdminProductQueryDto, AdminUpdateProductDto,
-  AdminOrderQueryDto, AdminUpdateOrderDto,
+  AdminOrderQueryDto, AdminUpdateOrderDto, AdminUpdateShipmentDto,
   AdminSellerQueryDto, AdminUpdateSellerDto,
   AdminCustomerQueryDto, AdminUpdateCustomerDto,
   CreateCategoryDto, UpdateCategoryDto,
@@ -67,6 +67,12 @@ export class AdminController {
   @ApiOperation({ summary: 'Update order status' })
   async updateOrder(@Param('id') id: string, @Body() dto: AdminUpdateOrderDto) {
     return successResponse(await this.service.updateOrder(id, dto), 'Order updated');
+  }
+
+  @Patch('orders/:id/shipment')
+  @ApiOperation({ summary: 'Update shipment details (AWB, carrier, tracking)' })
+  async updateShipment(@Param('id') orderId: string, @Body() dto: AdminUpdateShipmentDto) {
+    return successResponse(await this.service.updateShipment(orderId, dto), 'Shipment updated');
   }
 
   // ─── Sellers ───

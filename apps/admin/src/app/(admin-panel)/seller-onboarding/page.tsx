@@ -12,6 +12,7 @@ import {
   Loader2,
   Search,
   RefreshCw,
+  MessageSquare,
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { Button, Badge } from '@xelnova/ui';
@@ -20,7 +21,7 @@ import { DashboardHeader } from '@/components/dashboard/dashboard-header';
 import { StatCard } from '@/components/dashboard/stat-card';
 import { DataTable, type Column } from '@/components/dashboard/data-table';
 import { ActionModal } from '@/components/dashboard/action-modal';
-import { FormField, FormTextarea } from '@/components/dashboard/form-field';
+import { FormField, FormTextarea, FormInput } from '@/components/dashboard/form-field';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
 
@@ -53,8 +54,18 @@ interface SellerProfile {
   panNumber?: string;
   panName?: string;
   panVerified: boolean;
+  panVerifiedData?: { panNumber?: string; name?: string; panStatus?: string; nameStatus?: string; dobStatus?: string; aadhaarSeedingStatus?: string };
   panDocumentUrl?: string;
   maskedAadhaarUrl?: string;
+  aadhaarNumber?: string;
+  aadhaarVerified: boolean;
+  aadhaarVerifiedData?: { fullName?: string; dob?: string; gender?: string; address?: Record<string, string> };
+  signatureUrl?: string;
+  signatureData?: string;
+  signatureVerified?: boolean;
+  signatureRejectionNote?: string;
+  categorySelectionType?: string;
+  selectedCategories?: string[];
   bankAccountName?: string;
   bankAccountNumber?: string;
   bankIfscCode?: string;
@@ -102,6 +113,20 @@ const statusLabels: Record<string, string> = {
   REJECTED: 'Rejected',
 };
 
+const CATEGORY_LABEL_MAP: Record<string, string> = {
+  electronics: 'Electronics',
+  fashion: 'Fashion & Apparel',
+  home: 'Home & Kitchen',
+  beauty: 'Beauty & Personal Care',
+  sports: 'Sports & Fitness',
+  books: 'Books & Stationery',
+  toys: 'Toys & Games',
+  grocery: 'Grocery & Gourmet',
+  health: 'Health & Wellness',
+  automotive: 'Automotive',
+};
+const ALL_CATEGORY_LABELS = Object.keys(CATEGORY_LABEL_MAP);
+
 function getAuthToken() {
   if (typeof window === 'undefined') return null;
   return document.cookie
@@ -118,6 +143,9 @@ export default function SellerOnboardingPage() {
   const [reviewOpen, setReviewOpen] = useState(false);
   const [reviewLoading, setReviewLoading] = useState(false);
   const [rejectionReason, setRejectionReason] = useState('');
+  const [commissionRate, setCommissionRate] = useState(10);
+  const [signatureComment, setSignatureComment] = useState('');
+  const [signatureLoading, setSignatureLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [pagination, setPagination] = useState({ page: 1, limit: 20, total: 0, totalPages: 0 });
@@ -176,6 +204,7 @@ export default function SellerOnboardingPage() {
         body: JSON.stringify({
           decision,
           rejectionReason: decision === 'REJECTED' ? rejectionReason : undefined,
+          commissionRate: decision === 'APPROVED' ? commissionRate : undefined,
         }),
       });
       const data = await res.json();
@@ -193,6 +222,44 @@ export default function SellerOnboardingPage() {
       toast.error('Review failed');
     } finally {
       setReviewLoading(false);
+    }
+  };
+
+  const handleSignatureVerification = async (decision: 'VERIFIED' | 'REJECTED') => {
+    if (!selectedSeller) return;
+    if (decision === 'REJECTED' && !signatureComment.trim()) {
+      toast.error('Please provide a comment for rejection');
+      return;
+    }
+    setSignatureLoading(true);
+    try {
+      const token = getAuthToken();
+      const res = await fetch(`${API_BASE}/seller-onboarding/admin/verify-signature/${selectedSeller.id}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${decodeURIComponent(token)}` } : {}),
+        },
+        body: JSON.stringify({
+          decision,
+          comment: signatureComment || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast.success(`Signature ${decision.toLowerCase()}`);
+        setSignatureComment('');
+        setSelectedSeller((prev) =>
+          prev ? { ...prev, signatureVerified: decision === 'VERIFIED', signatureRejectionNote: decision === 'REJECTED' ? signatureComment : undefined } : null
+        );
+        fetchSellers();
+      } else {
+        toast.error(data.message || 'Failed');
+      }
+    } catch {
+      toast.error('Signature verification failed');
+    } finally {
+      setSignatureLoading(false);
     }
   };
 
@@ -254,10 +321,13 @@ export default function SellerOnboardingPage() {
       render: (row) => (
         <div className="flex items-center gap-1.5 flex-wrap">
           <Badge variant={row.gstVerified || row.sellsNonGstProducts ? 'success' : 'warning'}>
-            GST {row.gstVerified ? 'Verified' : row.sellsNonGstProducts ? 'Exempt' : 'Pending'}
+            GST {row.gstVerified ? '✓' : row.sellsNonGstProducts ? 'N/A' : '?'}
+          </Badge>
+          <Badge variant={row.aadhaarVerified ? 'success' : 'warning'}>
+            KYC {row.aadhaarVerified ? '✓' : '?'}
           </Badge>
           <Badge variant={row.bankVerified ? 'success' : 'warning'}>
-            Bank {row.bankVerified ? 'Verified' : 'Pending'}
+            Bank {row.bankVerified ? '✓' : '?'}
           </Badge>
         </div>
       ),
@@ -416,8 +486,6 @@ export default function SellerOnboardingPage() {
             <DetailSection title="Store Information">
               <DetailGrid>
                 <DetailItem label="Store Name" value={selectedSeller.storeName} />
-                <DetailItem label="Business Type" value={selectedSeller.businessType} />
-                <DetailItem label="Category" value={selectedSeller.businessCategory} />
                 <DetailItem label="Commission Rate" value={`${selectedSeller.commissionRate}%`} />
               </DetailGrid>
             </DetailSection>
@@ -431,29 +499,57 @@ export default function SellerOnboardingPage() {
               </DetailGrid>
             </DetailSection>
 
-            {/* Tax Details */}
-            <DetailSection title="Tax Details">
+            {/* Tax & Verification Details */}
+            <DetailSection title="Verification Details">
               <DetailGrid>
                 <DetailItem
                   label="GST Number"
                   value={selectedSeller.gstNumber || (selectedSeller.sellsNonGstProducts ? 'Non-GST Seller' : undefined)}
                   verified={selectedSeller.gstVerified}
                 />
-                <DetailItem label="PAN Number" value={selectedSeller.panNumber} />
-                <DetailItem label="PAN Name" value={selectedSeller.panName} />
+                <DetailItem label="Aadhaar" value={selectedSeller.aadhaarNumber} verified={selectedSeller.aadhaarVerified} />
               </DetailGrid>
               {selectedSeller.gstVerifiedData && (
                 <div className="mt-3 rounded-xl bg-success-50 border border-success-200 p-3">
                   <p className="text-sm font-medium text-success-700">GST Verified</p>
-                  <p className="text-sm text-success-600">
-                    Trade Name: {selectedSeller.gstVerifiedData.tradeName}
-                  </p>
-                  <p className="text-sm text-success-600">
-                    Legal Name: {selectedSeller.gstVerifiedData.legalName}
-                  </p>
+                  <p className="text-sm text-success-600">Trade Name: {selectedSeller.gstVerifiedData.tradeName}</p>
+                  <p className="text-sm text-success-600">Legal Name: {selectedSeller.gstVerifiedData.legalName}</p>
+                </div>
+              )}
+              {selectedSeller.aadhaarVerifiedData && (
+                <div className="mt-3 rounded-xl bg-success-50 border border-success-200 p-3">
+                  <p className="text-sm font-medium text-success-700">Aadhaar Verified</p>
+                  <p className="text-sm text-success-600">Name: {selectedSeller.aadhaarVerifiedData.fullName}</p>
+                  <p className="text-sm text-success-600">DOB: {selectedSeller.aadhaarVerifiedData.dob} | Gender: {selectedSeller.aadhaarVerifiedData.gender}</p>
+                  {selectedSeller.aadhaarVerifiedData.address?.state && (
+                    <p className="text-sm text-success-600">State: {selectedSeller.aadhaarVerifiedData.address.state}</p>
+                  )}
                 </div>
               )}
             </DetailSection>
+
+            {/* Category */}
+            {selectedSeller.categorySelectionType && (
+              <DetailSection title="Category Selection">
+                <DetailItem label="Type" value={selectedSeller.categorySelectionType === 'all' ? 'All Categories' : 'Selected Categories'} />
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {selectedSeller.categorySelectionType === 'all' ? (
+                    <>
+                      {(selectedSeller.selectedCategories && selectedSeller.selectedCategories.length > 0
+                        ? selectedSeller.selectedCategories
+                        : ALL_CATEGORY_LABELS
+                      ).map((cat) => (
+                        <Badge key={cat} variant="default">{CATEGORY_LABEL_MAP[cat] || cat}</Badge>
+                      ))}
+                    </>
+                  ) : (
+                    selectedSeller.selectedCategories?.map((cat) => (
+                      <Badge key={cat} variant="default">{CATEGORY_LABEL_MAP[cat] || cat}</Badge>
+                    ))
+                  )}
+                </div>
+              </DetailSection>
+            )}
 
             {/* Address */}
             <DetailSection title="Pickup Address">
@@ -497,21 +593,64 @@ export default function SellerOnboardingPage() {
               </DetailGrid>
             </DetailSection>
 
-            {/* KYC Documents */}
-            <DetailSection title="KYC Documents">
-              {selectedSeller.panDocumentUrl || selectedSeller.maskedAadhaarUrl ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {selectedSeller.panDocumentUrl && (
-                    <DocCard label="PAN Card" url={selectedSeller.panDocumentUrl} />
-                  )}
-                  {selectedSeller.maskedAadhaarUrl && (
-                    <DocCard label="Masked Aadhaar" url={selectedSeller.maskedAadhaarUrl} />
-                  )}
+            {/* Signature with Verification */}
+            {(selectedSeller.signatureUrl || selectedSeller.signatureData) && (
+              <DetailSection title="Signature">
+                <div className="rounded-xl border border-border overflow-hidden bg-white p-4 max-w-xs">
+                  <img
+                    src={selectedSeller.signatureUrl || selectedSeller.signatureData || ''}
+                    alt="Seller Signature"
+                    className="max-h-24 object-contain"
+                  />
                 </div>
-              ) : (
-                <p className="text-sm text-text-muted italic">No KYC documents uploaded</p>
-              )}
-            </DetailSection>
+                {selectedSeller.signatureVerified ? (
+                  <div className="mt-3 rounded-xl bg-success-50 border border-success-200 p-3">
+                    <p className="text-sm font-medium text-success-700 flex items-center gap-1.5">
+                      <CheckCircle size={14} /> Signature Verified
+                    </p>
+                  </div>
+                ) : selectedSeller.signatureRejectionNote ? (
+                  <div className="mt-3 rounded-xl bg-danger-50 border border-danger-200 p-3">
+                    <p className="text-sm font-medium text-danger-700 flex items-center gap-1.5">
+                      <XCircle size={14} /> Signature Rejected
+                    </p>
+                    <p className="text-sm text-danger-600 mt-1">{selectedSeller.signatureRejectionNote}</p>
+                  </div>
+                ) : null}
+                {!selectedSeller.signatureVerified && (
+                  <div className="mt-3 space-y-3">
+                    <div>
+                      <label className="block text-xs font-medium text-text-muted mb-1.5">
+                        <MessageSquare size={12} className="inline mr-1" />
+                        Comment (required for rejection)
+                      </label>
+                      <textarea
+                        value={signatureComment}
+                        onChange={(e) => setSignatureComment(e.target.value)}
+                        placeholder="Add a comment about the signature..."
+                        rows={2}
+                        className="w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm text-text-primary outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 transition-colors"
+                      />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleSignatureVerification('REJECTED')}
+                        disabled={signatureLoading}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-danger-200 bg-white px-3 py-1.5 text-sm font-medium text-danger-600 hover:bg-danger-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      >
+                        {signatureLoading ? <Loader2 size={14} className="animate-spin" /> : <XCircle size={14} />}
+                        Reject Signature
+                      </button>
+                      <Button size="sm" onClick={() => handleSignatureVerification('VERIFIED')} loading={signatureLoading}>
+                        <CheckCircle size={14} />
+                        Verify Signature
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </DetailSection>
+            )}
 
             {/* Other Documents */}
             {selectedSeller.documents?.length > 0 && (
@@ -608,20 +747,34 @@ export default function SellerOnboardingPage() {
                 verified={selectedSeller.gstVerified}
                 fallback={selectedSeller.sellsNonGstProducts ? 'Non-GST' : undefined}
               />
+              <ReviewStatusItem label="Aadhaar KYC" verified={selectedSeller.aadhaarVerified} />
               <ReviewStatusItem label="Bank Status" verified={selectedSeller.bankVerified} />
               <div>
-                <p className="text-xs text-text-muted">Documents</p>
-                <p className="text-sm font-medium text-text-primary">
-                  {selectedSeller.documents?.length || 0} uploaded
-                </p>
-              </div>
-              <div>
-                <p className="text-xs text-text-muted">Address</p>
-                <p className="text-sm font-medium text-text-primary">
-                  {selectedSeller.businessCity ? 'Provided' : 'Missing'}
+                <p className="text-xs text-text-muted">Signature</p>
+                <p className="text-sm font-medium flex items-center gap-1 text-text-primary">
+                  {selectedSeller.signatureVerified ? (
+                    <><CheckCircle size={14} className="text-success-500" /> Verified</>
+                  ) : selectedSeller.signatureUrl || selectedSeller.signatureData ? (
+                    'Provided (not verified)'
+                  ) : (
+                    <><XCircle size={14} className="text-danger-500" /> Missing</>
+                  )}
                 </p>
               </div>
             </div>
+
+            <FormField label="Commission Rate (%)">
+              <FormInput
+                type="number"
+                min={0}
+                max={100}
+                step={0.5}
+                value={commissionRate}
+                onChange={(e) => setCommissionRate(parseFloat(e.target.value) || 0)}
+                placeholder="e.g. 10"
+              />
+              <p className="text-xs text-text-muted mt-1">Set the commission percentage for this seller (default: 10%)</p>
+            </FormField>
 
             <FormField label="Rejection Reason (required if rejecting)">
               <FormTextarea

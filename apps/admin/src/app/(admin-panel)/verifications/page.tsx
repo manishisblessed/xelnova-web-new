@@ -75,13 +75,19 @@ export default function VerificationsPage() {
     switch (status) {
       case 'VERIFIED':
         return <Badge variant="success">Verified</Badge>;
+      case 'URL_CREATED':
+        return <Badge variant="default">URL Created</Badge>;
       case 'INVALID':
       case 'INVALID_FORMAT':
         return <Badge variant="danger">Invalid</Badge>;
       case 'NOT_FOUND':
         return <Badge variant="warning">Not Found</Badge>;
+      case 'FAILED':
+        return <Badge variant="danger">Failed</Badge>;
       case 'ERROR':
       case 'API_ERROR':
+      case 'CONFIG_ERROR':
+      case 'SERVICE_ERROR':
         return <Badge variant="danger">Error</Badge>;
       default:
         return <Badge variant="default">{status}</Badge>;
@@ -94,8 +100,16 @@ export default function VerificationsPage() {
         return <FileText size={16} className="text-blue-500" />;
       case 'IFSC':
         return <CreditCard size={16} className="text-purple-500" />;
-      case 'PAN':
+      case 'PAN_VERIFY':
+      case 'PAN_360':
+      case 'PAN_DIGILOCKER_URL':
+      case 'PAN_DIGILOCKER_DOC':
         return <Building2 size={16} className="text-orange-500" />;
+      case 'AADHAAR_DIGILOCKER_URL':
+      case 'AADHAAR_DIGILOCKER_DOC':
+        return <FileText size={16} className="text-emerald-500" />;
+      case 'BANK_VERIFY':
+        return <CreditCard size={16} className="text-indigo-500" />;
       default:
         return <FileText size={16} className="text-gray-500" />;
     }
@@ -119,6 +133,8 @@ export default function VerificationsPage() {
     failed: logs.filter(l => ['INVALID', 'INVALID_FORMAT', 'NOT_FOUND', 'ERROR'].includes(l.status)).length,
     gstin: logs.filter(l => l.type === 'GSTIN').length,
     ifsc: logs.filter(l => l.type === 'IFSC').length,
+    aadhaar: logs.filter(l => l.type.startsWith('AADHAAR')).length,
+    pan: logs.filter(l => l.type.startsWith('PAN')).length,
   };
 
   if (loading) {
@@ -144,9 +160,9 @@ export default function VerificationsPage() {
       <DashboardHeader title="Verifications" />
       <div className="p-6 space-y-6">
         {/* Stats */}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
           <div className="rounded-2xl border border-border bg-surface p-4 shadow-card">
-            <p className="text-sm text-text-muted">Total Verifications</p>
+            <p className="text-sm text-text-muted">Total</p>
             <p className="text-2xl font-bold text-text-primary mt-1">{stats.total}</p>
           </div>
           <div className="rounded-2xl border border-border bg-surface p-4 shadow-card">
@@ -158,12 +174,20 @@ export default function VerificationsPage() {
             <p className="text-2xl font-bold text-red-600 mt-1">{stats.failed}</p>
           </div>
           <div className="rounded-2xl border border-border bg-surface p-4 shadow-card">
-            <p className="text-sm text-text-muted">GSTIN Checks</p>
+            <p className="text-sm text-text-muted">GSTIN</p>
             <p className="text-2xl font-bold text-blue-600 mt-1">{stats.gstin}</p>
           </div>
           <div className="rounded-2xl border border-border bg-surface p-4 shadow-card">
-            <p className="text-sm text-text-muted">IFSC Checks</p>
+            <p className="text-sm text-text-muted">IFSC</p>
             <p className="text-2xl font-bold text-purple-600 mt-1">{stats.ifsc}</p>
+          </div>
+          <div className="rounded-2xl border border-border bg-surface p-4 shadow-card">
+            <p className="text-sm text-text-muted">Aadhaar</p>
+            <p className="text-2xl font-bold text-emerald-600 mt-1">{stats.aadhaar}</p>
+          </div>
+          <div className="rounded-2xl border border-border bg-surface p-4 shadow-card">
+            <p className="text-sm text-text-muted">PAN</p>
+            <p className="text-2xl font-bold text-orange-600 mt-1">{stats.pan}</p>
           </div>
         </div>
 
@@ -181,7 +205,13 @@ export default function VerificationsPage() {
             <option value="">All Types</option>
             <option value="GSTIN">GSTIN</option>
             <option value="IFSC">IFSC</option>
-            <option value="PAN">PAN</option>
+            <option value="BANK_VERIFY">Bank Verify</option>
+            <option value="PAN_VERIFY">PAN Verify</option>
+            <option value="PAN_360">PAN 360</option>
+            <option value="PAN_DIGILOCKER_URL">PAN Digilocker URL</option>
+            <option value="PAN_DIGILOCKER_DOC">PAN Digilocker Doc</option>
+            <option value="AADHAAR_DIGILOCKER_URL">Aadhaar Digilocker URL</option>
+            <option value="AADHAAR_DIGILOCKER_DOC">Aadhaar Digilocker Doc</option>
           </select>
           <select
             value={statusFilter}
@@ -263,6 +293,21 @@ export default function VerificationsPage() {
                           )}
                           {log.type === 'IFSC' && log.verifiedData.BANK && (
                             <p className="text-text-primary">{log.verifiedData.BANK}</p>
+                          )}
+                          {log.type === 'AADHAAR_DIGILOCKER_DOC' && log.verifiedData.name && (
+                            <p className="text-text-primary">{log.verifiedData.name}{log.verifiedData.dob ? ` (DOB: ${log.verifiedData.dob})` : ''}</p>
+                          )}
+                          {log.type === 'PAN_360' && log.verifiedData.registeredName && (
+                            <p className="text-text-primary">{log.verifiedData.registeredName}{log.verifiedData.dob ? ` — DOB: ${log.verifiedData.dob}` : ''}</p>
+                          )}
+                          {log.type === 'PAN_VERIFY' && log.verifiedData.registeredName && (
+                            <p className="text-text-primary">{log.verifiedData.registeredName} ({log.verifiedData.type})</p>
+                          )}
+                          {log.type === 'PAN_DIGILOCKER_DOC' && log.verifiedData.name && (
+                            <p className="text-text-primary">{log.verifiedData.name}{log.verifiedData.panNumber ? ` — ${log.verifiedData.panNumber}` : ''}</p>
+                          )}
+                          {log.type === 'BANK_VERIFY' && log.verifiedData.nameAtBank && (
+                            <p className="text-text-primary">{log.verifiedData.nameAtBank}{log.verifiedData.bankName ? ` — ${log.verifiedData.bankName}` : ''}</p>
                           )}
                         </div>
                       ) : log.errorMessage ? (

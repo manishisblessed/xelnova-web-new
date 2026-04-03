@@ -9,6 +9,7 @@ type GateState = 'checking' | 'ok' | 'incomplete' | 'under_review' | 'rejected';
 
 interface RegistrationStatus {
   hasSellerProfile: boolean;
+  sellerId?: string | null;
   onboardingStatus?: string | null;
   onboardingStep?: number | null;
   onboardingComplete?: boolean;
@@ -91,11 +92,21 @@ export function SellerProfileGate({ children }: { children: React.ReactNode }) {
         </p>
         {status?.onboardingStep && (
           <p className="text-sm text-gray-500">
-            You&apos;re on step {status.onboardingStep} of 6
+            You&apos;re on step {Math.min(status.onboardingStep, 3)} of 3
           </p>
         )}
         <button
-          onClick={() => router.push('/register')}
+          onClick={() => {
+            if (status?.sellerId && status?.onboardingStep) {
+              try {
+                sessionStorage.setItem('xelnova-reg', JSON.stringify({
+                  sellerId: status.sellerId,
+                  step: Math.min(status.onboardingStep, 3),
+                }));
+              } catch { /* ignore */ }
+            }
+            router.push('/register');
+          }}
           className="mt-2 px-6 py-3 rounded-xl bg-primary-500 text-white font-semibold hover:bg-primary-600 transition-colors shadow-lg shadow-primary-500/25"
         >
           Complete Registration

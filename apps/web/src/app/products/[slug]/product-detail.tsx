@@ -7,7 +7,7 @@ import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Star, Heart, Share2, ShieldCheck, Truck, RotateCcw, ChevronRight,
-  Minus, Plus, ThumbsUp, Check, ShoppingCart, Package, Loader2,
+  Minus, Plus, ThumbsUp, Check, ShoppingCart, Package, Loader2, Ruler, X,
 } from "lucide-react";
 import { cn } from "@xelnova/utils";
 import { formatCurrency, formatDate } from "@xelnova/utils";
@@ -15,6 +15,7 @@ import { useProductBySlug } from "@/lib/api";
 import { useCartStore } from "@/lib/store/cart-store";
 import { useWishlistStore } from "@/lib/store/wishlist-store";
 import { ProductCard } from "@/components/marketplace/product-card";
+import type { SizeChartRow } from "@/lib/data/products";
 
 type TabId = "description" | "specifications" | "reviews";
 
@@ -26,15 +27,20 @@ export default function ProductDetail() {
   const product = data?.product ?? null;
 
   const [selectedImage, setSelectedImage] = useState(0);
-  const [quantity, setQuantity] = useState(1);
   const [activeTab, setActiveTab] = useState<TabId>("description");
   const [selectedVariants, setSelectedVariants] = useState<Record<string, string>>({});
   const [zoomPos, setZoomPos] = useState({ x: 50, y: 50 });
   const [isZooming, setIsZooming] = useState(false);
+  const [justAdded, setJustAdded] = useState(false);
+  const [sizeChartModal, setSizeChartModal] = useState<{ label: string; rows: SizeChartRow[] } | null>(null);
+  const [variantGallery, setVariantGallery] = useState<string[] | null>(null);
+  const [hoverPreviewImage, setHoverPreviewImage] = useState<string | null>(null);
 
-  const addItem = useCartStore((s) => s.addItem);
+  const setItemQuantity = useCartStore((s) => s.setItemQuantity);
+  const getItemQuantity = useCartStore((s) => s.getItemQuantity);
   const toggle = useWishlistStore((s) => s.toggle);
-  const isInWishlist = useWishlistStore((s) => product ? s.isInWishlist(product.id) : false);
+  const productId = product?.id;
+  const isInWishlist = useWishlistStore((s) => productId ? s.isInWishlist(productId) : false);
 
   const similarProducts = data?.relatedProducts || [];
 
@@ -61,23 +67,143 @@ export default function ProductDetail() {
     );
   }
 
+  // Augment variants with a synthetic "default" option from the main product
+  // images so the base product is selectable alongside variant swatches.
+  const augmentedVariants = (() => {
+    if (!product || product.images.length === 0) return product?.variants ?? [];
+    return product.variants.map((variant) => {
+      const hasDefault = variant.options.some((o) => o.value === "__default__");
+      if (hasDefault) return variant;
+      const defaultLabel = variant.defaultLabel || product.name.split("|")[0].trim().slice(0, 30);
+      const defaultOption: (typeof variant.options)[number] = {
+        value: "__default__",
+        label: defaultLabel,
+        available: true,
+        images: product.images,
+        price: product.price,
+        compareAtPrice: product.comparePrice > product.price ? product.comparePrice : undefined,
+        stock: product.stockCount,
+      };
+      return { ...variant, options: [defaultOption, ...variant.options] };
+    });
+  })();
+
   const variantString = Object.entries(selectedVariants).map(([, v]) => v).join("-");
 
-  const handleAddToCart = () => {
-    addItem({
-      id: `${product.id}-${variantString || "default"}`,
-      productId: product.id,
-      name: product.name,
-      slug: product.slug,
-      price: product.price,
-      comparePrice: product.comparePrice,
-      image: product.images[0] || "",
-      variant: variantString || undefined,
-      seller: product.seller.name,
-    });
+  const effectivePrice = (() => {
+    if (!product) return 0;
+    for (const variant of augmentedVariants) {
+      const sel = selectedVariants[variant.type];
+      if (!sel) continue;
+      const opt = variant.options.find((o) => o.value === sel);
+      if (opt?.price != null) return opt.price;
+    }
+    return product.price;
+  })();
+
+  const effectiveComparePrice = (() => {
+    if (!product) return 0;
+    for (const variant of augmentedVariants) {
+      const sel = selectedVariants[variant.type];
+      if (!sel) continue;
+      const opt = variant.options.find((o) => o.value === sel);
+      if (opt?.compareAtPrice != null) return opt.compareAtPrice;
+    }
+    return product.comparePrice;
+  })();
+
+  const effectiveStock = (() => {
+    if (!product) return 0;
+    let found = false;
+    let min = Infinity;
+    for (const variant of augmentedVariants) {
+      const sel = selectedVariants[variant.type];
+      if (!sel) continue;
+      const opt = variant.options.find((o) => o.value === sel);
+      if (opt?.stock != null) {
+        found = true;
+        min = Math.min(min, opt.stock);
+      }
+    }
+    return found ? min : product.stockCount;
+  })();
+
+  const effectiveDiscount = effectiveComparePrice > effectivePrice
+    ? Math.round(((effectiveComparePrice - effectivePrice) / effectiveComparePrice) * 100)
+    : 0;
+  const effectiveInStock = effectiveStock > 0;
+
+  const handleVariantSelect = (type: string, value: string, opt?: { images?: string[] }) => {
+    setSelectedVariants((prev) => ({ ...prev, [type]: value }));
+    setHoverPreviewImage(null);
+    if (opt?.images && opt.images.length > 0) {
+      setVariantGallery(opt.images);
+      setSelectedImage(0);
+    }
   };
 
-  const handleBuyNow = () => { handleAddToCart(); router.push("/cart"); };
+  const handleVariantHover = (opt: { images?: string[] }) => {
+    const preview = opt.images?.[0];
+    if (preview) setHoverPreviewImage(preview);
+  };
+
+  const handleVariantHoverEnd = () => {
+    setHoverPreviewImage(null);
+  };
+
+  const cartQty = product ? getItemQuantity(product.id, variantString || undefined) : 0;
+  const isInCart = cartQty > 0;
+  const maxQty = product ? Math.min(effectiveStock, 10) : 10;
+
+  const selectedVariantImage = (() => {
+    if (!product) return "";
+    for (const variant of augmentedVariants) {
+      const sel = selectedVariants[variant.type];
+      if (!sel) continue;
+      const opt = variant.options.find((o) => o.value === sel);
+      if (opt?.images?.[0]) return opt.images[0];
+    }
+    return "";
+  })();
+
+  const cartItemPayload = product ? {
+    id: `${product.id}-${variantString || "default"}`,
+    productId: product.id,
+    name: product.name,
+    slug: product.slug,
+    price: effectivePrice,
+    comparePrice: effectiveComparePrice,
+    image: selectedVariantImage || product.images[0] || "",
+    variant: variantString || undefined,
+    seller: product.seller.name,
+  } : null;
+
+  const handleAddToCart = () => {
+    if (!cartItemPayload) return;
+    if (isInCart) {
+      router.push("/cart");
+      return;
+    }
+    setItemQuantity(cartItemPayload, 1);
+    setJustAdded(true);
+    setTimeout(() => setJustAdded(false), 2000);
+  };
+
+  const handleIncrement = () => {
+    if (!cartItemPayload || cartQty >= maxQty) return;
+    setItemQuantity(cartItemPayload, cartQty + 1);
+  };
+
+  const handleDecrement = () => {
+    if (!cartItemPayload || cartQty <= 0) return;
+    setItemQuantity(cartItemPayload, cartQty - 1);
+  };
+
+  const handleBuyNow = () => {
+    if (!cartItemPayload) return;
+    if (!isInCart) setItemQuantity(cartItemPayload, 1);
+    router.push("/cart");
+  };
 
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -93,7 +219,8 @@ export default function ProductDetail() {
     { id: "reviews", label: `Reviews (${product.reviewCount.toLocaleString("en-IN")})` },
   ];
 
-  const hasImages = product.images.length > 0;
+  const activeGallery = variantGallery && variantGallery.length > 0 ? variantGallery : product.images;
+  const hasImages = activeGallery.length > 0;
   const deliveryDate = new Date(Date.now() + 3 * 86400000).toLocaleDateString("en-IN", { weekday: "long", month: "short", day: "numeric" });
 
   return (
@@ -130,9 +257,23 @@ export default function ProductDetail() {
                 onMouseLeave={() => setIsZooming(false)}
                 onMouseMove={handleMouseMove}
               >
+                {/* Hover preview layer — instant swap, no animation */}
+                {hoverPreviewImage && (
+                  <div className="absolute inset-0 z-10">
+                    <Image
+                      src={hoverPreviewImage}
+                      alt={product.name}
+                      fill
+                      sizes="(max-width: 1024px) 100vw, 40vw"
+                      className="object-contain p-4"
+                      style={isZooming ? { transform: "scale(2)", transformOrigin: `${zoomPos.x}% ${zoomPos.y}%` } : undefined}
+                      priority
+                    />
+                  </div>
+                )}
                 <AnimatePresence mode="wait">
                   <motion.div
-                    key={selectedImage}
+                    key={`${variantGallery ? 'v' : 'p'}-${selectedImage}`}
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
@@ -141,7 +282,7 @@ export default function ProductDetail() {
                   >
                     {hasImages ? (
                       <Image
-                        src={product.images[selectedImage]}
+                        src={activeGallery[selectedImage] ?? activeGallery[0]}
                         alt={product.name}
                         fill
                         sizes="(max-width: 1024px) 100vw, 40vw"
@@ -165,12 +306,13 @@ export default function ProductDetail() {
               </motion.div>
 
               {/* Thumbnails */}
-              {product.images.length > 1 && (
+              {activeGallery.length > 1 && (
                 <div className="flex gap-2.5 mt-3 overflow-x-auto pb-1 scrollbar-hide">
-                  {product.images.map((img, i) => (
+                  {activeGallery.map((img, i) => (
                     <button
-                      key={i}
+                      key={`${variantGallery ? 'v' : 'p'}-${i}`}
                       onClick={() => setSelectedImage(i)}
+                      onMouseEnter={() => setSelectedImage(i)}
                       className={cn(
                         "relative h-16 w-16 shrink-0 overflow-hidden rounded-xl border-2 transition-all",
                         selectedImage === i
@@ -218,15 +360,15 @@ export default function ProductDetail() {
 
               {/* Price */}
               <div>
-                {product.comparePrice > product.price && (
+                {effectiveDiscount > 0 && (
                   <div className="mb-1 flex items-center gap-2">
-                    <span className="text-sm text-danger-600 font-semibold">-{product.discount}%</span>
-                    <span className="text-sm text-text-muted line-through">M.R.P.: {formatCurrency(product.comparePrice)}</span>
+                    <span className="text-sm text-danger-600 font-semibold">-{effectiveDiscount}%</span>
+                    <span className="text-sm text-text-muted line-through">M.R.P.: {formatCurrency(effectiveComparePrice)}</span>
                   </div>
                 )}
                 <div className="flex items-baseline gap-1">
                   <span className="text-sm text-text-muted">₹</span>
-                  <span className="text-3xl font-extrabold text-text-primary">{product.price.toLocaleString("en-IN")}</span>
+                  <span className="text-3xl font-extrabold text-text-primary">{effectivePrice.toLocaleString("en-IN")}</span>
                 </div>
                 <p className="mt-1 text-xs text-text-muted">Inclusive of all taxes</p>
               </div>
@@ -259,40 +401,158 @@ export default function ProductDetail() {
               </div>
 
               {/* Variants */}
-              {product.variants.map((variant) => (
-                <div key={variant.type}>
-                  <p className="mb-2 text-sm font-semibold text-text-primary">
-                    {variant.label}:{" "}
-                    <span className="font-normal text-text-secondary">
-                      {selectedVariants[variant.type]
-                        ? variant.options.find((o) => o.value === selectedVariants[variant.type])?.label
-                        : "Select"}
-                    </span>
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {variant.options.map((opt) => (
-                      <button
-                        key={opt.value}
-                        disabled={!opt.available}
-                        onClick={() => setSelectedVariants((prev) => ({ ...prev, [variant.type]: opt.value }))}
-                        className={cn(
-                          "relative rounded-xl border-2 px-4 py-2 text-sm font-medium transition-all",
-                          !opt.available && "opacity-40 cursor-not-allowed line-through",
-                          selectedVariants[variant.type] === opt.value
-                            ? "border-primary-500 bg-primary-50 text-primary-700"
-                            : "border-border text-text-secondary hover:border-gray-300",
-                          variant.type === "color" && "flex items-center gap-2 pl-3"
-                        )}
+              {augmentedVariants.map((variant) => {
+                const isColor = variant.type === "color" || variant.options.some((o) => o.hex || (o.images && o.images.length > 0));
+                const isSize = variant.type === "size";
+                const hasSizeChart = isSize && variant.sizeChart && variant.sizeChart.length > 0;
+
+                return (
+                  <div key={variant.type + variant.label}>
+                    <div className="mb-2 flex items-center justify-between">
+                      <p className="text-sm font-semibold text-text-primary">
+                        {variant.label}:{" "}
+                        <span className="font-normal text-text-secondary">
+                          {selectedVariants[variant.type]
+                            ? variant.options.find((o) => o.value === selectedVariants[variant.type])?.label
+                            : "Select"}
+                        </span>
+                      </p>
+                      {hasSizeChart && (
+                        <button
+                          onClick={() => setSizeChartModal({ label: variant.label, rows: variant.sizeChart! })}
+                          className="flex items-center gap-1 text-xs font-medium text-primary-600 hover:text-primary-700 transition-colors"
+                        >
+                          <Ruler size={12} />
+                          Size Chart
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Color/image variant — hoverable image thumbnails */}
+                    {isColor ? (
+                      <div
+                        className="flex flex-wrap gap-2.5"
+                        onMouseLeave={handleVariantHoverEnd}
                       >
-                        {variant.type === "color" && opt.hex && (
-                          <span className="h-4 w-4 rounded-full border border-gray-200" style={{ background: opt.hex }} />
-                        )}
-                        {opt.label}
-                      </button>
-                    ))}
+                        {variant.options.map((opt) => {
+                          const optDisabled = !opt.available || opt.stock === 0;
+                          const isSelected = selectedVariants[variant.type] === opt.value;
+                          const hasAnyImage = opt.images && opt.images.length > 0;
+                          const thumbImg = opt.images?.[0];
+                          return (
+                            <button
+                              key={opt.value}
+                              disabled={optDisabled}
+                              onClick={() => handleVariantSelect(variant.type, opt.value, opt)}
+                              onMouseEnter={() => !optDisabled && hasAnyImage && handleVariantHover(opt)}
+                              className={cn(
+                                "group relative flex flex-col items-center rounded-xl border-2 transition-all",
+                                optDisabled && "opacity-40 cursor-not-allowed",
+                                isSelected
+                                  ? "border-primary-500 ring-2 ring-primary-500/20 bg-primary-50/50"
+                                  : "border-border hover:border-gray-300 bg-white",
+                              )}
+                            >
+                              {thumbImg ? (
+                                <div className="relative h-16 w-16 overflow-hidden rounded-t-lg">
+                                  <Image src={thumbImg} alt={opt.label} fill sizes="64px" className="object-cover" />
+                                </div>
+                              ) : opt.hex ? (
+                                <div className="flex h-16 w-16 items-center justify-center rounded-t-lg">
+                                  <span
+                                    className="h-10 w-10 rounded-full border-2 border-gray-200 shadow-inner"
+                                    style={{ background: opt.hex }}
+                                  />
+                                </div>
+                              ) : (
+                                <div className="flex h-16 w-16 items-center justify-center rounded-t-lg bg-gray-50">
+                                  <span className="text-xs text-text-muted">{opt.label.slice(0, 2)}</span>
+                                </div>
+                              )}
+                              <div className="w-full px-1.5 py-1 text-center border-t border-border/50">
+                                <p className={cn(
+                                  "text-[11px] font-medium truncate",
+                                  isSelected ? "text-primary-700" : "text-text-secondary"
+                                )}>
+                                  {opt.label}
+                                </p>
+                                {opt.price != null && (
+                                  <p className="text-[10px] text-text-muted">₹{opt.price.toLocaleString("en-IN")}</p>
+                                )}
+                                {opt.compareAtPrice != null && opt.price != null && opt.compareAtPrice > opt.price && (
+                                  <p className="text-[9px] text-text-muted line-through">₹{opt.compareAtPrice.toLocaleString("en-IN")}</p>
+                                )}
+                              </div>
+                              {opt.stock === 0 && (
+                                <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-white/60">
+                                  <span className="text-[10px] font-bold text-danger-600 bg-white/80 px-1.5 py-0.5 rounded">Sold Out</span>
+                                </div>
+                              )}
+                              {isSelected && (
+                                <div className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-primary-600 flex items-center justify-center shadow">
+                                  <Check size={10} className="text-white" strokeWidth={3} />
+                                </div>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : isSize ? (
+                      /* Size variant — chip buttons */
+                      <div className="flex flex-wrap gap-2">
+                        {variant.options.map((opt) => {
+                          const optDisabled = !opt.available || opt.stock === 0;
+                          const isSelected = selectedVariants[variant.type] === opt.value;
+                          return (
+                            <button
+                              key={opt.value}
+                              disabled={optDisabled}
+                              onClick={() => handleVariantSelect(variant.type, opt.value, opt)}
+                              className={cn(
+                                "relative min-w-[48px] rounded-lg border-2 px-3.5 py-2 text-sm font-semibold transition-all",
+                                optDisabled && "opacity-40 cursor-not-allowed",
+                                isSelected
+                                  ? "border-primary-500 bg-primary-50 text-primary-700 shadow-sm"
+                                  : "border-border text-text-secondary hover:border-gray-400 bg-white",
+                                optDisabled && !isSelected && "bg-gray-50 line-through",
+                              )}
+                            >
+                              {opt.label}
+                              {opt.stock === 0 && !optDisabled && (
+                                <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-danger-500" />
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      /* Generic "other" variants — standard buttons */
+                      <div className="flex flex-wrap gap-2">
+                        {variant.options.map((opt) => {
+                          const optDisabled = !opt.available || opt.stock === 0;
+                          return (
+                            <button
+                              key={opt.value}
+                              disabled={optDisabled}
+                              onClick={() => handleVariantSelect(variant.type, opt.value, opt)}
+                              className={cn(
+                                "rounded-xl border-2 px-4 py-2 text-sm font-medium transition-all",
+                                optDisabled && "opacity-40 cursor-not-allowed line-through",
+                                selectedVariants[variant.type] === opt.value
+                                  ? "border-primary-500 bg-primary-50 text-primary-700"
+                                  : "border-border text-text-secondary hover:border-gray-300",
+                              )}
+                            >
+                              {opt.label}
+                              {opt.stock === 0 && <span className="ml-1 text-[10px] text-danger-500">(sold out)</span>}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 
@@ -303,12 +563,12 @@ export default function ProductDetail() {
               <div>
                 <div className="flex items-baseline gap-1">
                   <span className="text-sm text-text-muted">₹</span>
-                  <span className="text-2xl font-extrabold text-text-primary">{product.price.toLocaleString("en-IN")}</span>
+                  <span className="text-2xl font-extrabold text-text-primary">{effectivePrice.toLocaleString("en-IN")}</span>
                 </div>
-                {product.comparePrice > product.price && (
+                {effectiveDiscount > 0 && (
                   <p className="text-xs text-text-muted mt-0.5">
-                    M.R.P.: <span className="line-through">{formatCurrency(product.comparePrice)}</span>{" "}
-                    <span className="text-danger-600 font-semibold">({product.discount}% off)</span>
+                    M.R.P.: <span className="line-through">{formatCurrency(effectiveComparePrice)}</span>{" "}
+                    <span className="text-danger-600 font-semibold">({effectiveDiscount}% off)</span>
                   </p>
                 )}
               </div>
@@ -318,33 +578,38 @@ export default function ProductDetail() {
                 <span className="font-medium">FREE Delivery by {deliveryDate}</span>
               </div>
 
-              {product.inStock ? (
+              {effectiveInStock ? (
                 <p className="text-sm font-semibold text-success-700">In Stock</p>
               ) : (
                 <p className="text-sm font-semibold text-danger-600">Out of Stock</p>
               )}
 
-              {/* Quantity */}
+              {/* Quantity — synced with cart */}
               <div>
                 <p className="mb-1.5 text-xs font-medium text-text-muted">Quantity</p>
-                <div className="inline-flex items-center rounded-xl border border-border bg-gray-50">
-                  <button
-                    onClick={() => setQuantity(Math.max(1, quantity - 1))}
-                    className="rounded-l-xl px-3 py-2 text-text-muted hover:text-text-primary hover:bg-gray-100 transition-colors"
-                  >
-                    <Minus size={14} />
-                  </button>
-                  <span className="min-w-[40px] text-center text-sm font-semibold text-text-primary">{quantity}</span>
-                  <button
-                    onClick={() => setQuantity(Math.min(10, quantity + 1))}
-                    className="rounded-r-xl px-3 py-2 text-text-muted hover:text-text-primary hover:bg-gray-100 transition-colors"
-                  >
-                    <Plus size={14} />
-                  </button>
-                </div>
-                {product.stockCount < 20 && product.inStock && (
+                {isInCart ? (
+                  <div className="inline-flex items-center rounded-xl border-2 border-primary-200 bg-primary-50/50">
+                    <button
+                      onClick={handleDecrement}
+                      className="rounded-l-xl px-3 py-2 text-primary-600 hover:bg-primary-100 transition-colors"
+                    >
+                      <Minus size={14} />
+                    </button>
+                    <span className="min-w-[40px] text-center text-sm font-bold text-primary-700">{cartQty}</span>
+                    <button
+                      onClick={handleIncrement}
+                      disabled={cartQty >= maxQty}
+                      className="rounded-r-xl px-3 py-2 text-primary-600 hover:bg-primary-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      <Plus size={14} />
+                    </button>
+                  </div>
+                ) : (
+                  <p className="text-sm text-text-secondary">1 (update after adding to cart)</p>
+                )}
+                {effectiveStock < 20 && effectiveInStock && (
                   <p className="mt-1.5 text-xs text-danger-600 font-medium">
-                    Only {product.stockCount} left in stock — order soon
+                    Only {effectiveStock} left in stock — order soon
                   </p>
                 )}
               </div>
@@ -354,9 +619,22 @@ export default function ProductDetail() {
                 <button
                   onClick={handleAddToCart}
                   disabled={!product.inStock}
-                  className="w-full rounded-xl bg-primary-600 py-3 text-sm font-bold text-white shadow-sm transition-all hover:bg-primary-700 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed"
+                  className={cn(
+                    "w-full rounded-xl py-3 text-sm font-bold text-white shadow-sm transition-all active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2",
+                    isInCart
+                      ? "bg-success-600 hover:bg-success-700"
+                      : justAdded
+                        ? "bg-success-500"
+                        : "bg-primary-600 hover:bg-primary-700"
+                  )}
                 >
-                  {product.inStock ? "Add to Cart" : "Out of Stock"}
+                  {isInCart ? (
+                    <><ShoppingCart size={16} /> Go to Cart ({cartQty} {cartQty === 1 ? 'item' : 'items'})</>
+                  ) : justAdded ? (
+                    <><Check size={16} /> Added to Cart</>
+                  ) : (
+                    product.inStock ? "Add to Cart" : "Out of Stock"
+                  )}
                 </button>
                 <button
                   onClick={handleBuyNow}
@@ -514,6 +792,66 @@ export default function ProductDetail() {
           </div>
         )}
       </div>
+
+      {/* ─── Size Chart Modal ─── */}
+      <AnimatePresence>
+        {sizeChartModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+            onClick={() => setSizeChartModal(null)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              transition={{ type: "spring", damping: 25, stiffness: 300 }}
+              className="relative w-full max-w-lg rounded-2xl bg-white shadow-2xl overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between border-b border-border px-5 py-4">
+                <div className="flex items-center gap-2">
+                  <Ruler size={18} className="text-primary-600" />
+                  <h3 className="text-lg font-bold text-text-primary">{sizeChartModal.label} Chart</h3>
+                </div>
+                <button
+                  onClick={() => setSizeChartModal(null)}
+                  className="rounded-lg p-1.5 text-text-muted hover:bg-gray-100 hover:text-text-primary transition-colors"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+              <div className="overflow-x-auto p-5">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b-2 border-primary-100">
+                      <th className="pb-3 pr-4 text-left font-bold text-primary-700">{sizeChartModal.label}</th>
+                      {sizeChartModal.rows[0] && Object.keys(sizeChartModal.rows[0].values).map((h) => (
+                        <th key={h} className="pb-3 pr-4 text-left font-semibold text-text-primary">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sizeChartModal.rows.map((row, i) => (
+                      <tr key={row.label} className={cn(
+                        "border-b border-border/50 last:border-0",
+                        i % 2 === 0 ? "bg-gray-50/50" : "bg-white",
+                      )}>
+                        <td className="py-2.5 pr-4 font-semibold text-text-primary">{row.label}</td>
+                        {Object.values(row.values).map((val, j) => (
+                          <td key={j} className="py-2.5 pr-4 text-text-secondary">{val || "—"}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

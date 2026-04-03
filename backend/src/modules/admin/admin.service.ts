@@ -17,6 +17,7 @@ import {
   CreatePageDto, UpdatePageDto,
   AdminSiteSettingsDto,
   AdminAuditContext,
+  AdminUpdateShipmentDto,
 } from './dto/admin.dto';
 
 @Injectable()
@@ -201,6 +202,7 @@ export class AdminService {
           user: { select: { name: true, email: true, phone: true } },
           items: { include: { product: { select: { name: true, images: true } } } },
           shippingAddress: true,
+          shipment: true,
         },
       }),
       this.prisma.order.count({ where }),
@@ -214,6 +216,19 @@ export class AdminService {
     if (dto.status) data.status = dto.status;
     if (dto.paymentStatus) data.paymentStatus = dto.paymentStatus;
     return this.prisma.order.update({ where: { id }, data, include: { items: true } });
+  }
+
+  async updateShipment(orderId: string, dto: AdminUpdateShipmentDto) {
+    const shipment = await this.prisma.shipment.findUnique({ where: { orderId } });
+    if (!shipment) throw new Error('No shipment found for this order');
+
+    const data: Record<string, unknown> = {};
+    if (dto.awbNumber !== undefined) data.awbNumber = dto.awbNumber;
+    if (dto.courierProvider !== undefined) data.courierProvider = dto.courierProvider;
+    if (dto.trackingUrl !== undefined) data.trackingUrl = dto.trackingUrl;
+    if (dto.shipmentStatus !== undefined) data.shipmentStatus = dto.shipmentStatus;
+
+    return this.prisma.shipment.update({ where: { orderId }, data });
   }
 
   // ─── Sellers ───
@@ -728,6 +743,34 @@ export class AdminService {
     shipping: { freeShippingMin: 499, defaultRate: 49, expressRate: 99, codEnabled: true, codFee: 0 },
     payment: { razorpayEnabled: true, codEnabled: true, upiEnabled: true, cardEnabled: true, netBankingEnabled: true },
     notifications: { orderConfirmation: true, shipmentUpdate: true, promotionalEmails: false, smsAlerts: false, adminNewOrder: true },
+    shippingLabel: {
+      companyName: 'Xelnova',
+      companyLogo: '',
+      companyAddress: '',
+      companyPhone: '',
+      companyGstin: '',
+      tagline: '',
+      footerText: 'Thank you for shopping with us!',
+      showSellerSignature: true,
+      showBarcode: true,
+    },
+    shippingRates: {
+      weightSlabs: [
+        { upToKg: 0.5, rate: 35 },
+        { upToKg: 1, rate: 50 },
+        { upToKg: 2, rate: 70 },
+        { upToKg: 5, rate: 120 },
+        { upToKg: 10, rate: 200 },
+        { upToKg: 99, rate: 350 },
+      ],
+      dimensionSlabs: [
+        { upToCm3: 5000, rate: 0 },
+        { upToCm3: 15000, rate: 20 },
+        { upToCm3: 50000, rate: 50 },
+        { upToCm3: 999999, rate: 100 },
+      ],
+      baseCurrency: 'INR',
+    },
   };
 
   private mergeSiteSettings(stored: unknown) {
@@ -738,6 +781,8 @@ export class AdminService {
       shipping: { ...this.defaultSiteSettings.shipping, ...(s.shipping as Record<string, unknown>) },
       payment: { ...this.defaultSiteSettings.payment, ...(s.payment as Record<string, unknown>) },
       notifications: { ...this.defaultSiteSettings.notifications, ...(s.notifications as Record<string, unknown>) },
+      shippingLabel: { ...this.defaultSiteSettings.shippingLabel, ...(s.shippingLabel as Record<string, unknown>) },
+      shippingRates: { ...this.defaultSiteSettings.shippingRates, ...(s.shippingRates as Record<string, unknown>) },
     };
   }
 
@@ -754,6 +799,8 @@ export class AdminService {
       shipping: dto.shipping !== undefined ? { ...current.shipping, ...dto.shipping } : current.shipping,
       payment: dto.payment !== undefined ? { ...current.payment, ...dto.payment } : current.payment,
       notifications: dto.notifications !== undefined ? { ...current.notifications, ...dto.notifications } : current.notifications,
+      shippingLabel: dto.shippingLabel !== undefined ? { ...current.shippingLabel, ...dto.shippingLabel } : current.shippingLabel,
+      shippingRates: dto.shippingRates !== undefined ? { ...current.shippingRates, ...dto.shippingRates } : current.shippingRates,
     };
     await this.prisma.siteSettings.upsert({
       where: { id: 1 },
@@ -762,7 +809,7 @@ export class AdminService {
     });
 
     if (audit) {
-      const sections = (['general', 'tax', 'shipping', 'payment', 'notifications'] as const).filter(
+      const sections = (['general', 'tax', 'shipping', 'payment', 'notifications', 'shippingLabel', 'shippingRates'] as const).filter(
         (k) => dto[k] !== undefined,
       );
       await this.logging.logAdminAudit({

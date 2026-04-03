@@ -4,11 +4,18 @@ const nextConfig: NextConfig = {
   output: 'standalone',
   transpilePackages: ['@xelnova/api', '@xelnova/ui', '@xelnova/utils'],
   images: {
-    unoptimized: true,
+    formats: ['image/avif', 'image/webp'],
+    remotePatterns: [
+      { protocol: 'https', hostname: '**' },
+    ],
   },
   experimental: {
-    optimizePackageImports: ['lucide-react', 'framer-motion'],
+    optimizePackageImports: ['lucide-react', 'framer-motion', '@xelnova/ui', 'recharts'],
   },
+  compiler: {
+    removeConsole: process.env.NODE_ENV === 'production' ? { exclude: ['error', 'warn'] } : false,
+  },
+  poweredByHeader: false,
 };
 
 export default nextConfig;

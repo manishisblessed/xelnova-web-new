@@ -17,30 +17,31 @@ export function useFetch<T>(
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [trigger, setTrigger] = useState(0);
+  const depsKey = JSON.stringify(deps);
 
   const refetch = useCallback(() => setTrigger((t) => t + 1), []);
 
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
     setLoading(true);
     setError(null);
 
     fetcher()
       .then((result) => {
-        if (!cancelled) {
+        if (!controller.signal.aborted) {
           setData(result);
           setLoading(false);
         }
       })
       .catch((err) => {
-        if (!cancelled) {
+        if (!controller.signal.aborted) {
           setError(err?.response?.data?.message || err.message || 'Something went wrong');
           setLoading(false);
         }
       });
 
-    return () => { cancelled = true; };
-  }, [...deps, trigger]);
+    return () => { controller.abort(); };
+  }, [depsKey, trigger]);
 
   return { data, loading, error, refetch };
 }

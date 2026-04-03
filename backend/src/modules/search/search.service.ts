@@ -10,6 +10,7 @@ export class SearchService {
 
     const where = {
       isActive: true,
+      status: 'ACTIVE' as const,
       OR: [
         { name: { contains: term, mode: 'insensitive' as const } },
         { brand: { contains: term, mode: 'insensitive' as const } },
@@ -60,6 +61,7 @@ export class SearchService {
     const products = await this.prisma.product.findMany({
       where: {
         isActive: true,
+        status: 'ACTIVE',
         OR: [
           { name: { contains: term, mode: 'insensitive' } },
           { brand: { contains: term, mode: 'insensitive' } },
@@ -95,13 +97,13 @@ export class SearchService {
     const [topBrands, topProducts, topCategories] = await Promise.all([
       this.prisma.product.groupBy({
         by: ['brand'],
-        where: { isActive: true, brand: { not: null } },
+        where: { isActive: true, status: 'ACTIVE', brand: { not: null } },
         _count: { brand: true },
         orderBy: { _count: { brand: 'desc' } },
         take: 4,
       }),
       this.prisma.product.findMany({
-        where: { isActive: true, isFeatured: true },
+        where: { isActive: true, status: 'ACTIVE', isFeatured: true },
         select: { name: true },
         orderBy: { reviewCount: 'desc' },
         take: 4,

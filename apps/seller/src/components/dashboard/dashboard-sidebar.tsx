@@ -4,7 +4,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { LayoutDashboard, Package, Store, CreditCard, LogOut, User, BarChart3, Settings } from 'lucide-react';
+import { LayoutDashboard, Package, Store, CreditCard, LogOut, User, Truck, Wallet } from 'lucide-react';
 import { cn } from '@xelnova/utils';
 import { useDashboardAuth } from '@/lib/auth-context';
 
@@ -13,6 +13,8 @@ const NAV = [
   { href: '/orders', label: 'Orders', icon: Package },
   { href: '/inventory', label: 'Inventory', icon: Store },
   { href: '/payouts', label: 'Payouts', icon: CreditCard },
+  { href: '/wallet', label: 'Wallet', icon: Wallet },
+  { href: '/shipping', label: 'Shipping', icon: Truck },
   { href: '/profile', label: 'My Profile', icon: User },
 ];
 
@@ -23,17 +25,22 @@ export function DashboardSidebar() {
   return (
     <aside className="w-64 min-h-screen border-r border-border bg-surface flex flex-col">
       <div className="p-6 border-b border-border">
-        <Link href="/dashboard" className="flex items-center gap-2.5">
-          <Image src="/xelnova-icon-dark.png" alt="Xelnova" width={36} height={36} className="h-8 w-8" />
-          <div className="flex items-center gap-1.5">
-            <span className="text-xl font-bold text-primary-600 font-display">Xelnova</span>
-            <span className="text-xs text-text-muted font-medium uppercase tracking-wider">Seller</span>
-          </div>
+        <Link href="/dashboard" className="flex items-center gap-2">
+          <Image
+            src="/xelnova-logo-dark.png"
+            alt="Xelnova"
+            width={160}
+            height={40}
+            className="h-7 w-auto max-w-[118px] shrink-0"
+            priority
+          />
+          <div className="h-5 w-px bg-border shrink-0" aria-hidden />
+          <span className="text-xs font-bold tracking-wide text-primary-600 uppercase shrink-0">Seller</span>
         </Link>
       </div>
       <nav className="flex-1 p-3 space-y-0.5">
         {NAV.map((item) => {
-          const active = pathname === item.href;
+          const active = pathname === item.href || pathname.startsWith(item.href + '/');
           const Icon = item.icon;
           return (
             <Link key={item.href} href={item.href}>

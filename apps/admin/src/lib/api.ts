@@ -106,3 +106,12 @@ export async function apiPatchSiteSettings(body: Record<string, unknown>) {
   });
   return handleResponse(res);
 }
+
+export async function apiUpdateShipment(orderId: string, body: Record<string, unknown>) {
+  const res = await fetch(`${API_URL}/admin/orders/${orderId}/shipment`, {
+    method: 'PATCH',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return handleResponse(res);
+}

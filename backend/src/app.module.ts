@@ -18,6 +18,8 @@ import { EmailModule } from './modules/email/email.module';
 import { LoggingModule } from './modules/logging/logging.module';
 import { VerificationModule } from './modules/verification/verification.module';
 import { SellerOnboardingModule } from './modules/seller-onboarding/seller-onboarding.module';
+import { ShippingModule } from './modules/shipping/shipping.module';
+import { WalletModule } from './modules/wallet/wallet.module';
 import { LoggingMiddleware } from './common/middleware/logging.middleware';
 
 @Module({
@@ -41,6 +43,8 @@ import { LoggingMiddleware } from './common/middleware/logging.middleware';
     PaymentModule,
     EmailModule,
     SellerOnboardingModule,
+    ShippingModule,
+    WalletModule,
   ],
 })
 export class AppModule implements NestModule {

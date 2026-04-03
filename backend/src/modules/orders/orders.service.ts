@@ -1,6 +1,66 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateOrderDto } from './dto/order.dto';
+
+interface VariantOption {
+  value: string;
+  price?: number;
+  stock?: number;
+  [key: string]: unknown;
+}
+
+interface VariantGroup {
+  type: string;
+  options: VariantOption[];
+  [key: string]: unknown;
+}
+
+/**
+ * Given a product's `variants` JSON and a dash-separated variant string from the
+ * client (e.g. "red-l"), resolve the effective price. Returns `undefined` when no
+ * option-level price override exists.
+ */
+function resolveVariantPrice(variants: unknown, variantStr: string | undefined): number | undefined {
+  if (!variantStr || !Array.isArray(variants)) return undefined;
+  const parts = new Set(variantStr.split('-'));
+  for (const group of variants as VariantGroup[]) {
+    if (!Array.isArray(group?.options)) continue;
+    for (const opt of group.options) {
+      if (parts.has(opt.value) && typeof opt.price === 'number') return opt.price;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Check that the requested quantity does not exceed available stock.
+ * If the variant option has its own `stock`, use that; otherwise fall back to product stock.
+ */
+function checkVariantStock(
+  productStock: number,
+  variants: unknown,
+  variantStr: string | undefined,
+  requestedQty: number,
+  productName: string,
+): void {
+  let available = productStock;
+  if (variantStr && Array.isArray(variants)) {
+    const parts = new Set(variantStr.split('-'));
+    for (const group of variants as VariantGroup[]) {
+      if (!Array.isArray(group?.options)) continue;
+      for (const opt of group.options) {
+        if (parts.has(opt.value) && typeof opt.stock === 'number') {
+          available = Math.min(available, opt.stock);
+        }
+      }
+    }
+  }
+  if (requestedQty > available) {
+    throw new BadRequestException(
+      `Insufficient stock for "${productName}"${variantStr ? ` (${variantStr})` : ''}: requested ${requestedQty}, available ${available}`,
+    );
+  }
+}
 
 @Injectable()
 export class OrdersService {
@@ -30,17 +90,40 @@ export class OrdersService {
   }
 
   async create(userId: string, dto: CreateOrderDto) {
+    const productUpdates: Array<{
+      productId: string;
+      stockDelta: number;
+      variantValue?: string;
+      variants: unknown;
+    }> = [];
+
     const orderItems = await Promise.all(
       dto.items.map(async (item) => {
         const product = await this.prisma.product.findUnique({
           where: { id: item.productId },
         });
+        if (!product) {
+          throw new NotFoundException(`Product ${item.productId} not found`);
+        }
+
+        checkVariantStock(product.stock, product.variants, item.variant, item.quantity, product.name);
+
+        const variantPrice = resolveVariantPrice(product.variants, item.variant);
+        const price = variantPrice ?? product.price;
+
+        productUpdates.push({
+          productId: product.id,
+          stockDelta: item.quantity,
+          variantValue: item.variant,
+          variants: product.variants,
+        });
+
         return {
           productId: item.productId,
-          productName: product?.name || 'Unknown Product',
-          productImage: product?.images[0] || '',
+          productName: product.name,
+          productImage: product.images[0] || '',
           quantity: item.quantity,
-          price: product?.price || 0,
+          price,
           variant: item.variant,
         };
       }),
@@ -131,6 +214,35 @@ export class OrdersService {
       },
       include: { items: true, shippingAddress: true },
     });
+
+    // Decrement stock on products and variant options
+    for (const upd of productUpdates) {
+      const updateData: Record<string, unknown> = {
+        stock: { decrement: upd.stockDelta },
+      };
+
+      if (upd.variantValue && Array.isArray(upd.variants)) {
+        const parts = new Set(upd.variantValue.split('-'));
+        const updatedVariants = (upd.variants as VariantGroup[]).map((group) => {
+          if (!Array.isArray(group.options)) return group;
+          return {
+            ...group,
+            options: group.options.map((opt) => {
+              if (parts.has(opt.value) && typeof opt.stock === 'number') {
+                return { ...opt, stock: Math.max(0, opt.stock - upd.stockDelta) };
+              }
+              return opt;
+            }),
+          };
+        });
+        updateData.variants = updatedVariants;
+      }
+
+      await this.prisma.product.update({
+        where: { id: upd.productId },
+        data: updateData as any,
+      });
+    }
 
     // Clear user's cart after order
     await this.prisma.cartItem.deleteMany({ where: { userId } });

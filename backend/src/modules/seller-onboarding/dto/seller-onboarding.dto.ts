@@ -1,7 +1,6 @@
-import { IsString, IsEmail, IsOptional, IsBoolean, MinLength, MaxLength, Matches, IsNumber, IsEnum } from 'class-validator';
+import { IsString, IsEmail, IsOptional, IsBoolean, MinLength, MaxLength, Matches, IsNumber, IsEnum, IsArray } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
-/** Distinct name for Swagger (avoids clash with auth SendOtpDto). */
 export class SellerOnboardingSendOtpDto {
   @ApiProperty({ description: 'Email or phone number' })
   @IsString()
@@ -33,6 +32,7 @@ export class SellerOnboardingVerifyOtpDto {
   otp: string;
 }
 
+// Step 1: Account Creation (unchanged)
 export class Step1AccountDto {
   @ApiProperty()
   @IsString()
@@ -66,31 +66,63 @@ export class Step1AccountDto {
   captchaToken: string;
 }
 
-export class Step2TaxDetailsDto {
-  @ApiPropertyOptional({ description: '15 digit GST number' })
+// Step 2: Business Verification (GST + Aadhaar + PAN + Store + Category)
+export class Step2BusinessVerificationDto {
+  @ApiPropertyOptional({ description: '15-digit GST number' })
   @IsString()
   @IsOptional()
   @Matches(/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/, { message: 'Invalid GSTIN format' })
   gstNumber?: string;
 
-  @ApiPropertyOptional({ description: 'Seller only sells non-GST categories like Books' })
+  @ApiPropertyOptional()
   @IsBoolean()
   @IsOptional()
   sellsNonGstProducts?: boolean;
 
-  @ApiProperty({ description: '10 digit PAN number' })
+  @ApiPropertyOptional()
+  @IsBoolean()
+  @IsOptional()
+  gstVerified?: boolean;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  gstVerifiedData?: any;
+
+  @ApiPropertyOptional({ description: 'PAN number' })
   @IsString()
+  @IsOptional()
   @Matches(/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/, { message: 'Invalid PAN format' })
-  panNumber: string;
+  panNumber?: string;
 
-  @ApiProperty({ description: 'Name as on PAN card' })
+  @ApiPropertyOptional({ description: 'Name as on PAN card' })
   @IsString()
-  @MinLength(2)
-  panName: string;
-}
+  @IsOptional()
+  panName?: string;
 
-export class Step3StoreDetailsDto {
-  @ApiProperty()
+  @ApiPropertyOptional()
+  @IsBoolean()
+  @IsOptional()
+  panVerified?: boolean;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  panVerifiedData?: any;
+
+  @ApiPropertyOptional({ description: 'Aadhaar number (last 4 digits stored)' })
+  @IsString()
+  @IsOptional()
+  aadhaarNumber?: string;
+
+  @ApiPropertyOptional()
+  @IsBoolean()
+  @IsOptional()
+  aadhaarVerified?: boolean;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  aadhaarVerifiedData?: any;
+
+  @ApiProperty({ description: 'Store name' })
   @IsString()
   @MinLength(3)
   @MaxLength(50)
@@ -107,33 +139,48 @@ export class Step3StoreDetailsDto {
   @IsOptional()
   businessType?: string;
 
+  @ApiProperty({ description: '"all" or "choose"' })
+  @IsString()
+  categorySelectionType: string;
+
+  @ApiPropertyOptional({ description: 'Selected category values (when type is "choose")' })
+  @IsArray()
+  @IsOptional()
+  selectedCategories?: string[];
+
+  @ApiPropertyOptional({ description: 'Business address from GST data' })
+  @IsString()
+  @IsOptional()
+  businessAddress?: string;
+
   @ApiPropertyOptional()
   @IsString()
   @IsOptional()
-  businessCategory?: string;
+  businessCity?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  businessState?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  businessPincode?: string;
 }
 
-export class Step4AddressDto {
-  @ApiProperty()
+// Step 3: Final Setup (Signature + Shipping + Bank)
+export class Step3FinalSetupDto {
+  @ApiPropertyOptional({ description: 'Cloudinary URL of signature image' })
   @IsString()
-  @Matches(/^[1-9][0-9]{5}$/, { message: 'Invalid pincode' })
-  pincode: string;
+  @IsOptional()
+  signatureUrl?: string;
 
-  @ApiProperty()
+  @ApiPropertyOptional({ description: 'Base64 data of drawn signature' })
   @IsString()
-  city: string;
+  @IsOptional()
+  signatureData?: string;
 
-  @ApiProperty()
-  @IsString()
-  state: string;
-
-  @ApiProperty()
-  @IsString()
-  @MinLength(10)
-  address: string;
-}
-
-export class Step5ShippingDto {
   @ApiProperty({ enum: ['easy_ship', 'self_ship'] })
   @IsString()
   shippingMethod: string;
@@ -151,9 +198,7 @@ export class Step5ShippingDto {
   @IsNumber()
   @IsOptional()
   deliveryCharge3PlusDays?: number;
-}
 
-export class Step6BankDetailsDto {
   @ApiProperty()
   @IsString()
   @MinLength(2)
@@ -168,12 +213,15 @@ export class Step6BankDetailsDto {
   @IsString()
   @Matches(/^[A-Z]{4}0[A-Z0-9]{6}$/, { message: 'Invalid IFSC code' })
   ifscCode: string;
-}
 
-export class CompleteOnboardingDto {
-  @ApiProperty()
+  @ApiPropertyOptional({ description: 'Skip bank re-verification (dev/testing only)' })
   @IsBoolean()
-  agreeToTerms: boolean;
+  @IsOptional()
+  skipBankVerification?: boolean;
+
+  @ApiPropertyOptional({ description: 'Pre-verified bank data from frontend penny-drop' })
+  @IsOptional()
+  bankVerifiedData?: Record<string, any>;
 }
 
 export class AdminReviewDto {
@@ -190,6 +238,22 @@ export class AdminReviewDto {
   @IsString()
   @IsOptional()
   notes?: string;
+
+  @ApiPropertyOptional({ description: 'Commission rate percentage (0-100)' })
+  @IsNumber()
+  @IsOptional()
+  commissionRate?: number;
+}
+
+export class AdminVerifySignatureDto {
+  @ApiProperty({ enum: ['VERIFIED', 'REJECTED'] })
+  @IsString()
+  decision: 'VERIFIED' | 'REJECTED';
+
+  @ApiPropertyOptional({ description: 'Comment for signature verification/rejection' })
+  @IsString()
+  @IsOptional()
+  comment?: string;
 }
 
 export class GenerateCaptchaDto {

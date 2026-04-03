@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import Image from 'next/image';
+import { usePathname } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { ArrowUp, Mail, Phone, MapPin, Send, Facebook, Youtube, Instagram, Smartphone, ShieldCheck } from 'lucide-react';
 import { useCategories } from '@/lib/api';
@@ -57,7 +58,9 @@ const itemVariants = {
 };
 
 export function Footer() {
+  const pathname = usePathname();
   const { data: categories } = useCategories();
+  const hideBackToTop = pathname === '/login';
 
   const shopSection = {
     title: 'Shop',
@@ -71,14 +74,16 @@ export function Footer() {
 
   return (
     <footer className="bg-surface-dark text-white/80">
-      {/* Back to top */}
-      <button
-        onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-        className="flex w-full items-center justify-center gap-2 bg-primary-700 py-3 text-sm text-white/90 hover:bg-primary-600 transition-colors"
-      >
-        <ArrowUp size={14} />
-        Back to top
-      </button>
+      {!hideBackToTop && (
+        <button
+          type="button"
+          onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+          className="flex w-full items-center justify-center gap-2 bg-primary-700 py-3 text-sm text-white/90 hover:bg-primary-600 transition-colors"
+        >
+          <ArrowUp size={14} />
+          Back to top
+        </button>
+      )}
 
       {/* Newsletter */}
       <div className="border-b border-white/10">

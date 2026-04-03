@@ -10,7 +10,7 @@ export class ProductsService {
   async getStats() {
     const [productCount, sellerCount, userCount, orderCount] =
       await Promise.all([
-        this.prisma.product.count({ where: { isActive: true } }),
+        this.prisma.product.count({ where: { isActive: true, status: 'ACTIVE' } }),
         this.prisma.sellerProfile.count({ where: { verified: true } }),
         this.prisma.user.count({ where: { isActive: true } }),
         this.prisma.order.count(),
@@ -51,7 +51,7 @@ export class ProductsService {
   }
 
   async findAll(query: ProductQueryDto) {
-    const where: Prisma.ProductWhereInput = { isActive: true };
+    const where: Prisma.ProductWhereInput = { isActive: true, status: 'ACTIVE' };
 
     if (query.category) {
       const category = await this.prisma.category.findUnique({
@@ -153,6 +153,7 @@ export class ProductsService {
         categoryId: product.categoryId,
         id: { not: product.id },
         isActive: true,
+        status: 'ACTIVE',
       },
       take: 6,
     });
@@ -162,7 +163,7 @@ export class ProductsService {
 
   async findFeatured() {
     return this.prisma.product.findMany({
-      where: { isFeatured: true, isActive: true },
+      where: { isFeatured: true, isActive: true, status: 'ACTIVE' },
       take: 12,
       include: { seller: true },
     });
@@ -170,7 +171,7 @@ export class ProductsService {
 
   async findTrending() {
     return this.prisma.product.findMany({
-      where: { isTrending: true, isActive: true },
+      where: { isTrending: true, isActive: true, status: 'ACTIVE' },
       take: 12,
       include: { seller: true },
     });
@@ -178,7 +179,7 @@ export class ProductsService {
 
   async findFlashDeals() {
     return this.prisma.product.findMany({
-      where: { isFlashDeal: true, isActive: true },
+      where: { isFlashDeal: true, isActive: true, status: 'ACTIVE' },
       include: { seller: true },
     });
   }
@@ -188,5 +189,29 @@ export class ProductsService {
       where: { isActive: true },
       orderBy: { sortOrder: 'asc' },
     });
+  }
+
+  private readonly defaultShippingRates = {
+    weightSlabs: [
+      { upToKg: 0.5, rate: 35 },
+      { upToKg: 1, rate: 50 },
+      { upToKg: 2, rate: 70 },
+      { upToKg: 5, rate: 120 },
+      { upToKg: 10, rate: 200 },
+      { upToKg: 99, rate: 350 },
+    ],
+    dimensionSlabs: [
+      { upToCm3: 5000, rate: 0 },
+      { upToCm3: 15000, rate: 20 },
+      { upToCm3: 50000, rate: 50 },
+      { upToCm3: 999999, rate: 100 },
+    ],
+    baseCurrency: 'INR',
+  };
+
+  async getShippingRates() {
+    const row = await this.prisma.siteSettings.findUnique({ where: { id: 1 } });
+    const payload = row?.payload && typeof row.payload === 'object' ? (row.payload as Record<string, unknown>) : {};
+    return { ...this.defaultShippingRates, ...(payload.shippingRates as Record<string, unknown>) };
   }
 }

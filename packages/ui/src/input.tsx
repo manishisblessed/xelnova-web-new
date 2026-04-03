@@ -74,12 +74,15 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
             <label
               htmlFor={inputId}
               className={cn(
-                "absolute left-4 text-text-muted transition-all duration-200 pointer-events-none",
+                "absolute text-text-muted transition-all duration-200 pointer-events-none overflow-hidden text-ellipsis whitespace-nowrap",
                 floated
                   ? "top-0 -translate-y-1/2 text-xs bg-surface-raised px-1.5"
                   : "top-1/2 -translate-y-1/2 text-sm",
+                floated ? (icon ? "left-10" : "left-3") : (icon ? "left-11" : "left-4"),
+                floated
+                  ? (icon ? "max-w-[calc(100%-3.25rem)]" : "max-w-[calc(100%-1.5rem)]")
+                  : (icon ? "max-w-[calc(100%-4rem)]" : "max-w-[calc(100%-2rem)]"),
                 floated && focused && "text-primary-500",
-                icon && "left-11",
                 error && focused && "text-danger-500"
               )}
             >

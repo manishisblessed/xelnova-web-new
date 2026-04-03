@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   CreateProductDto,
@@ -9,6 +9,47 @@ import {
   RevenueQueryDto,
 } from './dto/seller-dashboard.dto';
 import { Prisma, ProductStatus } from '@prisma/client';
+
+/**
+ * Validate the `variants` JSON payload from the seller.
+ * Expected shape per group:
+ *   { type, label, sizeChart?, options: Array<{ value, label, available, hex?, image?, bigImage?, price?, compareAtPrice?, stock?, sku? }> }
+ */
+function sanitizeVariants(raw: unknown): unknown {
+  if (raw === null || raw === undefined) return raw;
+  if (!Array.isArray(raw)) throw new BadRequestException('variants must be an array');
+  for (const group of raw) {
+    if (!group || typeof group !== 'object') throw new BadRequestException('Each variant group must be an object');
+    const g = group as Record<string, unknown>;
+    if (typeof g.label !== 'string' || !g.label.trim()) throw new BadRequestException('Variant group label is required');
+    if (!Array.isArray(g.options)) throw new BadRequestException('Variant group options must be an array');
+
+    if (g.sizeChart !== undefined && g.sizeChart !== null) {
+      if (!Array.isArray(g.sizeChart)) throw new BadRequestException('sizeChart must be an array');
+      for (const row of g.sizeChart) {
+        if (!row || typeof row !== 'object') throw new BadRequestException('Each sizeChart row must be an object');
+        const r = row as Record<string, unknown>;
+        if (typeof r.label !== 'string') throw new BadRequestException('sizeChart row must have a label');
+        if (!r.values || typeof r.values !== 'object') throw new BadRequestException('sizeChart row must have a values object');
+      }
+    }
+
+    for (const opt of g.options) {
+      if (!opt || typeof opt !== 'object') throw new BadRequestException('Each variant option must be an object');
+      const o = opt as Record<string, unknown>;
+      if (o.images !== undefined) {
+        if (!Array.isArray(o.images)) throw new BadRequestException('Variant option images must be an array');
+        for (const img of o.images) {
+          if (typeof img !== 'string') throw new BadRequestException('Each item in variant option images must be a string URL');
+        }
+      }
+      if (typeof o.price === 'number' && o.price < 0) throw new BadRequestException('Variant option price cannot be negative');
+      if (typeof o.compareAtPrice === 'number' && o.compareAtPrice < 0) throw new BadRequestException('Variant option compareAtPrice cannot be negative');
+      if (typeof o.stock === 'number' && o.stock < 0) throw new BadRequestException('Variant option stock cannot be negative');
+    }
+  }
+  return raw;
+}
 
 @Injectable()
 export class SellerDashboardService {
@@ -32,6 +73,7 @@ export class SellerDashboardService {
 
     return {
       hasSellerProfile: !!profile,
+      sellerId: profile?.id ?? null,
       onboardingStatus: profile?.onboardingStatus ?? null,
       onboardingStep: profile?.onboardingStep ?? null,
       onboardingComplete,
@@ -139,6 +181,7 @@ export class SellerDashboardService {
     const baseSlug = this.slugify(dto.name);
     const existing = await this.prisma.product.count({ where: { slug: { startsWith: baseSlug } } });
     const slug = existing > 0 ? `${baseSlug}-${existing + 1}` : baseSlug;
+    const variants = sanitizeVariants(dto.variants);
 
     return this.prisma.product.create({
       data: {
@@ -155,7 +198,7 @@ export class SellerDashboardService {
         images: dto.images || [],
         highlights: dto.highlights || [],
         tags: dto.tags || [],
-        variants: dto.variants,
+        variants: variants as any,
         specifications: dto.specifications,
         sku: dto.sku,
         status: 'ACTIVE',
@@ -169,6 +212,17 @@ export class SellerDashboardService {
     const product = await this.prisma.product.findUnique({ where: { id: productId } });
     if (!product) throw new NotFoundException('Product not found');
     if (product.sellerId !== seller.id) throw new ForbiddenException('Not your product');
+
+    if (dto.variants !== undefined) {
+      dto.variants = sanitizeVariants(dto.variants) as any;
+    }
+
+    if (dto.status !== undefined) {
+      const allowed: ProductStatus[] = [ProductStatus.ACTIVE, ProductStatus.ON_HOLD];
+      if (!allowed.includes(dto.status as ProductStatus)) {
+        throw new BadRequestException(`Status must be one of: ${allowed.join(', ')}`);
+      }
+    }
 
     const data: any = { ...dto };
     if (dto.name) data.slug = this.slugify(dto.name) + '-' + Date.now().toString(36);

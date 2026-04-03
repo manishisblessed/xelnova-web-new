@@ -58,13 +58,72 @@ export interface GSTINResponse {
   valid: boolean;
 }
 
+export interface DigilockerCreateUrlResult {
+  verificationId: string;
+  referenceId: number;
+  orderId: string;
+  url: string;
+  status: string;
+  documentRequested: string[];
+  redirectUrl: string;
+  message: string;
+}
+
+export interface DigilockerAadhaarResult {
+  referenceId: number;
+  verificationId: string;
+  status: string;
+  name: string;
+  uid: string;
+  dob: string;
+  gender: string;
+  careOf: string;
+  address: string;
+  splitAddress: Record<string, string>;
+  yearOfBirth: string;
+  message: string;
+}
+
+export interface DigilockerPanResult {
+  referenceId: number;
+  verificationId: string;
+  status: string;
+  name: string;
+  panNumber: string;
+  dob: string;
+  gender: string;
+  message: string;
+}
+
+export interface PanVerificationResult {
+  panNumber: string;
+  type: string;
+  registeredName: string;
+  status: string;
+  message: string;
+}
+
+export interface Pan360Result {
+  panNumber: string;
+  type: string;
+  registeredName: string;
+  gender: string;
+  dob: string;
+  maskedAadhaar: string;
+  aadhaarLinked: boolean;
+  status: string;
+  message: string;
+}
+
 @Injectable()
 export class VerificationService {
   private readonly GSTIN_API_KEY = process.env.GSTIN_API_KEY || '';
   private readonly GSTIN_API_URL = 'https://sheet.gstincheck.co.in/check';
   private readonly EKYCHUB_USERNAME = process.env.EKYCHUB_USERNAME || '';
   private readonly EKYCHUB_TOKEN = process.env.EKYCHUB_TOKEN || '';
-  private readonly EKYCHUB_BASE_URL = 'https://connect.ekychub.in/v3/verification';
+  private readonly EKYCHUB_BASE_URL = 'https://connect.ekychub.in/v3';
+  private readonly EKYCHUB_DIGILOCKER_REDIRECT_URL =
+    process.env.EKYCHUB_DIGILOCKER_REDIRECT_URL || '';
 
   constructor(private prisma: PrismaService) {}
 
@@ -123,7 +182,7 @@ export class VerificationService {
     const orderId = `XN_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
 
     try {
-      const url = new URL(`${this.EKYCHUB_BASE_URL}/bank_verification`);
+      const url = new URL(`${this.EKYCHUB_BASE_URL}/verification/bank_verification`);
       url.searchParams.set('username', this.EKYCHUB_USERNAME);
       url.searchParams.set('token', this.EKYCHUB_TOKEN);
       url.searchParams.set('account_number', normalizedAccount);
@@ -196,16 +255,27 @@ export class VerificationService {
       if (!rawData.flag || rawData.flag === false) {
         const apiMsg = rawData.message || 'Invalid GSTIN';
         const isServiceIssue = /credit|expire|limit|quota|balance|unauthorized/i.test(apiMsg);
-        await this.logVerification('GSTIN', normalizedGstin, isServiceIssue ? 'SERVICE_ERROR' : 'INVALID', rawData, userId, apiMsg);
+        const isSystemError = /system\s*error|try\s*after\s*sometime|internal\s*server/i.test(apiMsg);
+        await this.logVerification('GSTIN', normalizedGstin, isServiceIssue || isSystemError ? 'SERVICE_ERROR' : 'INVALID', rawData, userId, apiMsg);
 
         if (isServiceIssue) {
           console.error(`[GSTIN] API service error: ${apiMsg} — renew credits at gstincheck.co.in`);
           throw new HttpException(
-            'GSTIN verification service is temporarily unavailable. Please try again later.',
+            { success: false, message: 'GSTIN verification service is temporarily unavailable. Please try again later.' },
             HttpStatus.SERVICE_UNAVAILABLE,
           );
         }
-        throw new HttpException(apiMsg, HttpStatus.BAD_REQUEST);
+        if (isSystemError) {
+          console.error(`[GSTIN] External API system error: ${apiMsg}`);
+          throw new HttpException(
+            { success: false, message: 'GSTIN verification service is experiencing issues. Please try again in a few minutes.' },
+            HttpStatus.SERVICE_UNAVAILABLE,
+          );
+        }
+        throw new HttpException(
+          { success: false, message: apiMsg },
+          HttpStatus.BAD_REQUEST,
+        );
       }
 
       const data: GSTINResponse = {
@@ -262,6 +332,371 @@ export class VerificationService {
       valid: isValidFormat,
       format: isValidFormat,
     };
+  }
+
+  // ========== eKYCHub helpers ==========
+
+  private ensureEkychubConfigured() {
+    if (!this.EKYCHUB_USERNAME || !this.EKYCHUB_TOKEN) {
+      throw new HttpException(
+        'KYC verification service is not configured. Set EKYCHUB_USERNAME and EKYCHUB_TOKEN on the backend.',
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    }
+  }
+
+  private generateOrderId(): string {
+    return `XN_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+  }
+
+  // ========== Digilocker Aadhaar ==========
+
+  async createDigilockerAadhaarUrl(
+    orderId: string,
+    userId?: string,
+  ): Promise<DigilockerCreateUrlResult> {
+    this.ensureEkychubConfigured();
+
+    if (!this.EKYCHUB_DIGILOCKER_REDIRECT_URL) {
+      throw new HttpException(
+        'Digilocker redirect URL not configured. Set EKYCHUB_DIGILOCKER_REDIRECT_URL on the backend.',
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    }
+
+    if (!this.EKYCHUB_DIGILOCKER_REDIRECT_URL.startsWith('https://')) {
+      console.warn(`[Digilocker] EKYCHUB_DIGILOCKER_REDIRECT_URL must be HTTPS. Current value: "${this.EKYCHUB_DIGILOCKER_REDIRECT_URL}"`);
+    }
+
+    const effectiveOrderId = orderId || this.generateOrderId();
+
+    try {
+      const url = new URL(`${this.EKYCHUB_BASE_URL}/digilocker/create_url_aadhaar`);
+      url.searchParams.set('username', this.EKYCHUB_USERNAME);
+      url.searchParams.set('token', this.EKYCHUB_TOKEN);
+      url.searchParams.set('redirect_url', this.EKYCHUB_DIGILOCKER_REDIRECT_URL);
+      url.searchParams.set('orderid', effectiveOrderId);
+
+      const res = await fetch(url.toString());
+      const body = await res.json();
+
+      if (body.status !== 'Success') {
+        const rawMsg = body.message || 'Failed to create Digilocker Aadhaar URL';
+        const errorCode = body.code || '';
+        await this.logVerification('AADHAAR_DIGILOCKER_URL', effectiveOrderId, 'FAILED', body, userId, rawMsg);
+
+        const isIpIssue = /white\s*list\s*ip/i.test(rawMsg);
+        const isRedirectIssue = errorCode === 'redirect_url_value_invalid';
+        let userMsg = rawMsg;
+        let status = HttpStatus.BAD_REQUEST;
+
+        if (isIpIssue) {
+          userMsg = 'Aadhaar verification service is temporarily unavailable. Please try again in a few minutes.';
+          status = HttpStatus.SERVICE_UNAVAILABLE;
+        } else if (isRedirectIssue) {
+          userMsg = 'Aadhaar verification is misconfigured. Please contact support.';
+          console.error(`[Digilocker] redirect_url_value_invalid — check EKYCHUB_DIGILOCKER_REDIRECT_URL: "${this.EKYCHUB_DIGILOCKER_REDIRECT_URL}"`);
+          status = HttpStatus.SERVICE_UNAVAILABLE;
+        }
+
+        throw new HttpException(
+          { success: false, message: userMsg, code: errorCode, type: body.type },
+          status,
+        );
+      }
+
+      const result: DigilockerCreateUrlResult = {
+        verificationId: body.verification_id,
+        referenceId: body.reference_id,
+        orderId: effectiveOrderId,
+        url: body.url,
+        status: body.status,
+        documentRequested: body.document_requested,
+        redirectUrl: body.redirect_url,
+        message: body.message,
+      };
+
+      await this.logVerification('AADHAAR_DIGILOCKER_URL', effectiveOrderId, 'URL_CREATED', result, userId);
+      return result;
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      await this.logVerification('AADHAAR_DIGILOCKER_URL', effectiveOrderId, 'ERROR', null, userId, error.message);
+      throw new HttpException(
+        { success: false, message: 'Failed to create Digilocker Aadhaar URL. Please try again.' },
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    }
+  }
+
+  // ========== Digilocker PAN ==========
+
+  async createDigilockerPanUrl(
+    orderId: string,
+    userId?: string,
+  ): Promise<DigilockerCreateUrlResult> {
+    this.ensureEkychubConfigured();
+
+    if (!this.EKYCHUB_DIGILOCKER_REDIRECT_URL) {
+      throw new HttpException(
+        'Digilocker redirect URL not configured. Set EKYCHUB_DIGILOCKER_REDIRECT_URL on the backend.',
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    }
+
+    const effectiveOrderId = orderId || this.generateOrderId();
+
+    try {
+      const url = new URL(`${this.EKYCHUB_BASE_URL}/digilocker/create_url_pan`);
+      url.searchParams.set('username', this.EKYCHUB_USERNAME);
+      url.searchParams.set('token', this.EKYCHUB_TOKEN);
+      url.searchParams.set('redirect_url', this.EKYCHUB_DIGILOCKER_REDIRECT_URL);
+      url.searchParams.set('orderid', effectiveOrderId);
+
+      const res = await fetch(url.toString());
+      const body = await res.json();
+
+      if (body.status !== 'Success') {
+        const rawMsg = body.message || 'Failed to create Digilocker PAN URL';
+        const errorCode = body.code || '';
+        await this.logVerification('PAN_DIGILOCKER_URL', effectiveOrderId, 'FAILED', body, userId, rawMsg);
+
+        const isRedirectIssue = errorCode === 'redirect_url_value_invalid';
+        let userMsg = rawMsg;
+        let status = HttpStatus.BAD_REQUEST;
+
+        if (isRedirectIssue) {
+          userMsg = 'PAN verification is misconfigured. Please contact support.';
+          console.error(`[Digilocker] redirect_url_value_invalid — check EKYCHUB_DIGILOCKER_REDIRECT_URL: "${this.EKYCHUB_DIGILOCKER_REDIRECT_URL}"`);
+          status = HttpStatus.SERVICE_UNAVAILABLE;
+        }
+
+        throw new HttpException(
+          { success: false, message: userMsg, code: errorCode, type: body.type },
+          status,
+        );
+      }
+
+      const result: DigilockerCreateUrlResult = {
+        verificationId: body.verification_id,
+        referenceId: body.reference_id,
+        orderId: effectiveOrderId,
+        url: body.url,
+        status: body.status,
+        documentRequested: body.document_requested,
+        redirectUrl: body.redirect_url,
+        message: body.message,
+      };
+
+      await this.logVerification('PAN_DIGILOCKER_URL', effectiveOrderId, 'URL_CREATED', result, userId);
+      return result;
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      await this.logVerification('PAN_DIGILOCKER_URL', effectiveOrderId, 'ERROR', null, userId, error.message);
+      throw new HttpException(
+        { success: false, message: 'Failed to create Digilocker PAN URL. Please try again.' },
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    }
+  }
+
+  // ========== Digilocker Get Document ==========
+
+  async getDigilockerDocument(
+    verificationId: string,
+    referenceId: string,
+    orderId: string,
+    documentType: 'AADHAAR' | 'PAN',
+    userId?: string,
+  ): Promise<DigilockerAadhaarResult | DigilockerPanResult> {
+    this.ensureEkychubConfigured();
+
+    if (!verificationId || !referenceId || !orderId) {
+      throw new HttpException('verificationId, referenceId and orderId are required', HttpStatus.BAD_REQUEST);
+    }
+
+    try {
+      const url = new URL(`${this.EKYCHUB_BASE_URL}/digilocker/get_document`);
+      url.searchParams.set('username', this.EKYCHUB_USERNAME);
+      url.searchParams.set('token', this.EKYCHUB_TOKEN);
+      url.searchParams.set('verification_id', verificationId);
+      url.searchParams.set('reference_id', referenceId);
+      url.searchParams.set('orderid', orderId);
+      url.searchParams.set('document_type', documentType);
+
+      const res = await fetch(url.toString());
+      const body = await res.json();
+
+      if (body.status !== 'Success') {
+        const rawMsg = body.message || `Failed to get Digilocker ${documentType} document`;
+        const errorCode = body.code || '';
+        const logType = documentType === 'AADHAAR' ? 'AADHAAR_DIGILOCKER_DOC' : 'PAN_DIGILOCKER_DOC';
+        await this.logVerification(logType, orderId, 'FAILED', body, userId, rawMsg);
+
+        const isUserIncomplete = /not completed|pending|in.?progress/i.test(rawMsg);
+        const userMsg = isUserIncomplete
+          ? 'Digilocker verification was not completed. Please try again.'
+          : rawMsg;
+
+        throw new HttpException(
+          { success: false, message: userMsg, code: errorCode, type: body.type },
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
+      if (documentType === 'AADHAAR') {
+        const result: DigilockerAadhaarResult = {
+          referenceId: body.reference_id,
+          verificationId: body.verification_id,
+          status: body.status,
+          name: body.name,
+          uid: body.uid,
+          dob: body.dob,
+          gender: body.gender,
+          careOf: body.care_of || '',
+          address: body.address || '',
+          splitAddress: body.split_address || {},
+          yearOfBirth: body.year_of_birth,
+          message: body.message,
+        };
+
+        await this.logVerification('AADHAAR_DIGILOCKER_DOC', orderId, 'VERIFIED', {
+          name: result.name,
+          uid: result.uid,
+          dob: result.dob,
+          gender: result.gender,
+        }, userId);
+
+        return result;
+      }
+
+      const result: DigilockerPanResult = {
+        referenceId: body.reference_id,
+        verificationId: body.verification_id,
+        status: body.status,
+        name: body.name,
+        panNumber: body.pan_number || body.pan || '',
+        dob: body.dob || '',
+        gender: body.gender || '',
+        message: body.message,
+      };
+
+      await this.logVerification('PAN_DIGILOCKER_DOC', orderId, 'VERIFIED', {
+        name: result.name,
+        panNumber: result.panNumber,
+        dob: result.dob,
+      }, userId);
+
+      return result;
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      const logType = documentType === 'AADHAAR' ? 'AADHAAR_DIGILOCKER_DOC' : 'PAN_DIGILOCKER_DOC';
+      await this.logVerification(logType, orderId, 'ERROR', null, userId, error.message);
+      throw new HttpException(`Failed to get Digilocker ${documentType} document`, HttpStatus.SERVICE_UNAVAILABLE);
+    }
+  }
+
+  // ========== eKYCHub PAN Verification ==========
+
+  async verifyPan(
+    panNumber: string,
+    userId?: string,
+  ): Promise<PanVerificationResult> {
+    const normalizedPan = panNumber.toUpperCase().trim();
+
+    if (!/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(normalizedPan)) {
+      await this.logVerification('PAN_VERIFY', normalizedPan, 'INVALID_FORMAT', null, userId, 'Invalid PAN format');
+      throw new HttpException('Invalid PAN format', HttpStatus.BAD_REQUEST);
+    }
+
+    this.ensureEkychubConfigured();
+
+    const orderId = this.generateOrderId();
+
+    try {
+      const url = new URL(`${this.EKYCHUB_BASE_URL}/verification/pan_verification`);
+      url.searchParams.set('username', this.EKYCHUB_USERNAME);
+      url.searchParams.set('token', this.EKYCHUB_TOKEN);
+      url.searchParams.set('pan', normalizedPan);
+      url.searchParams.set('orderid', orderId);
+
+      const res = await fetch(url.toString());
+      const body = await res.json();
+
+      if (body.status !== 'Success') {
+        const msg = body.message || 'PAN verification failed';
+        await this.logVerification('PAN_VERIFY', normalizedPan, 'FAILED', body, userId, msg);
+        throw new HttpException(msg, HttpStatus.BAD_REQUEST);
+      }
+
+      const result: PanVerificationResult = {
+        panNumber: body.pan || normalizedPan,
+        type: body.type || '',
+        registeredName: body.registered_name || '',
+        status: body.status,
+        message: body.message,
+      };
+
+      await this.logVerification('PAN_VERIFY', normalizedPan, 'VERIFIED', result, userId);
+      return result;
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      await this.logVerification('PAN_VERIFY', normalizedPan, 'ERROR', null, userId, error.message);
+      throw new HttpException('Failed to verify PAN', HttpStatus.SERVICE_UNAVAILABLE);
+    }
+  }
+
+  // ========== eKYCHub PAN 360 ==========
+
+  async verifyPan360(
+    panNumber: string,
+    userId?: string,
+  ): Promise<Pan360Result> {
+    const normalizedPan = panNumber.toUpperCase().trim();
+
+    if (!/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(normalizedPan)) {
+      await this.logVerification('PAN_360', normalizedPan, 'INVALID_FORMAT', null, userId, 'Invalid PAN format');
+      throw new HttpException('Invalid PAN format', HttpStatus.BAD_REQUEST);
+    }
+
+    this.ensureEkychubConfigured();
+
+    const orderId = this.generateOrderId();
+
+    try {
+      const url = new URL(`${this.EKYCHUB_BASE_URL}/verification/pan_360`);
+      url.searchParams.set('username', this.EKYCHUB_USERNAME);
+      url.searchParams.set('token', this.EKYCHUB_TOKEN);
+      url.searchParams.set('pan', normalizedPan);
+      url.searchParams.set('orderid', orderId);
+
+      const res = await fetch(url.toString());
+      const body = await res.json();
+
+      if (body.status !== 'Success') {
+        const msg = body.message || 'PAN 360 verification failed';
+        await this.logVerification('PAN_360', normalizedPan, 'FAILED', body, userId, msg);
+        throw new HttpException(msg, HttpStatus.BAD_REQUEST);
+      }
+
+      const result: Pan360Result = {
+        panNumber: body.pan || normalizedPan,
+        type: body.type || '',
+        registeredName: body.registered_name || '',
+        gender: body.gender || '',
+        dob: body.date_of_birth || '',
+        maskedAadhaar: body.masked_aadhaar_number || '',
+        aadhaarLinked: body.aadhaar_linked ?? false,
+        status: body.status,
+        message: body.message,
+      };
+
+      await this.logVerification('PAN_360', normalizedPan, 'VERIFIED', result, userId);
+      return result;
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      await this.logVerification('PAN_360', normalizedPan, 'ERROR', null, userId, error.message);
+      throw new HttpException('Failed to verify PAN', HttpStatus.SERVICE_UNAVAILABLE);
+    }
   }
 
   async updateSellerBankVerification(

@@ -40,6 +40,13 @@ export class AdminUpdateOrderDto {
   @ApiPropertyOptional() @IsOptional() @IsString() paymentStatus?: string;
 }
 
+export class AdminUpdateShipmentDto {
+  @ApiPropertyOptional() @IsOptional() @IsString() awbNumber?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() courierProvider?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() trackingUrl?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() shipmentStatus?: string;
+}
+
 // ─── Seller management ───
 export class AdminSellerQueryDto extends PaginationDto {
   @ApiPropertyOptional() @IsOptional() @IsString() verified?: string;
@@ -191,6 +198,14 @@ export class AdminSiteSettingsDto {
   @ApiPropertyOptional()
   @Allow()
   notifications?: Record<string, unknown>;
+
+  @ApiPropertyOptional()
+  @Allow()
+  shippingLabel?: Record<string, unknown>;
+
+  @ApiPropertyOptional()
+  @Allow()
+  shippingRates?: Record<string, unknown>;
 }
 
 /** Passed from admin HTTP handlers for audit logging (Performance → Recent Activity). */

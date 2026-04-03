@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { Badge } from '@xelnova/ui';
 import { AdminListPage } from '@/components/dashboard/admin-list-page';
 import { ActionModal } from '@/components/dashboard/action-modal';
@@ -51,6 +51,7 @@ export default function FlashDealsPage() {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ isFlashDeal: false, endsAt: '' });
 
+  const flashDealQueryParams = useMemo(() => ({ limit: '200' }), []);
   const normalizeItems = useCallback((rows: FlashDealProduct[]) => rows.filter((p) => p.isFlashDeal), []);
 
   const openEdit = (p: FlashDealProduct) => {
@@ -82,23 +83,23 @@ export default function FlashDealsPage() {
     }
   };
 
-  const columns: Column<FlashDealProduct>[] = [
+  const columns: Column<FlashDealProduct>[] = useMemo(() => [
     {
       key: 'name',
       header: 'Product',
-      render: (r) => (
+      render: (r: FlashDealProduct) => (
         <div>
           <span className="font-medium">{r.name}</span>
           <p className="text-xs text-text-muted mt-0.5">{r.slug}</p>
         </div>
       ),
     },
-    { key: 'category', header: 'Category', render: (r) => r.category?.name ?? '—' },
-    { key: 'seller', header: 'Seller', render: (r) => r.seller?.storeName ?? '—' },
+    { key: 'category', header: 'Category', render: (r: FlashDealProduct) => r.category?.name ?? '—' },
+    { key: 'seller', header: 'Seller', render: (r: FlashDealProduct) => r.seller?.storeName ?? '—' },
     {
       key: 'price',
       header: 'Price',
-      render: (r) => (
+      render: (r: FlashDealProduct) => (
         <span>
           ₹{r.price.toLocaleString()}
           {r.compareAtPrice != null && r.compareAtPrice > r.price && (
@@ -107,11 +108,11 @@ export default function FlashDealsPage() {
         </span>
       ),
     },
-    { key: 'stock', header: 'Stock', render: (r) => r.stock },
+    { key: 'stock', header: 'Stock', render: (r: FlashDealProduct) => r.stock },
     {
       key: 'status',
       header: 'Deal status',
-      render: (r) => {
+      render: (r: FlashDealProduct) => {
         const s = dealStatus(r);
         return <Badge variant={SV[s] ?? 'default'}>{s}</Badge>;
       },
@@ -119,16 +120,16 @@ export default function FlashDealsPage() {
     {
       key: 'flashDealEndsAt',
       header: 'Ends',
-      render: (r) => (r.flashDealEndsAt ? new Date(r.flashDealEndsAt).toLocaleString() : '—'),
+      render: (r: FlashDealProduct) => (r.flashDealEndsAt ? new Date(r.flashDealEndsAt).toLocaleString() : '—'),
     },
-  ];
+  ], []);
 
   return (
     <>
       <AdminListPage<FlashDealProduct>
         title="Flash Deals"
         section="products"
-        queryParams={{ limit: '200' }}
+        queryParams={flashDealQueryParams}
         normalizeItems={normalizeItems}
         columns={columns}
         keyExtractor={(r) => r.id}

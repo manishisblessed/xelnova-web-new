@@ -9,10 +9,33 @@ export interface ProductReview {
   verified: boolean;
 }
 
-export interface ProductVariant {
-  type: "size" | "color";
+export interface ProductVariantOption {
+  value: string;
   label: string;
-  options: { value: string; label: string; available: boolean; hex?: string }[];
+  available: boolean;
+  hex?: string;
+  /** Option images — first is the main/thumbnail, rest are supporting (up to 5) */
+  images?: string[];
+  /** Per-option price override; when set, replaces product.price on the PDP/cart. */
+  price?: number;
+  compareAtPrice?: number;
+  stock?: number;
+  sku?: string;
+}
+
+export interface SizeChartRow {
+  label: string;
+  values: Record<string, string>;
+}
+
+export interface ProductVariant {
+  /** Unique key for selection state (e.g. color, size, material) */
+  type: string;
+  label: string;
+  /** Label for the base/main product when shown alongside variant options */
+  defaultLabel?: string;
+  options: ProductVariantOption[];
+  sizeChart?: SizeChartRow[];
 }
 
 export interface Product {

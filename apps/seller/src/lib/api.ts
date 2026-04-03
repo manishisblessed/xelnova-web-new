@@ -1,4 +1,6 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
+import { publicApiBase } from '@/lib/public-api-base';
+
+const API_URL = publicApiBase();
 
 /** Session JWT from httpOnly-style dashboard cookie (set by `/api/session`). */
 export function getDashboardToken(): string | null {
@@ -51,6 +53,7 @@ export async function apiSellerRegistrationStatus() {
   const res = await fetch(`${API_URL}/seller/registration-status`, { headers: authHeaders() });
   return handleResponse<{
     hasSellerProfile: boolean;
+    sellerId?: string | null;
     onboardingStatus?: string | null;
     onboardingStep?: number | null;
     onboardingComplete?: boolean;
@@ -120,6 +123,143 @@ export async function apiUpdateOrderStatus(orderId: string, status: string) {
   return handleResponse(res);
 }
 
+// ─── Shipping ───
+
+export async function apiShipOrder(orderId: string, body: {
+  shippingMode: string;
+  carrierName?: string;
+  awbNumber?: string;
+  weight?: number;
+  dimensions?: string;
+}) {
+  const res = await fetch(`${API_URL}/seller/orders/${orderId}/ship`, {
+    method: 'POST',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return handleResponse(res);
+}
+
+export async function apiUpdateShipmentAwb(orderId: string, body: {
+  awbNumber: string;
+  carrierName?: string;
+  trackingUrl?: string;
+}) {
+  const res = await fetch(`${API_URL}/seller/orders/${orderId}/shipment/awb`, {
+    method: 'PATCH',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return handleResponse(res);
+}
+
+export async function apiUpdateShipmentStatus(orderId: string, body: {
+  status: string;
+  location?: string;
+  remark?: string;
+}) {
+  const res = await fetch(`${API_URL}/seller/orders/${orderId}/shipment/status`, {
+    method: 'PATCH',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return handleResponse(res);
+}
+
+export async function apiGetShipment(orderId: string) {
+  const res = await fetch(`${API_URL}/seller/orders/${orderId}/shipment`, {
+    headers: authHeaders(),
+  });
+  return handleResponse(res);
+}
+
+export async function apiTrackShipment(orderId: string) {
+  const res = await fetch(`${API_URL}/seller/orders/${orderId}/shipment/track`, {
+    headers: authHeaders(),
+  });
+  return handleResponse(res);
+}
+
+export async function apiCancelShipment(orderId: string) {
+  const res = await fetch(`${API_URL}/seller/orders/${orderId}/shipment/cancel`, {
+    method: 'POST',
+    headers: authHeaders(),
+  });
+  return handleResponse(res);
+}
+
+export async function apiCheckServiceability(orderId: string) {
+  const res = await fetch(`${API_URL}/seller/orders/${orderId}/serviceability`, {
+    headers: authHeaders(),
+  });
+  return handleResponse(res);
+}
+
+// ─── Shipping Label ───
+
+export async function apiDownloadShippingLabel(orderId: string) {
+  const res = await fetch(`${API_URL}/seller/orders/${orderId}/label`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    let msg = 'Failed to download label';
+    try { msg = JSON.parse(text).message || msg; } catch { /* plain text error */ }
+    throw new Error(msg);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `shipping-label-${orderId}.pdf`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+// ─── Courier Configs ───
+
+export async function apiGetCourierConfigs() {
+  const res = await fetch(`${API_URL}/seller/courier-configs`, {
+    headers: authHeaders(),
+  });
+  return handleResponse(res);
+}
+
+export async function apiSaveCourierConfig(body: {
+  provider: string;
+  apiKey: string;
+  apiSecret?: string;
+  accountId?: string;
+  warehouseId?: string;
+  metadata?: Record<string, any>;
+}) {
+  const res = await fetch(`${API_URL}/seller/courier-configs`, {
+    method: 'POST',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return handleResponse(res);
+}
+
+export async function apiUpdateCourierConfig(provider: string, body: Record<string, unknown>) {
+  const res = await fetch(`${API_URL}/seller/courier-configs/${provider}`, {
+    method: 'PATCH',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return handleResponse(res);
+}
+
+export async function apiDeleteCourierConfig(provider: string) {
+  const res = await fetch(`${API_URL}/seller/courier-configs/${provider}`, {
+    method: 'DELETE',
+    headers: authHeaders(),
+  });
+  return handleResponse(res);
+}
+
 // ─── Revenue & Analytics ───
 
 export async function apiGetRevenue(params?: Record<string, string>) {
@@ -146,12 +286,45 @@ export async function apiUploadImage(file: File): Promise<{ url: string; publicI
   return handleResponse<{ url: string; publicId: string }>(res);
 }
 
+export async function apiUploadImages(files: File[]): Promise<{ url: string; publicId: string }[]> {
+  const form = new FormData();
+  for (const file of files) form.append('files', file);
+  const res = await fetch(`${API_URL}/upload/images`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: form,
+  });
+  return handleResponse<{ url: string; publicId: string }[]>(res);
+}
+
 export async function apiDeleteImage(publicId: string): Promise<void> {
   const res = await fetch(`${API_URL}/upload/${encodeURIComponent(publicId)}`, {
     method: 'DELETE',
     headers: authHeaders(),
   });
   await handleResponse(res);
+}
+
+// ─── Wallet ───
+
+export async function apiGetWalletBalance() {
+  const res = await fetch(`${API_URL}/wallet/balance`, { headers: authHeaders() });
+  return handleResponse(res);
+}
+
+export async function apiGetWalletTransactions(page = 1, limit = 20) {
+  const params = new URLSearchParams({ page: page.toString(), limit: limit.toString() });
+  const res = await fetch(`${API_URL}/wallet/transactions?${params}`, { headers: authHeaders() });
+  return handleResponse(res);
+}
+
+export async function apiRequestPayout(amount: number, notes?: string) {
+  const res = await fetch(`${API_URL}/wallet/payout`, {
+    method: 'POST',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ amount, notes }),
+  });
+  return handleResponse(res);
 }
 
 // ─── Profile ───
@@ -168,4 +341,17 @@ export async function apiUpdateProfile(body: Record<string, unknown>) {
     body: JSON.stringify(body),
   });
   return handleResponse(res);
+}
+
+// ─── Public Settings ───
+
+export interface ShippingRates {
+  weightSlabs: { upToKg: number; rate: number }[];
+  dimensionSlabs: { upToCm3: number; rate: number }[];
+  baseCurrency: string;
+}
+
+export async function apiGetShippingRates(): Promise<ShippingRates> {
+  const res = await fetch(`${API_URL}/products/shipping-rates`);
+  return handleResponse<ShippingRates>(res);
 }

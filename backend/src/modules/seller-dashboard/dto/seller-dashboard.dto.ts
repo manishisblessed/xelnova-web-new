@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsNumber, IsBoolean, IsArray, Min, IsEnum } from 'class-validator';
+import { IsString, IsOptional, IsNumber, IsBoolean, IsArray, Min, IsEnum, Allow } from 'class-validator';
 import { ApiPropertyOptional, ApiProperty } from '@nestjs/swagger';
 import { Type, Transform } from 'class-transformer';
 
@@ -14,8 +14,8 @@ export class CreateProductDto {
   @ApiPropertyOptional() @IsOptional() @IsArray() @IsString({ each: true }) images?: string[];
   @ApiPropertyOptional() @IsOptional() @IsArray() @IsString({ each: true }) highlights?: string[];
   @ApiPropertyOptional() @IsOptional() @IsArray() @IsString({ each: true }) tags?: string[];
-  @ApiPropertyOptional() @IsOptional() variants?: any;
-  @ApiPropertyOptional() @IsOptional() specifications?: any;
+  @ApiPropertyOptional() @IsOptional() @Allow() variants?: any;
+  @ApiPropertyOptional() @IsOptional() @Allow() specifications?: any;
   @ApiPropertyOptional() @IsOptional() @IsString() sku?: string;
 }
 
@@ -31,9 +31,10 @@ export class UpdateProductDto {
   @ApiPropertyOptional() @IsOptional() @IsArray() @IsString({ each: true }) images?: string[];
   @ApiPropertyOptional() @IsOptional() @IsArray() @IsString({ each: true }) highlights?: string[];
   @ApiPropertyOptional() @IsOptional() @IsArray() @IsString({ each: true }) tags?: string[];
-  @ApiPropertyOptional() @IsOptional() variants?: any;
-  @ApiPropertyOptional() @IsOptional() specifications?: any;
+  @ApiPropertyOptional() @IsOptional() @Allow() variants?: any;
+  @ApiPropertyOptional() @IsOptional() @Allow() specifications?: any;
   @ApiPropertyOptional() @IsOptional() @IsBoolean() isActive?: boolean;
+  @ApiPropertyOptional() @IsOptional() @IsString() status?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() sku?: string;
 }
 
