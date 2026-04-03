@@ -30,14 +30,25 @@ cd ~/xelnova-web-new/backend
 npx prisma generate
 npm run build 2>&1 | tail -5
 
-echo "Syncing backend dist..."
+echo "Syncing backend dist and schema..."
 rsync -av --delete ~/xelnova-web-new/backend/dist/ ~/backend/dist/ > /dev/null
 cp ~/xelnova-web-new/backend/package.json ~/backend/package.json
+cp ~/xelnova-web-new/backend/prisma/schema.prisma ~/backend/prisma/schema.prisma
+cp ~/xelnova-web-new/backend/prisma.config.ts ~/backend/prisma.config.ts 2>/dev/null
 
-echo "Restarting backend..."
+echo "Installing deps & generating Prisma client in production dir..."
 cd ~/backend
-pm2 restart xelnova-api
+npm install --omit=dev 2>&1 | tail -3
+npx prisma generate 2>&1 | tail -3
+
+echo "Ensuring NODE_ENV=production..."
+grep -q '^NODE_ENV=' .env || echo 'NODE_ENV=production' >> .env
+
+echo "Restarting backend (cwd=~/backend)..."
+pm2 delete xelnova-api 2>/dev/null
+cd ~/backend && pm2 start npm --name xelnova-api -- run start:prod
 sleep 5
+pm2 save
 pm2 logs xelnova-api --lines 3 --nostream
 
 echo ""
