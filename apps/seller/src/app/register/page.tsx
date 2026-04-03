@@ -638,9 +638,12 @@ export default function RegisterPage() {
     const rect = canvas.getBoundingClientRect();
     const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
     const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+    const dpr = window.devicePixelRatio || 1;
+    const cssW = canvas.width / dpr;
+    const cssH = canvas.height / dpr;
     return {
-      x: clientX - rect.left,
-      y: clientY - rect.top,
+      x: ((clientX - rect.left) / rect.width) * cssW,
+      y: ((clientY - rect.top) / rect.height) * cssH,
     };
   };
 
