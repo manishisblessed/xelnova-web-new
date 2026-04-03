@@ -17,11 +17,17 @@ export class PaymentService {
     const isPlaceholder = (v: string) => !v || v.startsWith('your-') || v === 'test' || v.length < 10;
     if (!isPlaceholder(keyId) && !isPlaceholder(keySecret)) {
       this.razorpay = new Razorpay({ key_id: keyId, key_secret: keySecret });
+    } else {
+      console.warn('Razorpay keys not configured or placeholder — payments will be unavailable');
     }
   }
 
   private getRazorpay(): Razorpay {
-    if (!this.razorpay) throw new BadRequestException('Payment gateway not configured');
+    if (!this.razorpay) {
+      throw new BadRequestException(
+        'Payment gateway is not configured. Please set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET environment variables.',
+      );
+    }
     return this.razorpay;
   }
 
@@ -30,12 +36,24 @@ export class PaymentService {
     if (!order) throw new NotFoundException('Order not found');
     if (order.userId !== userId) throw new BadRequestException('Not your order');
 
-    const razorpayOrder = await this.getRazorpay().orders.create({
-      amount: Math.round(order.total * 100),
-      currency: 'INR',
-      receipt: order.orderNumber,
-      notes: { orderId: order.id, userId },
-    });
+    const amountInPaise = Math.round(Number(order.total) * 100);
+    if (!amountInPaise || amountInPaise < 100) {
+      throw new BadRequestException(`Invalid order total for payment: ₹${order.total}`);
+    }
+
+    let razorpayOrder;
+    try {
+      razorpayOrder = await this.getRazorpay().orders.create({
+        amount: amountInPaise,
+        currency: 'INR',
+        receipt: order.orderNumber,
+        notes: { orderId: order.id, userId },
+      });
+    } catch (err: any) {
+      const msg = err?.error?.description || err?.message || 'Unknown Razorpay error';
+      console.error('Razorpay order creation failed:', { orderId, amountInPaise, error: msg });
+      throw new BadRequestException(`Payment gateway error: ${msg}`);
+    }
 
     await this.prisma.order.update({
       where: { id: orderId },

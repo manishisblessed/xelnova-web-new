@@ -12,6 +12,14 @@ sed -i 's|ADMIN_URL="http://localhost:3002"|ADMIN_URL="https://admin.xelnova.in"
 sed -i 's|APP_URL="http://localhost:3000"|APP_URL="https://xelnova.in"|' .env
 sed -i 's|CORS_ORIGINS="http://localhost:3000,http://localhost:3002,http://localhost:3003"|CORS_ORIGINS="https://xelnova.in,https://www.xelnova.in,https://seller.xelnova.in,https://admin.xelnova.in"|' .env
 
+# Razorpay — ensure keys are present
+grep -q '^RAZORPAY_KEY_ID=' .env || echo 'RAZORPAY_KEY_ID="rzp_test_SYXLNzHZjBIdRu"' >> .env
+grep -q '^RAZORPAY_KEY_SECRET=' .env || echo 'RAZORPAY_KEY_SECRET="36rdANPPAZTBZskZawfsT2M7"' >> .env
+grep -q '^RAZORPAY_WEBHOOK_SECRET=' .env || echo 'RAZORPAY_WEBHOOK_SECRET=""' >> .env
+
+# Cloudinary — ensure CLOUDINARY_URL is present
+grep -q '^CLOUDINARY_URL=' .env || echo 'CLOUDINARY_URL=cloudinary://635444549461982:4QTXNyUtKGn9MBDcsqpw_YKhxe4@dgulzkcnq' >> .env
+
 # reCAPTCHA Enterprise — site key is public, secret/API keys are set manually in ~/backend/.env
 grep -q '^RECAPTCHA_SITE_KEY=' .env || echo 'RECAPTCHA_SITE_KEY="6Lc4s5osAAAAAOi73vFTn5BLso8XKxXidIoDPiTm"' >> .env
 grep -q '^RECAPTCHA_PROJECT_ID=' .env || echo 'RECAPTCHA_PROJECT_ID="xelnova-1774475911864"' >> .env
