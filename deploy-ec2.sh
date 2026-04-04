@@ -12,10 +12,27 @@ sed -i 's|ADMIN_URL="http://localhost:3002"|ADMIN_URL="https://admin.xelnova.in"
 sed -i 's|APP_URL="http://localhost:3000"|APP_URL="https://xelnova.in"|' .env
 sed -i 's|CORS_ORIGINS="http://localhost:3000,http://localhost:3002,http://localhost:3003"|CORS_ORIGINS="https://xelnova.in,https://www.xelnova.in,https://seller.xelnova.in,https://admin.xelnova.in"|' .env
 
-# Razorpay — ensure keys are present
+# Razorpay — ensure keys are present (TEST keys only for safety)
 grep -q '^RAZORPAY_KEY_ID=' .env || echo 'RAZORPAY_KEY_ID="rzp_test_SYXLNzHZjBIdRu"' >> .env
 grep -q '^RAZORPAY_KEY_SECRET=' .env || echo 'RAZORPAY_KEY_SECRET="36rdANPPAZTBZskZawfsT2M7"' >> .env
 grep -q '^RAZORPAY_WEBHOOK_SECRET=' .env || echo 'RAZORPAY_WEBHOOK_SECRET=""' >> .env
+
+# Safety check: warn if live Razorpay keys are detected
+if grep -q 'rzp_live_' .env; then
+  echo ""
+  echo "⚠️  WARNING: LIVE Razorpay keys detected in .env!"
+  echo "⚠️  Real money will be charged to customers."
+  echo "⚠️  If this is not intended, replace with test keys (rzp_test_...)."
+  echo ""
+fi
+
+# Fortius SMS — verify keys are set for OTP delivery
+if ! grep -q '^FORTIUS_API_KEY=.\+' .env; then
+  echo ""
+  echo "⚠️  WARNING: FORTIUS_API_KEY is not set! OTP SMS will NOT be delivered."
+  echo "⚠️  Set FORTIUS_API_KEY in ~/backend/.env for OTP to work."
+  echo ""
+fi
 
 # Cloudinary — ensure CLOUDINARY_URL is present
 grep -q '^CLOUDINARY_URL=' .env || echo 'CLOUDINARY_URL=cloudinary://635444549461982:4QTXNyUtKGn9MBDcsqpw_YKhxe4@dgulzkcnq' >> .env

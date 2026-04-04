@@ -249,4 +249,46 @@ export class OrdersService {
 
     return order;
   }
+
+  private static readonly CANCELLABLE_STATUSES = ['PENDING', 'PROCESSING', 'CONFIRMED'];
+
+  async cancelOrder(orderNumber: string, userId: string, reason?: string) {
+    const order = await this.prisma.order.findUnique({
+      where: { orderNumber },
+      include: { items: true },
+    });
+
+    if (!order || order.userId !== userId) {
+      throw new NotFoundException('Order not found');
+    }
+
+    if (!OrdersService.CANCELLABLE_STATUSES.includes(order.status)) {
+      throw new BadRequestException(
+        `Order cannot be cancelled — it is already ${order.status.toLowerCase()}. ` +
+        `Only orders in Pending, Processing, or Confirmed status can be cancelled.`,
+      );
+    }
+
+    // Restore stock for each item
+    for (const item of order.items) {
+      await this.prisma.product.update({
+        where: { id: item.productId },
+        data: { stock: { increment: item.quantity } },
+      });
+    }
+
+    const updated = await this.prisma.order.update({
+      where: { id: order.id },
+      data: {
+        status: 'CANCELLED',
+        ...(reason ? { couponCode: order.couponCode } : {}),
+      },
+      include: {
+        items: { include: { product: { select: { name: true, images: true } } } },
+        shippingAddress: true,
+      },
+    });
+
+    return updated;
+  }
 }

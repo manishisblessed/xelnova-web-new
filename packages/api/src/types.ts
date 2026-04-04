@@ -178,6 +178,7 @@ export interface Order {
   tax: number;
   total: number;
   status: string;
+  paymentStatus?: string;
   paymentMethod: string | null;
   shippingAddress: Address | null;
   couponCode: string | null;

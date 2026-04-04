@@ -49,3 +49,11 @@ export async function createOrder(payload: CreateOrderPayload): Promise<Order> {
   }
   return data.data;
 }
+
+export async function cancelOrder(orderNumber: string, reason?: string): Promise<Order> {
+  const { data, status } = await api.post<ApiResponse<Order>>(`/orders/${orderNumber}/cancel`, { reason });
+  if (!data.success || !data.data) {
+    throw apiError(data.message || 'Failed to cancel order', status >= 400 ? status : 500);
+  }
+  return data.data;
+}

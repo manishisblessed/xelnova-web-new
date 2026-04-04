@@ -8,6 +8,8 @@ import * as crypto from 'crypto';
 export class PaymentService {
   private razorpay: Razorpay | null = null;
 
+  private readonly isTestMode: boolean;
+
   constructor(
     private readonly config: ConfigService,
     private readonly prisma: PrismaService,
@@ -15,10 +17,27 @@ export class PaymentService {
     const keyId = this.config.get('RAZORPAY_KEY_ID') || '';
     const keySecret = this.config.get('RAZORPAY_KEY_SECRET') || '';
     const isPlaceholder = (v: string) => !v || v.startsWith('your-') || v === 'test' || v.length < 10;
+
+    this.isTestMode = keyId.startsWith('rzp_test_');
+    const isLive = keyId.startsWith('rzp_live_');
+
+    if (isLive && process.env.NODE_ENV !== 'production') {
+      console.error(
+        '[PAYMENT] DANGER: Live Razorpay keys detected in non-production environment! ' +
+        'Real money will be charged. Switch to test keys (rzp_test_...) immediately.',
+      );
+    }
+
+    if (isLive) {
+      console.warn('[PAYMENT] Razorpay is running in LIVE mode — real transactions will be processed.');
+    } else if (this.isTestMode) {
+      console.log('[PAYMENT] Razorpay is running in TEST mode — no real money will be charged.');
+    }
+
     if (!isPlaceholder(keyId) && !isPlaceholder(keySecret)) {
       this.razorpay = new Razorpay({ key_id: keyId, key_secret: keySecret });
     } else {
-      console.warn('Razorpay keys not configured or placeholder — payments will be unavailable');
+      console.warn('[PAYMENT] Razorpay keys not configured or placeholder — payments will be unavailable');
     }
   }
 
@@ -66,6 +85,7 @@ export class PaymentService {
       currency: razorpayOrder.currency,
       orderId: order.id,
       keyId: this.config.get('RAZORPAY_KEY_ID'),
+      testMode: this.isTestMode,
     };
   }
 

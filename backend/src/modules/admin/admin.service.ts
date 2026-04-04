@@ -219,8 +219,13 @@ export class AdminService {
   }
 
   async updateShipment(orderId: string, dto: AdminUpdateShipmentDto) {
-    const shipment = await this.prisma.shipment.findUnique({ where: { orderId } });
-    if (!shipment) throw new Error('No shipment found for this order');
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: { items: { select: { product: { select: { sellerId: true } } } } },
+    });
+    if (!order) throw new NotFoundException('Order not found');
+
+    const existing = await this.prisma.shipment.findUnique({ where: { orderId } });
 
     const data: Record<string, unknown> = {};
     if (dto.awbNumber !== undefined) data.awbNumber = dto.awbNumber;
@@ -228,7 +233,32 @@ export class AdminService {
     if (dto.trackingUrl !== undefined) data.trackingUrl = dto.trackingUrl;
     if (dto.shipmentStatus !== undefined) data.shipmentStatus = dto.shipmentStatus;
 
-    return this.prisma.shipment.update({ where: { orderId }, data });
+    if (existing) {
+      return this.prisma.shipment.update({ where: { orderId }, data });
+    }
+
+    // Create shipment if none exists — derive sellerId from order items
+    const sellerId = order.items?.[0]?.product?.sellerId;
+    if (!sellerId) throw new BadRequestException('Cannot determine seller for this order');
+
+    return this.prisma.shipment.create({
+      data: {
+        orderId,
+        sellerId,
+        shippingMode: 'SELF_SHIP',
+        courierProvider: dto.courierProvider || null,
+        awbNumber: dto.awbNumber || null,
+        trackingUrl: dto.trackingUrl || null,
+        shipmentStatus: (dto.shipmentStatus as any) || 'PENDING',
+        statusHistory: [
+          {
+            status: dto.shipmentStatus || 'PENDING',
+            timestamp: new Date().toISOString(),
+            remark: 'Shipment created by admin',
+          },
+        ],
+      },
+    });
   }
 
   // ─── Sellers ───

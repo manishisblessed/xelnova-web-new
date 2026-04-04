@@ -267,53 +267,61 @@ export default function OrdersPage() {
               </FormField>
             </div>
 
-            {/* Shipment details (only if shipment exists) */}
-            {selected.shipment && (
-              <div className="border-t border-border pt-4 space-y-3">
-                <div className="flex items-center gap-2">
-                  <Truck size={16} className="text-primary-600" />
-                  <h3 className="text-sm font-semibold text-text-primary">Shipment Details</h3>
+            {/* Shipment details — always shown so admin can create or update */}
+            <div className="border-t border-border pt-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <Truck size={16} className="text-primary-600" />
+                <h3 className="text-sm font-semibold text-text-primary">Shipment Details</h3>
+                {selected.shipment ? (
                   <Badge variant="info" className="text-[10px]">{selected.shipment.shippingMode.replace(/_/g, ' ')}</Badge>
-                </div>
-
-                {selected.shipment.weight != null && (
-                  <p className="text-xs text-text-muted">
-                    Weight: {selected.shipment.weight} kg
-                    {selected.shipment.dimensions && ` · Dimensions: ${selected.shipment.dimensions}`}
-                  </p>
+                ) : (
+                  <Badge variant="warning" className="text-[10px]">No shipment yet</Badge>
                 )}
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <FormField label="AWB Number">
-                    <FormInput value={shipAwb} onChange={(e) => setShipAwb(e.target.value)} placeholder="Enter AWB / tracking number" />
-                  </FormField>
-                  <FormField label="Carrier / Courier">
-                    <FormInput value={shipCarrier} onChange={(e) => setShipCarrier(e.target.value)} placeholder="e.g. Delhivery, BlueDart" />
-                  </FormField>
-                  <FormField label="Tracking URL">
-                    <FormInput value={shipTrackingUrl} onChange={(e) => setShipTrackingUrl(e.target.value)} placeholder="https://..." />
-                  </FormField>
-                  <FormField label="Shipment Status">
-                    <FormSelect value={shipStatus} onChange={(e) => setShipStatus(e.target.value)}>
-                      {SHIPMENT_STATUSES.map((s) => (
-                        <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>
-                      ))}
-                    </FormSelect>
-                  </FormField>
-                </div>
-
-                <div className="flex justify-end">
-                  <button
-                    type="button"
-                    onClick={() => void handleUpdateShipment()}
-                    disabled={shipmentSaving}
-                    className="px-4 py-2 text-xs font-semibold text-white bg-primary-600 rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
-                  >
-                    {shipmentSaving ? 'Saving…' : 'Update Shipment'}
-                  </button>
-                </div>
               </div>
-            )}
+
+              {selected.shipment?.weight != null && (
+                <p className="text-xs text-text-muted">
+                  Weight: {selected.shipment.weight} kg
+                  {selected.shipment.dimensions && ` · Dimensions: ${selected.shipment.dimensions}`}
+                </p>
+              )}
+
+              {!selected.shipment && (
+                <p className="text-xs text-text-muted">
+                  No shipment record exists for this order. Fill in the details below to create one.
+                </p>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <FormField label="AWB Number">
+                  <FormInput value={shipAwb} onChange={(e) => setShipAwb(e.target.value)} placeholder="Enter AWB / tracking number" />
+                </FormField>
+                <FormField label="Carrier / Courier">
+                  <FormInput value={shipCarrier} onChange={(e) => setShipCarrier(e.target.value)} placeholder="e.g. Delhivery, BlueDart" />
+                </FormField>
+                <FormField label="Tracking URL">
+                  <FormInput value={shipTrackingUrl} onChange={(e) => setShipTrackingUrl(e.target.value)} placeholder="https://..." />
+                </FormField>
+                <FormField label="Shipment Status">
+                  <FormSelect value={shipStatus} onChange={(e) => setShipStatus(e.target.value)}>
+                    {SHIPMENT_STATUSES.map((s) => (
+                      <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>
+                    ))}
+                  </FormSelect>
+                </FormField>
+              </div>
+
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => void handleUpdateShipment()}
+                  disabled={shipmentSaving}
+                  className="px-4 py-2 text-xs font-semibold text-white bg-primary-600 rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
+                >
+                  {shipmentSaving ? 'Saving…' : selected.shipment ? 'Update Shipment' : 'Create Shipment'}
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </ActionModal>

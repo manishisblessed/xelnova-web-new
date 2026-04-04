@@ -87,3 +87,10 @@ export class CreateOrderDto {
   @IsString()
   couponCode?: string;
 }
+
+export class CancelOrderDto {
+  @ApiPropertyOptional({ description: 'Reason for cancellation' })
+  @IsOptional()
+  @IsString()
+  reason?: string;
+}

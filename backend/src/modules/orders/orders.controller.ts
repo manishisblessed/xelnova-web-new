@@ -1,7 +1,7 @@
-import { Controller, Get, Post, Param, Body } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Param, Body } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { OrdersService } from './orders.service';
-import { CreateOrderDto } from './dto/order.dto';
+import { CreateOrderDto, CancelOrderDto } from './dto/order.dto';
 import {
   successResponse,
   errorResponse,
@@ -22,6 +22,18 @@ export class OrdersController {
       await this.ordersService.findAll(userId),
       'Orders fetched successfully',
     );
+  }
+
+  @Post(':orderNumber/cancel')
+  @Auth()
+  @ApiOperation({ summary: 'Cancel an order (customer)' })
+  async cancelOrder(
+    @Param('orderNumber') orderNumber: string,
+    @CurrentUser('id') userId: string,
+    @Body() dto: CancelOrderDto,
+  ) {
+    const order = await this.ordersService.cancelOrder(orderNumber, userId, dto.reason);
+    return successResponse(order, 'Order cancelled successfully');
   }
 
   @Get(':orderNumber')

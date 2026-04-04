@@ -8,7 +8,7 @@ import { motion } from "framer-motion";
 import {
   Package, Truck, CheckCircle, Clock, ChevronLeft, MapPin, Phone,
   CreditCard, AlertCircle, Ban, RotateCcw, Banknote, Loader2,
-  Copy, ShoppingBag, User,
+  Copy, ShoppingBag, User, XCircle,
 } from "lucide-react";
 import { formatCurrency } from "@xelnova/utils";
 import { ordersApi, setAccessToken, type Order, type OrderItem } from "@xelnova/api";
@@ -51,6 +51,9 @@ export default function OrderDetailPage() {
   const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [cancelModalOpen, setCancelModalOpen] = useState(false);
+  const [cancelReason, setCancelReason] = useState("");
+  const [cancelling, setCancelling] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -64,6 +67,24 @@ export default function OrderDetailPage() {
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [params.orderNumber]);
+
+  const canCancel = order && ["PENDING", "PROCESSING", "CONFIRMED"].includes(order.status.toUpperCase());
+
+  const handleCancelOrder = async () => {
+    if (!order) return;
+    setCancelling(true);
+    try {
+      syncToken();
+      const updated = await ordersApi.cancelOrder(order.orderNumber, cancelReason || undefined);
+      setOrder(updated);
+      setCancelModalOpen(false);
+      setCancelReason("");
+    } catch (e: any) {
+      alert(e.message || "Failed to cancel order");
+    } finally {
+      setCancelling(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -118,9 +139,19 @@ export default function OrderDetailPage() {
               Placed on {new Date(order.createdAt).toLocaleDateString("en-IN", { year: "numeric", month: "long", day: "numeric" })}
             </p>
           </div>
-          <span className={`inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-semibold ${st.color} ${st.bg} ${st.border} border`}>
-            <StatusIcon size={15} /> {st.label}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className={`inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-semibold ${st.color} ${st.bg} ${st.border} border`}>
+              <StatusIcon size={15} /> {st.label}
+            </span>
+            {canCancel && (
+              <button
+                onClick={() => setCancelModalOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-semibold text-red-700 bg-red-50 border border-red-200 hover:bg-red-100 transition-colors"
+              >
+                <XCircle size={15} /> Cancel Order
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Progress tracker */}
@@ -285,6 +316,68 @@ export default function OrderDetailPage() {
           </motion.div>
         </div>
       </div>
+
+      {/* Cancel Order Modal */}
+      {cancelModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 space-y-4"
+          >
+            <div className="flex items-center gap-3">
+              <div className="flex items-center justify-center h-10 w-10 rounded-full bg-red-50">
+                <XCircle size={22} className="text-red-600" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-text-primary">Cancel Order</h3>
+                <p className="text-sm text-text-secondary">This action cannot be undone</p>
+              </div>
+            </div>
+
+            <p className="text-sm text-text-secondary">
+              Are you sure you want to cancel order <strong>#{order.orderNumber}</strong>?
+              {order.paymentMethod !== "cod" && " If payment was made, a refund will be initiated."}
+            </p>
+
+            <div>
+              <label className="block text-sm font-medium text-text-primary mb-1.5">
+                Reason for cancellation <span className="text-text-muted">(optional)</span>
+              </label>
+              <textarea
+                value={cancelReason}
+                onChange={(e) => setCancelReason(e.target.value)}
+                placeholder="e.g. Changed my mind, found a better price, ordered by mistake..."
+                rows={3}
+                className="w-full rounded-xl border border-border px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-none"
+              />
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                onClick={() => { setCancelModalOpen(false); setCancelReason(""); }}
+                disabled={cancelling}
+                className="flex-1 rounded-xl border border-border px-4 py-2.5 text-sm font-semibold text-text-primary hover:bg-gray-50 transition-colors"
+              >
+                Keep Order
+              </button>
+              <button
+                onClick={() => void handleCancelOrder()}
+                disabled={cancelling}
+                className="flex-1 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-red-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {cancelling ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" /> Cancelling...
+                  </>
+                ) : (
+                  "Yes, Cancel Order"
+                )}
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
     </div>
   );
 }
