@@ -26,6 +26,7 @@ export default function ForgotPasswordPage() {
         setOtpSent(true);
         setSuccess(`OTP sent to +91 ${phone}`);
       } else {
+        await authApi.forgotPassword(email);
         setSuccess('If this email is registered, you will receive a password reset link shortly.');
       }
     } catch (err: unknown) {

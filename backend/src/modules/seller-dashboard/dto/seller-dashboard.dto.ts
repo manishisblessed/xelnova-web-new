@@ -17,6 +17,11 @@ export class CreateProductDto {
   @ApiPropertyOptional() @IsOptional() @Allow() variants?: any;
   @ApiPropertyOptional() @IsOptional() @Allow() specifications?: any;
   @ApiPropertyOptional() @IsOptional() @IsString() sku?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() metaTitle?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() metaDescription?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() hsnCode?: string;
+  @ApiPropertyOptional() @IsOptional() @IsNumber() @Type(() => Number) gstRate?: number;
+  @ApiPropertyOptional() @IsOptional() @IsNumber() @Type(() => Number) lowStockThreshold?: number;
 }
 
 export class UpdateProductDto {
@@ -36,6 +41,11 @@ export class UpdateProductDto {
   @ApiPropertyOptional() @IsOptional() @IsBoolean() isActive?: boolean;
   @ApiPropertyOptional() @IsOptional() @IsString() status?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() sku?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() metaTitle?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() metaDescription?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() hsnCode?: string;
+  @ApiPropertyOptional() @IsOptional() @IsNumber() @Type(() => Number) gstRate?: number;
+  @ApiPropertyOptional() @IsOptional() @IsNumber() @Type(() => Number) lowStockThreshold?: number;
 }
 
 export class SellerProductQueryDto {
@@ -74,6 +84,16 @@ export class UpdateSellerProfileDto {
 
 export class RevenueQueryDto {
   @ApiPropertyOptional() @IsOptional() @IsString() period?: string; // 'day' | 'week' | 'month' | 'year'
+  @ApiPropertyOptional() @IsOptional() @IsString() dateFrom?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() dateTo?: string;
+}
+
+export class ProposeBrandDto {
+  @ApiProperty() @IsString() name: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() logo?: string;
+}
+
+export class SettlementQueryDto {
   @ApiPropertyOptional() @IsOptional() @IsString() dateFrom?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() dateTo?: string;
 }

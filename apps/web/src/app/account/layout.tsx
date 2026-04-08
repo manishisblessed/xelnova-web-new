@@ -11,6 +11,11 @@ import {
   LogOut,
   Camera,
   Loader2,
+  RotateCcw,
+  Wallet,
+  HelpCircle,
+  Gift,
+  Bell,
 } from "lucide-react";
 import { useAuth, usersApi, setAccessToken, type AuthUser } from "@xelnova/api";
 import { useEffect, useState } from "react";
@@ -29,8 +34,13 @@ function hasAuthCookie(): boolean {
 const navLinks = [
   { icon: User, label: "My Profile", href: "/account/profile" },
   { icon: Package, label: "My Orders", href: "/account/orders" },
+  { icon: RotateCcw, label: "Returns", href: "/account/returns" },
+  { icon: Wallet, label: "Wallet", href: "/account/wallet" },
   { icon: Heart, label: "Wishlist", href: "/account/wishlist" },
   { icon: MapPin, label: "Addresses", href: "/account/addresses" },
+  { icon: Gift, label: "Loyalty & Referral", href: "/account/loyalty" },
+  { icon: Bell, label: "Notifications", href: "/account/notifications" },
+  { icon: HelpCircle, label: "Support", href: "/account/support" },
   { icon: Shield, label: "Security", href: "/account/security" },
 ];
 

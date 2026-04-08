@@ -79,6 +79,7 @@ export function HomeBelowFold() {
   const allProducts = productsData?.products || [];
   const flashDealProducts = flashDeals || [];
   const trendingProducts = allProducts.filter((p) => p.isFeatured || p.rating >= 4.5).slice(0, 8);
+  const newArrivals = [...allProducts].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 8);
   const bestSellers = allProducts.filter((p) => p.rating >= 4.5).sort((a, b) => b.reviewCount - a.reviewCount).slice(0, 8);
   const recommended = allProducts.filter((p) => p.rating >= 4.0).slice(0, 8);
   const dealProduct = allProducts.find((p) => p.discount >= 30 && p.rating >= 4.5) || allProducts[0];
@@ -105,7 +106,7 @@ export function HomeBelowFold() {
         <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
           <div className="bg-white rounded-2xl border border-border/60 overflow-hidden shadow-card">
             <div className="flex flex-col md:flex-row">
-              <div className="md:w-56 lg:w-64 bg-gradient-to-br from-primary-700 via-primary-600 to-primary-800 p-6 flex flex-col justify-center items-center text-center relative overflow-hidden">
+              <div className="md:w-56 lg:w-64 bg-gradient-to-br from-violet-600 via-purple-600 to-indigo-700 p-6 flex flex-col justify-center items-center text-center relative overflow-hidden">
                 <div className="absolute inset-0 opacity-10">
                   <div className="absolute top-4 left-4 w-32 h-32 rounded-full bg-white/20 blur-2xl" />
                   <div className="absolute bottom-4 right-4 w-24 h-24 rounded-full bg-accent-400/30 blur-xl" />
@@ -152,6 +153,24 @@ export function HomeBelowFold() {
           </div>
         </div>
       </section>
+
+      {/* ─── NEW ARRIVALS ─── */}
+      {newArrivals.length > 0 && (
+        <section className="py-6">
+          <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
+            <div className="bg-white rounded-2xl border border-border/60 p-5 md:p-6 shadow-card">
+              <SectionHeader title="New Arrivals" subtitle="Just landed — fresh picks for you" seeAllHref="/products?sort=newest" />
+              <div className="flex gap-4 overflow-x-auto pb-2 scrollbar-hide">
+                {newArrivals.map((product, i) => (
+                  <div key={product.id} className="w-[220px] flex-shrink-0 sm:w-[240px]">
+                    <ProductCard product={product} index={i} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* ─── 7. PROMO BANNERS ─── */}
       {promoBanners.length > 0 && (
@@ -398,7 +417,7 @@ export function HomeBelowFold() {
       {/* ─── 14. APP DOWNLOAD CTA ─── */}
       <section className="py-6">
         <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
-          <div className="relative bg-gradient-to-r from-primary-700 via-primary-800 to-surface-dark rounded-3xl p-8 md:p-12 overflow-hidden">
+          <div className="relative bg-gradient-to-r from-violet-600 via-purple-600 to-indigo-700 rounded-3xl p-8 md:p-12 overflow-hidden">
             <div className="absolute inset-0 opacity-[0.04]">
               <div className="absolute top-1/2 left-1/4 w-80 h-80 bg-white rounded-full blur-3xl" />
               <div className="absolute bottom-0 right-1/3 w-64 h-64 bg-accent-400 rounded-full blur-3xl" />
@@ -427,14 +446,14 @@ export function HomeBelowFold() {
               </div>
               <div className="hidden md:flex items-center justify-center">
                 <div className="w-48 h-72 bg-white/5 rounded-[2rem] border border-white/10 p-2 relative">
-                  <div className="w-full h-full bg-gradient-to-b from-primary-500/50 to-primary-700/50 rounded-[1.5rem] flex items-center justify-center">
+                  <div className="w-full h-full bg-gradient-to-b from-violet-500/50 to-purple-700/50 rounded-[1.5rem] flex items-center justify-center">
                     <div className="text-center">
-                      <img src="/xelnova-icon-green.png" alt="Xelnova" className="w-14 h-14 rounded-2xl mx-auto mb-3" />
+                      <Image src="/xelnova-icon-green.png" alt="Xelnova" width={56} height={56} className="w-14 h-14 rounded-2xl mx-auto mb-3" />
                       <p className="text-white font-bold text-base font-display">Xelnova</p>
                       <p className="text-white/70 text-[10px] mt-0.5">Shop smart</p>
                     </div>
                   </div>
-                  <div className="absolute top-0 left-1/2 -translate-x-1/2 w-20 h-4 bg-surface-dark rounded-b-xl" />
+                  <div className="absolute top-0 left-1/2 -translate-x-1/2 w-20 h-4 bg-indigo-800 rounded-b-xl" />
                 </div>
               </div>
             </div>

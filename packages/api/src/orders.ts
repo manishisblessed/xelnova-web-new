@@ -57,3 +57,15 @@ export async function cancelOrder(orderNumber: string, reason?: string): Promise
   }
   return data.data;
 }
+
+export function getInvoiceUrl(orderNumber: string): string {
+  const base = api.defaults.baseURL || '';
+  return `${base}/orders/${orderNumber}/invoice`;
+}
+
+export async function downloadInvoice(orderNumber: string): Promise<Blob> {
+  const { data } = await api.get(`/orders/${orderNumber}/invoice`, {
+    responseType: 'blob',
+  });
+  return data;
+}

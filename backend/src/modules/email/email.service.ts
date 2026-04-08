@@ -155,6 +155,16 @@ export class EmailService {
     });
   }
 
+  async sendGenericEmail(to: string, subject: string, textBody: string) {
+    const html = `
+      <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+        <h1 style="color:#7c3aed">Xelnova</h1>
+        ${textBody.split('\n').map((line) => `<p>${line}</p>`).join('')}
+      </div>
+    `;
+    return this.sendEmail({ to, subject, html });
+  }
+
   async sendPayoutNotification(to: string, name: string, amount: number, status: string) {
     return this.sendEmail({
       to,

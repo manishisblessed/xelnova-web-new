@@ -18,7 +18,7 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  const protectedPaths = ['/dashboard', '/orders', '/inventory', '/payouts', '/wallet', '/profile', '/shipping'];
+  const protectedPaths = ['/dashboard', '/orders', '/inventory', '/payouts', '/wallet', '/profile', '/shipping', '/tickets', '/bulk-upload', '/inventory-alerts', '/brands', '/settlement', '/analytics'];
   const isProtected = protectedPaths.some((p) => pathname === p || pathname.startsWith(p + '/'));
   if (isProtected) {
     if (!token || !isSellerSession(request)) {
@@ -51,5 +51,17 @@ export const config = {
     '/profile/:path*',
     '/shipping',
     '/shipping/:path*',
+    '/tickets',
+    '/tickets/:path*',
+    '/bulk-upload',
+    '/bulk-upload/:path*',
+    '/inventory-alerts',
+    '/inventory-alerts/:path*',
+    '/brands',
+    '/brands/:path*',
+    '/settlement',
+    '/settlement/:path*',
+    '/analytics',
+    '/analytics/:path*',
   ],
 };

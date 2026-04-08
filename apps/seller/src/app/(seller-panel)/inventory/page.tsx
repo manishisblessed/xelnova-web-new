@@ -426,6 +426,11 @@ export default function SellerInventoryPage() {
   const [formImages, setFormImages] = useState<ProductImage[]>([]);
   const [formVariantRows, setFormVariantRows] = useState<FormVariantRow[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [formMetaTitle, setFormMetaTitle] = useState('');
+  const [formMetaDesc, setFormMetaDesc] = useState('');
+  const [formHsnCode, setFormHsnCode] = useState('');
+  const [formGstRate, setFormGstRate] = useState('');
+  const [formLowStock, setFormLowStock] = useState('5');
 
   const loadProducts = useCallback(() => {
     setLoading(true);
@@ -464,6 +469,11 @@ export default function SellerInventoryPage() {
     setFormShort('');
     setFormImages([]);
     setFormVariantRows([]);
+    setFormMetaTitle('');
+    setFormMetaDesc('');
+    setFormHsnCode('');
+    setFormGstRate('');
+    setFormLowStock('5');
   };
 
   const openCreate = () => {
@@ -493,6 +503,11 @@ export default function SellerInventoryPage() {
         setFormShort(String(full.shortDescription ?? ''));
         setFormImages(urlsToProductImages(full.images as string[] | undefined));
         setFormVariantRows(variantGroupsToFormRows(full.variants));
+        setFormMetaTitle(String(full.metaTitle ?? ''));
+        setFormMetaDesc(String(full.metaDescription ?? ''));
+        setFormHsnCode(String(full.hsnCode ?? ''));
+        setFormGstRate(full.gstRate != null ? String(full.gstRate) : '');
+        setFormLowStock(String(full.lowStockThreshold ?? '5'));
       })
       .catch((err: Error) => {
         toast.error(err.message || 'Could not load product details');
@@ -697,6 +712,11 @@ export default function SellerInventoryPage() {
         shortDescription: formShort.trim() || undefined,
         images: imgs.length ? imgs : undefined,
         variants: variantPayload.length ? variantPayload : undefined,
+        metaTitle: formMetaTitle.trim() || undefined,
+        metaDescription: formMetaDesc.trim() || undefined,
+        hsnCode: formHsnCode.trim() || undefined,
+        gstRate: formGstRate ? Number(formGstRate) : undefined,
+        lowStockThreshold: formLowStock ? Number(formLowStock) : undefined,
       });
       toast.success('Product created');
       setCreateOpen(false);
@@ -734,6 +754,11 @@ export default function SellerInventoryPage() {
         images: imgs,
         variants: variantPayload.length ? variantPayload : [],
         ...(formCategoryId ? { categoryId: formCategoryId } : {}),
+        metaTitle: formMetaTitle.trim() || undefined,
+        metaDescription: formMetaDesc.trim() || undefined,
+        hsnCode: formHsnCode.trim() || undefined,
+        gstRate: formGstRate ? Number(formGstRate) : undefined,
+        lowStockThreshold: formLowStock ? Number(formLowStock) : undefined,
       });
       toast.success('Product updated');
       setEditProduct(null);
@@ -1230,6 +1255,33 @@ export default function SellerInventoryPage() {
           value={formShort}
           onChange={(e) => setFormShort(e.target.value)}
         />
+      </div>
+
+      {/* SEO & Tax Fields */}
+      <div className="border-t border-border pt-4 mt-4">
+        <p className="text-xs font-semibold text-text-primary mb-3">SEO & Tax</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs text-text-muted block mb-1">Meta Title</label>
+            <Input placeholder="SEO title (optional)" value={formMetaTitle} onChange={(e) => setFormMetaTitle(e.target.value)} />
+          </div>
+          <div>
+            <label className="text-xs text-text-muted block mb-1">HSN Code</label>
+            <Input placeholder="e.g. 6109" value={formHsnCode} onChange={(e) => setFormHsnCode(e.target.value)} />
+          </div>
+          <div className="sm:col-span-2">
+            <label className="text-xs text-text-muted block mb-1">Meta Description</label>
+            <Input placeholder="SEO description (optional)" value={formMetaDesc} onChange={(e) => setFormMetaDesc(e.target.value)} />
+          </div>
+          <div>
+            <label className="text-xs text-text-muted block mb-1">GST Rate (%)</label>
+            <Input type="number" placeholder="e.g. 18" value={formGstRate} onChange={(e) => setFormGstRate(e.target.value)} />
+          </div>
+          <div>
+            <label className="text-xs text-text-muted block mb-1">Low Stock Threshold</label>
+            <Input type="number" placeholder="5" value={formLowStock} onChange={(e) => setFormLowStock(e.target.value)} />
+          </div>
+        </div>
       </div>
     </div>
   );

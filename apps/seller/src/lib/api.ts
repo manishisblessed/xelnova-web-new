@@ -327,6 +327,100 @@ export async function apiRequestPayout(amount: number, notes?: string) {
   return handleResponse(res);
 }
 
+// ─── Tickets ───
+
+export async function apiGetSellerTickets() {
+  const res = await fetch(`${API_URL}/tickets/seller`, { headers: authHeaders() });
+  return handleResponse(res);
+}
+
+export async function apiGetSellerTicketDetail(id: string) {
+  const res = await fetch(`${API_URL}/tickets/seller/${id}`, { headers: authHeaders() });
+  return handleResponse(res);
+}
+
+export async function apiSellerReplyTicket(id: string, message: string) {
+  const res = await fetch(`${API_URL}/tickets/seller/${id}/reply`, {
+    method: 'POST',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message }),
+  });
+  return handleResponse(res);
+}
+
+// ─── Bulk Upload ───
+
+export async function apiBulkUploadProducts(rows: Record<string, string>[]) {
+  const res = await fetch(`${API_URL}/seller/products/bulk-upload`, {
+    method: 'POST',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rows }),
+  });
+  return handleResponse(res);
+}
+
+// ─── Inventory Alerts ───
+
+export async function apiGetInventoryAlerts() {
+  const res = await fetch(`${API_URL}/seller/inventory-alerts`, { headers: authHeaders() });
+  return handleResponse(res);
+}
+
+export async function apiSendInventoryAlerts() {
+  const res = await fetch(`${API_URL}/seller/inventory-alerts/notify`, {
+    method: 'POST',
+    headers: authHeaders(),
+  });
+  return handleResponse(res);
+}
+
+// ─── Brand Proposal ───
+
+export async function apiProposeBrand(name: string, logo?: string) {
+  const res = await fetch(`${API_URL}/seller/brands/propose`, {
+    method: 'POST',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, logo }),
+  });
+  return handleResponse(res);
+}
+
+export async function apiGetSellerBrands() {
+  const res = await fetch(`${API_URL}/seller/brands`, { headers: authHeaders() });
+  return handleResponse(res);
+}
+
+// ─── Settlement Reports ───
+
+export async function apiGetSettlement(params?: Record<string, string>) {
+  const q = params ? `?${new URLSearchParams(params)}` : '';
+  const res = await fetch(`${API_URL}/seller/settlement${q}`, { headers: authHeaders() });
+  return handleResponse(res);
+}
+
+export async function apiDownloadSettlementCsv(params?: Record<string, string>) {
+  const q = params ? `?${new URLSearchParams(params)}` : '';
+  const res = await fetch(`${API_URL}/seller/settlement/csv${q}`, { headers: authHeaders() });
+  if (!res.ok) throw new Error('Failed to download CSV');
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'settlement-report.csv';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+// ─── Sales Analytics ───
+
+export async function apiGetSalesAnalytics(period?: string) {
+  const q = period ? `?period=${period}` : '';
+  const res = await fetch(`${API_URL}/seller/sales-analytics${q}`, { headers: authHeaders() });
+  return handleResponse(res);
+}
+
 // ─── Profile ───
 
 export async function apiGetProfile() {

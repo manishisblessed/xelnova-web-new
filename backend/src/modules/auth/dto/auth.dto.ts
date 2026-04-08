@@ -90,3 +90,21 @@ export class GoogleTokenDto {
   @IsString()
   role?: string;
 }
+
+export class ForgotPasswordDto {
+  @ApiProperty({ example: 'rahul.sharma@example.com' })
+  @IsEmail()
+  email: string;
+}
+
+export class ResetPasswordDto {
+  @ApiProperty()
+  @IsString()
+  @IsNotEmpty()
+  token: string;
+
+  @ApiProperty()
+  @IsString()
+  @MinLength(6)
+  newPassword: string;
+}

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, Suspense } from 'react';
+import { useState, useEffect, useCallback, useRef, Suspense } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useSearchParams } from 'next/navigation';
@@ -65,6 +65,31 @@ function LoginPageContent() {
     }
   }, [searchParams]);
 
+  const googleCallbackRef = useRef<(response: { credential: string }) => void>(null);
+
+  const initializeGoogleSignIn = useCallback(() => {
+    if (window.google) {
+      window.google.accounts.id.initialize({
+        client_id: GOOGLE_CLIENT_ID,
+        callback: (response: { credential: string }) => googleCallbackRef.current?.(response),
+        auto_select: false,
+      });
+
+      const buttonDiv = document.getElementById('google-signin-button');
+      if (buttonDiv) {
+        buttonDiv.innerHTML = '';
+        window.google.accounts.id.renderButton(buttonDiv, {
+          type: 'standard',
+          theme: 'outline',
+          size: 'large',
+          text: 'continue_with',
+          shape: 'rectangular',
+          width: 350,
+        });
+      }
+    }
+  }, []);
+
   useEffect(() => {
     const existingScript = document.querySelector('script[src="https://accounts.google.com/gsi/client"]');
     if (existingScript) {
@@ -82,30 +107,7 @@ function LoginPageContent() {
     return () => {
       // Don't remove — React strict mode double-mounts in dev
     };
-  }, []);
-
-  const initializeGoogleSignIn = () => {
-    if (window.google) {
-      window.google.accounts.id.initialize({
-        client_id: GOOGLE_CLIENT_ID,
-        callback: handleGoogleCallback,
-        auto_select: false,
-      });
-
-      const buttonDiv = document.getElementById('google-signin-button');
-      if (buttonDiv) {
-        buttonDiv.innerHTML = '';
-        window.google.accounts.id.renderButton(buttonDiv, {
-          type: 'standard',
-          theme: 'outline',
-          size: 'large',
-          text: 'continue_with',
-          shape: 'rectangular',
-          width: 350,
-        });
-      }
-    }
-  };
+  }, [initializeGoogleSignIn]);
 
   const handleGoogleCallback = async (response: { credential: string }) => {
     setGoogleClicked(false);
@@ -141,6 +143,8 @@ function LoginPageContent() {
       setGoogleLoading(false);
     }
   };
+
+  googleCallbackRef.current = handleGoogleCallback;
 
   useEffect(() => {
     const handleBlur = () => {

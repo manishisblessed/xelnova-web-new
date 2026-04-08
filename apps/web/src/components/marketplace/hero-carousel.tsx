@@ -110,7 +110,7 @@ export function HeroCarousel() {
                 sizes="(max-width: 768px) 100vw, 1100px"
               />
             ) : (
-              <div className="absolute inset-0 bg-gradient-to-br from-primary-700 via-primary-600 to-primary-800" />
+              <div className="absolute inset-0 bg-gradient-to-br from-violet-600 via-purple-600 to-indigo-700" />
             )}
             <div className="absolute inset-0 bg-gradient-to-r from-black/75 via-black/40 to-transparent" />
 

@@ -8,10 +8,12 @@ import { motion } from "framer-motion";
 import {
   Package, Truck, CheckCircle, Clock, ChevronLeft, MapPin, Phone,
   CreditCard, AlertCircle, Ban, RotateCcw, Banknote, Loader2,
-  Copy, ShoppingBag, User, XCircle,
+  Copy, ShoppingBag, User, XCircle, Download, RefreshCw,
 } from "lucide-react";
 import { formatCurrency } from "@xelnova/utils";
-import { ordersApi, setAccessToken, type Order, type OrderItem } from "@xelnova/api";
+import { ordersApi, returnsApi, setAccessToken, type Order, type OrderItem } from "@xelnova/api";
+import { useRouter } from "next/navigation";
+import { useCartStore } from "@/lib/store/cart-store";
 
 function syncToken() {
   if (typeof document === "undefined") return;
@@ -48,12 +50,18 @@ const PROGRESS_STEPS = ["PENDING", "CONFIRMED", "SHIPPED", "DELIVERED"];
 
 export default function OrderDetailPage() {
   const params = useParams<{ orderNumber: string }>();
+  const router = useRouter();
+  const addToCart = useCartStore((s) => s.addItem);
   const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
   const [cancelling, setCancelling] = useState(false);
+  const [returnModalOpen, setReturnModalOpen] = useState(false);
+  const [returnReason, setReturnReason] = useState("");
+  const [submittingReturn, setSubmittingReturn] = useState(false);
+  const [downloadingInvoice, setDownloadingInvoice] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -84,6 +92,61 @@ export default function OrderDetailPage() {
     } finally {
       setCancelling(false);
     }
+  };
+
+  const canReturn = order && order.status.toUpperCase() === "DELIVERED";
+
+  const handleReturnRequest = async () => {
+    if (!order || !returnReason.trim()) return;
+    setSubmittingReturn(true);
+    try {
+      syncToken();
+      await returnsApi.createReturn(order.orderNumber, returnReason);
+      setReturnModalOpen(false);
+      setReturnReason("");
+      alert("Return request submitted successfully!");
+    } catch (e: any) {
+      alert(e.message || "Failed to submit return request");
+    } finally {
+      setSubmittingReturn(false);
+    }
+  };
+
+  const handleDownloadInvoice = async () => {
+    if (!order) return;
+    setDownloadingInvoice(true);
+    try {
+      syncToken();
+      const blob = await ordersApi.downloadInvoice(order.orderNumber);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `Invoice-${order.orderNumber}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      alert(e.message || "Failed to download invoice");
+    } finally {
+      setDownloadingInvoice(false);
+    }
+  };
+
+  const handleReorder = () => {
+    if (!order) return;
+    for (const item of order.items as ItemRow[]) {
+      addToCart({
+        id: item.productId,
+        productId: item.productId,
+        name: itemName(item),
+        slug: "",
+        price: item.price,
+        comparePrice: 0,
+        image: itemImage(item) || "",
+        variant: item.variant || undefined,
+        seller: "",
+      }, item.quantity);
+    }
+    router.push("/cart");
   };
 
   if (loading) {
@@ -221,7 +284,7 @@ export default function OrderDetailPage() {
                   <div key={item.id ?? i} className="flex gap-3 items-center rounded-xl border border-border p-3">
                     <div className="h-16 w-16 rounded-lg bg-gray-50 border border-border overflow-hidden shrink-0 flex items-center justify-center">
                       {img ? (
-                        <img src={img} alt={name} className="h-full w-full object-cover" />
+                        <Image src={img} alt={name} width={64} height={64} className="h-full w-full object-cover" />
                       ) : (
                         <Package size={22} className="text-gray-300" />
                       )}
@@ -304,8 +367,35 @@ export default function OrderDetailPage() {
             </div>
           </motion.div>
 
+          {/* Actions */}
+          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="rounded-2xl border border-border bg-white p-5 shadow-card space-y-2.5">
+            <h3 className="text-sm font-bold text-text-primary mb-3">Actions</h3>
+            <button
+              onClick={handleDownloadInvoice}
+              disabled={downloadingInvoice}
+              className="w-full flex items-center gap-2 rounded-xl border border-border px-4 py-2.5 text-sm font-medium text-text-primary hover:bg-gray-50 transition-colors disabled:opacity-50"
+            >
+              {downloadingInvoice ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
+              Download Invoice
+            </button>
+            <button
+              onClick={handleReorder}
+              className="w-full flex items-center gap-2 rounded-xl border border-border px-4 py-2.5 text-sm font-medium text-primary-600 hover:bg-primary-50 transition-colors"
+            >
+              <RefreshCw size={15} /> Buy Again
+            </button>
+            {canReturn && (
+              <button
+                onClick={() => setReturnModalOpen(true)}
+                className="w-full flex items-center gap-2 rounded-xl border border-orange-200 bg-orange-50 px-4 py-2.5 text-sm font-medium text-orange-700 hover:bg-orange-100 transition-colors"
+              >
+                <RotateCcw size={15} /> Request Return
+              </button>
+            )}
+          </motion.div>
+
           {/* Need help */}
-          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="rounded-2xl border border-border bg-gradient-to-br from-primary-50 to-blue-50 p-5">
+          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }} className="rounded-2xl border border-border bg-gradient-to-br from-primary-50 to-blue-50 p-5">
             <h3 className="text-sm font-bold text-text-primary mb-1">Need Help?</h3>
             <p className="text-xs text-text-secondary mb-3">
               Have a question about this order? Our support team is here to help.
@@ -372,6 +462,63 @@ export default function OrderDetailPage() {
                   </>
                 ) : (
                   "Yes, Cancel Order"
+                )}
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Return Request Modal */}
+      {returnModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 space-y-4"
+          >
+            <div className="flex items-center gap-3">
+              <div className="flex items-center justify-center h-10 w-10 rounded-full bg-orange-50">
+                <RotateCcw size={22} className="text-orange-600" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-text-primary">Request Return</h3>
+                <p className="text-sm text-text-secondary">Order #{order?.orderNumber}</p>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-text-primary mb-1.5">
+                Reason for return <span className="text-red-500">*</span>
+              </label>
+              <textarea
+                value={returnReason}
+                onChange={(e) => setReturnReason(e.target.value)}
+                placeholder="e.g. Product damaged, wrong item received, not as described..."
+                rows={3}
+                className="w-full rounded-xl border border-border px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-none"
+              />
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                onClick={() => { setReturnModalOpen(false); setReturnReason(""); }}
+                disabled={submittingReturn}
+                className="flex-1 rounded-xl border border-border px-4 py-2.5 text-sm font-semibold text-text-primary hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => void handleReturnRequest()}
+                disabled={submittingReturn || !returnReason.trim()}
+                className="flex-1 rounded-xl bg-orange-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-orange-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {submittingReturn ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" /> Submitting...
+                  </>
+                ) : (
+                  "Submit Return"
                 )}
               </button>
             </div>

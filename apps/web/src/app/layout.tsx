@@ -28,10 +28,34 @@ export const metadata: Metadata = {
   },
 };
 
+const organizationJsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'Organization',
+  name: 'Xelnova',
+  url: 'https://www.xelnova.in',
+  logo: 'https://www.xelnova.in/xelnova-icon-dark.png',
+  sameAs: [
+    'https://www.facebook.com/people/Xelnova-India/pfbid02dQmA3L3AMABgPWSJUmWb39d9eCnWj37QyCt3r2c3Yup6iub2J66UX99A6pPnyVFRl/',
+    'https://www.youtube.com/@XelnovaIndia',
+    'https://www.instagram.com/xelnova.in',
+  ],
+  contactPoint: {
+    '@type': 'ContactPoint',
+    telephone: '1800-123-XELNOVA',
+    contactType: 'customer service',
+    areaServed: 'IN',
+    availableLanguage: 'English',
+  },
+};
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={`${inter.variable} ${poppins.variable}`} data-scroll-behavior="smooth">
       <body className="font-sans antialiased min-h-screen flex flex-col" suppressHydrationWarning>
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(organizationJsonLd) }}
+        />
         <Providers>
           <Toaster />
           <Header />

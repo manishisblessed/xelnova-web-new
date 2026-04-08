@@ -43,6 +43,9 @@ export default function CouponsPage() {
     validUntil: '',
     usageLimit: '',
     isActive: true,
+    scope: 'global' as 'global' | 'category' | 'seller',
+    categoryId: '',
+    sellerId: '',
   });
 
   const openAdd = () => {
@@ -57,6 +60,9 @@ export default function CouponsPage() {
       validUntil: '',
       usageLimit: '',
       isActive: true,
+      scope: 'global',
+      categoryId: '',
+      sellerId: '',
     });
     setModalOpen(true);
   };
@@ -81,6 +87,9 @@ export default function CouponsPage() {
       validUntil: toDatetimeLocal(c.validUntil),
       usageLimit: c.usageLimit != null ? String(c.usageLimit) : '',
       isActive: c.isActive,
+      scope: (c as any).scope || 'global',
+      categoryId: (c as any).categoryId || '',
+      sellerId: (c as any).sellerId || '',
     });
     setModalOpen(true);
   };
@@ -111,6 +120,9 @@ export default function CouponsPage() {
         maxDiscount: form.maxDiscount.trim() ? Number(form.maxDiscount) : undefined,
         validUntil: form.validUntil.trim() ? new Date(form.validUntil).toISOString() : undefined,
         usageLimit: form.usageLimit.trim() ? Number(form.usageLimit) : undefined,
+        scope: form.scope,
+        categoryId: form.scope === 'category' ? form.categoryId.trim() || undefined : undefined,
+        sellerId: form.scope === 'seller' ? form.sellerId.trim() || undefined : undefined,
       };
       if (editing) {
         body.isActive = form.isActive;
@@ -237,6 +249,19 @@ export default function CouponsPage() {
           <div className="col-span-2">
             <FormField label="Description"><FormInput value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} placeholder="Optional" /></FormField>
           </div>
+          <FormField label="Scope">
+            <FormSelect value={form.scope} onChange={(e) => setForm((f) => ({ ...f, scope: e.target.value as any }))}>
+              <option value="global">Global (all products)</option>
+              <option value="category">Category-specific</option>
+              <option value="seller">Seller-specific</option>
+            </FormSelect>
+          </FormField>
+          {form.scope === 'category' && (
+            <FormField label="Category ID"><FormInput value={form.categoryId} onChange={(e) => setForm((f) => ({ ...f, categoryId: e.target.value }))} placeholder="Category ID" /></FormField>
+          )}
+          {form.scope === 'seller' && (
+            <FormField label="Seller ID"><FormInput value={form.sellerId} onChange={(e) => setForm((f) => ({ ...f, sellerId: e.target.value }))} placeholder="Seller Profile ID" /></FormField>
+          )}
           {editing && (
             <div className="col-span-2">
               <FormField label="Active">

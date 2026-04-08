@@ -170,7 +170,6 @@ export default function RegisterPage() {
   const [mathAnswer, setMathAnswer] = useState('');
   const recaptchaScriptLoaded = useRef(false);
   const [gstVerification, setGstVerification] = useState<VerificationState>({ status: 'idle' });
-  const [ifscVerification, setIfscVerification] = useState<VerificationState>({ status: 'idle' });
   const [bankVerification, setBankVerification] = useState<VerificationState>({ status: 'idle' });
   const [aadhaar, setAadhaar] = useState<AadhaarState>({ status: 'idle' });
 
@@ -547,23 +546,7 @@ export default function RegisterPage() {
     }
   };
 
-  // ========== IFSC & Bank ==========
-
-  const verifyIfsc = async () => {
-    if (!formData.ifscCode || formData.ifscCode.length !== 11) return;
-    setIfscVerification({ status: 'loading' });
-    try {
-      const res = await fetch(`${API_BASE}/verification/ifsc/${formData.ifscCode.toUpperCase()}`);
-      const data = await res.json();
-      if (data.success) {
-        setIfscVerification({ status: 'verified', data: data.data });
-      } else {
-        setIfscVerification({ status: 'error', error: extractErrorMessage(data, 'IFSC verification failed') });
-      }
-    } catch {
-      setIfscVerification({ status: 'error', error: 'Unable to reach the server. Please check your connection and try again.' });
-    }
-  };
+  // ========== Bank (single penny-drop verification) ==========
 
   const verifyBankAccount = async () => {
     if (!formData.accountNumber || !/^[0-9]{9,18}$/.test(formData.accountNumber)) return;
@@ -604,16 +587,32 @@ export default function RegisterPage() {
     const rect = canvas.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) return;
     const dpr = window.devicePixelRatio || 1;
-    canvas.width = rect.width * dpr;
-    canvas.height = rect.height * dpr;
+    const w = Math.max(1, Math.round(rect.width * dpr));
+    const h = Math.max(1, Math.round(rect.height * dpr));
+    canvas.width = w;
+    canvas.height = h;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const cssW = w / dpr;
+    const cssH = h / dpr;
     ctx.fillStyle = '#fff';
-    ctx.fillRect(0, 0, rect.width, rect.height);
+    ctx.fillRect(0, 0, cssW, cssH);
     strokeHistoryRef.current = [];
     pointsRef.current = [];
     setHasDrawn(false);
     setSignatureDataUrl('');
   }, []);
+
+  /** Re-sync backing store if layout/CSS size drifted from last init (fixes stroke offset). */
+  const ensureCanvasMatchesDisplay = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return;
+    const dpr = window.devicePixelRatio || 1;
+    const w = Math.max(1, Math.round(rect.width * dpr));
+    const h = Math.max(1, Math.round(rect.height * dpr));
+    if (canvas.width !== w || canvas.height !== h) initCanvas();
+  }, [initCanvas]);
 
   useEffect(() => {
     if (currentStep !== 3 || signatureMode !== 'draw') return;
@@ -623,7 +622,9 @@ export default function RegisterPage() {
     const canvas = canvasRef.current;
     if (!canvas) return () => cancelAnimationFrame(raf);
 
-    const ro = new ResizeObserver(() => initCanvas());
+    const ro = new ResizeObserver(() => {
+      requestAnimationFrame(() => initCanvas());
+    });
     ro.observe(canvas);
 
     return () => {
@@ -632,18 +633,29 @@ export default function RegisterPage() {
     };
   }, [currentStep, signatureMode, initCanvas]);
 
+  const getPointerClientXY = (e: React.MouseEvent | React.TouchEvent): { clientX: number; clientY: number } | null => {
+    if ('touches' in e) {
+      if (e.touches.length > 0) {
+        return { clientX: e.touches[0].clientX, clientY: e.touches[0].clientY };
+      }
+      return null;
+    }
+    return { clientX: e.clientX, clientY: e.clientY };
+  };
+
+  /**
+   * Pointer position in the same coordinate space as drawing: CSS pixels relative to the canvas
+   * layout box (matches ctx.setTransform(dpr, 0, 0, dpr, 0, 0)).
+   */
   const getPos = (e: React.MouseEvent | React.TouchEvent) => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
+    const p = getPointerClientXY(e);
+    if (!p) return { x: 0, y: 0 };
     const rect = canvas.getBoundingClientRect();
-    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
-    const dpr = window.devicePixelRatio || 1;
-    const cssW = canvas.width / dpr;
-    const cssH = canvas.height / dpr;
     return {
-      x: ((clientX - rect.left) / rect.width) * cssW,
-      y: ((clientY - rect.top) / rect.height) * cssH,
+      x: p.clientX - rect.left,
+      y: p.clientY - rect.top,
     };
   };
 
@@ -686,6 +698,7 @@ export default function RegisterPage() {
     e.preventDefault();
     const canvas = canvasRef.current;
     if (!canvas) return;
+    ensureCanvasMatchesDisplay();
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     strokeHistoryRef.current.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
@@ -756,9 +769,9 @@ export default function RegisterPage() {
       ctx.putImageData(prev, 0, 0);
       setSignatureDataUrl(canvas.toDataURL('image/png'));
     } else {
-      const rect = canvas.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
       ctx.fillStyle = '#fff';
-      ctx.fillRect(0, 0, rect.width, rect.height);
+      ctx.fillRect(0, 0, canvas.width / dpr, canvas.height / dpr);
       setSignatureDataUrl('');
       setHasDrawn(false);
     }
@@ -769,9 +782,9 @@ export default function RegisterPage() {
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    const rect = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
     ctx.fillStyle = '#fff';
-    ctx.fillRect(0, 0, rect.width, rect.height);
+    ctx.fillRect(0, 0, canvas.width / dpr, canvas.height / dpr);
     setSignatureDataUrl('');
     setHasDrawn(false);
     strokeHistoryRef.current = [];
@@ -824,6 +837,9 @@ export default function RegisterPage() {
       ...prev,
       [name]: type === 'checkbox' ? checked : value,
     }));
+    if (name === 'accountNumber' || name === 'ifscCode') {
+      setBankVerification({ status: 'idle' });
+    }
     if (errors[name] || errors.submit) {
       setErrors(prev => { const e = { ...prev }; delete e[name]; delete e.submit; return e; });
     }
@@ -880,7 +896,6 @@ export default function RegisterPage() {
       else if (!/^[0-9]{9,18}$/.test(formData.accountNumber)) newErrors.accountNumber = 'Invalid account number';
       if (!formData.ifscCode.trim()) newErrors.ifscCode = 'IFSC required';
       else if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(formData.ifscCode.toUpperCase())) newErrors.ifscCode = 'Invalid IFSC format';
-      else if (ifscVerification.status !== 'verified') newErrors.ifscCode = 'IFSC not verified';
       if (bankVerification.status !== 'verified') newErrors.accountNumber = newErrors.accountNumber || 'Bank account not verified';
       if (!formData.agreeTerms) newErrors.agreeTerms = 'You must agree to terms';
     }
@@ -1106,7 +1121,7 @@ export default function RegisterPage() {
                   })}
                 </div>
               </div>
-              <div className="rounded-2xl bg-gradient-to-br from-primary-600 via-primary-600 to-emerald-800 p-6 text-white shadow-lg shadow-primary-900/20 overflow-hidden relative">
+              <div className="rounded-2xl bg-gradient-to-br from-violet-600 via-purple-600 to-indigo-700 p-6 text-white shadow-lg shadow-primary-900/20 overflow-hidden relative">
                 <div className="absolute -right-8 -top-8 h-32 w-32 rounded-full bg-white/10 blur-2xl" aria-hidden />
                 <h3 className="font-display font-bold mb-4 relative">Why sell on Xelnova?</h3>
                 <div className="space-y-3 relative">
@@ -1527,7 +1542,7 @@ export default function RegisterPage() {
                             <label htmlFor="sig-upload" className="flex flex-col items-center justify-center p-8 rounded-xl border-2 border-dashed border-gray-200 bg-white cursor-pointer hover:border-primary-300 hover:bg-primary-50/30 transition-all duration-200 group">
                               {signaturePreview ? (
                                 <div className="relative">
-                                  <img src={signaturePreview} alt="Signature" className="max-h-28 object-contain" />
+                                  <Image src={signaturePreview} alt="Signature" width={200} height={112} className="max-h-28 object-contain" />
                                   <p className="text-xs text-gray-400 mt-3 text-center">Click to replace</p>
                                 </div>
                               ) : (
@@ -1590,18 +1605,10 @@ export default function RegisterPage() {
                           </div>
                           <div>
                             <label className="text-xs font-medium text-gray-600 mb-1 block">IFSC Code *</label>
-                            <div className="flex gap-2">
-                              <input type="text" name="ifscCode" value={formData.ifscCode} onChange={handleChange} placeholder="e.g. SBIN0001234" className={`${inputClass('ifscCode')} flex-1 uppercase`} maxLength={11} />
-                              <Button type="button" onClick={verifyIfsc} loading={ifscVerification.status === 'loading'} disabled={ifscVerification.status === 'verified'} size="sm" className="shrink-0">
-                                {ifscVerification.status === 'verified' ? <CheckCircle size={14} /> : 'Verify'}
-                              </Button>
-                            </div>
+                            <input type="text" name="ifscCode" value={formData.ifscCode} onChange={handleChange} placeholder="e.g. SBIN0001234" className={`${inputClass('ifscCode')} uppercase`} maxLength={11} />
                             {errors.ifscCode && <p className="text-xs text-red-500 mt-1">{errors.ifscCode}</p>}
                           </div>
                         </div>
-                        {ifscVerification.status === 'verified' && ifscVerification.data && (
-                          <p className="text-xs text-green-700 mb-2">{ifscVerification.data.BANK} — {ifscVerification.data.BRANCH}</p>
-                        )}
                         <div className="flex gap-2 items-end mb-3">
                           <div className="flex-1">
                             <label className="text-xs font-medium text-gray-600 mb-1 block">Account Holder Name *</label>
@@ -1649,9 +1656,9 @@ export default function RegisterPage() {
                       <button
                         type="submit"
                         disabled={loading || signatureUploading}
-                        className="relative inline-flex items-center justify-center gap-2.5 px-8 py-3.5 rounded-xl text-[15px] font-bold text-white bg-gradient-to-r from-primary-600 via-primary-600 to-emerald-600 shadow-lg shadow-primary-600/25 hover:shadow-xl hover:shadow-primary-600/30 hover:-translate-y-0.5 active:translate-y-0 disabled:opacity-60 disabled:pointer-events-none transition-all duration-200 min-w-[200px] overflow-hidden group"
+                        className="relative inline-flex items-center justify-center gap-2.5 px-8 py-3.5 rounded-xl text-[15px] font-bold text-white bg-gradient-to-r from-violet-600 via-purple-600 to-indigo-700 shadow-lg shadow-primary-600/25 hover:shadow-xl hover:shadow-primary-600/30 hover:-translate-y-0.5 active:translate-y-0 disabled:opacity-60 disabled:pointer-events-none transition-all duration-200 min-w-[200px] overflow-hidden group"
                       >
-                        <span className="absolute inset-0 bg-gradient-to-r from-primary-700 via-primary-700 to-emerald-700 opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
+                        <span className="absolute inset-0 bg-gradient-to-r from-violet-700 via-purple-700 to-indigo-800 opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
                         {(loading || signatureUploading) ? (
                           <span className="relative flex items-center gap-2">
                             <Loader2 size={18} className="animate-spin" />

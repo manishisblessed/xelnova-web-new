@@ -1,5 +1,10 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { EmailService } from '../email/email.service';
+import { NotificationService } from '../notifications/notification.service';
+import { FraudDetectionService } from '../notifications/fraud-detection.service';
+import { AbandonedCartService } from '../notifications/abandoned-cart.service';
+import { LoyaltyService } from '../notifications/loyalty.service';
 import { CreateOrderDto } from './dto/order.dto';
 
 interface VariantOption {
@@ -64,7 +69,16 @@ function checkVariantStock(
 
 @Injectable()
 export class OrdersService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(OrdersService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly emailService: EmailService,
+    private readonly notificationService: NotificationService,
+    private readonly fraudService: FraudDetectionService,
+    private readonly abandonedCartService: AbandonedCartService,
+    private readonly loyaltyService: LoyaltyService,
+  ) {}
 
   async findAll(userId: string) {
     return this.prisma.order.findMany({
@@ -140,13 +154,22 @@ export class OrdersService {
         where: { code: dto.couponCode.toUpperCase() },
       });
       if (coupon && coupon.isActive) {
-        if (coupon.discountType === 'PERCENTAGE') {
-          discount = Math.min(
-            Math.round((subtotal * coupon.discountValue) / 100),
-            coupon.maxDiscount || Infinity,
-          );
+        if (coupon.usageLimit && coupon.usedCount >= coupon.usageLimit) {
+          // Coupon exhausted — skip silently
         } else {
-          discount = coupon.discountValue;
+          if (coupon.discountType === 'PERCENTAGE') {
+            discount = Math.min(
+              Math.round((subtotal * coupon.discountValue) / 100),
+              coupon.maxDiscount || Infinity,
+            );
+          } else {
+            discount = Math.min(coupon.discountValue, subtotal);
+          }
+          // Increment usage count
+          await this.prisma.coupon.update({
+            where: { id: coupon.id },
+            data: { usedCount: { increment: 1 } },
+          });
         }
       }
     }
@@ -247,7 +270,49 @@ export class OrdersService {
     // Clear user's cart after order
     await this.prisma.cartItem.deleteMany({ where: { userId } });
 
+    // Mark abandoned cart reminder as converted (fire-and-forget)
+    this.abandonedCartService.markConverted(userId).catch(() => {});
+
+    // Send order confirmation email (fire-and-forget)
+    this.sendOrderConfirmationEmail(userId, order).catch((err) =>
+      this.logger.warn(`Failed to send order confirmation email: ${err.message}`),
+    );
+
+    // In-app notification (fire-and-forget)
+    this.notificationService.notifyOrderPlaced(userId, order.orderNumber, order.total).catch(() => {});
+
+    // Fraud detection (fire-and-forget)
+    this.fraudService.evaluateOrder(order.id).catch((err) =>
+      this.logger.warn(`Fraud evaluation failed for order ${order.id}: ${err.message}`),
+    );
+
+    // Earn loyalty points (fire-and-forget)
+    this.loyaltyService.earnFromOrder(userId, order.total, order.id).catch((err) =>
+      this.logger.warn(`Loyalty earn failed for order ${order.id}: ${err.message}`),
+    );
+
     return order;
+  }
+
+  private async sendOrderConfirmationEmail(
+    userId: string,
+    order: { orderNumber: string; total: number; items: { productName: string; quantity: number; price: number }[] },
+  ) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true, name: true },
+    });
+    if (!user?.email) return;
+
+    await this.emailService.sendOrderConfirmation(user.email, user.name, {
+      orderNumber: order.orderNumber,
+      total: order.total,
+      items: order.items.map((i) => ({
+        name: i.productName,
+        quantity: i.quantity,
+        price: i.price,
+      })),
+    });
   }
 
   private static readonly CANCELLABLE_STATUSES = ['PENDING', 'PROCESSING', 'CONFIRMED'];

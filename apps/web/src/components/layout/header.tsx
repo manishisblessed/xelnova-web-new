@@ -1,19 +1,47 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search, ShoppingCart, Menu, X, Heart, Package, User, LogIn, LogOut,
-  Sparkles, Phone, MapPin, ChevronDown, Flame, Download,
+  Sparkles, Phone, MapPin, ChevronDown, Flame, Download, TrendingUp,
 } from 'lucide-react';
 import { useCartStore } from '@/lib/store/cart-store';
 import { useWishlistStore } from '@/lib/store/wishlist-store';
 import { useLocationStore, autoDetectLocation } from '@/lib/store/location-store';
 import { useCategories } from '@/lib/api';
-import { useAuth } from '@xelnova/api';
+import { useAuth, searchApi } from '@xelnova/api';
 import { LocationModal } from '@/components/location-modal';
+
+type AutocompleteResult = {
+  products: { type: 'product'; text: string; slug: string; image: string; price: number }[];
+  categories: { type: 'category'; text: string; slug: string }[];
+};
+
+function useAutocomplete(query: string) {
+  const [results, setResults] = useState<AutocompleteResult | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (query.length < 2) { setResults(null); return; }
+    const prev = timerRef.current;
+    if (prev != null) clearTimeout(prev);
+    timerRef.current = setTimeout(() => {
+      searchApi.getAutocomplete(query)
+        .then(setResults)
+        .catch(() => setResults(null));
+    }, 250);
+    return () => {
+      const t = timerRef.current;
+      if (t != null) clearTimeout(t);
+    };
+  }, [query]);
+
+  const clear = useCallback(() => setResults(null), []);
+  return { results, clear };
+}
 
 const categoryIcons: Record<string, string> = {
   electronics: '⚡',
@@ -37,7 +65,11 @@ export function Header() {
   const [isScrolled, setIsScrolled] = useState(false);
   const [isAccountOpen, setIsAccountOpen] = useState(false);
   const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
+  const [searchFocused, setSearchFocused] = useState(false);
   const accountRef = useRef<HTMLDivElement>(null);
+  const searchContainerRef = useRef<HTMLDivElement>(null);
+  const mobileSearchContainerRef = useRef<HTMLDivElement>(null);
+  const { results: autocomplete, clear: clearAutocomplete } = useAutocomplete(searchQuery);
 
   const [mounted, setMounted] = useState(false);
   const [locationModalOpen, setLocationModalOpen] = useState(false);
@@ -76,6 +108,12 @@ export function Header() {
       if (accountRef.current && !accountRef.current.contains(e.target as Node)) {
         setIsAccountOpen(false);
       }
+      if (
+        searchContainerRef.current && !searchContainerRef.current.contains(e.target as Node) &&
+        mobileSearchContainerRef.current && !mobileSearchContainerRef.current.contains(e.target as Node)
+      ) {
+        setSearchFocused(false);
+      }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
@@ -95,15 +133,77 @@ export function Header() {
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     if (searchQuery.trim()) {
+      setSearchFocused(false);
+      clearAutocomplete();
       const cat = searchCategory !== 'All Categories' ? `&category=${searchCategory.toLowerCase().replace(/ & /g, '-')}` : '';
       window.location.href = `/products?search=${encodeURIComponent(searchQuery.trim())}${cat}`;
     }
   };
 
+  const handleSuggestionClick = (href: string) => {
+    setSearchFocused(false);
+    clearAutocomplete();
+    window.location.href = href;
+  };
+
+  const showDropdown = searchFocused && autocomplete && (autocomplete.products.length > 0 || autocomplete.categories.length > 0);
+
+  const autocompleteDropdown = (
+    <AnimatePresence>
+      {showDropdown && (
+        <motion.div
+          initial={{ opacity: 0, y: -4 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -4 }}
+          transition={{ duration: 0.15 }}
+          className="absolute left-0 right-0 top-full z-50 mt-1 rounded-xl border border-gray-200 bg-white shadow-xl overflow-hidden"
+        >
+          {autocomplete!.categories.length > 0 && (
+            <div className="px-3 pt-3 pb-1">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-text-muted mb-1.5">Categories</p>
+              {autocomplete!.categories.map((cat) => (
+                <button
+                  key={cat.slug}
+                  type="button"
+                  onClick={() => handleSuggestionClick(`/products?category=${cat.slug}`)}
+                  className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-sm text-text-secondary hover:bg-primary-50 hover:text-primary-700 transition-colors"
+                >
+                  <TrendingUp size={14} className="text-text-muted shrink-0" />
+                  {cat.text}
+                </button>
+              ))}
+            </div>
+          )}
+          {autocomplete!.products.length > 0 && (
+            <div className="px-3 pt-2 pb-2">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-text-muted mb-1.5">Products</p>
+              {autocomplete!.products.slice(0, 6).map((p) => (
+                <button
+                  key={p.slug}
+                  type="button"
+                  onClick={() => handleSuggestionClick(`/products/${p.slug}`)}
+                  className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-sm hover:bg-primary-50 transition-colors"
+                >
+                  {p.image && (
+                    <Image src={p.image} alt="" width={36} height={36} className="h-9 w-9 rounded-lg object-cover border border-border shrink-0" />
+                  )}
+                  <span className="flex-1 text-left truncate text-text-primary">{p.text}</span>
+                  <span className="text-xs font-semibold text-text-muted shrink-0">
+                    ₹{p.price.toLocaleString('en-IN')}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+
   return (
     <header className={`sticky top-0 z-50 bg-white transition-all duration-500 ${isScrolled ? 'shadow-elevated' : ''}`}>
       {/* Top Bar */}
-      <div className="bg-gradient-to-r from-primary-800 via-primary-700 to-primary-800 text-[11px]">
+      <div className="bg-gradient-to-r from-primary-600 via-purple-600 to-primary-600 text-[11px]">
         <div className="mx-auto max-w-[1440px] flex items-center justify-between px-4 py-1.5 sm:px-6">
           <div className="flex items-center gap-3 text-white/90">
             <button
@@ -162,13 +262,13 @@ export function Header() {
             <Image src="/xelnova-logo-dark.png" alt="Xelnova" width={280} height={80} className="h-8 w-auto lg:h-10" priority />
           </Link>
 
-          {/* Search Bar with Category Dropdown */}
+          {/* Search Bar with Category Dropdown + Autocomplete */}
           <form onSubmit={handleSearch} className="hidden md:flex flex-1 max-w-2xl mx-auto">
-            <div className="relative flex w-full items-center rounded-xl overflow-hidden border-2 border-gray-200 focus-within:border-primary-500 transition-all duration-200">
+            <div ref={searchContainerRef} className="relative flex w-full items-center rounded-xl overflow-visible border-2 border-gray-200 focus-within:border-primary-500 transition-all duration-200">
               <select
                 value={searchCategory}
                 onChange={(e) => setSearchCategory(e.target.value)}
-                className="h-11 bg-gray-50 border-r border-gray-200 px-3 pr-7 text-xs font-medium text-text-secondary outline-none cursor-pointer hover:bg-gray-100 transition-colors appearance-none"
+                className="h-11 bg-gray-50 border-r border-gray-200 px-3 pr-7 text-xs font-medium text-text-secondary outline-none cursor-pointer hover:bg-gray-100 transition-colors appearance-none rounded-l-xl"
                 style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 8px center' }}
               >
                 <option value="All Categories">All Categories</option>
@@ -180,15 +280,17 @@ export function Header() {
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
+                onFocus={() => setSearchFocused(true)}
                 placeholder="Search products, brands & more..."
                 className="h-11 min-w-0 flex-1 bg-white px-4 text-sm text-text-primary outline-none placeholder:text-text-muted"
               />
               <button
                 type="submit"
-                className="flex h-11 w-12 flex-shrink-0 items-center justify-center bg-primary-600 text-white hover:bg-primary-700 transition-colors"
+                className="flex h-11 w-12 flex-shrink-0 items-center justify-center bg-primary-600 text-white hover:bg-primary-700 transition-colors rounded-r-xl"
               >
                 <Search size={18} />
               </button>
+              {autocompleteDropdown}
             </div>
           </form>
 
@@ -205,9 +307,11 @@ export function Header() {
                 >
                   <div className="relative shrink-0">
                     {user.avatar && !avatarLoadFailed ? (
-                      <img
+                      <Image
                         src={user.avatar}
                         alt=""
+                        width={36}
+                        height={36}
                         referrerPolicy="no-referrer"
                         onError={() => setAvatarLoadFailed(true)}
                         className="h-9 w-9 rounded-full object-cover ring-2 ring-white shadow-sm transition-all group-hover:ring-primary-100"
@@ -349,17 +453,19 @@ export function Header() {
         {/* Mobile Search */}
         <div className="md:hidden px-4 pb-2.5">
           <form onSubmit={handleSearch}>
-            <div className="flex items-center rounded-xl overflow-hidden border-2 border-gray-200 focus-within:border-primary-500 transition-all">
+            <div ref={mobileSearchContainerRef} className="relative flex items-center rounded-xl overflow-visible border-2 border-gray-200 focus-within:border-primary-500 transition-all">
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
+                onFocus={() => setSearchFocused(true)}
                 placeholder="Search products, brands & more..."
-                className="h-10 flex-1 bg-white px-3 text-sm text-text-primary outline-none placeholder:text-text-muted"
+                className="h-10 flex-1 bg-white px-3 text-sm text-text-primary outline-none placeholder:text-text-muted rounded-l-xl"
               />
-              <button type="submit" className="flex h-10 w-10 items-center justify-center bg-primary-600 text-white">
+              <button type="submit" className="flex h-10 w-10 items-center justify-center bg-primary-600 text-white rounded-r-xl">
                 <Search size={16} />
               </button>
+              {autocompleteDropdown}
             </div>
           </form>
         </div>
@@ -418,15 +524,17 @@ export function Header() {
               className="fixed inset-y-0 left-0 z-[101] w-[300px] bg-white shadow-2xl flex flex-col"
             >
               {/* Sidebar Header */}
-              <div className="bg-gradient-to-r from-primary-700 to-primary-600 px-5 py-5">
+              <div className="bg-gradient-to-r from-violet-600 to-purple-600 px-5 py-5">
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-3">
                     {isAuthenticated && user ? (
                       <>
                         {user.avatar && !avatarLoadFailed ? (
-                          <img
+                          <Image
                             src={user.avatar}
                             alt=""
+                            width={44}
+                            height={44}
                             referrerPolicy="no-referrer"
                             onError={() => setAvatarLoadFailed(true)}
                             className="h-11 w-11 rounded-full object-cover ring-2 ring-white/50 shadow-lg"

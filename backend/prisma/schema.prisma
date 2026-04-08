@@ -127,6 +127,10 @@ model User {
   isActive          Boolean      @default(true)
   isBanned          Boolean      @default(false)
   banReason         String?
+  adminRoleId       String?
+
+  passwordResetToken   String?   @unique
+  passwordResetExpires DateTime?
 
   addresses        Address[]
   orders           Order[]
@@ -138,6 +142,9 @@ model User {
   sessions         UserSession[]
   activityLogs     ActivityLog[]
   verificationLogs VerificationLog[]
+  returnRequests   ReturnRequest[]
+  tickets          Ticket[]
+  ticketMessages   TicketMessage[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -409,6 +416,12 @@ model Product {
   status   ProductStatus @default(ACTIVE)
   sku      String?
 
+  metaTitle       String?
+  metaDescription String?
+  hsnCode         String?
+  gstRate         Float?
+  lowStockThreshold Int @default(5)
+
   reviews    Review[]
   orderItems OrderItem[]
   cartItems  CartItem[]
@@ -477,7 +490,8 @@ model Order {
   paymentId     String?
   paymentStatus PaymentStatus @default(PENDING)
 
-  shipment Shipment?
+  shipment       Shipment?
+  returnRequests ReturnRequest[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -501,6 +515,41 @@ model OrderItem {
 
   @@index([orderId])
   @@map("order_items")
+}
+
+// ─── Return / Refund ───
+
+enum ReturnStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+  PICKED_UP
+  REFUNDED
+}
+
+model ReturnRequest {
+  id        String       @id @default(cuid())
+  orderId   String
+  order     Order        @relation(fields: [orderId], references: [id])
+  userId    String
+  user      User         @relation(fields: [userId], references: [id])
+  reason    String
+  status    ReturnStatus @default(REQUESTED)
+  adminNote String?
+  refundAmount Float?
+
+  reverseAwb             String?
+  reverseCourier         String?
+  reverseTrackingUrl     String?
+  reversePickupScheduled DateTime?
+  reversePickedUpAt      DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([orderId])
+  @@index([userId])
+  @@map("return_requests")
 }
 
 // ─── Cart ───
@@ -550,6 +599,10 @@ model Coupon {
   usageLimit     Int?
   usedCount      Int          @default(0)
 
+  scope          String       @default("global")
+  categoryId     String?
+  sellerId       String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -591,6 +644,9 @@ model Brand {
   featured Boolean @default(false)
   isActive Boolean @default(true)
 
+  proposedBy String?
+  approved   Boolean @default(true)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -607,6 +663,10 @@ model Payout {
   status   PayoutStatus  @default(PENDING)
   method   String        @default("bank_transfer")
   note     String?
+
+  razorpayTransferId String?
+  isAdvance          Boolean @default(false)
+  orderId            String?
 
   requestedAt DateTime  @default(now())
   paidAt      DateTime?
@@ -852,6 +912,7 @@ model SellerCourierConfig {
 enum WalletOwnerType {
   ADMIN
   SELLER
+  CUSTOMER
 }
 
 enum WalletTransactionType {
@@ -910,4 +971,191 @@ model SiteSettings {
   updatedAt DateTime @updatedAt
 
   @@map("site_settings")
+}
+
+// ─── Support Tickets ───
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+model Ticket {
+  id           String         @id @default(cuid())
+  ticketNumber String         @unique
+  subject      String
+  status       TicketStatus   @default(OPEN)
+  priority     TicketPriority @default(MEDIUM)
+
+  customerId       String
+  customer         User           @relation(fields: [customerId], references: [id])
+  orderId          String?
+  assignedSellerId String?
+  assignedAdminId  String?
+
+  messages TicketMessage[]
+
+  closedAt  DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([customerId])
+  @@index([assignedSellerId])
+  @@index([status])
+  @@map("tickets")
+}
+
+model TicketMessage {
+  id         String  @id @default(cuid())
+  ticketId   String
+  ticket     Ticket  @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  senderId   String
+  sender     User    @relation(fields: [senderId], references: [id])
+  senderRole String
+  message    String
+  isInternal Boolean @default(false)
+  isForwarded Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@index([ticketId])
+  @@map("ticket_messages")
+}
+
+// ─── Abandoned Cart Reminders ───
+
+model AbandonedCartReminder {
+  id        String   @id @default(cuid())
+  userId    String
+  email     String
+  cartValue Float
+  itemCount Int
+  sentAt    DateTime @default(now())
+  channel   String   @default("email")
+  converted Boolean  @default(false)
+
+  @@index([userId])
+  @@index([sentAt])
+  @@map("abandoned_cart_reminders")
+}
+
+// ─── Loyalty & Referral ───
+
+model LoyaltyLedger {
+  id          String   @id @default(cuid())
+  userId      String
+  points      Int
+  type        String
+  description String
+  referenceId String?
+  expiresAt   DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@map("loyalty_ledger")
+}
+
+model ReferralCode {
+  id          String  @id @default(cuid())
+  userId      String  @unique
+  code        String  @unique
+  totalUses   Int     @default(0)
+  earnedPoints Int    @default(0)
+  isActive    Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("referral_codes")
+}
+
+model ReferralUse {
+  id             String @id @default(cuid())
+  referralCodeId String
+  referredUserId String
+  orderId        String?
+  pointsAwarded  Int    @default(0)
+
+  createdAt DateTime @default(now())
+
+  @@index([referralCodeId])
+  @@index([referredUserId])
+  @@map("referral_uses")
+}
+
+// ─── Fraud Detection ───
+
+enum FraudFlagStatus {
+  PENDING
+  REVIEWED
+  CLEARED
+  BLOCKED
+}
+
+model FraudFlag {
+  id        String          @id @default(cuid())
+  orderId   String
+  userId    String
+  rules     String[]
+  riskScore Int             @default(0)
+  status    FraudFlagStatus @default(PENDING)
+  adminNote String?
+  reviewedBy String?
+  reviewedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([orderId])
+  @@index([userId])
+  @@index([status])
+  @@map("fraud_flags")
+}
+
+// ─── Push Notification Tokens ───
+
+model PushToken {
+  id       String @id @default(cuid())
+  userId   String
+  token    String
+  platform String @default("web")
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, token])
+  @@index([userId])
+  @@map("push_tokens")
+}
+
+// ─── Notification Log ───
+
+model NotificationLog {
+  id        String  @id @default(cuid())
+  userId    String
+  channel   String
+  type      String
+  title     String
+  body      String
+  data      Json?
+  sent      Boolean @default(true)
+  read      Boolean @default(false)
+  readAt    DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([channel])
+  @@index([createdAt])
+  @@map("notification_logs")
 }

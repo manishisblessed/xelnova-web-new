@@ -2,17 +2,17 @@
 
 /* ─── Design Tokens ─── */
 @theme {
-  /* Primary — Warm Emerald */
-  --color-primary-50: #effdf6;
-  --color-primary-100: #d9f9e6;
-  --color-primary-200: #b5f2d1;
-  --color-primary-300: #7de8b3;
-  --color-primary-400: #43d68e;
-  --color-primary-500: #1aba6f;
-  --color-primary-600: #0f9a5a;
-  --color-primary-700: #107a4a;
-  --color-primary-800: #11603d;
-  --color-primary-900: #104f34;
+  /* Primary — Violet / Purple (matches login gradient: violet-600 → purple-600 → indigo-700) */
+  --color-primary-50: #f5f3ff;
+  --color-primary-100: #ede9fe;
+  --color-primary-200: #ddd6fe;
+  --color-primary-300: #c4b5fd;
+  --color-primary-400: #a78bfa;
+  --color-primary-500: #8b5cf6;
+  --color-primary-600: #7c3aed;
+  --color-primary-700: #7c3aed;
+  --color-primary-800: #6d28d9;
+  --color-primary-900: #5b21b6;
 
   /* Accent — Warm Gold */
   --color-accent-50: #fff9eb;
@@ -155,20 +155,20 @@ body {
 /* Mesh gradient backgrounds */
 .mesh-hero {
   background:
-    radial-gradient(ellipse 80% 60% at 10% 90%, rgba(26, 186, 111, 0.07) 0%, transparent 60%),
-    radial-gradient(ellipse 60% 50% at 90% 10%, rgba(249, 141, 7, 0.05) 0%, transparent 60%),
+    radial-gradient(ellipse 80% 60% at 10% 90%, rgba(124, 58, 237, 0.09) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 50% at 90% 10%, rgba(147, 51, 234, 0.07) 0%, transparent 60%),
     var(--color-surface-raised);
 }
 
 .mesh-warm {
   background:
-    radial-gradient(ellipse 70% 50% at 80% 80%, rgba(249, 141, 7, 0.06) 0%, transparent 50%),
-    radial-gradient(ellipse 60% 40% at 20% 20%, rgba(26, 186, 111, 0.04) 0%, transparent 50%),
+    radial-gradient(ellipse 70% 50% at 80% 80%, rgba(147, 51, 234, 0.06) 0%, transparent 50%),
+    radial-gradient(ellipse 60% 40% at 20% 20%, rgba(124, 58, 237, 0.05) 0%, transparent 50%),
     #ffffff;
 }
 
 /* Colored shadows */
-.shadow-primary { box-shadow: 0 8px 30px -4px rgba(15, 154, 90, 0.25); }
+.shadow-primary { box-shadow: 0 8px 30px -4px rgba(124, 58, 237, 0.3); }
 .shadow-accent { box-shadow: 0 8px 30px -4px rgba(249, 141, 7, 0.25); }
 .shadow-elevated { box-shadow: 0 20px 60px -12px rgba(0, 0, 0, 0.12), 0 4px 12px -2px rgba(0, 0, 0, 0.06); }
 .shadow-card { box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.03); }

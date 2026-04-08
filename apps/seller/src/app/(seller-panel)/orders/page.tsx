@@ -1,5 +1,5 @@
 'use client';
-
+import Image from 'next/image';
 import { useCallback, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -344,7 +344,7 @@ export default function SellerOrdersPage() {
                     <div className="flex items-start gap-4">
                       <div className="relative h-16 w-16 rounded-lg border border-border bg-gray-50 overflow-hidden shrink-0">
                         {order.items?.[0] && itemImg(order.items[0]) ? (
-                          <img src={itemImg(order.items[0])!} alt="" className="h-full w-full object-cover" />
+                          <Image src={itemImg(order.items[0])!} alt="" fill className="object-cover" />
                         ) : (
                           <div className="h-full w-full flex items-center justify-center">
                             <Package size={20} className="text-gray-300" />
@@ -459,13 +459,7 @@ function OrderDetail({
   const isCancelled = ['CANCELLED', 'RETURNED', 'REFUNDED'].includes(order.status);
   const showShipAction = order.status === 'CONFIRMED';
 
-  useEffect(() => {
-    if (['SHIPPED', 'DELIVERED'].includes(order.status)) {
-      loadShipment();
-    }
-  }, [order.id, order.status]);
-
-  const loadShipment = async () => {
+  const loadShipment = useCallback(async () => {
     setShipmentLoading(true);
     try {
       const data = await apiGetShipment(order.id);
@@ -475,7 +469,13 @@ function OrderDetail({
     } finally {
       setShipmentLoading(false);
     }
-  };
+  }, [order.id]);
+
+  useEffect(() => {
+    if (['SHIPPED', 'DELIVERED'].includes(order.status)) {
+      loadShipment();
+    }
+  }, [order.status, loadShipment]);
 
   const handleLiveTrack = async () => {
     setTrackingLoading(true);
@@ -725,7 +725,7 @@ function OrderDetail({
                   return (
                     <div key={i} className="flex gap-3 items-center rounded-xl border border-border p-3">
                       <div className="h-14 w-14 rounded-lg bg-gray-50 border border-border overflow-hidden shrink-0">
-                        {img ? <img src={img} alt="" className="h-full w-full object-cover" /> : (
+                        {img ? <Image src={img} alt="" fill className="object-cover" /> : (
                           <div className="h-full w-full flex items-center justify-center"><Package size={18} className="text-gray-300" /></div>
                         )}
                       </div>

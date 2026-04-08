@@ -1,9 +1,13 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, Query, Req } from '@nestjs/common';
-import { Request } from 'express';
+import { Controller, Get, Post, Patch, Delete, Body, Param, Query, Req, Res } from '@nestjs/common';
+import { Request, Response } from 'express';
 import { Role } from '@prisma/client';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { AdminService } from './admin.service';
+import { ReportsService } from './reports.service';
+import { DuplicateListingService } from './duplicate-listing.service';
+import { PricingCheckService } from './pricing-check.service';
+import { SplitPaymentService } from '../payment/split-payment.service';
 import { Auth } from '../../common/decorators/auth.decorator';
 import { successResponse, paginatedResponse } from '../../common/helpers/response.helper';
 import { getClientIp } from '../../common/helpers/client-ip';
@@ -27,7 +31,13 @@ import {
 @Controller('admin')
 @Auth('ADMIN' as any)
 export class AdminController {
-  constructor(private readonly service: AdminService) {}
+  constructor(
+    private readonly service: AdminService,
+    private readonly reports: ReportsService,
+    private readonly duplicates: DuplicateListingService,
+    private readonly pricing: PricingCheckService,
+    private readonly splitPayment: SplitPaymentService,
+  ) {}
 
   @Get('dashboard')
   @ApiOperation({ summary: 'Admin dashboard overview' })
@@ -191,6 +201,12 @@ export class AdminController {
   @ApiOperation({ summary: 'List brands' })
   async getBrands() {
     return successResponse(await this.service.getBrands(), 'Brands fetched');
+  }
+
+  @Get('brands/pending')
+  @ApiOperation({ summary: 'List brands pending approval' })
+  async getPendingBrands() {
+    return successResponse(await this.service.getPendingBrands(), 'Pending brands fetched');
   }
 
   @Post('brands')
@@ -387,5 +403,84 @@ export class AdminController {
       userAgent: req.get('user-agent') || '',
     };
     return successResponse(await this.service.updateSiteSettings(dto, audit), 'Settings updated');
+  }
+
+  // ─── GST Report ───
+  @Get('reports/gst')
+  @ApiOperation({ summary: 'Get GST report' })
+  async getGstReport(@Query('dateFrom') dateFrom?: string, @Query('dateTo') dateTo?: string) {
+    return successResponse(await this.reports.getGstReport({ dateFrom, dateTo }), 'GST report fetched');
+  }
+
+  @Get('reports/gst/csv')
+  @ApiOperation({ summary: 'Download GST report as CSV' })
+  async getGstCsv(@Query('dateFrom') dateFrom?: string, @Query('dateTo') dateTo?: string, @Res() res?: Response) {
+    const csv = await this.reports.getGstReportCsv({ dateFrom, dateTo });
+    res!.set({ 'Content-Type': 'text/csv', 'Content-Disposition': 'attachment; filename="gst-report.csv"' });
+    res!.send(csv);
+  }
+
+  // ─── TDS Report ───
+  @Get('reports/tds')
+  @ApiOperation({ summary: 'Get TDS report' })
+  async getTdsReport(@Query('dateFrom') dateFrom?: string, @Query('dateTo') dateTo?: string) {
+    return successResponse(await this.reports.getTdsReport({ dateFrom, dateTo }), 'TDS report fetched');
+  }
+
+  @Get('reports/tds/csv')
+  @ApiOperation({ summary: 'Download TDS report as CSV' })
+  async getTdsCsv(@Query('dateFrom') dateFrom?: string, @Query('dateTo') dateTo?: string, @Res() res?: Response) {
+    const csv = await this.reports.getTdsReportCsv({ dateFrom, dateTo });
+    res!.set({ 'Content-Type': 'text/csv', 'Content-Disposition': 'attachment; filename="tds-report.csv"' });
+    res!.send(csv);
+  }
+
+  // ─── Refund Report ───
+  @Get('reports/refunds')
+  @ApiOperation({ summary: 'Get refund report' })
+  async getRefundReport(@Query('dateFrom') dateFrom?: string, @Query('dateTo') dateTo?: string) {
+    return successResponse(await this.reports.getRefundReport({ dateFrom, dateTo }), 'Refund report fetched');
+  }
+
+  // ─── Duplicate Listings ───
+  @Get('duplicates')
+  @ApiOperation({ summary: 'Scan for duplicate product listings' })
+  async scanDuplicates() {
+    return successResponse(await this.duplicates.scanDuplicates(), 'Duplicate scan complete');
+  }
+
+  @Post('duplicates/:productId/hide')
+  @ApiOperation({ summary: 'Hide a duplicate product listing' })
+  async hideDuplicate(@Param('productId') productId: string) {
+    return successResponse(await this.duplicates.hideProduct(productId), 'Product hidden');
+  }
+
+  // ─── Pricing Checks ───
+  @Get('pricing-flags')
+  @ApiOperation({ summary: 'Scan for pricing anomalies' })
+  async scanPricing() {
+    return successResponse(await this.pricing.scanPricingIssues(), 'Pricing scan complete');
+  }
+
+  // ─── Split Payment / Advance Payout ───
+  @Post('payouts/advance')
+  @ApiOperation({ summary: 'Create advance payout to seller' })
+  async createAdvancePayout(@Body() body: { sellerId: string; amount: number; orderId?: string; note?: string }) {
+    return successResponse(
+      await this.splitPayment.createAdvancePayout(body.sellerId, body.amount, body.orderId, body.note),
+      'Advance payout created',
+    );
+  }
+
+  @Get('orders/:orderId/seller-shares')
+  @ApiOperation({ summary: 'Compute seller shares for an order' })
+  async getSellerShares(@Param('orderId') orderId: string) {
+    return successResponse(await this.splitPayment.computeSellerShares(orderId), 'Seller shares computed');
+  }
+
+  @Post('orders/:orderId/settle')
+  @ApiOperation({ summary: 'Create settlement payouts for all sellers in an order' })
+  async settleOrder(@Param('orderId') orderId: string) {
+    return successResponse(await this.splitPayment.settleOrder(orderId), 'Order settled');
   }
 }

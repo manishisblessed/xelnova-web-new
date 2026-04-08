@@ -11,6 +11,8 @@ import {
   CompletePhoneRegistrationDto,
   RefreshTokenDto,
   GoogleTokenDto,
+  ForgotPasswordDto,
+  ResetPasswordDto,
 } from './dto/auth.dto';
 import { successResponse } from '../../common/helpers/response.helper';
 import { Auth } from '../../common/decorators/auth.decorator';
@@ -83,6 +85,22 @@ export class AuthController {
   async completePhoneRegistration(@Body() dto: CompletePhoneRegistrationDto) {
     const result = await this.authService.completePhoneRegistration(dto.phone, dto.name, dto.email);
     return successResponse(result, 'Registration successful');
+  }
+
+  @Post('forgot-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Send password reset email' })
+  async forgotPassword(@Body() dto: ForgotPasswordDto) {
+    const result = await this.authService.forgotPassword(dto.email);
+    return successResponse(result, result.message);
+  }
+
+  @Post('reset-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Reset password with token' })
+  async resetPassword(@Body() dto: ResetPasswordDto) {
+    const result = await this.authService.resetPassword(dto.token, dto.newPassword);
+    return successResponse(result, result.message);
   }
 
   @Post('refresh')

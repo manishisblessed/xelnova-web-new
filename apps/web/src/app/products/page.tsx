@@ -61,7 +61,7 @@ function ProductsContent() {
   const [sort, setSort] = useState(searchParams.get("sort") || "relevance");
 
   const { data: productsData, loading } = useProducts({ limit: 100 });
-  const allProducts = productsData?.products || [];
+  const allProducts = useMemo(() => productsData?.products || [], [productsData]);
 
   const brands = useMemo(() => [...new Set(allProducts.map((p) => p.brand).filter(Boolean))].sort(), [allProducts]);
 

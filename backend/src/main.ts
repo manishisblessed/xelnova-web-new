@@ -29,12 +29,30 @@ async function bootstrap() {
     }),
   );
 
-  if (!isProduction) {
+  const enableDocs = !isProduction || process.env.ENABLE_API_DOCS === 'true';
+  if (enableDocs) {
     const swaggerConfig = new DocumentBuilder()
       .setTitle('Xelnova API')
-      .setDescription('Xelnova Ecommerce Marketplace API')
-      .setVersion('1.0')
+      .setDescription(
+        'Xelnova E-commerce Marketplace API.\n\n' +
+        '**Base URL:** `/api/v1`\n\n' +
+        '**Authentication:** Bearer token via `Authorization` header.\n\n' +
+        '**Modules:** Auth, Products, Categories, Cart, Orders, Payment, Returns, ' +
+        'Wallet, Tickets, Seller Dashboard, Admin, Notifications, Loyalty, COD Verification, Shipping.',
+      )
+      .setVersion('1.0.0')
       .addBearerAuth()
+      .addTag('Auth', 'Registration, login, OTP, password reset')
+      .addTag('Products', 'Product catalog and search')
+      .addTag('Cart', 'Shopping cart operations')
+      .addTag('Orders', 'Order placement and management')
+      .addTag('Payment', 'Razorpay payment flow')
+      .addTag('Returns', 'Return requests and reverse pickup')
+      .addTag('Notifications', 'In-app notifications and push tokens')
+      .addTag('Loyalty', 'Loyalty points and referral codes')
+      .addTag('COD Verification', 'Cash-on-delivery OTP verification')
+      .addTag('Admin', 'Admin dashboard operations')
+      .addTag('Admin Notifications', 'Abandoned carts and fraud detection')
       .build();
 
     const document = SwaggerModule.createDocument(app, swaggerConfig);

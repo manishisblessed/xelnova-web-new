@@ -19,6 +19,11 @@ export * as reviewsApi from './reviews';
 export * as sellerDashboardApi from './seller-dashboard';
 export * as adminApi from './admin';
 export * as paymentApi from './payment';
+export * as returnsApi from './returns';
+export * as walletApi from './wallet';
+export * as ticketsApi from './tickets';
+export * as notificationsApi from './notifications';
+export * as wishlistApi from './wishlist';
 
 // Hooks
 export { AuthProvider, useAuth } from './hooks/use-auth';

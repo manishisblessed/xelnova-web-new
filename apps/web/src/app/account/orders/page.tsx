@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import Link from "next/link";
+import Image from "next/image";
 import {
   Package,
   ChevronRight,
@@ -144,7 +145,7 @@ export default function OrdersPage() {
                       <div key={item.id ?? idx} className="flex items-center gap-3">
                         <div className="h-12 w-12 rounded-lg bg-surface-muted border border-border-light overflow-hidden flex items-center justify-center flex-shrink-0">
                           {img ? (
-                            <img src={img} alt={name} className="h-full w-full object-cover" />
+                            <Image src={img} alt={name} width={48} height={48} className="h-full w-full object-cover" />
                           ) : (
                             <Package size={20} className="text-text-muted" />
                           )}

@@ -1,40 +1,61 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import Link from "next/link";
-import { Heart } from "lucide-react";
+import { Heart, Loader2 } from "lucide-react";
 import { useWishlistStore } from "@/lib/store/wishlist-store";
-import { useProducts } from "@/lib/api";
+import { wishlistApi, setAccessToken } from "@xelnova/api";
 import { ProductCard } from "@/components/marketplace/product-card";
+
+function syncToken() {
+  if (typeof document === "undefined") return;
+  const m = document.cookie.match(/(?:^|;\s*)xelnova-token=([^;]*)/);
+  if (m) setAccessToken(decodeURIComponent(m[1]));
+}
 
 export default function WishlistPage() {
   const [mounted, setMounted] = useState(false);
-  const wishlistItems = useWishlistStore((s) => s.items);
-  useEffect(() => setMounted(true), []);
+  const [products, setProducts] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const syncFromServerFn = useWishlistStore((s) => s.syncFromServer);
+  const syncFromServer = useCallback(() => { syncFromServerFn(); }, [syncFromServerFn]);
 
-  const { data: productsData } = useProducts({ limit: 100 });
-  const allProducts = productsData?.products || [];
+  useEffect(() => {
+    setMounted(true);
+    syncToken();
+    syncFromServer();
+    wishlistApi.getWishlist()
+      .then((data) => setProducts(data || []))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [syncFromServer]);
 
-  if (!mounted) {
+  if (!mounted || loading) {
     return (
       <div className="flex items-center justify-center py-20">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary-600 border-t-transparent" />
+        <Loader2 className="h-8 w-8 animate-spin text-primary-600" />
       </div>
     );
   }
 
-  const wishlistProducts = allProducts.filter((p) => wishlistItems.includes(p.id));
+  const mappedProducts = products.map((p: any) => ({
+    ...p,
+    compareAtPrice: p.compareAtPrice ?? 0,
+    brand: p.brand || "",
+    category: p.category?.name || "",
+    tags: p.tags || [],
+  }));
 
   return (
     <div>
       <div className="mb-6 flex items-center justify-between">
         <h2 className="text-lg font-bold text-text-primary">
-          My Wishlist ({wishlistProducts.length})
+          My Wishlist ({mappedProducts.length})
         </h2>
       </div>
 
-      {wishlistProducts.length === 0 ? (
+      {mappedProducts.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-2xl border border-border bg-white py-16 text-center shadow-card">
           <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}>
             <div className="rounded-full bg-danger-50 p-5 mb-4 mx-auto w-fit">
@@ -54,7 +75,7 @@ export default function WishlistPage() {
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:gap-5">
-          {wishlistProducts.map((product, i) => (
+          {mappedProducts.map((product: any, i: number) => (
             <ProductCard key={product.id} product={product} index={i} />
           ))}
         </div>

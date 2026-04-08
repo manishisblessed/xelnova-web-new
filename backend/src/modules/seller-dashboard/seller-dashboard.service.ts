@@ -1,5 +1,6 @@
-import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { EmailService } from '../email/email.service';
 import {
   CreateProductDto,
   UpdateProductDto,
@@ -7,6 +8,7 @@ import {
   SellerOrderQueryDto,
   UpdateSellerProfileDto,
   RevenueQueryDto,
+  SettlementQueryDto,
 } from './dto/seller-dashboard.dto';
 import { Prisma, ProductStatus } from '@prisma/client';
 
@@ -53,7 +55,12 @@ function sanitizeVariants(raw: unknown): unknown {
 
 @Injectable()
 export class SellerDashboardService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(SellerDashboardService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly emailService: EmailService,
+  ) {}
 
   private async getSellerProfile(userId: string) {
     const profile = await this.prisma.sellerProfile.findUnique({ where: { userId } });
@@ -176,12 +183,22 @@ export class SellerDashboardService {
     return { items, total, page, limit };
   }
 
+  private async generateSku(sellerId: string, categoryId: string): Promise<string> {
+    const cat = await this.prisma.category.findUnique({ where: { id: categoryId }, select: { slug: true } });
+    const prefix = (cat?.slug || 'GEN').slice(0, 4).toUpperCase();
+    const sellerSuffix = sellerId.slice(-4).toUpperCase();
+    const count = await this.prisma.product.count({ where: { sellerId } });
+    return `${prefix}-${sellerSuffix}-${String(count + 1).padStart(5, '0')}`;
+  }
+
   async createProduct(userId: string, dto: CreateProductDto) {
     const seller = await this.getSellerProfile(userId);
     const baseSlug = this.slugify(dto.name);
     const existing = await this.prisma.product.count({ where: { slug: { startsWith: baseSlug } } });
     const slug = existing > 0 ? `${baseSlug}-${existing + 1}` : baseSlug;
     const variants = sanitizeVariants(dto.variants);
+
+    const sku = dto.sku || await this.generateSku(seller.id, dto.categoryId);
 
     return this.prisma.product.create({
       data: {
@@ -200,7 +217,12 @@ export class SellerDashboardService {
         tags: dto.tags || [],
         variants: variants as any,
         specifications: dto.specifications,
-        sku: dto.sku,
+        sku,
+        metaTitle: dto.metaTitle,
+        metaDescription: dto.metaDescription,
+        hsnCode: dto.hsnCode,
+        gstRate: dto.gstRate,
+        lowStockThreshold: dto.lowStockThreshold ?? 5,
         status: 'ACTIVE',
       },
       include: { category: { select: { name: true } } },
@@ -431,5 +453,311 @@ export class SellerDashboardService {
       data: dto,
       include: { user: { select: { name: true, email: true, phone: true } } },
     });
+  }
+
+  // ─── Bulk Upload ───
+
+  async bulkUploadProducts(userId: string, rows: Record<string, string>[]) {
+    const seller = await this.getSellerProfile(userId);
+    const results: { row: number; status: 'ok' | 'error'; message?: string; productId?: string }[] = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      try {
+        if (!r.name || !r.price || !r.categoryId) {
+          results.push({ row: i + 1, status: 'error', message: 'name, price, categoryId are required' });
+          continue;
+        }
+
+        const price = parseFloat(r.price);
+        if (isNaN(price) || price < 0) {
+          results.push({ row: i + 1, status: 'error', message: 'Invalid price' });
+          continue;
+        }
+
+        const baseSlug = this.slugify(r.name);
+        const slugCount = await this.prisma.product.count({ where: { slug: { startsWith: baseSlug } } });
+        const slug = slugCount > 0 ? `${baseSlug}-${slugCount + 1}` : baseSlug;
+        const sku = r.sku || await this.generateSku(seller.id, r.categoryId);
+
+        const product = await this.prisma.product.create({
+          data: {
+            name: r.name,
+            slug,
+            shortDescription: r.shortDescription || null,
+            description: r.description || null,
+            price,
+            compareAtPrice: r.compareAtPrice ? parseFloat(r.compareAtPrice) : null,
+            categoryId: r.categoryId,
+            brand: r.brand || null,
+            sellerId: seller.id,
+            stock: r.stock ? parseInt(r.stock) : 0,
+            images: r.images ? r.images.split('|').map((s) => s.trim()).filter(Boolean) : [],
+            highlights: r.highlights ? r.highlights.split('|').map((s) => s.trim()).filter(Boolean) : [],
+            tags: r.tags ? r.tags.split('|').map((s) => s.trim().toLowerCase()).filter(Boolean) : [],
+            sku,
+            metaTitle: r.metaTitle || null,
+            metaDescription: r.metaDescription || null,
+            hsnCode: r.hsnCode || null,
+            gstRate: r.gstRate ? parseFloat(r.gstRate) : null,
+            lowStockThreshold: r.lowStockThreshold ? parseInt(r.lowStockThreshold) : 5,
+            status: 'ACTIVE',
+          },
+        });
+        results.push({ row: i + 1, status: 'ok', productId: product.id });
+      } catch (err: any) {
+        results.push({ row: i + 1, status: 'error', message: err.message?.slice(0, 200) });
+      }
+    }
+
+    return {
+      total: rows.length,
+      success: results.filter((r) => r.status === 'ok').length,
+      failed: results.filter((r) => r.status === 'error').length,
+      results,
+    };
+  }
+
+  // ─── Inventory Alerts ───
+
+  async getInventoryAlerts(userId: string) {
+    const seller = await this.getSellerProfile(userId);
+    const products = await this.prisma.product.findMany({
+      where: { sellerId: seller.id, isActive: true },
+      select: {
+        id: true, name: true, sku: true, stock: true, lowStockThreshold: true,
+        images: true, status: true,
+      },
+      orderBy: { stock: 'asc' },
+    });
+    return products.filter((p) => p.stock <= p.lowStockThreshold);
+  }
+
+  async checkAndSendInventoryAlerts(userId: string) {
+    const seller = await this.getSellerProfile(userId);
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { email: true, name: true } });
+    if (!user?.email) return { sent: false };
+
+    const lowStockProducts = await this.prisma.product.findMany({
+      where: { sellerId: seller.id, isActive: true },
+      select: { id: true, name: true, sku: true, stock: true, lowStockThreshold: true },
+    }).then((products) => products.filter((p) => p.stock <= p.lowStockThreshold));
+
+    if (lowStockProducts.length === 0) return { sent: false, count: 0 };
+
+    const productList = lowStockProducts
+      .map((p) => `• ${p.name} (SKU: ${p.sku || 'N/A'}) — ${p.stock} left`)
+      .join('\n');
+
+    await this.emailService.sendGenericEmail(
+      user.email,
+      'Low Stock Alert — Xelnova Seller Dashboard',
+      `Hi ${user.name || 'Seller'},\n\nThe following products are running low on stock:\n\n${productList}\n\nPlease restock soon to avoid missed sales.\n\nBest,\nXelnova Team`,
+    );
+
+    return { sent: true, count: lowStockProducts.length };
+  }
+
+  // ─── Brand Proposal ───
+
+  async proposeBrand(userId: string, name: string, logo?: string) {
+    const seller = await this.getSellerProfile(userId);
+    const slug = this.slugify(name);
+
+    const existing = await this.prisma.brand.findUnique({ where: { slug } });
+    if (existing) throw new BadRequestException('A brand with this name already exists');
+
+    return this.prisma.brand.create({
+      data: {
+        name,
+        slug,
+        logo: logo || null,
+        proposedBy: seller.id,
+        approved: false,
+        featured: false,
+        isActive: false,
+      },
+    });
+  }
+
+  async getSellerBrands(userId: string) {
+    const seller = await this.getSellerProfile(userId);
+    return this.prisma.brand.findMany({
+      where: { proposedBy: seller.id },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  // ─── Settlement Reports ───
+
+  async getSettlementReport(userId: string, query: SettlementQueryDto) {
+    const seller = await this.getSellerProfile(userId);
+    const productIds = (
+      await this.prisma.product.findMany({ where: { sellerId: seller.id }, select: { id: true } })
+    ).map((p) => p.id);
+
+    const dateFilter: any = {};
+    if (query.dateFrom) dateFilter.gte = new Date(query.dateFrom);
+    if (query.dateTo) dateFilter.lte = new Date(query.dateTo);
+
+    const orderItems = await this.prisma.orderItem.findMany({
+      where: {
+        productId: { in: productIds },
+        order: {
+          paymentStatus: 'PAID',
+          ...(Object.keys(dateFilter).length > 0 ? { createdAt: dateFilter } : {}),
+        },
+      },
+      include: {
+        order: { select: { orderNumber: true, createdAt: true, status: true, paymentMethod: true, total: true } },
+        product: { select: { name: true, sku: true } },
+      },
+      orderBy: { order: { createdAt: 'desc' } },
+    });
+
+    const commissionRate = seller.commissionRate / 100;
+
+    const rows = orderItems.map((oi) => {
+      const gross = oi.price * oi.quantity;
+      const commission = gross * commissionRate;
+      const net = gross - commission;
+      return {
+        orderNumber: oi.order.orderNumber,
+        date: oi.order.createdAt.toISOString().split('T')[0],
+        productName: oi.product?.name || oi.productName,
+        sku: oi.product?.sku || '',
+        quantity: oi.quantity,
+        unitPrice: oi.price,
+        gross,
+        commissionPercent: seller.commissionRate,
+        commission,
+        net,
+        orderStatus: oi.order.status,
+        paymentMethod: oi.order.paymentMethod || '',
+      };
+    });
+
+    const totals = rows.reduce(
+      (acc, r) => ({
+        gross: acc.gross + r.gross,
+        commission: acc.commission + r.commission,
+        net: acc.net + r.net,
+      }),
+      { gross: 0, commission: 0, net: 0 },
+    );
+
+    return { rows, totals, commissionRate: seller.commissionRate };
+  }
+
+  async getSettlementCsv(userId: string, query: SettlementQueryDto): Promise<string> {
+    const report = await this.getSettlementReport(userId, query);
+    const header = 'Order Number,Date,Product,SKU,Qty,Unit Price,Gross,Commission %,Commission,Net,Status,Payment Method';
+    const lines = report.rows.map((r) =>
+      [
+        r.orderNumber, r.date, `"${r.productName}"`, r.sku, r.quantity,
+        r.unitPrice.toFixed(2), r.gross.toFixed(2), r.commissionPercent,
+        r.commission.toFixed(2), r.net.toFixed(2), r.orderStatus, r.paymentMethod,
+      ].join(','),
+    );
+    lines.push('');
+    lines.push(`,,,,,Total,${report.totals.gross.toFixed(2)},,${report.totals.commission.toFixed(2)},${report.totals.net.toFixed(2)},,`);
+    return [header, ...lines].join('\n');
+  }
+
+  // ─── Sales Analytics (enhanced) ───
+
+  async getSalesAnalytics(userId: string, period: string = 'month') {
+    const seller = await this.getSellerProfile(userId);
+    const productIds = (
+      await this.prisma.product.findMany({ where: { sellerId: seller.id }, select: { id: true } })
+    ).map((p) => p.id);
+
+    const now = new Date();
+    let startDate: Date;
+    switch (period) {
+      case 'week':
+        startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        break;
+      case 'year':
+        startDate = new Date(now.getFullYear(), 0, 1);
+        break;
+      case 'month':
+      default:
+        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+        break;
+    }
+
+    const orderItems = await this.prisma.orderItem.findMany({
+      where: {
+        productId: { in: productIds },
+        order: {
+          createdAt: { gte: startDate },
+          status: { notIn: ['CANCELLED', 'RETURNED', 'REFUNDED'] },
+        },
+      },
+      include: {
+        order: { select: { createdAt: true } },
+        product: { select: { name: true, categoryId: true } },
+      },
+    });
+
+    const dailyMap = new Map<string, { revenue: number; orders: Set<string>; units: number }>();
+    const productMap = new Map<string, { name: string; revenue: number; units: number }>();
+    const categoryMap = new Map<string, { revenue: number; units: number }>();
+
+    for (const oi of orderItems) {
+      const day = oi.order.createdAt.toISOString().split('T')[0];
+      const amount = oi.price * oi.quantity;
+
+      const d = dailyMap.get(day) || { revenue: 0, orders: new Set<string>(), units: 0 };
+      d.revenue += amount;
+      d.orders.add(oi.orderId);
+      d.units += oi.quantity;
+      dailyMap.set(day, d);
+
+      const pName = oi.product?.name || oi.productName;
+      const p = productMap.get(oi.productId) || { name: pName, revenue: 0, units: 0 };
+      p.revenue += amount;
+      p.units += oi.quantity;
+      productMap.set(oi.productId, p);
+
+      const catId = oi.product?.categoryId || 'unknown';
+      const c = categoryMap.get(catId) || { revenue: 0, units: 0 };
+      c.revenue += amount;
+      c.units += oi.quantity;
+      categoryMap.set(catId, c);
+    }
+
+    const dailyData = Array.from(dailyMap.entries())
+      .map(([date, d]) => ({ date, revenue: d.revenue, orders: d.orders.size, units: d.units }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    const topProducts = Array.from(productMap.entries())
+      .map(([id, d]) => ({ id, ...d }))
+      .sort((a, b) => b.revenue - a.revenue)
+      .slice(0, 10);
+
+    const categoryIds = Array.from(categoryMap.keys());
+    const categories = await this.prisma.category.findMany({
+      where: { id: { in: categoryIds } },
+      select: { id: true, name: true },
+    });
+    const catNameMap = new Map(categories.map((c) => [c.id, c.name]));
+
+    const categoryData = Array.from(categoryMap.entries())
+      .map(([id, d]) => ({ category: catNameMap.get(id) || 'Other', ...d }))
+      .sort((a, b) => b.revenue - a.revenue);
+
+    const totalRevenue = dailyData.reduce((s, d) => s + d.revenue, 0);
+    const totalOrders = dailyData.reduce((s, d) => s + d.orders, 0);
+    const totalUnits = dailyData.reduce((s, d) => s + d.units, 0);
+
+    return {
+      period,
+      summary: { totalRevenue, totalOrders, totalUnits },
+      dailyData,
+      topProducts,
+      categoryBreakdown: categoryData,
+    };
   }
 }

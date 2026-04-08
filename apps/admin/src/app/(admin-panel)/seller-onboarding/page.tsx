@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import Image from 'next/image';
 import {
   Store,
   CheckCircle,
@@ -596,10 +597,12 @@ export default function SellerOnboardingPage() {
             {/* Signature with Verification */}
             {(selectedSeller.signatureUrl || selectedSeller.signatureData) && (
               <DetailSection title="Signature">
-                <div className="rounded-xl border border-border overflow-hidden bg-white p-4 max-w-xs">
-                  <img
+                <div className="rounded-xl border border-border overflow-hidden bg-white p-4 max-w-xs relative">
+                  <Image
                     src={selectedSeller.signatureUrl || selectedSeller.signatureData || ''}
                     alt="Seller Signature"
+                    width={320}
+                    height={96}
                     className="max-h-24 object-contain"
                   />
                 </div>
@@ -665,9 +668,11 @@ export default function SellerOnboardingPage() {
                       >
                         <div className="flex items-center gap-3 min-w-0">
                           {isImage ? (
-                            <img
+                            <Image
                               src={doc.fileUrl}
                               alt={doc.type}
+                              width={40}
+                              height={40}
                               className="h-10 w-10 rounded-lg object-cover border border-border"
                             />
                           ) : (
@@ -867,7 +872,7 @@ function DocCard({ label, url }: { label: string; url: string }) {
         </a>
       </div>
       <a href={url} target="_blank" rel="noopener noreferrer">
-        <img src={url} alt={label} className="w-full h-36 object-contain bg-white p-2" />
+        <Image src={url} alt={label} width={400} height={144} className="w-full h-36 object-contain bg-white p-2" />
       </a>
     </div>
   );

@@ -5,7 +5,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 export class WalletService {
   constructor(private prisma: PrismaService) {}
 
-  async getOrCreateWallet(ownerId: string, ownerType: 'ADMIN' | 'SELLER') {
+  async getOrCreateWallet(ownerId: string, ownerType: 'ADMIN' | 'SELLER' | 'CUSTOMER') {
     return this.prisma.wallet.upsert({
       where: { ownerId_ownerType: { ownerId, ownerType } },
       create: { ownerId, ownerType, balance: 0 },
@@ -13,7 +13,7 @@ export class WalletService {
     });
   }
 
-  async getBalance(ownerId: string, ownerType: 'ADMIN' | 'SELLER') {
+  async getBalance(ownerId: string, ownerType: 'ADMIN' | 'SELLER' | 'CUSTOMER') {
     const wallet = await this.prisma.wallet.findUnique({
       where: { ownerId_ownerType: { ownerId, ownerType } },
     });
@@ -25,7 +25,7 @@ export class WalletService {
 
   async getTransactions(
     ownerId: string,
-    ownerType: 'ADMIN' | 'SELLER',
+    ownerType: 'ADMIN' | 'SELLER' | 'CUSTOMER',
     page = 1,
     limit = 20,
   ) {

@@ -78,7 +78,7 @@ export function Footer() {
         <button
           type="button"
           onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-          className="flex w-full items-center justify-center gap-2 bg-primary-700 py-3 text-sm text-white/90 hover:bg-primary-600 transition-colors"
+          className="flex w-full items-center justify-center gap-2 bg-violet-600 py-3 text-sm text-white/90 hover:bg-purple-600 transition-colors"
         >
           <ArrowUp size={14} />
           Back to top

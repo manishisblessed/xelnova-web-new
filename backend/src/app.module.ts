@@ -20,6 +20,10 @@ import { VerificationModule } from './modules/verification/verification.module';
 import { SellerOnboardingModule } from './modules/seller-onboarding/seller-onboarding.module';
 import { ShippingModule } from './modules/shipping/shipping.module';
 import { WalletModule } from './modules/wallet/wallet.module';
+import { ReturnsModule } from './modules/returns/returns.module';
+import { TicketsModule } from './modules/tickets/tickets.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
+import { WishlistModule } from './modules/wishlist/wishlist.module';
 import { LoggingMiddleware } from './common/middleware/logging.middleware';
 
 @Module({
@@ -45,6 +49,10 @@ import { LoggingMiddleware } from './common/middleware/logging.middleware';
     SellerOnboardingModule,
     ShippingModule,
     WalletModule,
+    ReturnsModule,
+    TicketsModule,
+    NotificationsModule,
+    WishlistModule,
   ],
 })
 export class AppModule implements NestModule {

@@ -51,7 +51,7 @@ export function DashboardAuthProvider({ children }: { children: ReactNode }) {
       setUser(null);
       window.location.href = '/login';
     }
-  }, []);
+  }, [setUser]);
 
   return (
     <DashboardAuthContext.Provider value={{ user, setUser, logout, isAuthenticated: !!user }}>

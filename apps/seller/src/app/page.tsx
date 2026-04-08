@@ -110,8 +110,8 @@ const benefits = [
     description: 'Get instant access to our growing customer base across India. Our sellers see an average of 3x revenue growth in their first year.',
     stat: '3x',
     statLabel: 'avg. revenue growth',
-    gradient: 'from-emerald-500 to-teal-600',
-    bgGradient: 'from-emerald-50 to-teal-50',
+    gradient: 'from-violet-500 to-purple-600',
+    bgGradient: 'from-violet-50 to-purple-50',
   },
   {
     icon: BadgePercent,
@@ -431,8 +431,8 @@ export default function SellerLandingPage() {
                     <path d="M2 8.5C50 2 150 2 198 8.5" stroke="url(#underline-gradient)" strokeWidth="3" strokeLinecap="round" />
                     <defs>
                       <linearGradient id="underline-gradient" x1="0" y1="0" x2="200" y2="0">
-                        <stop stopColor="#10b981" />
-                        <stop offset="1" stopColor="#059669" />
+                        <stop stopColor="#8b5cf6" />
+                        <stop offset="1" stopColor="#7c3aed" />
                       </linearGradient>
                     </defs>
                   </svg>
@@ -547,7 +547,7 @@ export default function SellerLandingPage() {
                 >
                   <div className="bg-white rounded-2xl p-4 shadow-elevated border border-gray-100/80">
                     <div className="flex items-center gap-3">
-                      <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-green-400 to-emerald-500 flex items-center justify-center shadow-sm">
+                      <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-violet-400 to-purple-500 flex items-center justify-center shadow-sm">
                         <IndianRupee size={20} className="text-white" />
                       </div>
                       <div>
@@ -956,7 +956,7 @@ export default function SellerLandingPage() {
                 icon: Shield,
                 title: 'Secure & Reliable',
                 description: 'Enterprise-grade security for your business data. PCI-DSS compliant payment processing. Your business is safe with us.',
-                gradient: 'from-emerald-500 to-teal-600',
+                gradient: 'from-violet-500 to-purple-600',
               },
               {
                 icon: CreditCard,
@@ -1067,7 +1067,7 @@ export default function SellerLandingPage() {
 
             <h2 className="text-3xl sm:text-4xl lg:text-6xl font-extrabold font-display leading-tight tracking-tight text-white [text-shadow:0_2px_40px_rgba(0,0,0,0.35)]">
               Your Next Chapter{' '}
-              <span className="text-emerald-300 sm:text-emerald-200">
+              <span className="text-violet-300 sm:text-violet-200">
                 Starts Here
               </span>
             </h2>
@@ -1080,10 +1080,10 @@ export default function SellerLandingPage() {
             <div className="mt-10 flex flex-col sm:flex-row gap-4 justify-center">
               <Link
                 href="/register"
-                className="group relative inline-flex items-center justify-center gap-2.5 px-10 py-4.5 text-base font-bold rounded-2xl shadow-2xl hover:shadow-[0_20px_60px_-12px_rgba(255,255,255,0.3)] hover:-translate-y-0.5 transition-all duration-300 bg-white text-emerald-800 hover:bg-emerald-50"
+                className="group relative inline-flex items-center justify-center gap-2.5 px-10 py-4.5 text-base font-bold rounded-2xl shadow-2xl hover:shadow-[0_20px_60px_-12px_rgba(255,255,255,0.3)] hover:-translate-y-0.5 transition-all duration-300 bg-white text-violet-800 hover:bg-violet-50"
               >
                 Create Free Seller Account
-                <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform text-emerald-700" />
+                <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform text-violet-700" />
               </Link>
               <Link
                 href="/login"
@@ -1101,7 +1101,7 @@ export default function SellerLandingPage() {
                 { icon: IndianRupee, label: '7-Day Payments' },
               ].map((item, i) => (
                 <div key={i} className="flex items-center gap-2 text-sm font-medium">
-                  <item.icon size={16} className="text-emerald-400 shrink-0" />
+                  <item.icon size={16} className="text-violet-400 shrink-0" />
                   <span className="text-slate-200">{item.label}</span>
                 </div>
               ))}
@@ -1111,8 +1111,8 @@ export default function SellerLandingPage() {
       </section>
 
       {/* ─── Footer ─── */}
-      <footer className="relative bg-[#030712] border-t border-emerald-900/30">
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_50%_at_50%_-20%,rgba(16,185,129,0.12),transparent)] pointer-events-none" />
+      <footer className="relative bg-[#030712] border-t border-violet-900/30">
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_50%_at_50%_-20%,rgba(124,58,237,0.12),transparent)] pointer-events-none" />
         <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           {/* Top row: brand + link columns */}
           <div className="pt-16 pb-10 grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-10 gap-8 lg:gap-10">
@@ -1136,7 +1136,7 @@ export default function SellerLandingPage() {
                   { label: 'Fulfillment', href: '/fulfillment' },
                 ].map((item) => (
                   <li key={item.label}>
-                    <a href={item.href} className="text-[#94a3b8] hover:text-emerald-400 text-sm transition-colors duration-200">
+                    <a href={item.href} className="text-[#94a3b8] hover:text-violet-400 text-sm transition-colors duration-200">
                       {item.label}
                     </a>
                   </li>
@@ -1149,7 +1149,7 @@ export default function SellerLandingPage() {
               <ul className="space-y-2.5">
                 {['Seller University', 'Help Center', 'Community Forum', 'Success Stories', 'Blog'].map((item) => (
                   <li key={item}>
-                    <a href="#" className="text-[#94a3b8] hover:text-emerald-400 text-sm transition-colors duration-200">
+                    <a href="#" className="text-[#94a3b8] hover:text-violet-400 text-sm transition-colors duration-200">
                       {item}
                     </a>
                   </li>
@@ -1162,7 +1162,7 @@ export default function SellerLandingPage() {
               <ul className="space-y-2.5">
                 {['About Xelnova', 'Careers', 'Press', 'Investors', 'Contact Us'].map((item) => (
                   <li key={item}>
-                    <a href="#" className="text-[#94a3b8] hover:text-emerald-400 text-sm transition-colors duration-200">
+                    <a href="#" className="text-[#94a3b8] hover:text-violet-400 text-sm transition-colors duration-200">
                       {item}
                     </a>
                   </li>
@@ -1180,19 +1180,19 @@ export default function SellerLandingPage() {
                   href="mailto:seller-support@xelnova.in"
                   className="flex items-center gap-3 group"
                 >
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-400 ring-1 ring-emerald-500/20">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-violet-500/15 text-violet-400 ring-1 ring-violet-500/20">
                     <Mail size={16} />
                   </span>
                   <span>
                     <span className="block text-[11px] font-medium uppercase tracking-wider text-slate-500">Email</span>
-                    <span className="block text-sm font-semibold text-white group-hover:text-emerald-300 transition-colors">
+                    <span className="block text-sm font-semibold text-white group-hover:text-violet-300 transition-colors">
                       seller-support@xelnova.in
                     </span>
                   </span>
                 </a>
 
                 <div className="flex items-center gap-3">
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-400 ring-1 ring-emerald-500/20">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-violet-500/15 text-violet-400 ring-1 ring-violet-500/20">
                     <Phone size={16} />
                   </span>
                   <span>

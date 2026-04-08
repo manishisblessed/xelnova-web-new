@@ -3,12 +3,15 @@ import {
   UnauthorizedException,
   ConflictException,
   BadRequestException,
+  NotFoundException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
+import * as crypto from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { sendFortiusOtpSms } from '../../common/helpers/fortius-sms.helper';
+import { EmailService } from '../email/email.service';
 import { RegisterDto } from './dto/auth.dto';
 import { LoggingService } from '../logging/logging.service';
 import { Role } from '@prisma/client';
@@ -25,6 +28,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly loggingService: LoggingService,
+    private readonly emailService: EmailService,
   ) {}
 
   async login(email: string, password: string, ipAddress?: string, userAgent?: string) {
@@ -591,5 +595,51 @@ export class AuthService {
     await this.prisma.refreshToken.create({
       data: { token, userId, expiresAt },
     });
+  }
+
+  async forgotPassword(email: string) {
+    const user = await this.prisma.user.findUnique({ where: { email: email.trim().toLowerCase() } });
+    if (!user) {
+      // Don't reveal whether the email exists
+      return { message: 'If that email is registered, a reset link has been sent.' };
+    }
+
+    const token = crypto.randomBytes(32).toString('hex');
+    const expires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { passwordResetToken: token, passwordResetExpires: expires },
+    });
+
+    await this.emailService.sendPasswordReset(user.email, user.name, token);
+
+    return { message: 'If that email is registered, a reset link has been sent.' };
+  }
+
+  async resetPassword(token: string, newPassword: string) {
+    const user = await this.prisma.user.findFirst({
+      where: {
+        passwordResetToken: token,
+        passwordResetExpires: { gt: new Date() },
+      },
+    });
+
+    if (!user) {
+      throw new BadRequestException('Invalid or expired reset token');
+    }
+
+    const hashed = await bcrypt.hash(newPassword, 10);
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        password: hashed,
+        passwordResetToken: null,
+        passwordResetExpires: null,
+      },
+    });
+
+    return { message: 'Password has been reset successfully' };
   }
 }

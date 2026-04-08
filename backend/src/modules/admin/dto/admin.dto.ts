@@ -99,6 +99,7 @@ export class UpdateBrandDto {
   @ApiPropertyOptional() @IsOptional() @IsString() logo?: string;
   @ApiPropertyOptional() @IsOptional() @IsBoolean() featured?: boolean;
   @ApiPropertyOptional() @IsOptional() @IsBoolean() isActive?: boolean;
+  @ApiPropertyOptional() @IsOptional() @IsBoolean() approved?: boolean;
 }
 
 // ─── Banner CRUD ───
@@ -128,6 +129,9 @@ export class CreateCouponDto {
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Type(() => Number) maxDiscount?: number;
   @ApiPropertyOptional() @IsOptional() @IsString() validUntil?: string;
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Type(() => Number) usageLimit?: number;
+  @ApiPropertyOptional({ enum: ['global', 'category', 'seller'] }) @IsOptional() @IsString() scope?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() categoryId?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() sellerId?: string;
 }
 
 export class UpdateCouponDto extends CreateCouponDto {

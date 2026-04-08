@@ -94,3 +94,13 @@ export function getStoredUser(): AuthUser | null {
     return null;
   }
 }
+
+export async function forgotPassword(email: string): Promise<{ message: string }> {
+  const { data } = await api.post<ApiResponse<{ message: string }>>('/auth/forgot-password', { email });
+  return data.data;
+}
+
+export async function resetPassword(token: string, newPassword: string): Promise<{ message: string }> {
+  const { data } = await api.post<ApiResponse<{ message: string }>>('/auth/reset-password', { token, newPassword });
+  return data.data;
+}

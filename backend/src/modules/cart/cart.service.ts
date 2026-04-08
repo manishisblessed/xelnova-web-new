@@ -136,22 +136,52 @@ export class CartService {
     if (coupon.validUntil && coupon.validUntil < new Date()) {
       throw new BadRequestException('Coupon has expired');
     }
+    if (coupon.usageLimit && coupon.usedCount >= coupon.usageLimit) {
+      throw new BadRequestException('Coupon usage limit reached');
+    }
 
     const cart = await this.getCart(userId);
-    if (cart.summary.subtotal < coupon.minOrderAmount) {
+
+    // Scope validation: category or seller
+    let eligibleSubtotal = cart.summary.subtotal;
+    if (coupon.scope === 'category' && coupon.categoryId) {
+      const cartItems = await this.prisma.cartItem.findMany({
+        where: { userId },
+        include: { product: { select: { categoryId: true, price: true } } },
+      });
+      eligibleSubtotal = cartItems
+        .filter((ci) => ci.product.categoryId === coupon.categoryId)
+        .reduce((sum, ci) => sum + ci.product.price * ci.quantity, 0);
+      if (eligibleSubtotal === 0) {
+        throw new BadRequestException('No items in your cart match this coupon\'s category');
+      }
+    } else if (coupon.scope === 'seller' && coupon.sellerId) {
+      const cartItems = await this.prisma.cartItem.findMany({
+        where: { userId },
+        include: { product: { select: { sellerId: true, price: true } } },
+      });
+      eligibleSubtotal = cartItems
+        .filter((ci) => ci.product.sellerId === coupon.sellerId)
+        .reduce((sum, ci) => sum + ci.product.price * ci.quantity, 0);
+      if (eligibleSubtotal === 0) {
+        throw new BadRequestException('No items in your cart match this coupon\'s seller');
+      }
+    }
+
+    if (eligibleSubtotal < coupon.minOrderAmount) {
       throw new BadRequestException(
-        `Minimum order amount of ₹${coupon.minOrderAmount} required`,
+        `Minimum order amount of ₹${coupon.minOrderAmount} required for this coupon`,
       );
     }
 
     let discount: number;
     if (coupon.discountType === 'PERCENTAGE') {
       discount = Math.min(
-        Math.round((cart.summary.subtotal * coupon.discountValue) / 100),
+        Math.round((eligibleSubtotal * coupon.discountValue) / 100),
         coupon.maxDiscount || Infinity,
       );
     } else {
-      discount = coupon.discountValue;
+      discount = Math.min(coupon.discountValue, eligibleSubtotal);
     }
 
     const subtotal = cart.summary.subtotal;
@@ -161,7 +191,7 @@ export class CartService {
 
     return {
       ...cart,
-      coupon: { code: coupon.code, discount },
+      coupon: { code: coupon.code, discount, scope: coupon.scope },
       summary: {
         ...cart.summary,
         discount,

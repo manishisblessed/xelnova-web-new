@@ -20,6 +20,34 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 export class WalletController {
   constructor(private readonly walletService: WalletService) {}
 
+  // ========== Customer Endpoints ==========
+
+  @Get('customer/balance')
+  @Auth()
+  @ApiOperation({ summary: 'Get customer wallet balance' })
+  async getCustomerBalance(@CurrentUser('id') userId: string) {
+    await this.walletService.getOrCreateWallet(userId, 'CUSTOMER');
+    const result = await this.walletService.getBalance(userId, 'CUSTOMER');
+    return successResponse(result, 'Balance retrieved');
+  }
+
+  @Get('customer/transactions')
+  @Auth()
+  @ApiOperation({ summary: 'Get customer wallet transactions' })
+  async getCustomerTransactions(
+    @CurrentUser('id') userId: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const result = await this.walletService.getTransactions(
+      userId,
+      'CUSTOMER',
+      parseInt(page || '1'),
+      parseInt(limit || '20'),
+    );
+    return successResponse(result, 'Transactions retrieved');
+  }
+
   // ========== Seller Endpoints ==========
 
   @Get('balance')

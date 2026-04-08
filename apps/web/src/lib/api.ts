@@ -110,14 +110,17 @@ function useFetch<T>(fetcher: () => Promise<T>, deps: any[] = []): FetchState<T>
 
   const refetch = useCallback(() => setTrigger(t => t + 1), []);
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const stableFetcher = useCallback(fetcher, [depsKey]);
+
   useEffect(() => {
     const controller = new AbortController();
     setState(s => ({ ...s, loading: true, error: null }));
-    fetcher()
+    stableFetcher()
       .then(data => { if (!controller.signal.aborted) setState({ data, loading: false, error: null }); })
       .catch(err => { if (!controller.signal.aborted) setState({ data: null, loading: false, error: err?.response?.data?.message || err.message || 'Failed to load' }); });
     return () => { controller.abort(); };
-  }, [depsKey, trigger]);
+  }, [stableFetcher, trigger]);
 
   return { ...state, refetch };
 }

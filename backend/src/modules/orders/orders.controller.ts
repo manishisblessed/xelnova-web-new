@@ -1,6 +1,8 @@
-import { Controller, Get, Post, Patch, Param, Body } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Param, Body, Res, Header } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
+import { Response } from 'express';
 import { OrdersService } from './orders.service';
+import { InvoiceService } from './invoice.service';
 import { CreateOrderDto, CancelOrderDto } from './dto/order.dto';
 import {
   successResponse,
@@ -12,7 +14,10 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 @ApiTags('Orders')
 @Controller('orders')
 export class OrdersController {
-  constructor(private readonly ordersService: OrdersService) {}
+  constructor(
+    private readonly ordersService: OrdersService,
+    private readonly invoiceService: InvoiceService,
+  ) {}
 
   @Get()
   @Auth()
@@ -34,6 +39,23 @@ export class OrdersController {
   ) {
     const order = await this.ordersService.cancelOrder(orderNumber, userId, dto.reason);
     return successResponse(order, 'Order cancelled successfully');
+  }
+
+  @Get(':orderNumber/invoice')
+  @Auth()
+  @ApiOperation({ summary: 'Download order invoice PDF' })
+  async downloadInvoice(
+    @Param('orderNumber') orderNumber: string,
+    @CurrentUser('id') userId: string,
+    @Res() res: Response,
+  ) {
+    const buffer = await this.invoiceService.generateInvoice(orderNumber, userId);
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="Invoice-${orderNumber}.pdf"`,
+      'Content-Length': buffer.length,
+    });
+    res.end(buffer);
   }
 
   @Get(':orderNumber')

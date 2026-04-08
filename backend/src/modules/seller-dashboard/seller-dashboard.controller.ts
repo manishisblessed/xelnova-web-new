@@ -1,5 +1,6 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, Query } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, Query, Res, Header } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
+import { Response } from 'express';
 import { SellerDashboardService } from './seller-dashboard.service';
 import { Auth } from '../../common/decorators/auth.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -11,6 +12,8 @@ import {
   UpdateOrderStatusDto,
   UpdateSellerProfileDto,
   RevenueQueryDto,
+  ProposeBrandDto,
+  SettlementQueryDto,
 } from './dto/seller-dashboard.dto';
 import { successResponse, paginatedResponse, errorResponse } from '../../common/helpers/response.helper';
 
@@ -100,6 +103,73 @@ export class SellerDashboardController {
   @ApiOperation({ summary: 'Get seller analytics' })
   async getAnalytics(@CurrentUser('id') userId: string) {
     return successResponse(await this.service.getAnalytics(userId), 'Analytics fetched');
+  }
+
+  // ─── Bulk Upload ───
+
+  @Post('products/bulk-upload')
+  @ApiOperation({ summary: 'Bulk upload products from parsed CSV rows' })
+  async bulkUpload(@CurrentUser('id') userId: string, @Body() body: { rows: Record<string, string>[] }) {
+    return successResponse(await this.service.bulkUploadProducts(userId, body.rows), 'Bulk upload complete');
+  }
+
+  // ─── Inventory Alerts ───
+
+  @Get('inventory-alerts')
+  @ApiOperation({ summary: 'Get low-stock products' })
+  async getInventoryAlerts(@CurrentUser('id') userId: string) {
+    return successResponse(await this.service.getInventoryAlerts(userId), 'Inventory alerts fetched');
+  }
+
+  @Post('inventory-alerts/notify')
+  @ApiOperation({ summary: 'Send low-stock email alert to seller' })
+  async sendInventoryAlerts(@CurrentUser('id') userId: string) {
+    return successResponse(await this.service.checkAndSendInventoryAlerts(userId), 'Alert check complete');
+  }
+
+  // ─── Brand Proposal ───
+
+  @Post('brands/propose')
+  @ApiOperation({ summary: 'Propose a new brand for admin approval' })
+  async proposeBrand(@CurrentUser('id') userId: string, @Body() dto: ProposeBrandDto) {
+    return successResponse(await this.service.proposeBrand(userId, dto.name, dto.logo), 'Brand proposed');
+  }
+
+  @Get('brands')
+  @ApiOperation({ summary: 'Get brands proposed by this seller' })
+  async getSellerBrands(@CurrentUser('id') userId: string) {
+    return successResponse(await this.service.getSellerBrands(userId), 'Brands fetched');
+  }
+
+  // ─── Settlement Reports ───
+
+  @Get('settlement')
+  @ApiOperation({ summary: 'Get settlement/payout report' })
+  async getSettlement(@CurrentUser('id') userId: string, @Query() query: SettlementQueryDto) {
+    return successResponse(await this.service.getSettlementReport(userId, query), 'Settlement report fetched');
+  }
+
+  @Get('settlement/csv')
+  @ApiOperation({ summary: 'Download settlement report as CSV' })
+  async getSettlementCsv(
+    @CurrentUser('id') userId: string,
+    @Query() query: SettlementQueryDto,
+    @Res() res: Response,
+  ) {
+    const csv = await this.service.getSettlementCsv(userId, query);
+    res.set({
+      'Content-Type': 'text/csv',
+      'Content-Disposition': `attachment; filename="settlement-report.csv"`,
+    });
+    res.send(csv);
+  }
+
+  // ─── Sales Analytics ───
+
+  @Get('sales-analytics')
+  @ApiOperation({ summary: 'Get sales analytics with charts data' })
+  async getSalesAnalytics(@CurrentUser('id') userId: string, @Query('period') period?: string) {
+    return successResponse(await this.service.getSalesAnalytics(userId, period), 'Sales analytics fetched');
   }
 
   // ─── Profile ───

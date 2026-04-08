@@ -537,6 +537,13 @@ export class AdminService {
     return this.prisma.brand.findMany({ orderBy: { name: 'asc' } });
   }
 
+  async getPendingBrands() {
+    return this.prisma.brand.findMany({
+      where: { approved: false },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
   async createBrand(dto: CreateBrandDto) {
     return this.prisma.brand.create({
       data: { name: dto.name, slug: this.slugify(dto.name), logo: dto.logo, featured: dto.featured },
@@ -590,6 +597,9 @@ export class AdminService {
         maxDiscount: dto.maxDiscount,
         validUntil: dto.validUntil ? new Date(dto.validUntil) : undefined,
         usageLimit: dto.usageLimit,
+        scope: dto.scope || 'global',
+        categoryId: dto.categoryId || null,
+        sellerId: dto.sellerId || null,
       },
     });
   }

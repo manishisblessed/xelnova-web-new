@@ -107,11 +107,193 @@ export async function apiPatchSiteSettings(body: Record<string, unknown>) {
   return handleResponse(res);
 }
 
+// ─── Tickets ───
+
+export async function apiGetTickets(params?: Record<string, string>) {
+  const query = new URLSearchParams({ limit: '50', ...params });
+  const res = await fetch(`${API_URL}/tickets/admin?${query}`, { headers: authHeaders() });
+  return handleResponse(res);
+}
+
+export async function apiGetTicketDetail(id: string) {
+  const res = await fetch(`${API_URL}/tickets/admin/${id}`, { headers: authHeaders() });
+  return handleResponse(res);
+}
+
+export async function apiReplyTicket(id: string, message: string, isInternal = false) {
+  const res = await fetch(`${API_URL}/tickets/admin/${id}/reply`, {
+    method: 'POST',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message, isInternal }),
+  });
+  return handleResponse(res);
+}
+
+export async function apiForwardTicket(id: string, sellerId: string, note?: string) {
+  const res = await fetch(`${API_URL}/tickets/admin/${id}/forward`, {
+    method: 'POST',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sellerId, note }),
+  });
+  return handleResponse(res);
+}
+
+export async function apiUpdateTicketStatus(id: string, status: string, priority?: string) {
+  const res = await fetch(`${API_URL}/tickets/admin/${id}/status`, {
+    method: 'PATCH',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status, priority }),
+  });
+  return handleResponse(res);
+}
+
 export async function apiUpdateShipment(orderId: string, body: Record<string, unknown>) {
   const res = await fetch(`${API_URL}/admin/orders/${orderId}/shipment`, {
     method: 'PATCH',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
+  return handleResponse(res);
+}
+
+// ─── Reports ───
+
+export async function apiGetGstReport(params?: Record<string, string>) {
+  const q = params ? `?${new URLSearchParams(params)}` : '';
+  const res = await fetch(`${API_URL}/admin/reports/gst${q}`, { headers: authHeaders() });
+  return handleResponse(res);
+}
+
+export async function apiDownloadGstCsv(params?: Record<string, string>) {
+  const q = params ? `?${new URLSearchParams(params)}` : '';
+  const res = await fetch(`${API_URL}/admin/reports/gst/csv${q}`, { headers: authHeaders() });
+  if (!res.ok) throw new Error('Failed to download CSV');
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'gst-report.csv';
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+
+export async function apiGetTdsReport(params?: Record<string, string>) {
+  const q = params ? `?${new URLSearchParams(params)}` : '';
+  const res = await fetch(`${API_URL}/admin/reports/tds${q}`, { headers: authHeaders() });
+  return handleResponse(res);
+}
+
+export async function apiDownloadTdsCsv(params?: Record<string, string>) {
+  const q = params ? `?${new URLSearchParams(params)}` : '';
+  const res = await fetch(`${API_URL}/admin/reports/tds/csv${q}`, { headers: authHeaders() });
+  if (!res.ok) throw new Error('Failed to download CSV');
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'tds-report.csv';
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+
+export async function apiGetRefundReport(params?: Record<string, string>) {
+  const q = params ? `?${new URLSearchParams(params)}` : '';
+  const res = await fetch(`${API_URL}/admin/reports/refunds${q}`, { headers: authHeaders() });
+  return handleResponse(res);
+}
+
+// ─── Duplicates & Pricing ───
+
+export async function apiScanDuplicates() {
+  const res = await fetch(`${API_URL}/admin/duplicates`, { headers: authHeaders() });
+  return handleResponse(res);
+}
+
+export async function apiHideDuplicate(productId: string) {
+  const res = await fetch(`${API_URL}/admin/duplicates/${productId}/hide`, {
+    method: 'POST',
+    headers: authHeaders(),
+  });
+  return handleResponse(res);
+}
+
+export async function apiScanPricing() {
+  const res = await fetch(`${API_URL}/admin/pricing-flags`, { headers: authHeaders() });
+  return handleResponse(res);
+}
+
+// ─── Split Payment / Advance Payout ───
+
+export async function apiCreateAdvancePayout(body: { sellerId: string; amount: number; orderId?: string; note?: string }) {
+  const res = await fetch(`${API_URL}/admin/payouts/advance`, {
+    method: 'POST',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return handleResponse(res);
+}
+
+export async function apiGetSellerShares(orderId: string) {
+  const res = await fetch(`${API_URL}/admin/orders/${orderId}/seller-shares`, { headers: authHeaders() });
+  return handleResponse(res);
+}
+
+export async function apiSettleOrder(orderId: string) {
+  const res = await fetch(`${API_URL}/admin/orders/${orderId}/settle`, {
+    method: 'POST',
+    headers: authHeaders(),
+  });
+  return handleResponse(res);
+}
+
+// ─── Reverse Pickup ───
+
+export async function apiScheduleReversePickup(returnId: string, body: { courier: string; awb?: string; trackingUrl?: string; pickupDate?: string }) {
+  const res = await fetch(`${API_URL}/returns/${returnId}/reverse-pickup`, {
+    method: 'POST',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return handleResponse(res);
+}
+
+// ─── Abandoned Cart ───
+
+export async function apiGetAbandonedCarts(hours = 24) {
+  const res = await fetch(`${API_URL}/admin/notifications/abandoned-carts?hours=${hours}`, { headers: authHeaders() });
+  return handleResponse(res);
+}
+
+export async function apiSendAbandonedCartReminders(hours = 24) {
+  const res = await fetch(`${API_URL}/admin/notifications/abandoned-carts/send-reminders?hours=${hours}`, {
+    method: 'POST',
+    headers: authHeaders(),
+  });
+  return handleResponse(res);
+}
+
+export async function apiGetAbandonedCartStats() {
+  const res = await fetch(`${API_URL}/admin/notifications/abandoned-carts/stats`, { headers: authHeaders() });
+  return handleResponse(res);
+}
+
+// ─── Fraud Detection ───
+
+export async function apiGetFraudFlags(page = 1, all = false) {
+  const res = await fetch(`${API_URL}/admin/notifications/fraud-flags?page=${page}&all=${all}`, { headers: authHeaders() });
+  return handleResponse(res);
+}
+
+export async function apiReviewFraudFlag(flagId: string, body: { status: 'CLEARED' | 'BLOCKED'; adminNote: string }) {
+  const res = await fetch(`${API_URL}/admin/notifications/fraud-flags/${flagId}/review`, {
+    method: 'PATCH',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return handleResponse(res);
+}
+
+// ─── COD Risk ───
+
+export async function apiAssessCodRisk(userId: string, amount: number) {
+  const res = await fetch(`${API_URL}/cod/risk/${userId}?amount=${amount}`, { headers: authHeaders() });
   return handleResponse(res);
 }

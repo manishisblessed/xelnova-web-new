@@ -4,7 +4,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { LayoutDashboard, Package, Store, CreditCard, LogOut, User, Truck, Wallet } from 'lucide-react';
+import { LayoutDashboard, Package, Store, CreditCard, LogOut, User, Truck, Wallet, MessageSquare, Upload, AlertTriangle, Tag, FileText, BarChart3 } from 'lucide-react';
 import { cn } from '@xelnova/utils';
 import { useDashboardAuth } from '@/lib/auth-context';
 
@@ -12,9 +12,15 @@ const NAV = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/orders', label: 'Orders', icon: Package },
   { href: '/inventory', label: 'Inventory', icon: Store },
+  { href: '/bulk-upload', label: 'Bulk Upload', icon: Upload },
+  { href: '/inventory-alerts', label: 'Stock Alerts', icon: AlertTriangle },
+  { href: '/brands', label: 'Brands', icon: Tag },
   { href: '/payouts', label: 'Payouts', icon: CreditCard },
+  { href: '/settlement', label: 'Settlement', icon: FileText },
+  { href: '/analytics', label: 'Analytics', icon: BarChart3 },
   { href: '/wallet', label: 'Wallet', icon: Wallet },
   { href: '/shipping', label: 'Shipping', icon: Truck },
+  { href: '/tickets', label: 'Support Tickets', icon: MessageSquare },
   { href: '/profile', label: 'My Profile', icon: User },
 ];
 
