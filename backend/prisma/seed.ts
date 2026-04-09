@@ -5,6 +5,7 @@ dotenv.config({ path: path.resolve(__dirname, "../.env") });
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import * as bcrypt from "bcrypt";
+import { upsertEcommerceDemoData } from "./seed-ecommerce";
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {
@@ -29,6 +30,8 @@ async function main() {
   await prisma.sellerProfile.deleteMany();
   await prisma.coupon.deleteMany();
   await prisma.banner.deleteMany();
+  await prisma.brand.deleteMany();
+  await prisma.cmsPage.deleteMany();
   await prisma.refreshToken.deleteMany();
   await prisma.address.deleteMany();
   await prisma.user.deleteMany();
@@ -232,6 +235,17 @@ async function main() {
     `✅ ${Object.keys(categorySlugToId).length} categories created\n`,
   );
 
+  // ─── Brands, banners, coupons, CMS (idempotent upserts) ───
+  console.log("🛒 Seeding ecommerce demo (brands, banners, coupons, CMS)...");
+  const ec = await upsertEcommerceDemoData(prisma);
+  const extra =
+    ec.categoriesEnsured > 0
+      ? ` (+ ${ec.categoriesEnsured} root categories; DB had none)`
+      : "";
+  console.log(
+    `✅ ${ec.brands} brands, ${ec.banners} banners, ${ec.coupons} coupons, ${ec.cmsPages} CMS pages${extra}\n`,
+  );
+
   // ─── Default Admin Roles ───
   console.log("🔐 Creating default admin roles...");
   await prisma.adminRole.deleteMany();
@@ -252,8 +266,10 @@ async function main() {
   console.log("Categories:      " + Object.keys(categorySlugToId).length);
   console.log("Admin Roles:     " + defaultRoles.length);
   console.log("Products:        0 (sellers add their own)");
-  console.log("Banners:         0 (admin adds via panel)");
-  console.log("Coupons:         0 (admin adds via panel)");
+  console.log("Brands:          " + ec.brands);
+  console.log("Banners:         " + ec.banners);
+  console.log("Coupons:         " + ec.coupons);
+  console.log("CMS pages:       " + ec.cmsPages);
 }
 
 main()

@@ -115,30 +115,50 @@ export class FraudDetectionService {
   }
 
   async getPendingFlags(page = 1, limit = 20) {
-    const skip = (page - 1) * limit;
-    const [flags, total] = await Promise.all([
-      this.prisma.fraudFlag.findMany({
-        where: { status: 'PENDING' },
-        orderBy: { riskScore: 'desc' },
-        skip,
-        take: limit,
-      }),
-      this.prisma.fraudFlag.count({ where: { status: 'PENDING' } }),
-    ]);
-    return { flags, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } };
+    const empty = () => ({
+      flags: [] as Awaited<ReturnType<typeof this.prisma.fraudFlag.findMany>>,
+      pagination: { page, limit, total: 0, totalPages: 0 },
+    });
+    try {
+      const skip = (page - 1) * limit;
+      const [flags, total] = await Promise.all([
+        this.prisma.fraudFlag.findMany({
+          where: { status: 'PENDING' },
+          orderBy: { riskScore: 'desc' },
+          skip,
+          take: limit,
+        }),
+        this.prisma.fraudFlag.count({ where: { status: 'PENDING' } }),
+      ]);
+      return { flags, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.error(`getPendingFlags failed (run prisma migrations if table missing): ${msg}`);
+      return empty();
+    }
   }
 
   async getAllFlags(page = 1, limit = 20) {
-    const skip = (page - 1) * limit;
-    const [flags, total] = await Promise.all([
-      this.prisma.fraudFlag.findMany({
-        orderBy: { createdAt: 'desc' },
-        skip,
-        take: limit,
-      }),
-      this.prisma.fraudFlag.count(),
-    ]);
-    return { flags, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } };
+    const empty = () => ({
+      flags: [] as Awaited<ReturnType<typeof this.prisma.fraudFlag.findMany>>,
+      pagination: { page, limit, total: 0, totalPages: 0 },
+    });
+    try {
+      const skip = (page - 1) * limit;
+      const [flags, total] = await Promise.all([
+        this.prisma.fraudFlag.findMany({
+          orderBy: { createdAt: 'desc' },
+          skip,
+          take: limit,
+        }),
+        this.prisma.fraudFlag.count(),
+      ]);
+      return { flags, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.error(`getAllFlags failed (run prisma migrations if table missing): ${msg}`);
+      return empty();
+    }
   }
 
   async reviewFlag(flagId: string, status: 'CLEARED' | 'BLOCKED', adminNote: string, reviewedBy: string) {

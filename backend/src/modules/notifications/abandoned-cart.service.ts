@@ -123,11 +123,21 @@ export class AbandonedCartService {
   }
 
   async getStats() {
-    const [total, converted] = await Promise.all([
-      this.prisma.abandonedCartReminder.count(),
-      this.prisma.abandonedCartReminder.count({ where: { converted: true } }),
-    ]);
-    return { totalSent: total, converted, conversionRate: total > 0 ? ((converted / total) * 100).toFixed(1) : '0' };
+    try {
+      const [total, converted] = await Promise.all([
+        this.prisma.abandonedCartReminder.count(),
+        this.prisma.abandonedCartReminder.count({ where: { converted: true } }),
+      ]);
+      return {
+        totalSent: total,
+        converted,
+        conversionRate: total > 0 ? ((converted / total) * 100).toFixed(1) : '0',
+      };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.error(`getStats failed (run prisma migrations if table missing): ${msg}`);
+      return { totalSent: 0, converted: 0, conversionRate: '0' };
+    }
   }
 
   async markConverted(userId: string) {

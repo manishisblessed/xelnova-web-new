@@ -10,6 +10,7 @@
     "clean": "rm -rf dist",
     "db:migrate": "npx prisma migrate dev",
     "db:seed": "npx tsx prisma/seed.ts",
+    "db:seed:ecommerce": "npx tsx prisma/seed-ecommerce-content.ts",
     "db:studio": "npx prisma studio",
     "db:reset": "npx prisma migrate reset"
   },

@@ -12,9 +12,27 @@ function authHeaders(): Record<string, string> {
 }
 
 async function handleResponse<T = unknown>(res: Response): Promise<T> {
-  const json = await res.json();
+  const ct = res.headers.get('content-type') || '';
+  let json: { message?: string; data?: T; success?: boolean };
+  if (ct.includes('application/json')) {
+    try {
+      json = await res.json();
+    } catch {
+      throw new Error('Invalid response from server');
+    }
+  } else {
+    const text = await res.text();
+    if (!res.ok) {
+      throw new Error(
+        res.status === 404
+          ? 'API endpoint not found. Ensure the API gateway is deployed with the latest routes.'
+          : text.slice(0, 200) || `Request failed (${res.status})`,
+      );
+    }
+    throw new Error('Unexpected response from server');
+  }
   if (!res.ok) throw new Error(json.message || 'Request failed');
-  return json.data;
+  return json.data as T;
 }
 
 // ─── Auth ───
