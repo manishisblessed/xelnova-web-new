@@ -81,6 +81,8 @@ export function Header() {
   const setLocation = useLocationStore((s) => s.setLocation);
   const autoDetected = useLocationStore((s) => s.autoDetected);
   const setAutoDetected = useLocationStore((s) => s.setAutoDetected);
+  const promptDismissed = useLocationStore((s) => s.promptDismissed);
+  const setPromptDismissed = useLocationStore((s) => s.setPromptDismissed);
   const { data: categories } = useCategories();
   const { user, isAuthenticated, logout, loading: authLoading } = useAuth();
 
@@ -102,6 +104,15 @@ export function Header() {
     });
     return () => { cancelled = true; };
   }, [mounted, location, autoDetected, setLocation, setAutoDetected]);
+
+  // Auto-show location modal after 2 seconds if no location is set and user hasn't dismissed it
+  useEffect(() => {
+    if (!mounted || location || promptDismissed || locationModalOpen) return;
+    const timer = setTimeout(() => {
+      setLocationModalOpen(true);
+    }, 2000);
+    return () => clearTimeout(timer);
+  }, [mounted, location, promptDismissed, locationModalOpen]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -654,7 +665,13 @@ export function Header() {
         )}
       </AnimatePresence>
 
-      <LocationModal open={locationModalOpen} onClose={() => setLocationModalOpen(false)} />
+      <LocationModal 
+        open={locationModalOpen} 
+        onClose={() => {
+          setLocationModalOpen(false);
+          setPromptDismissed(true);
+        }} 
+      />
     </header>
   );
 }

@@ -1,17 +1,17 @@
 'use client';
 
 import { useState } from 'react';
-import { Badge } from '@xelnova/ui';
+import { Badge, Button } from '@xelnova/ui';
 import { AdminListPage } from '@/components/dashboard/admin-list-page';
 import { ActionModal } from '@/components/dashboard/action-modal';
 import { ConfirmDialog } from '@/components/dashboard/confirm-dialog';
-import { FormField, FormSelect, FormToggle } from '@/components/dashboard/form-field';
-import { Pencil, Trash2 } from 'lucide-react';
+import { FormField, FormSelect, FormToggle, FormTextarea } from '@/components/dashboard/form-field';
+import { Pencil, Trash2, CheckCircle, XCircle, Clock, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Column } from '@/components/dashboard/data-table';
-import { apiDelete, apiUpdate } from '@/lib/api';
+import { apiDelete, apiUpdate, apiPost } from '@/lib/api';
 
-const STATUS_OPTIONS = ['ACTIVE', 'PENDING', 'DRAFT', 'REJECTED'] as const;
+const STATUS_OPTIONS = ['ACTIVE', 'PENDING', 'DRAFT', 'REJECTED', 'ON_HOLD'] as const;
 
 type ProductStatus = (typeof STATUS_OPTIONS)[number];
 
@@ -26,9 +26,11 @@ interface Product {
   isFeatured: boolean;
   isTrending: boolean;
   isFlashDeal: boolean;
+  isActive: boolean;
   rating: number;
   reviewCount: number;
   createdAt: string;
+  rejectionReason?: string | null;
   category: { name: string } | null;
   seller: { storeName: string } | null;
 }
@@ -43,8 +45,25 @@ function statusBadgeVariant(status: ProductStatus): 'success' | 'warning' | 'dan
       return 'default';
     case 'REJECTED':
       return 'danger';
+    case 'ON_HOLD':
+      return 'warning';
     default:
       return 'default';
+  }
+}
+
+function StatusIcon({ status }: { status: ProductStatus }) {
+  switch (status) {
+    case 'ACTIVE':
+      return <CheckCircle size={14} className="text-success-500" />;
+    case 'PENDING':
+      return <Clock size={14} className="text-warning-500" />;
+    case 'REJECTED':
+      return <XCircle size={14} className="text-danger-500" />;
+    case 'ON_HOLD':
+      return <AlertTriangle size={14} className="text-warning-500" />;
+    default:
+      return null;
   }
 }
 
@@ -52,14 +71,18 @@ export default function ProductsPage() {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [modalOpen, setModalOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [rejectOpen, setRejectOpen] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [approving, setApproving] = useState<string | null>(null);
+  const [rejectionReason, setRejectionReason] = useState('');
   const [form, setForm] = useState({
     status: 'ACTIVE' as ProductStatus,
     isFeatured: false,
     isTrending: false,
     isFlashDeal: false,
+    rejectionReason: '',
   });
 
   const openEdit = (p: Product) => {
@@ -69,8 +92,43 @@ export default function ProductsPage() {
       isFeatured: p.isFeatured,
       isTrending: p.isTrending,
       isFlashDeal: p.isFlashDeal,
+      rejectionReason: p.rejectionReason || '',
     });
     setModalOpen(true);
+  };
+
+  const handleApprove = async (product: Product) => {
+    setApproving(product.id);
+    try {
+      await apiPost(`products/${product.id}/approve`, {});
+      toast.success(`"${product.name}" approved and now live`);
+      setRefreshTrigger((n) => n + 1);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to approve product');
+    } finally {
+      setApproving(null);
+    }
+  };
+
+  const openReject = (p: Product) => {
+    setEditing(p);
+    setRejectionReason('');
+    setRejectOpen(true);
+  };
+
+  const handleReject = async () => {
+    if (!editing) return;
+    setSaving(true);
+    try {
+      await apiPost(`products/${editing.id}/reject`, { rejectionReason });
+      toast.success(`"${editing.name}" rejected`);
+      setRejectOpen(false);
+      setRefreshTrigger((n) => n + 1);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to reject product');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleSave = async () => {
@@ -82,6 +140,7 @@ export default function ProductsPage() {
         isFeatured: form.isFeatured,
         isTrending: form.isTrending,
         isFlashDeal: form.isFlashDeal,
+        rejectionReason: form.status === 'REJECTED' ? form.rejectionReason : null,
       });
       toast.success('Product updated');
       setModalOpen(false);
@@ -152,9 +211,19 @@ export default function ProductsPage() {
       key: 'status',
       header: 'Status',
       render: (r) => (
-        <Badge variant={statusBadgeVariant(r.status)}>
-          {r.status.charAt(0) + r.status.slice(1).toLowerCase()}
-        </Badge>
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center gap-1.5">
+            <StatusIcon status={r.status} />
+            <Badge variant={statusBadgeVariant(r.status)}>
+              {r.status.charAt(0) + r.status.slice(1).toLowerCase().replace('_', ' ')}
+            </Badge>
+          </div>
+          {r.status === 'REJECTED' && r.rejectionReason && (
+            <p className="text-xs text-danger-600 max-w-[200px] truncate" title={r.rejectionReason}>
+              {r.rejectionReason}
+            </p>
+          )}
+        </div>
       ),
     },
     {
@@ -195,10 +264,32 @@ export default function ProductsPage() {
         refreshTrigger={refreshTrigger}
         renderActions={(r) => (
           <div className="flex items-center gap-1">
+            {r.status === 'PENDING' && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => handleApprove(r)}
+                  disabled={approving === r.id}
+                  className="p-1.5 rounded-lg hover:bg-success-50 text-success-600 hover:text-success-700 disabled:opacity-50"
+                  title="Approve"
+                >
+                  <CheckCircle size={16} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openReject(r)}
+                  className="p-1.5 rounded-lg hover:bg-danger-50 text-danger-600 hover:text-danger-700"
+                  title="Reject"
+                >
+                  <XCircle size={16} />
+                </button>
+              </>
+            )}
             <button
               type="button"
               onClick={() => openEdit(r)}
               className="p-1.5 rounded-lg hover:bg-surface-muted text-text-muted hover:text-primary-600"
+              title="Edit"
             >
               <Pencil size={15} />
             </button>
@@ -209,6 +300,7 @@ export default function ProductsPage() {
                 setDeleteOpen(true);
               }}
               className="p-1.5 rounded-lg hover:bg-danger-50 text-text-muted hover:text-danger-600"
+              title="Delete"
             >
               <Trash2 size={15} />
             </button>
@@ -242,6 +334,16 @@ export default function ProductsPage() {
             </FormSelect>
           </FormField>
         </div>
+        {form.status === 'REJECTED' && (
+          <FormField label="Rejection Reason">
+            <FormTextarea
+              value={form.rejectionReason}
+              onChange={(e) => setForm((f) => ({ ...f, rejectionReason: e.target.value }))}
+              placeholder="Explain why this product was rejected..."
+              rows={3}
+            />
+          </FormField>
+        )}
         <div className="space-y-3 pt-1">
           <FormToggle
             label="Featured"
@@ -259,6 +361,27 @@ export default function ProductsPage() {
             onChange={(v) => setForm((f) => ({ ...f, isFlashDeal: v }))}
           />
         </div>
+      </ActionModal>
+      <ActionModal
+        open={rejectOpen}
+        onClose={() => setRejectOpen(false)}
+        title="Reject Product"
+        onSubmit={handleReject}
+        loading={saving}
+        submitLabel="Reject Product"
+        submitVariant="danger"
+      >
+        <p className="text-sm text-text-secondary">
+          Rejecting <strong>{editing?.name}</strong>. The seller will be notified and can make changes before resubmitting.
+        </p>
+        <FormField label="Rejection Reason">
+          <FormTextarea
+            value={rejectionReason}
+            onChange={(e) => setRejectionReason(e.target.value)}
+            placeholder="Explain why this product is being rejected (e.g., missing images, incorrect pricing, prohibited item)..."
+            rows={4}
+          />
+        </FormField>
       </ActionModal>
       <ConfirmDialog
         open={deleteOpen}

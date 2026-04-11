@@ -159,14 +159,42 @@ export class AdminService {
 
   async updateProduct(id: string, dto: AdminUpdateProductDto) {
     const data: any = {};
-    if (dto.status) data.status = dto.status;
+    
+    if (dto.status) {
+      data.status = dto.status;
+      
+      // When approving: set isActive to true and clear rejection reason
+      if (dto.status === 'ACTIVE') {
+        data.isActive = true;
+        data.rejectionReason = null;
+      }
+      
+      // When rejecting: set isActive to false and require rejection reason
+      if (dto.status === 'REJECTED') {
+        data.isActive = false;
+        if (dto.rejectionReason) {
+          data.rejectionReason = dto.rejectionReason;
+        }
+      }
+    }
+    
     if (dto.isFeatured !== undefined) data.isFeatured = dto.isFeatured;
     if (dto.isTrending !== undefined) data.isTrending = dto.isTrending;
     if (dto.isFlashDeal !== undefined) data.isFlashDeal = dto.isFlashDeal;
     if (dto.flashDealEndsAt) data.flashDealEndsAt = new Date(dto.flashDealEndsAt);
     if (dto.isActive !== undefined) data.isActive = dto.isActive;
+    if (dto.rejectionReason !== undefined && dto.status !== 'ACTIVE') {
+      data.rejectionReason = dto.rejectionReason || null;
+    }
 
-    return this.prisma.product.update({ where: { id }, data });
+    return this.prisma.product.update({ 
+      where: { id }, 
+      data,
+      include: {
+        category: { select: { name: true } },
+        seller: { select: { storeName: true, email: true, user: { select: { email: true } } } },
+      },
+    });
   }
 
   async deleteProduct(id: string) {

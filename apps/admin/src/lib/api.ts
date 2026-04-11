@@ -100,6 +100,15 @@ export async function apiDelete(section: string, id: string): Promise<void> {
   await handleResponse(res);
 }
 
+export async function apiPost<T = unknown>(path: string, body: Record<string, unknown>): Promise<T> {
+  const res = await fetch(`${API_URL}/admin/${path}`, {
+    method: 'POST',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return handleResponse<T>(res);
+}
+
 // ─── Revenue ───
 
 export async function apiRevenue(params?: Record<string, string>) {

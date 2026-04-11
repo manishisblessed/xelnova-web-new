@@ -26,6 +26,8 @@ export class AdminUpdateProductDto {
   @ApiPropertyOptional() @IsOptional() @IsBoolean() isFlashDeal?: boolean;
   @ApiPropertyOptional() @IsOptional() @IsString() flashDealEndsAt?: string;
   @ApiPropertyOptional() @IsOptional() @IsBoolean() isActive?: boolean;
+  @ApiPropertyOptional({ description: 'Reason for rejection (required when status is REJECTED)' })
+  @IsOptional() @IsString() rejectionReason?: string;
 }
 
 // ─── Order management ───

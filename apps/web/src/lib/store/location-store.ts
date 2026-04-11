@@ -11,9 +11,11 @@ export interface LocationData {
 interface LocationState {
   location: LocationData | null;
   autoDetected: boolean;
+  promptDismissed: boolean;
   setLocation: (data: LocationData) => void;
   clearLocation: () => void;
   setAutoDetected: (v: boolean) => void;
+  setPromptDismissed: (v: boolean) => void;
 }
 
 export async function lookupPincode(pincode: string): Promise<LocationData> {
@@ -75,9 +77,11 @@ export const useLocationStore = create<LocationState>()(
     (set) => ({
       location: null,
       autoDetected: false,
-      setLocation: (data) => set({ location: data }),
+      promptDismissed: false,
+      setLocation: (data) => set({ location: data, promptDismissed: true }),
       clearLocation: () => set({ location: null }),
       setAutoDetected: (v) => set({ autoDetected: v }),
+      setPromptDismissed: (v) => set({ promptDismissed: v }),
     }),
     { name: 'xelnova-location' },
   ),

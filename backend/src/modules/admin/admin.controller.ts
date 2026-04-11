@@ -53,10 +53,35 @@ export class AdminController {
     return paginatedResponse(items, total, page, limit, 'Products fetched');
   }
 
+  @Get('products/pending')
+  @ApiOperation({ summary: 'List products pending approval' })
+  async getPendingProducts(@Query() query: AdminProductQueryDto) {
+    const { items, total, page, limit } = await this.service.getProducts({ ...query, status: 'PENDING' });
+    return paginatedResponse(items, total, page, limit, 'Pending products fetched');
+  }
+
   @Patch('products/:id')
   @ApiOperation({ summary: 'Update product (status, feature flags)' })
   async updateProduct(@Param('id') id: string, @Body() dto: AdminUpdateProductDto) {
     return successResponse(await this.service.updateProduct(id, dto), 'Product updated');
+  }
+
+  @Post('products/:id/approve')
+  @ApiOperation({ summary: 'Approve a pending product' })
+  async approveProduct(@Param('id') id: string) {
+    return successResponse(
+      await this.service.updateProduct(id, { status: 'ACTIVE', isActive: true }),
+      'Product approved and now live',
+    );
+  }
+
+  @Post('products/:id/reject')
+  @ApiOperation({ summary: 'Reject a pending product' })
+  async rejectProduct(@Param('id') id: string, @Body() body: { rejectionReason?: string }) {
+    return successResponse(
+      await this.service.updateProduct(id, { status: 'REJECTED', rejectionReason: body.rejectionReason }),
+      'Product rejected',
+    );
   }
 
   @Delete('products/:id')

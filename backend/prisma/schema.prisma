@@ -412,9 +412,10 @@ model Product {
   highlights     String[]
   tags           String[]
 
-  isActive Boolean       @default(true)
-  status   ProductStatus @default(ACTIVE)
-  sku      String?
+  isActive        Boolean       @default(false)
+  status          ProductStatus @default(PENDING)
+  rejectionReason String?
+  sku             String?
 
   metaTitle       String?
   metaDescription String?

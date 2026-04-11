@@ -54,6 +54,7 @@ interface SellerProduct {
   categoryId?: string;
   category?: { name: string } | null;
   createdAt: string;
+  rejectionReason?: string | null;
 }
 
 function productStatusVariant(status: string): 'success' | 'warning' | 'danger' | 'info' | 'default' {
@@ -718,7 +719,9 @@ export default function SellerInventoryPage() {
         gstRate: formGstRate ? Number(formGstRate) : undefined,
         lowStockThreshold: formLowStock ? Number(formLowStock) : undefined,
       });
-      toast.success('Product created');
+      toast.success('Product created and submitted for approval', { 
+        description: 'Your product will be reviewed by our team and go live once approved.' 
+      });
       setCreateOpen(false);
       resetForm();
       loadProducts();
@@ -787,6 +790,10 @@ export default function SellerInventoryPage() {
   };
 
   const toggleHold = async (product: SellerProduct) => {
+    if (product.status === 'PENDING' || product.status === 'REJECTED') {
+      toast.error('Cannot change status of pending or rejected products');
+      return;
+    }
     const newStatus = product.status === 'ON_HOLD' ? 'ACTIVE' : 'ON_HOLD';
     try {
       await apiUpdateProduct(product.id, { status: newStatus });
@@ -795,6 +802,10 @@ export default function SellerInventoryPage() {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to update status');
     }
+  };
+
+  const canToggleHold = (product: SellerProduct) => {
+    return product.status === 'ACTIVE' || product.status === 'ON_HOLD';
   };
 
   const columns: Column<SellerProduct>[] = [
@@ -822,7 +833,19 @@ export default function SellerInventoryPage() {
     {
       key: 'status',
       header: 'Status',
-      render: (row) => <Badge variant={productStatusVariant(row.status)}>{productStatusLabel(row.status)}</Badge>,
+      render: (row) => (
+        <div className="flex flex-col gap-0.5">
+          <Badge variant={productStatusVariant(row.status)}>{productStatusLabel(row.status)}</Badge>
+          {row.status === 'PENDING' && (
+            <span className="text-[10px] text-warning-600">Awaiting admin review</span>
+          )}
+          {row.status === 'REJECTED' && row.rejectionReason && (
+            <span className="text-[10px] text-danger-600 max-w-[140px] truncate" title={row.rejectionReason}>
+              {row.rejectionReason}
+            </span>
+          )}
+        </div>
+      ),
     },
     {
       key: 'category',
@@ -856,16 +879,18 @@ export default function SellerInventoryPage() {
           <Button type="button" variant="outline" size="sm" onClick={() => openEdit(row)} title="Edit">
             <Pencil className="h-3.5 w-3.5" />
           </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => toggleHold(row)}
-            title={row.status === 'ON_HOLD' ? 'Activate' : 'Put on hold'}
-            className={row.status === 'ON_HOLD' ? 'border-primary-300 text-primary-600 hover:bg-primary-50' : 'border-warning-300 text-warning-600 hover:bg-warning-50'}
-          >
-            {row.status === 'ON_HOLD' ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}
-          </Button>
+          {canToggleHold(row) && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => toggleHold(row)}
+              title={row.status === 'ON_HOLD' ? 'Activate' : 'Put on hold'}
+              className={row.status === 'ON_HOLD' ? 'border-primary-300 text-primary-600 hover:bg-primary-50' : 'border-warning-300 text-warning-600 hover:bg-warning-50'}
+            >
+              {row.status === 'ON_HOLD' ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}
+            </Button>
+          )}
           <Button type="button" variant="danger" size="sm" onClick={() => setDeleteProduct(row)} title="Delete">
             <Trash2 className="h-3.5 w-3.5" />
           </Button>

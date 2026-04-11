@@ -223,7 +223,7 @@ export class SellerDashboardService {
         hsnCode: dto.hsnCode,
         gstRate: dto.gstRate,
         lowStockThreshold: dto.lowStockThreshold ?? 5,
-        status: 'ACTIVE',
+        status: 'PENDING',
       },
       include: { category: { select: { name: true } } },
     });
@@ -501,7 +501,7 @@ export class SellerDashboardService {
             hsnCode: r.hsnCode || null,
             gstRate: r.gstRate ? parseFloat(r.gstRate) : null,
             lowStockThreshold: r.lowStockThreshold ? parseInt(r.lowStockThreshold) : 5,
-            status: 'ACTIVE',
+            status: 'PENDING',
           },
         });
         results.push({ row: i + 1, status: 'ok', productId: product.id });
