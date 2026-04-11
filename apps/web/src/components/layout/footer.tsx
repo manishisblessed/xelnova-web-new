@@ -7,6 +7,17 @@ import { motion } from 'framer-motion';
 import { ArrowUp, Mail, Phone, MapPin, Send, Facebook, Youtube, Instagram, Smartphone, ShieldCheck } from 'lucide-react';
 import { useCategories } from '@/lib/api';
 
+const fallbackShopLinks = [
+  { name: 'Electronics', href: '/products?category=electronics' },
+  { name: 'Fashion', href: '/products?category=fashion' },
+  { name: 'Home & Kitchen', href: '/products?category=home-kitchen' },
+  { name: 'Beauty & Health', href: '/products?category=beauty-health' },
+  { name: 'Sports & Outdoors', href: '/products?category=sports-outdoors' },
+  { name: 'Books', href: '/products?category=books' },
+  { name: 'Toys & Games', href: '/products?category=toys-games' },
+  { name: 'All Categories', href: '/products' },
+];
+
 const staticSections = [
   {
     title: 'Sell on Xelnova',
@@ -62,12 +73,14 @@ export function Footer() {
   const { data: categories } = useCategories();
   const hideBackToTop = pathname === '/login';
 
+  const categoryLinks = (categories || []).slice(0, 8).map((cat) => ({
+    name: cat.name,
+    href: `/products?category=${cat.slug}`,
+  }));
+
   const shopSection = {
     title: 'Shop',
-    links: (categories || []).slice(0, 8).map((cat) => ({
-      name: cat.name,
-      href: `/products?category=${cat.slug}`,
-    })),
+    links: categoryLinks.length > 0 ? categoryLinks : fallbackShopLinks,
   };
 
   const footerSections = [shopSection, ...staticSections];

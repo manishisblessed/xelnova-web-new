@@ -17,6 +17,7 @@ interface Slide {
   cta: string;
   href: string;
   accent: string;
+  gradient?: string;
 }
 
 const fallbackSlides: Slide[] = [
@@ -29,6 +30,40 @@ const fallbackSlides: Slide[] = [
     cta: 'Browse Products',
     href: '/products',
     accent: 'bg-primary-500',
+    gradient: 'bg-gradient-to-br from-violet-600 via-purple-600 to-indigo-700',
+  },
+  {
+    id: 'fb-2',
+    image: '',
+    title: 'Mega Sale\nUp to 70% Off',
+    subtitle: 'Grab unbeatable deals on top brands. Limited time offer!',
+    badge: 'Hot Deals',
+    cta: 'Shop Deals',
+    href: '/products?sort=discount',
+    accent: 'bg-accent-500',
+    gradient: 'bg-gradient-to-br from-orange-500 via-rose-500 to-pink-600',
+  },
+  {
+    id: 'fb-3',
+    image: '',
+    title: 'Sell on\nXelnova',
+    subtitle: 'Join thousands of sellers and grow your business with India\'s fastest marketplace',
+    badge: 'Start Selling',
+    cta: 'Register Now',
+    href: '/seller',
+    accent: 'bg-primary-500',
+    gradient: 'bg-gradient-to-br from-emerald-500 via-teal-600 to-cyan-700',
+  },
+  {
+    id: 'fb-4',
+    image: '',
+    title: 'New Arrivals\nEvery Day',
+    subtitle: 'Explore the latest trends in fashion, electronics, home & more',
+    badge: 'Trending',
+    cta: 'Explore Now',
+    href: '/products?sort=newest',
+    accent: 'bg-accent-500',
+    gradient: 'bg-gradient-to-br from-blue-600 via-indigo-600 to-purple-700',
   },
 ];
 
@@ -110,7 +145,7 @@ export function HeroCarousel() {
                 sizes="(max-width: 768px) 100vw, 1100px"
               />
             ) : (
-              <div className="absolute inset-0 bg-gradient-to-br from-violet-600 via-purple-600 to-indigo-700" />
+              <div className={`absolute inset-0 ${slide.gradient || 'bg-gradient-to-br from-violet-600 via-purple-600 to-indigo-700'}`} />
             )}
             <div className="absolute inset-0 bg-gradient-to-r from-black/75 via-black/40 to-transparent" />
 
