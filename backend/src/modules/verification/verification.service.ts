@@ -152,7 +152,10 @@ export class VerificationService {
       if (error instanceof HttpException) throw error;
       
       await this.logVerification('IFSC', normalizedCode, 'ERROR', null, userId, error.message);
-      throw new HttpException('Failed to verify IFSC code', HttpStatus.SERVICE_UNAVAILABLE);
+      throw new HttpException(
+        { success: false, message: 'IFSC verification service is temporarily unavailable. Please try again later.' },
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
     }
   }
 
@@ -176,7 +179,10 @@ export class VerificationService {
 
     if (!this.EKYCHUB_USERNAME || !this.EKYCHUB_TOKEN) {
       await this.logVerification('BANK_VERIFY', normalizedAccount, 'CONFIG_ERROR', null, userId, 'eKYC Hub credentials not configured');
-      throw new HttpException('Bank verification service not configured', HttpStatus.SERVICE_UNAVAILABLE);
+      throw new HttpException(
+        { success: false, message: 'Bank verification service is temporarily unavailable. Please try again later.' },
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
     }
 
     const orderId = `XN_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
@@ -193,7 +199,10 @@ export class VerificationService {
 
       if (!response.ok) {
         await this.logVerification('BANK_VERIFY', normalizedAccount, 'API_ERROR', null, userId, `API returned ${response.status}`);
-        throw new HttpException('Bank verification service unavailable', HttpStatus.SERVICE_UNAVAILABLE);
+        throw new HttpException(
+          { success: false, message: 'Bank verification service is temporarily unavailable. Please try again later.' },
+          HttpStatus.SERVICE_UNAVAILABLE,
+        );
       }
 
       const data: BankVerificationResponse = await response.json();
@@ -225,7 +234,10 @@ export class VerificationService {
       if (error instanceof HttpException) throw error;
 
       await this.logVerification('BANK_VERIFY', normalizedAccount, 'ERROR', null, userId, error.message);
-      throw new HttpException('Failed to verify bank account', HttpStatus.SERVICE_UNAVAILABLE);
+      throw new HttpException(
+        { success: false, message: 'Bank verification failed. Please try again.' },
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
     }
   }
 
@@ -239,7 +251,10 @@ export class VerificationService {
 
     if (!this.GSTIN_API_KEY) {
       await this.logVerification('GSTIN', normalizedGstin, 'CONFIG_ERROR', null, userId, 'GSTIN_API_KEY not configured');
-      throw new HttpException('GSTIN verification service not configured', HttpStatus.SERVICE_UNAVAILABLE);
+      throw new HttpException(
+        { success: false, message: 'GSTIN verification service is temporarily unavailable. Please try again later.' },
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
     }
 
     try {
@@ -247,7 +262,10 @@ export class VerificationService {
       
       if (!response.ok) {
         await this.logVerification('GSTIN', normalizedGstin, 'API_ERROR', null, userId, `API returned ${response.status}`);
-        throw new HttpException('Failed to verify GSTIN', HttpStatus.SERVICE_UNAVAILABLE);
+        throw new HttpException(
+          { success: false, message: 'GSTIN verification service is temporarily unavailable. Please try again later.' },
+          HttpStatus.SERVICE_UNAVAILABLE,
+        );
       }
 
       const rawData = await response.json();
@@ -299,7 +317,10 @@ export class VerificationService {
       if (error instanceof HttpException) throw error;
       
       await this.logVerification('GSTIN', normalizedGstin, 'ERROR', null, userId, error.message);
-      throw new HttpException('Failed to verify GSTIN', HttpStatus.SERVICE_UNAVAILABLE);
+      throw new HttpException(
+        { success: false, message: 'GSTIN verification failed. Please try again.' },
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
     }
   }
 
@@ -338,8 +359,9 @@ export class VerificationService {
 
   private ensureEkychubConfigured() {
     if (!this.EKYCHUB_USERNAME || !this.EKYCHUB_TOKEN) {
+      console.error('[eKYCHub] Missing EKYCHUB_USERNAME or EKYCHUB_TOKEN in environment');
       throw new HttpException(
-        'KYC verification service is not configured. Set EKYCHUB_USERNAME and EKYCHUB_TOKEN on the backend.',
+        { success: false, message: 'KYC verification service is temporarily unavailable. Please try again later.' },
         HttpStatus.SERVICE_UNAVAILABLE,
       );
     }
@@ -358,8 +380,9 @@ export class VerificationService {
     this.ensureEkychubConfigured();
 
     if (!this.EKYCHUB_DIGILOCKER_REDIRECT_URL) {
+      console.error('[Digilocker] EKYCHUB_DIGILOCKER_REDIRECT_URL not configured');
       throw new HttpException(
-        'Digilocker redirect URL not configured. Set EKYCHUB_DIGILOCKER_REDIRECT_URL on the backend.',
+        { success: false, message: 'Aadhaar verification service is temporarily unavailable. Please try again later.' },
         HttpStatus.SERVICE_UNAVAILABLE,
       );
     }
@@ -437,8 +460,9 @@ export class VerificationService {
     this.ensureEkychubConfigured();
 
     if (!this.EKYCHUB_DIGILOCKER_REDIRECT_URL) {
+      console.error('[Digilocker PAN] EKYCHUB_DIGILOCKER_REDIRECT_URL not configured');
       throw new HttpException(
-        'Digilocker redirect URL not configured. Set EKYCHUB_DIGILOCKER_REDIRECT_URL on the backend.',
+        { success: false, message: 'PAN verification service is temporarily unavailable. Please try again later.' },
         HttpStatus.SERVICE_UNAVAILABLE,
       );
     }
@@ -591,7 +615,10 @@ export class VerificationService {
       if (error instanceof HttpException) throw error;
       const logType = documentType === 'AADHAAR' ? 'AADHAAR_DIGILOCKER_DOC' : 'PAN_DIGILOCKER_DOC';
       await this.logVerification(logType, orderId, 'ERROR', null, userId, error.message);
-      throw new HttpException(`Failed to get Digilocker ${documentType} document`, HttpStatus.SERVICE_UNAVAILABLE);
+      throw new HttpException(
+        { success: false, message: `Failed to fetch your ${documentType === 'AADHAAR' ? 'Aadhaar' : 'PAN'} document. Please try again.` },
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
     }
   }
 
@@ -641,7 +668,10 @@ export class VerificationService {
     } catch (error) {
       if (error instanceof HttpException) throw error;
       await this.logVerification('PAN_VERIFY', normalizedPan, 'ERROR', null, userId, error.message);
-      throw new HttpException('Failed to verify PAN', HttpStatus.SERVICE_UNAVAILABLE);
+      throw new HttpException(
+        { success: false, message: 'PAN verification failed. Please try again.' },
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
     }
   }
 
@@ -695,7 +725,10 @@ export class VerificationService {
     } catch (error) {
       if (error instanceof HttpException) throw error;
       await this.logVerification('PAN_360', normalizedPan, 'ERROR', null, userId, error.message);
-      throw new HttpException('Failed to verify PAN', HttpStatus.SERVICE_UNAVAILABLE);
+      throw new HttpException(
+        { success: false, message: 'PAN verification failed. Please try again.' },
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
     }
   }
 

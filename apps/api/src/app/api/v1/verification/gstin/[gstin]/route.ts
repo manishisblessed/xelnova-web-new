@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-function getBackendUrl() {
-  const url = process.env.BACKEND_URL;
-  if (!url) throw new Error('BACKEND_URL is not configured. Set NEXT_PUBLIC_BACKEND_URL in Amplify env vars.');
-  return url;
+function getBackendUrl(): string | null {
+  return process.env.BACKEND_URL?.trim() || null;
 }
 
 function mapBackendToFrontendShape(backendData: Record<string, unknown>) {
@@ -35,7 +33,7 @@ export async function GET(
     }
 
     const BACKEND_URL = getBackendUrl();
-    try {
+    if (BACKEND_URL) try {
       const backendUrl = `${BACKEND_URL.replace(/\/$/, '')}/api/v1/verification/gstin/${encodeURIComponent(gstinUpper)}`;
       const res = await fetch(backendUrl, {
         signal: AbortSignal.timeout(15000),
@@ -103,8 +101,7 @@ export async function GET(
     return NextResponse.json(
       {
         success: false,
-        message:
-          'Unable to verify GSTIN. Start the NestJS backend (port 4000) or set GSTIN_API_KEY in apps/api/.env.local.',
+        message: 'GSTIN verification service is temporarily unavailable. Please try again later.',
       },
       { status: 503 }
     );

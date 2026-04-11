@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-function getBackendUrl() {
-  const url = process.env.BACKEND_URL;
-  if (!url) throw new Error('BACKEND_URL is not configured. Set NEXT_PUBLIC_BACKEND_URL in Amplify env vars.');
-  return url;
+const PROXY_TIMEOUT_MS = 20_000;
+
+function getBackendUrl(): string | null {
+  return process.env.BACKEND_URL?.trim() || null;
 }
 
 export async function proxyToBackend(
@@ -12,6 +12,13 @@ export async function proxyToBackend(
   segments: string[] | undefined,
 ) {
   const BACKEND_URL = getBackendUrl();
+  if (!BACKEND_URL) {
+    return NextResponse.json(
+      { success: false, message: 'Service temporarily unavailable. Please try again later.' },
+      { status: 503 },
+    );
+  }
+
   const path = segments?.length ? segments.join('/') : '';
   const search = request.nextUrl.search;
   const target = `${BACKEND_URL}/api/v1/${prefix}/${path}${search}`.replace(/\/+$/, '');
@@ -25,14 +32,23 @@ export async function proxyToBackend(
   if (role) headers.set('X-Role', role);
 
   const method = request.method;
-  const init: RequestInit = { method, headers };
+  const init: RequestInit = { method, headers, signal: AbortSignal.timeout(PROXY_TIMEOUT_MS) };
 
   if (!['GET', 'HEAD'].includes(method)) {
     const buf = await request.arrayBuffer();
     if (buf.byteLength > 0) init.body = buf;
   }
 
-  const res = await fetch(target, init);
-  const outHeaders = new Headers(res.headers);
-  return new NextResponse(res.body, { status: res.status, headers: outHeaders });
+  try {
+    const res = await fetch(target, init);
+    const outHeaders = new Headers(res.headers);
+    return new NextResponse(res.body, { status: res.status, headers: outHeaders });
+  } catch (err) {
+    const isTimeout = err instanceof DOMException && err.name === 'TimeoutError';
+    console.error(`[proxy] ${method} ${target} failed:`, isTimeout ? 'timeout' : err);
+    return NextResponse.json(
+      { success: false, message: isTimeout ? 'Request timed out. Please try again.' : 'Service temporarily unavailable. Please try again later.' },
+      { status: 503 },
+    );
+  }
 }

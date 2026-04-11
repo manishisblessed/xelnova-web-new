@@ -404,6 +404,8 @@ export default function RegisterPage() {
   const extractErrorMessage = (data: any, fallback: string): string => {
     if (typeof data?.message === 'string') return data.message;
     if (typeof data?.message?.message === 'string') return data.message.message;
+    if (Array.isArray(data?.message)) return data.message.filter((m: unknown) => typeof m === 'string').join('. ') || fallback;
+    if (typeof data?.error === 'string') return data.error;
     return fallback;
   };
 
@@ -412,14 +414,18 @@ export default function RegisterPage() {
     setGstVerification({ status: 'loading' });
     try {
       const res = await fetch(`${API_BASE}/verification/gstin/${formData.gstNumber.toUpperCase()}`);
-      const data = await res.json();
+      let data: any;
+      try { data = await res.json(); } catch {
+        setGstVerification({ status: 'error', error: 'GST verification service is temporarily unavailable. Please try again later.' });
+        return;
+      }
       if (data.success) {
         setGstVerification({ status: 'verified', data: data.data });
         if (data.data.tradeName) {
           setFormData(prev => ({ ...prev, storeName: prev.storeName || data.data.tradeName }));
         }
       } else {
-        setGstVerification({ status: 'error', error: extractErrorMessage(data, 'GST verification failed') });
+        setGstVerification({ status: 'error', error: extractErrorMessage(data, 'GST verification failed. Please try again.') });
       }
     } catch {
       setGstVerification({ status: 'error', error: 'Unable to reach the server. Please check your connection and try again.' });
@@ -436,9 +442,13 @@ export default function RegisterPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
       });
-      const data = await res.json();
+      let data: any;
+      try { data = await res.json(); } catch {
+        setAadhaar({ status: 'error', error: 'Aadhaar verification service is temporarily unavailable. Please try again later.' });
+        return;
+      }
       if (!data.success) {
-        setAadhaar({ status: 'error', error: extractErrorMessage(data, 'Failed to start Aadhaar verification') });
+        setAadhaar({ status: 'error', error: extractErrorMessage(data, 'Failed to start Aadhaar verification. Please try again.') });
         return;
       }
 
@@ -558,14 +568,18 @@ export default function RegisterPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ accountNumber: formData.accountNumber, ifscCode: formData.ifscCode.toUpperCase() }),
       });
-      const data = await res.json();
+      let data: any;
+      try { data = await res.json(); } catch {
+        setBankVerification({ status: 'error', error: 'Bank verification service is temporarily unavailable. Please try again later.' });
+        return;
+      }
       if (data.success) {
         setBankVerification({ status: 'verified', data: data.data });
         if (data.data.nameAtBank && !formData.accountHolderName) {
           setFormData(prev => ({ ...prev, accountHolderName: data.data.nameAtBank }));
         }
       } else {
-        setBankVerification({ status: 'error', error: extractErrorMessage(data, 'Bank account verification failed') });
+        setBankVerification({ status: 'error', error: extractErrorMessage(data, 'Bank account verification failed. Please try again.') });
       }
     } catch {
       setBankVerification({ status: 'error', error: 'Unable to reach the server. Please check your connection and try again.' });
