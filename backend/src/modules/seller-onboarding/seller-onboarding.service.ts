@@ -742,6 +742,18 @@ export class SellerOnboardingService {
     }
 
     if (dto.decision === 'APPROVED') {
+      if (!seller.signatureUrl && !seller.signatureData) {
+        throw new HttpException(
+          'Cannot approve: seller signature is missing. Ask the seller to complete onboarding.',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      if (!seller.signatureVerified) {
+        throw new HttpException(
+          'Cannot approve: signature must be verified by an admin first.',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
       updateData.onboardingStatus = 'APPROVED';
       updateData.verified = true;
       updateData.onboardingCompletedAt = new Date();

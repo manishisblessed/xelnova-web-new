@@ -7,6 +7,11 @@ const nextConfig: NextConfig = {
     formats: ['image/avif', 'image/webp'],
     remotePatterns: [
       { protocol: 'https', hostname: 'placehold.co', pathname: '/**' },
+      { protocol: 'https', hostname: 'images.unsplash.com', pathname: '/**' },
+      { protocol: 'https', hostname: 'res.cloudinary.com', pathname: '/**' },
+      { protocol: 'https', hostname: 'xelnova.in', pathname: '/**' },
+      { protocol: 'https', hostname: 'www.xelnova.in', pathname: '/**' },
+      { protocol: 'https', hostname: 'api.xelnova.in', pathname: '/**' },
     ],
   },
   experimental: {

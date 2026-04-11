@@ -62,11 +62,17 @@ echo "Ensuring NODE_ENV=production..."
 grep -q '^NODE_ENV=' .env || echo 'NODE_ENV=production' >> .env
 
 echo "Restarting backend (cwd=~/backend)..."
-pm2 delete xelnova-api 2>/dev/null
-cd ~/backend && pm2 start npm --name xelnova-api -- run start:prod
-sleep 5
+# Single listener on 4000: remove BOTH legacy names, kill stale bind, then start once (avoids EADDRINUSE)
+pm2 delete xelnova-api xelnova-backend 2>/dev/null || true
+sleep 1
+sudo fuser -k 4000/tcp 2>/dev/null || true
+sleep 2
+cd ~/backend
+# Direct node entrypoint avoids npm workspace resolution issues; dotenv loads ~/backend/.env via cwd
+pm2 start dist/src/main.js --name xelnova-backend --update-env
+sleep 4
 pm2 save
-pm2 logs xelnova-api --lines 3 --nostream
+pm2 logs xelnova-backend --lines 12 --nostream
 
 echo ""
 echo "=== Building seller app ==="

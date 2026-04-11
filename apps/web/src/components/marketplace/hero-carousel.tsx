@@ -17,13 +17,28 @@ interface Slide {
   cta: string;
   href: string;
   accent: string;
+  /** Used only when `image` fails to load or is empty after merge */
   gradient?: string;
+}
+
+/** Stock hero photos when CMS has no image or API is unavailable (Unsplash, hotlink-safe) */
+const HERO_STOCK_IMAGES = [
+  'https://images.unsplash.com/photo-1607082349566-187342175e2f?auto=format&fit=crop&w=1920&q=80',
+  'https://images.unsplash.com/photo-1441986300917-64674bd600d8?auto=format&fit=crop&w=1920&q=80',
+  'https://images.unsplash.com/photo-1498049794561-7790b78638c4?auto=format&fit=crop&w=1920&q=80',
+  'https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?auto=format&fit=crop&w=1920&q=80',
+] as const;
+
+function resolveBannerImage(bannerImage: string | null | undefined, index: number): string {
+  const trimmed = bannerImage?.trim();
+  if (trimmed) return trimmed;
+  return HERO_STOCK_IMAGES[index % HERO_STOCK_IMAGES.length];
 }
 
 const fallbackSlides: Slide[] = [
   {
     id: 'fb-1',
-    image: '',
+    image: HERO_STOCK_IMAGES[0],
     title: 'Welcome to\nXelnova',
     subtitle: 'Discover amazing products from trusted sellers across India',
     badge: 'Shop Now',
@@ -34,7 +49,7 @@ const fallbackSlides: Slide[] = [
   },
   {
     id: 'fb-2',
-    image: '',
+    image: HERO_STOCK_IMAGES[1],
     title: 'Mega Sale\nUp to 70% Off',
     subtitle: 'Grab unbeatable deals on top brands. Limited time offer!',
     badge: 'Hot Deals',
@@ -45,7 +60,7 @@ const fallbackSlides: Slide[] = [
   },
   {
     id: 'fb-3',
-    image: '',
+    image: HERO_STOCK_IMAGES[2],
     title: 'Sell on\nXelnova',
     subtitle: 'Join thousands of sellers and grow your business with India\'s fastest marketplace',
     badge: 'Start Selling',
@@ -56,7 +71,7 @@ const fallbackSlides: Slide[] = [
   },
   {
     id: 'fb-4',
-    image: '',
+    image: HERO_STOCK_IMAGES[3],
     title: 'New Arrivals\nEvery Day',
     subtitle: 'Explore the latest trends in fashion, electronics, home & more',
     badge: 'Trending',
@@ -72,13 +87,14 @@ const accentColors = ['bg-primary-500', 'bg-accent-500', 'bg-primary-500', 'bg-a
 function mapBannerToSlide(banner: Banner, index: number): Slide {
   return {
     id: banner.id,
-    image: banner.image || '',
+    image: resolveBannerImage(banner.image, index),
     title: banner.title,
     subtitle: banner.subtitle || '',
     badge: banner.ctaText || undefined,
     cta: banner.ctaText || 'Shop Now',
     href: banner.ctaLink || '/products',
     accent: accentColors[index % accentColors.length],
+    gradient: 'bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900',
   };
 }
 
@@ -116,6 +132,13 @@ export function HeroCarousel() {
   }, [paginate]);
 
   const slide = slides[activeIndex];
+  const [heroImgError, setHeroImgError] = useState(false);
+
+  useEffect(() => {
+    setHeroImgError(false);
+  }, [slide.id, slide.image]);
+
+  const showPhoto = Boolean(slide.image) && !heroImgError;
 
   return (
     <div className="relative overflow-hidden rounded-2xl lg:rounded-3xl bg-surface-dark group shadow-lg shadow-black/10 h-full">
@@ -135,7 +158,7 @@ export function HeroCarousel() {
             }}
             className="absolute inset-0"
           >
-            {slide.image ? (
+            {showPhoto ? (
               <Image
                 src={slide.image}
                 alt={slide.title}
@@ -143,11 +166,12 @@ export function HeroCarousel() {
                 priority
                 className="object-cover"
                 sizes="(max-width: 768px) 100vw, 1100px"
+                onError={() => setHeroImgError(true)}
               />
             ) : (
               <div className={`absolute inset-0 ${slide.gradient || 'bg-gradient-to-br from-violet-600 via-purple-600 to-indigo-700'}`} />
             )}
-            <div className="absolute inset-0 bg-gradient-to-r from-black/75 via-black/40 to-transparent" />
+            <div className="absolute inset-0 bg-gradient-to-r from-black/60 via-black/35 to-black/10" />
 
             <div className="absolute inset-0 flex items-center">
               <div className="w-full px-6 md:px-10 lg:px-14">

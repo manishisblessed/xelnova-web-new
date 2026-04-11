@@ -11,7 +11,7 @@ Deploys the NestJS backend + Next.js apps from `main` branch to the EC2 instance
 | SSH Key           | `C:\Users\hp\Desktop\xelnova_backend.pem`|
 | Backend directory | `~/backend`                              |
 | Repo clone        | `~/xelnova-web-new`                      |
-| PM2 process name  | `xelnova-api`                            |
+| PM2 process name  | `xelnova-backend` (only one process on port 4000; remove legacy `xelnova-api` if present) |
 | Backend port      | `4000`                                   |
 
 ## Production Domains
@@ -60,10 +60,10 @@ npm ci
 npm run build          # runs: prisma generate && nest build
 
 # Restart the PM2 process
-pm2 restart xelnova-api
+pm2 restart xelnova-backend
 
 # Verify it started
-pm2 logs xelnova-api --lines 15 --nostream
+pm2 logs xelnova-backend --lines 15 --nostream
 ```
 
 You should see **"Nest application successfully started"** and
@@ -72,7 +72,7 @@ You should see **"Nest application successfully started"** and
 ### Backend one-liner (from local PowerShell)
 
 ```powershell
-ssh -i "C:\Users\hp\Desktop\xelnova_backend.pem" ubuntu@3.83.45.205 "cd ~/xelnova-web-new && git pull origin main && rsync -av --exclude=node_modules --exclude=dist --exclude=.env --exclude=.env.production ~/xelnova-web-new/backend/ ~/backend/ && cd ~/backend && npm ci && npm run build && pm2 restart xelnova-api && sleep 5 && pm2 logs xelnova-api --lines 10 --nostream"
+ssh -i "C:\Users\hp\Desktop\xelnova_backend.pem" ubuntu@3.83.45.205 "cd ~/xelnova-web-new && git pull origin main && rsync -av --exclude=node_modules --exclude=dist --exclude=.env --exclude=.env.production ~/xelnova-web-new/backend/ ~/backend/ && cd ~/backend && npm ci && npm run build && pm2 restart xelnova-backend && sleep 5 && pm2 logs xelnova-backend --lines 10 --nostream"
 ```
 
 ---
@@ -198,14 +198,14 @@ sudo certbot --nginx -d admin.xelnova.in
 
 ```bash
 pm2 list                          # show all processes
-pm2 logs xelnova-api              # live tail logs
-pm2 logs xelnova-api --lines 50   # last 50 lines
-pm2 restart xelnova-api           # restart
-pm2 stop xelnova-api              # stop
-pm2 delete xelnova-api            # remove process
+pm2 logs xelnova-backend              # live tail logs
+pm2 logs xelnova-backend --lines 50   # last 50 lines
+pm2 restart xelnova-backend           # restart
+pm2 stop xelnova-backend              # stop
+pm2 delete xelnova-backend            # remove process
 
 # First-time PM2 setup (already done):
-# cd ~/backend && pm2 start npm --name xelnova-api -- run start:prod
+# cd ~/backend && pm2 start dist/src/main.js --name xelnova-backend
 # pm2 save && pm2 startup
 ```
 
@@ -219,32 +219,35 @@ npm run build
 
 **App crashes on start**
 ```bash
-pm2 logs xelnova-api --lines 50 --nostream
+pm2 logs xelnova-backend --lines 50 --nostream
 ```
 
-**Port already in use**
+**Port already in use (`EADDRINUSE :::4000`)** — usually two backends (e.g. `xelnova-api` + `xelnova-backend`) or a crash loop. Use only **one** PM2 app:
 ```bash
-lsof -i :4000
-kill -9 <PID>
-pm2 restart xelnova-api
+pm2 delete xelnova-api xelnova-backend 2>/dev/null || true
+sleep 1
+sudo fuser -k 4000/tcp 2>/dev/null || true
+sleep 2
+cd ~/backend && pm2 start dist/src/main.js --name xelnova-backend && pm2 save
+pm2 logs xelnova-backend --lines 15 --nostream
 ```
 
 **OTP not working on production**
-- Check `pm2 logs xelnova-api` for Resend/Fortius errors
+- Check `pm2 logs xelnova-backend` for Resend/Fortius errors
 - Verify `RESEND_API_KEY` and `FORTIUS_API_KEY` are set in `~/backend/.env`
 - Verify `NODE_ENV=production` (dev mode returns devOtp; production requires real keys)
 
 **CORS errors in browser**
 - Check `CORS_ORIGINS` in `~/backend/.env` includes the exact origin (with `https://`)
-- Restart: `pm2 restart xelnova-api`
+- Restart: `pm2 restart xelnova-backend`
 
 **reCAPTCHA verification failing on seller registration**
-- Check `pm2 logs xelnova-api` for `[reCAPTCHA]` errors
+- Check `pm2 logs xelnova-backend` for `[reCAPTCHA]` errors
 - Verify all three vars are set in `~/backend/.env`: `RECAPTCHA_SITE_KEY`, `RECAPTCHA_PROJECT_ID`, `RECAPTCHA_API_KEY`
 - Verify `RECAPTCHA_SITE_KEY` matches `NEXT_PUBLIC_RECAPTCHA_SITE_KEY` in seller app
 - Verify the key is a **reCAPTCHA Enterprise** key (not v2/v3) at https://console.cloud.google.com/security/recaptcha
 - Verify `seller.xelnova.in` is listed as an allowed domain in the reCAPTCHA Enterprise console
-- Restart: `pm2 restart xelnova-api`
+- Restart: `pm2 restart xelnova-backend`
 
 **Google Sign-In not working**
 - Check `GOOGLE_CALLBACK_URL` in backend `.env` matches the OAuth console redirect URI

@@ -15,6 +15,10 @@ interface ActionModalProps {
   submitVariant?: 'primary' | 'danger';
   loading?: boolean;
   wide?: boolean;
+  /** When true, primary submit stays visible but is not clickable */
+  submitDisabled?: boolean;
+  /** Shown as native tooltip when submit is disabled */
+  submitDisabledReason?: string;
 }
 
 export function ActionModal({
@@ -27,6 +31,8 @@ export function ActionModal({
   submitVariant = 'primary',
   loading,
   wide,
+  submitDisabled,
+  submitDisabledReason,
 }: ActionModalProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
 
@@ -66,7 +72,16 @@ export function ActionModal({
                     {loading ? 'Deleting...' : submitLabel}
                   </button>
                 ) : (
-                  <Button variant={submitVariant} onClick={onSubmit} loading={loading} size="sm">{submitLabel}</Button>
+                  <Button
+                    variant={submitVariant}
+                    onClick={onSubmit}
+                    loading={loading}
+                    size="sm"
+                    disabled={!!submitDisabled}
+                    title={submitDisabled ? submitDisabledReason : undefined}
+                  >
+                    {submitLabel}
+                  </Button>
                 )}
               </div>
             )}

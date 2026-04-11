@@ -68,6 +68,8 @@ interface SellerProfile {
   categorySelectionType?: string;
   selectedCategories?: string[];
   bankAccountName?: string;
+  /** Name returned from bank verification (penny drop / name match) */
+  bankVerifiedName?: string | null;
   bankAccountNumber?: string;
   bankIfscCode?: string;
   bankVerified: boolean;
@@ -127,6 +129,39 @@ const CATEGORY_LABEL_MAP: Record<string, string> = {
   automotive: 'Automotive',
 };
 const ALL_CATEGORY_LABELS = Object.keys(CATEGORY_LABEL_MAP);
+
+/** Cloudinary and common image URLs may omit a file extension in the path */
+function isLikelyImageUrl(url: string): boolean {
+  if (!url) return false;
+  if (/^data:image\//i.test(url)) return true;
+  if (/\.(jpg|jpeg|png|webp|gif|avif)(\?|#|$)/i.test(url)) return true;
+  if (/res\.cloudinary\.com\/.+\/image\/upload/i.test(url)) return true;
+  return false;
+}
+
+function SellerSignatureImage({
+  signatureUrl,
+  signatureData,
+  className = 'max-h-24 w-full object-contain',
+}: {
+  signatureUrl?: string | null;
+  signatureData?: string | null;
+  className?: string;
+}) {
+  const url = signatureUrl?.trim();
+  const data = signatureData?.trim();
+  const src = url || data || '';
+  if (!src) return null;
+  if (src.startsWith('data:')) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element -- next/image does not optimize data URLs
+      <img src={src} alt="Seller signature" className={className} />
+    );
+  }
+  return (
+    <Image src={src} alt="Seller signature" width={400} height={120} className={className} />
+  );
+}
 
 function getAuthToken() {
   if (typeof window === 'undefined') return null;
@@ -191,6 +226,17 @@ export default function SellerOnboardingPage() {
     if (decision === 'REJECTED' && !rejectionReason.trim()) {
       toast.error('Please provide a rejection reason');
       return;
+    }
+    if (decision === 'APPROVED') {
+      const hasSig = !!(selectedSeller.signatureUrl?.trim() || selectedSeller.signatureData?.trim());
+      if (!hasSig) {
+        toast.error('Cannot approve: no signature on file');
+        return;
+      }
+      if (!selectedSeller.signatureVerified) {
+        toast.error('Cannot approve: verify the seller’s signature in Seller Details first');
+        return;
+      }
     }
 
     setReviewLoading(true);
@@ -279,6 +325,16 @@ export default function SellerOnboardingPage() {
       .then((d) => { if (d.success) setStats(d.data); })
       .catch(() => {});
   }, [sellers]);
+
+  const signaturePresent =
+    !!(selectedSeller?.signatureUrl?.trim() || selectedSeller?.signatureData?.trim());
+  const canApproveApplication =
+    !!selectedSeller && signaturePresent && !!selectedSeller.signatureVerified;
+  const mustVerifySignatureBeforeReview =
+    !!selectedSeller &&
+    selectedSeller.onboardingStatus === 'UNDER_REVIEW' &&
+    signaturePresent &&
+    !selectedSeller.signatureVerified;
 
   const pendingCount = stats.UNDER_REVIEW || 0;
   const approvedCount = stats.APPROVED || 0;
@@ -480,6 +536,8 @@ export default function SellerOnboardingPage() {
             : undefined
         }
         submitLabel="Review Application"
+        submitDisabled={mustVerifySignatureBeforeReview}
+        submitDisabledReason="Verify the seller's signature in this window before continuing to approval"
       >
         {selectedSeller && (
           <div className="space-y-6">
@@ -569,7 +627,19 @@ export default function SellerOnboardingPage() {
             {/* Bank Details */}
             <DetailSection title="Bank Details">
               <DetailGrid>
-                <DetailItem label="Account Holder" value={selectedSeller.bankAccountName} />
+                <DetailItem
+                  label="Account Holder"
+                  value={
+                    selectedSeller.bankVerified
+                      ? (selectedSeller.bankVerifiedName || selectedSeller.bankAccountName)
+                      : undefined
+                  }
+                  footnote={
+                    !selectedSeller.bankVerified
+                      ? 'Account holder name is shown after bank account verification completes.'
+                      : undefined
+                  }
+                />
                 <DetailItem
                   label="Account Number"
                   value={
@@ -597,13 +667,10 @@ export default function SellerOnboardingPage() {
             {/* Signature with Verification */}
             {(selectedSeller.signatureUrl || selectedSeller.signatureData) && (
               <DetailSection title="Signature">
-                <div className="rounded-xl border border-border overflow-hidden bg-white p-4 max-w-xs relative">
-                  <Image
-                    src={selectedSeller.signatureUrl || selectedSeller.signatureData || ''}
-                    alt="Seller Signature"
-                    width={320}
-                    height={96}
-                    className="max-h-24 object-contain"
+                <div className="rounded-xl border border-border overflow-hidden bg-white p-4 max-w-md relative min-h-[96px]">
+                  <SellerSignatureImage
+                    signatureUrl={selectedSeller.signatureUrl}
+                    signatureData={selectedSeller.signatureData}
                   />
                 </div>
                 {selectedSeller.signatureVerified ? (
@@ -660,7 +727,8 @@ export default function SellerOnboardingPage() {
               <DetailSection title="All Documents">
                 <div className="space-y-2">
                   {selectedSeller.documents.map((doc) => {
-                    const isImage = doc.fileUrl && /\.(jpg|jpeg|png|webp|gif)/i.test(doc.fileUrl);
+                    const isImage = isLikelyImageUrl(doc.fileUrl);
+                    const isData = doc.fileUrl?.startsWith('data:');
                     return (
                       <div
                         key={doc.id}
@@ -668,13 +736,22 @@ export default function SellerOnboardingPage() {
                       >
                         <div className="flex items-center gap-3 min-w-0">
                           {isImage ? (
-                            <Image
-                              src={doc.fileUrl}
-                              alt={doc.type}
-                              width={40}
-                              height={40}
-                              className="h-10 w-10 rounded-lg object-cover border border-border"
-                            />
+                            isData ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={doc.fileUrl}
+                                alt={doc.type}
+                                className="h-10 w-10 rounded-lg object-cover border border-border shrink-0"
+                              />
+                            ) : (
+                              <Image
+                                src={doc.fileUrl}
+                                alt={doc.type}
+                                width={40}
+                                height={40}
+                                className="h-10 w-10 rounded-lg object-cover border border-border"
+                              />
+                            )
                           ) : (
                             <div className="h-10 w-10 rounded-lg bg-surface-muted flex items-center justify-center">
                               <FileText size={18} className="text-text-muted" />
@@ -765,6 +842,15 @@ export default function SellerOnboardingPage() {
                     <><XCircle size={14} className="text-danger-500" /> Missing</>
                   )}
                 </p>
+                {signaturePresent && (
+                  <div className="mt-2 rounded-lg border border-border bg-white p-2 max-w-[200px]">
+                    <SellerSignatureImage
+                      signatureUrl={selectedSeller.signatureUrl}
+                      signatureData={selectedSeller.signatureData}
+                      className="max-h-16 w-full object-contain"
+                    />
+                  </div>
+                )}
               </div>
             </div>
 
@@ -790,28 +876,50 @@ export default function SellerOnboardingPage() {
               />
             </FormField>
 
-            <div className="flex items-center justify-end gap-3 pt-2">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => { setReviewOpen(false); setRejectionReason(''); }}
-                disabled={reviewLoading}
-              >
-                Cancel
-              </Button>
-              <button
-                type="button"
-                onClick={() => handleReview('REJECTED')}
-                disabled={reviewLoading}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-danger-200 bg-white px-3 py-1.5 text-sm font-medium text-danger-600 hover:bg-danger-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                {reviewLoading ? <Loader2 size={14} className="animate-spin" /> : <XCircle size={14} />}
-                Reject
-              </button>
-              <Button size="sm" onClick={() => handleReview('APPROVED')} loading={reviewLoading}>
-                <CheckCircle size={14} />
-                Approve
-              </Button>
+            <div className="space-y-3 pt-2">
+              {!canApproveApplication && signaturePresent && (
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  Approve is available only after you open Seller Details and use <strong>Verify Signature</strong>.
+                </p>
+              )}
+              {!signaturePresent && (
+                <p className="text-xs text-danger-700 bg-danger-50 border border-danger-200 rounded-lg px-3 py-2">
+                  This application has no signature on file. Reject or ask the seller to resubmit.
+                </p>
+              )}
+              <div className="flex items-center justify-end gap-3">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => { setReviewOpen(false); setRejectionReason(''); }}
+                  disabled={reviewLoading}
+                >
+                  Cancel
+                </Button>
+                <button
+                  type="button"
+                  onClick={() => handleReview('REJECTED')}
+                  disabled={reviewLoading}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-danger-200 bg-white px-3 py-1.5 text-sm font-medium text-danger-600 hover:bg-danger-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {reviewLoading ? <Loader2 size={14} className="animate-spin" /> : <XCircle size={14} />}
+                  Reject
+                </button>
+                <Button
+                  size="sm"
+                  onClick={() => handleReview('APPROVED')}
+                  loading={reviewLoading}
+                  disabled={!canApproveApplication}
+                  title={
+                    !canApproveApplication
+                      ? 'Verify the seller’s signature in Seller Details first'
+                      : undefined
+                  }
+                >
+                  <CheckCircle size={14} />
+                  Approve
+                </Button>
+              </div>
             </div>
           </div>
         )}
@@ -841,10 +949,12 @@ function DetailItem({
   label,
   value,
   verified,
+  footnote,
 }: {
   label: string;
   value?: string | null;
   verified?: boolean;
+  footnote?: string;
 }) {
   return (
     <div className="min-w-0">
@@ -853,6 +963,9 @@ function DetailItem({
         <p className="text-sm font-medium text-text-primary truncate">{value || '—'}</p>
         {verified && <CheckCircle size={14} className="text-success-500 shrink-0" />}
       </div>
+      {footnote ? (
+        <p className="text-xs text-text-muted mt-1 leading-snug">{footnote}</p>
+      ) : null}
     </div>
   );
 }

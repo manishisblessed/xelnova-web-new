@@ -13,6 +13,8 @@ import type { Banner } from '@xelnova/api';
 import { ProductCard } from '@/components/marketplace/product-card';
 import { FlashDealCard } from '@/components/marketplace/flash-deal-card';
 import { SectionHeader } from '@/components/marketplace/section-header';
+import { CategoryImageOrIcon } from '@/components/marketplace/category-image-or-icon';
+import { BrandTile } from '@/components/marketplace/brand-tile';
 import { useProducts, useFlashDeals, useCategories } from '@/lib/api';
 
 const trustFeatures = [
@@ -55,7 +57,7 @@ function useDealCountdown(endAt?: string) {
 
 export function HomeBelowFold() {
   const { data: productsData } = useProducts({ limit: 50 });
-  const { data: flashDeals } = useFlashDeals();
+  const { data: flashDeals, loading: flashDealsLoading } = useFlashDeals();
   const { data: categories } = useCategories();
   const [promoBanners, setPromoBanners] = useState<Banner[]>([]);
   const [brands, setBrands] = useState<{ id: string; name: string; slug: string; logo: string | null; featured: boolean }[]>([]);
@@ -78,6 +80,7 @@ export function HomeBelowFold() {
 
   const allProducts = productsData?.products || [];
   const flashDealProducts = flashDeals || [];
+  const showFlashDealsSkeleton = flashDealsLoading && flashDealProducts.length === 0;
   const trendingProducts = allProducts.filter((p) => p.isFeatured || p.rating >= 4.5).slice(0, 8);
   const newArrivals = [...allProducts].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 8);
   const bestSellers = allProducts.filter((p) => p.rating >= 4.5).sort((a, b) => b.reviewCount - a.reviewCount).slice(0, 8);
@@ -93,6 +96,7 @@ export function HomeBelowFold() {
 
   const topSelections = (categories || []).slice(0, 3).map((cat) => ({
     id: cat.id,
+    slug: cat.slug,
     title: cat.name,
     discount: `${cat.productCount} Products`,
     image: cat.image || '',
@@ -127,11 +131,31 @@ export function HomeBelowFold() {
               </div>
               <div className="flex-1 overflow-x-auto scrollbar-hide">
                 <div className="flex gap-4 p-4 min-w-max">
-                  {flashDealProducts.map((product) => (
-                    <FlashDealCard key={product.id} product={product} />
-                  ))}
-                  {flashDealProducts.length === 0 && (
-                    <div className="flex items-center justify-center w-full py-8 text-text-muted text-sm">Loading deals...</div>
+                  {showFlashDealsSkeleton && (
+                    <div className="flex items-center justify-center min-w-[280px] w-full py-10 text-text-muted text-sm">
+                      <span className="inline-flex items-center gap-2">
+                        <span className="h-4 w-4 animate-spin rounded-full border-2 border-primary-500 border-t-transparent" />
+                        Loading deals…
+                      </span>
+                    </div>
+                  )}
+                  {!showFlashDealsSkeleton &&
+                    flashDealProducts.map((product) => (
+                      <FlashDealCard key={product.id} product={product} />
+                    ))}
+                  {!flashDealsLoading && flashDealProducts.length === 0 && (
+                    <div className="flex flex-col items-center justify-center min-w-[min(100%,320px)] w-full py-10 px-4 text-center">
+                      <p className="text-sm font-medium text-text-secondary">No flash deals right now</p>
+                      <p className="text-xs text-text-muted mt-1 max-w-sm">
+                        Check back soon, or browse all products for the best prices.
+                      </p>
+                      <Link
+                        href="/products"
+                        className="mt-3 text-sm font-semibold text-primary-600 hover:text-primary-700"
+                      >
+                        Browse products
+                      </Link>
+                    </div>
                   )}
                 </div>
               </div>
@@ -319,8 +343,8 @@ export function HomeBelowFold() {
                 href={item.href}
                 className="group flex items-center gap-5 bg-white border border-border/60 rounded-2xl p-5 hover:shadow-card-hover hover:-translate-y-0.5 transition-all duration-300"
               >
-                <div className="w-24 h-24 flex-shrink-0 rounded-xl bg-surface-raised overflow-hidden flex items-center justify-center">
-                  <Image src={item.image} alt={item.title} width={96} height={96} className="w-20 h-20 object-contain group-hover:scale-110 transition-transform duration-300" />
+                <div className="w-24 h-24 flex-shrink-0 rounded-xl bg-gradient-to-br from-gray-50 to-gray-100 overflow-hidden flex items-center justify-center border border-border/50">
+                  <CategoryImageOrIcon slug={item.slug} name={item.title} imageSrc={item.image} size="lg" />
                 </div>
                 <div className="flex-1">
                   <h3 className="font-semibold text-text-primary group-hover:text-primary-700 transition-colors">{item.title}</h3>
@@ -356,19 +380,9 @@ export function HomeBelowFold() {
         <section className="py-6">
           <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
             <SectionHeader title="Top Brands" subtitle="Shop from the brands you love" />
-            <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-6">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
               {brands.map((brand) => (
-                <Link
-                  key={brand.id}
-                  href={`/products?brand=${encodeURIComponent(brand.name)}`}
-                  className="flex h-20 items-center justify-center rounded-2xl border border-border/60 bg-white px-4 text-center transition-all duration-300 hover:border-primary-300 hover:text-primary-700 hover:shadow-card-hover hover:-translate-y-0.5"
-                >
-                  {brand.logo ? (
-                    <Image src={brand.logo} alt={brand.name} width={80} height={40} className="h-8 w-auto object-contain" />
-                  ) : (
-                    <span className="text-sm font-bold text-text-secondary">{brand.name}</span>
-                  )}
-                </Link>
+                <BrandTile key={brand.id} name={brand.name} logo={brand.logo} />
               ))}
             </div>
           </div>
