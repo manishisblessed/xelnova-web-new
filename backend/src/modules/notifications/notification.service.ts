@@ -134,6 +134,119 @@ export class NotificationService {
     });
   }
 
+  // ─── Seller Notifications ───
+
+  async notifySellerVerified(sellerId: string, storeName: string) {
+    await this.logNotification({
+      userId: sellerId,
+      channel: 'in_app',
+      type: 'SELLER_VERIFIED',
+      title: 'Account Verified',
+      body: `Congratulations! Your seller account "${storeName}" has been verified. You can now start adding products.`,
+      data: { storeName },
+    });
+    this.sendSellerEmail(sellerId, 'Account Verified', `Your seller account "${storeName}" has been verified. You can now start listing products on Xelnova.`).catch(() => {});
+  }
+
+  async notifySellerRejected(sellerId: string, storeName: string, reason?: string) {
+    await this.logNotification({
+      userId: sellerId,
+      channel: 'in_app',
+      type: 'SELLER_REJECTED',
+      title: 'Verification Update',
+      body: `Your seller account "${storeName}" verification was not approved.${reason ? ` Reason: ${reason}` : ''} Please review and resubmit.`,
+      data: { storeName, reason },
+    });
+    this.sendSellerEmail(sellerId, 'Verification Not Approved', `Your seller account "${storeName}" could not be verified.${reason ? ` Reason: ${reason}` : ''} Please update your details and resubmit.`).catch(() => {});
+  }
+
+  async notifyProductApproved(sellerId: string, productName: string) {
+    await this.logNotification({
+      userId: sellerId,
+      channel: 'in_app',
+      type: 'PRODUCT_APPROVED',
+      title: 'Product Approved',
+      body: `Your product "${productName}" has been approved and is now live on the marketplace.`,
+      data: { productName },
+    });
+  }
+
+  async notifyProductRejected(sellerId: string, productName: string, reason?: string) {
+    await this.logNotification({
+      userId: sellerId,
+      channel: 'in_app',
+      type: 'PRODUCT_REJECTED',
+      title: 'Product Update',
+      body: `Your product "${productName}" was not approved.${reason ? ` Reason: ${reason}` : ''}`,
+      data: { productName, reason },
+    });
+  }
+
+  async notifyTicketUpdate(userId: string, ticketNumber: string, status: string) {
+    await this.logNotification({
+      userId,
+      channel: 'in_app',
+      type: 'TICKET_UPDATE',
+      title: 'Support Ticket Update',
+      body: `Your ticket #${ticketNumber} status has been updated to ${status}.`,
+      data: { ticketNumber, status },
+    });
+  }
+
+  async notifyTicketReply(userId: string, ticketNumber: string, senderName: string) {
+    await this.logNotification({
+      userId,
+      channel: 'in_app',
+      type: 'TICKET_REPLY',
+      title: 'New Reply on Ticket',
+      body: `${senderName} replied to your ticket #${ticketNumber}.`,
+      data: { ticketNumber },
+    });
+  }
+
+  async notifyTicketForwarded(sellerId: string, ticketNumber: string) {
+    await this.logNotification({
+      userId: sellerId,
+      channel: 'in_app',
+      type: 'TICKET_ASSIGNED',
+      title: 'Ticket Assigned',
+      body: `A support ticket #${ticketNumber} has been assigned to you. Please review and respond.`,
+      data: { ticketNumber },
+    });
+  }
+
+  async notifyPayoutProcessed(sellerId: string, amount: number) {
+    await this.logNotification({
+      userId: sellerId,
+      channel: 'in_app',
+      type: 'PAYOUT_PROCESSED',
+      title: 'Payout Processed',
+      body: `Your payout of ₹${amount.toFixed(0)} has been processed to your bank account.`,
+      data: { amount },
+    });
+  }
+
+  async notifyNewOrder(sellerId: string, orderNumber: string, amount: number) {
+    await this.logNotification({
+      userId: sellerId,
+      channel: 'in_app',
+      type: 'NEW_ORDER',
+      title: 'New Order Received',
+      body: `You have a new order #${orderNumber} worth ₹${amount.toFixed(0)}.`,
+      data: { orderNumber, amount },
+    });
+  }
+
+  private async sendSellerEmail(userId: string, subject: string, body: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { email: true, name: true } });
+    if (!user?.email) return;
+    await this.email.sendEmail({
+      to: user.email,
+      subject: `Xelnova: ${subject}`,
+      html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px"><h2 style="color:#7c3aed">${subject}</h2><p>Hi ${user.name},</p><p>${body}</p></div>`,
+    });
+  }
+
   // ─── WhatsApp (Meta Cloud API) ───
 
   async sendOrderConfirmationWhatsApp(phone: string, orderNumber: string, total: string) {

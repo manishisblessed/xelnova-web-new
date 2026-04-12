@@ -9,6 +9,9 @@ async function bootstrap() {
 
   const isProduction = process.env.NODE_ENV === 'production';
 
+  const expressApp = app.getHttpAdapter().getInstance();
+  expressApp.set('trust proxy', true);
+
   const corsOrigins = process.env.CORS_ORIGINS?.split(',').filter(Boolean);
   if (!corsOrigins?.length && isProduction) {
     console.warn('WARNING: CORS_ORIGINS is not set in production. No cross-origin requests will be allowed.');

@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
+import { NotificationService } from '../notifications/notification.service';
 
 const TICKET_INCLUDE = {
   customer: { select: { id: true, name: true, email: true, avatar: true } },
@@ -25,6 +26,7 @@ export class TicketsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly emailService: EmailService,
+    private readonly notificationService: NotificationService,
   ) {}
 
   // ─── Customer ───
@@ -205,6 +207,8 @@ export class TicketsService {
       this.notifyCustomerReply(ticket.customerId, ticketId).catch((e) =>
         this.logger.warn(`Failed to notify customer: ${e.message}`),
       );
+      const admin = await this.prisma.user.findUnique({ where: { id: adminId }, select: { name: true } });
+      this.notificationService.notifyTicketReply(ticket.customerId, '', admin?.name || 'Support').catch(() => {});
     }
 
     return msg;
@@ -243,6 +247,8 @@ export class TicketsService {
 
     await this.prisma.$transaction(updates as any);
 
+    this.notificationService.notifyTicketForwarded(sellerId, ticket.ticketNumber).catch(() => {});
+
     return this.getTicketDetail(ticketId);
   }
 
@@ -251,11 +257,15 @@ export class TicketsService {
     if (priority) data.priority = priority;
     if (status === 'CLOSED') data.closedAt = new Date();
 
-    return this.prisma.ticket.update({
+    const ticket = await this.prisma.ticket.update({
       where: { id: ticketId },
       data: data as any,
       include: TICKET_INCLUDE,
     });
+
+    this.notificationService.notifyTicketUpdate(ticket.customerId, ticket.ticketNumber, status).catch(() => {});
+
+    return ticket;
   }
 
   // ─── Seller ───

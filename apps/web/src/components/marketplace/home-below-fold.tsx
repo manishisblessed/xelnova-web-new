@@ -6,7 +6,8 @@ import Image from 'next/image';
 import {
   Zap, ShoppingBag, Eye, Star,
   Truck, RotateCcw, ShieldCheck, Headphones, Flame,
-  ChevronRight, ArrowRight, Smartphone,
+  ChevronRight, ArrowRight, Smartphone, Mail,
+  ChevronDown, Wallet, Gift, Award, Sparkles,
 } from 'lucide-react';
 import { productsApi } from '@xelnova/api';
 import type { Banner } from '@xelnova/api';
@@ -375,6 +376,68 @@ export function HomeBelowFold() {
         </section>
       )}
 
+      {/* ─── SHOP BY PRICE RANGE ─── */}
+      <section className="py-6">
+        <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
+          <SectionHeader title="Shop by Budget" subtitle="Find products that fit your budget" />
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 md:gap-4">
+            {[
+              { label: 'Under ₹499', range: '0-499', gradient: 'from-emerald-500 to-teal-600', icon: '💰' },
+              { label: 'Under ₹999', range: '0-999', gradient: 'from-blue-500 to-indigo-600', icon: '🛍️' },
+              { label: 'Under ₹1,999', range: '0-1999', gradient: 'from-purple-500 to-violet-600', icon: '✨' },
+              { label: 'Premium', range: '2000-99999', gradient: 'from-amber-500 to-orange-600', icon: '👑' },
+            ].map((tier) => (
+              <Link
+                key={tier.range}
+                href={`/products?priceRange=${tier.range}`}
+                className="group relative overflow-hidden rounded-2xl border border-border/60 bg-white p-6 text-center hover:shadow-card-hover hover:-translate-y-1 transition-all duration-300"
+              >
+                <div className={`absolute inset-0 bg-gradient-to-br ${tier.gradient} opacity-0 group-hover:opacity-5 transition-opacity duration-300`} />
+                <div className="text-3xl mb-3">{tier.icon}</div>
+                <h3 className="text-lg font-bold text-text-primary group-hover:text-primary-700 transition-colors">{tier.label}</h3>
+                <p className="text-xs text-text-muted mt-1">Free delivery included</p>
+                <span className="inline-flex items-center gap-1 text-xs font-semibold text-primary-600 mt-3 group-hover:gap-2 transition-all">
+                  Explore <ArrowRight size={12} />
+                </span>
+              </Link>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ─── CURATED COLLECTIONS ─── */}
+      <section className="py-6">
+        <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
+          <SectionHeader title="Curated Collections" subtitle="Hand-picked for every occasion" />
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {[
+              { title: 'Work From Home Essentials', desc: 'Desks, chairs, tech & more', gradient: 'from-blue-600 to-indigo-700', href: '/products?collection=wfh' },
+              { title: 'Wedding Season Picks', desc: 'Outfits, gifts & decorations', gradient: 'from-rose-500 to-pink-600', href: '/products?collection=wedding' },
+              { title: 'Summer Must-Haves', desc: 'Stay cool this season', gradient: 'from-amber-500 to-orange-600', href: '/products?collection=summer' },
+              { title: 'Fitness & Wellness', desc: 'Gym gear, supplements & yoga', gradient: 'from-emerald-500 to-teal-600', href: '/products?collection=fitness' },
+              { title: 'Home Makeover', desc: 'Decor, furniture & organization', gradient: 'from-violet-500 to-purple-600', href: '/products?collection=home' },
+              { title: 'Tech Accessories', desc: 'Cases, chargers & gadgets', gradient: 'from-cyan-500 to-blue-600', href: '/products?collection=tech' },
+            ].map((collection) => (
+              <Link
+                key={collection.title}
+                href={collection.href}
+                className={`group relative overflow-hidden rounded-2xl bg-gradient-to-br ${collection.gradient} p-6 min-h-[140px] flex flex-col justify-end hover:shadow-lg hover:-translate-y-1 transition-all duration-300`}
+              >
+                <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent" />
+                <div className="absolute top-4 right-4 w-20 h-20 rounded-full bg-white/[0.06] group-hover:scale-125 transition-transform duration-500" />
+                <div className="relative">
+                  <h3 className="text-lg font-bold text-white mb-1">{collection.title}</h3>
+                  <p className="text-xs text-white/75">{collection.desc}</p>
+                  <span className="inline-flex items-center gap-1 text-xs font-semibold text-white/90 mt-3 group-hover:gap-2 transition-all">
+                    Shop Collection <ArrowRight size={12} />
+                  </span>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </div>
+      </section>
+
       {/* ─── 12. BRAND SHOWCASE ─── */}
       {brands.length > 0 && (
         <section className="py-6">
@@ -487,6 +550,125 @@ export function HomeBelowFold() {
                 <h3 className="font-semibold text-text-primary text-sm">{item.title}</h3>
                 <p className="text-xs text-text-muted mt-0.5">{item.desc}</p>
               </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ─── WHY SHOP WITH US ─── */}
+      <section className="py-8">
+        <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
+          <SectionHeader title="Why Xelnova?" subtitle="The smarter way to shop" />
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {[
+              { icon: Wallet, title: 'Xelnova Wallet', desc: 'Add money & pay for recharges, bills & more', color: 'text-emerald-600 bg-emerald-50' },
+              { icon: Gift, title: 'Daily Rewards', desc: 'Earn loyalty points on every purchase', color: 'text-violet-600 bg-violet-50' },
+              { icon: Award, title: 'Genuine Products', desc: '100% authentic from verified sellers', color: 'text-blue-600 bg-blue-50' },
+              { icon: Sparkles, title: 'Best Prices', desc: 'Price match guarantee across the platform', color: 'text-amber-600 bg-amber-50' },
+            ].map((item) => (
+              <div key={item.title} className="bg-white border border-border/60 rounded-2xl p-5 text-center hover:shadow-card-hover transition-all duration-300">
+                <div className={`w-12 h-12 mx-auto mb-3 rounded-2xl ${item.color} flex items-center justify-center`}>
+                  <item.icon size={22} />
+                </div>
+                <h3 className="text-sm font-bold text-text-primary">{item.title}</h3>
+                <p className="text-xs text-text-muted mt-1 leading-relaxed">{item.desc}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ─── NEWSLETTER SIGNUP ─── */}
+      <section className="py-6">
+        <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
+          <div className="bg-gradient-to-r from-primary-50 via-accent-50/50 to-primary-50 rounded-3xl border border-primary-100/60 p-8 md:p-12">
+            <div className="max-w-xl mx-auto text-center">
+              <div className="w-14 h-14 bg-primary-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                <Mail size={24} className="text-primary-600" />
+              </div>
+              <h2 className="text-2xl md:text-3xl font-extrabold text-text-primary mb-2 font-display">Stay in the Loop</h2>
+              <p className="text-sm text-text-secondary mb-6">Get exclusive deals, new arrivals & special offers delivered to your inbox.</p>
+              <form
+                className="flex gap-2 max-w-md mx-auto"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const form = e.currentTarget;
+                  const input = form.querySelector('input') as HTMLInputElement;
+                  if (input?.value) {
+                    input.value = '';
+                    alert('Thanks for subscribing!');
+                  }
+                }}
+              >
+                <input
+                  type="email"
+                  placeholder="Enter your email"
+                  required
+                  className="flex-1 px-4 py-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                />
+                <button
+                  type="submit"
+                  className="px-6 py-3 rounded-xl bg-primary-600 text-white text-sm font-semibold hover:bg-primary-700 transition-colors shadow-primary"
+                >
+                  Subscribe
+                </button>
+              </form>
+              <p className="text-[11px] text-text-muted mt-3">No spam, unsubscribe anytime.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ─── FAQ SECTION ─── */}
+      <section className="py-8">
+        <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
+          <SectionHeader title="Frequently Asked Questions" subtitle="Quick answers to common queries" />
+          <div className="max-w-3xl mx-auto space-y-3">
+            {[
+              { q: 'Is Cash on Delivery available?', a: 'Yes! We offer COD across India for most products. OTP verification is required at delivery.' },
+              { q: 'What is the return policy?', a: 'Most products can be returned within 7 days of delivery. Simply raise a return request from your order page.' },
+              { q: 'How do I track my order?', a: 'After your order ships, you will receive a tracking link via email and SMS. You can also track from your account dashboard.' },
+              { q: 'Is my payment information secure?', a: 'Absolutely. All payments are processed through Razorpay with 256-bit SSL encryption. We never store your card details.' },
+              { q: 'How do I become a seller on Xelnova?', a: 'Register at seller.xelnova.in with your GST details and bank account. After verification, you can start listing products immediately.' },
+            ].map((faq) => (
+              <details key={faq.q} className="group bg-white border border-border/60 rounded-2xl overflow-hidden">
+                <summary className="flex items-center justify-between p-5 cursor-pointer text-sm font-semibold text-text-primary hover:text-primary-700 transition-colors list-none">
+                  {faq.q}
+                  <ChevronDown size={16} className="text-text-muted group-open:rotate-180 transition-transform duration-200 shrink-0 ml-4" />
+                </summary>
+                <div className="px-5 pb-5 text-sm text-text-secondary leading-relaxed border-t border-border/40 pt-4">
+                  {faq.a}
+                </div>
+              </details>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ─── BLOG / BUYING GUIDES ─── */}
+      <section className="py-6">
+        <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
+          <SectionHeader title="Buying Guides & Tips" subtitle="Make informed purchase decisions" />
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {[
+              { title: 'How to Choose the Right Laptop', category: 'Electronics', color: 'bg-blue-500', href: '/blog/choose-laptop' },
+              { title: 'Fashion Trends for 2026', category: 'Fashion', color: 'bg-pink-500', href: '/blog/fashion-trends' },
+              { title: 'Home Organization Hacks', category: 'Home & Living', color: 'bg-emerald-500', href: '/blog/organization' },
+            ].map((post) => (
+              <Link
+                key={post.title}
+                href={post.href}
+                className="group bg-white border border-border/60 rounded-2xl overflow-hidden hover:shadow-card-hover hover:-translate-y-0.5 transition-all duration-300"
+              >
+                <div className={`h-2 ${post.color}`} />
+                <div className="p-5">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-text-muted">{post.category}</span>
+                  <h3 className="text-sm font-bold text-text-primary mt-1.5 group-hover:text-primary-700 transition-colors">{post.title}</h3>
+                  <span className="inline-flex items-center gap-1 text-xs font-semibold text-primary-600 mt-3 group-hover:gap-2 transition-all">
+                    Read More <ArrowRight size={12} />
+                  </span>
+                </div>
+              </Link>
             ))}
           </div>
         </div>

@@ -6,7 +6,7 @@ import Image from 'next/image';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search, ShoppingCart, Menu, X, Heart, Package, User, LogIn, LogOut,
-  Sparkles, Phone, MapPin, ChevronDown, Flame, Download, TrendingUp,
+  Sparkles, Phone, MapPin, ChevronDown, Flame, Download, TrendingUp, Bell,
 } from 'lucide-react';
 import { useCartStore } from '@/lib/store/cart-store';
 import { useWishlistStore } from '@/lib/store/wishlist-store';
@@ -66,6 +66,7 @@ export function Header() {
   const [isAccountOpen, setIsAccountOpen] = useState(false);
   const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
   const [searchFocused, setSearchFocused] = useState(false);
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
   const accountRef = useRef<HTMLDivElement>(null);
   const searchContainerRef = useRef<HTMLDivElement>(null);
   const mobileSearchContainerRef = useRef<HTMLDivElement>(null);
@@ -87,6 +88,22 @@ export function Header() {
   const { user, isAuthenticated, logout, loading: authLoading } = useAuth();
 
   useEffect(() => setMounted(true), []);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    let cancelled = false;
+    const fetchCount = () => {
+      fetch('/api/v1/notifications?limit=1', {
+        headers: { 'Authorization': `Bearer ${typeof window !== 'undefined' ? document.cookie.match(/(?:^|;\s*)xelnova-token=([^;]*)/)?.[1] || '' : ''}` },
+      })
+        .then(r => r.json())
+        .then(d => { if (!cancelled && d.success) setUnreadNotifications(d.data?.unread ?? 0); })
+        .catch(() => {});
+    };
+    fetchCount();
+    const interval = setInterval(fetchCount, 30000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [isAuthenticated]);
 
   useEffect(() => {
     setAvatarLoadFailed(false);
@@ -415,6 +432,24 @@ export function Header() {
               </Link>
             )}
 
+            {isAuthenticated && (
+              <Link
+                href="/account/notifications"
+                className="relative rounded-xl p-2.5 text-text-secondary hover:text-primary-600 hover:bg-primary-50 transition-all"
+              >
+                <Bell size={20} />
+                {unreadNotifications > 0 && (
+                  <motion.span
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    className="absolute -right-0.5 top-0.5 flex h-4.5 min-w-4.5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white ring-2 ring-white"
+                  >
+                    {unreadNotifications > 99 ? '99+' : unreadNotifications}
+                  </motion.span>
+                )}
+              </Link>
+            )}
+
             <Link
               href="/account/wishlist"
               className="relative rounded-xl p-2.5 text-text-secondary hover:text-primary-600 hover:bg-primary-50 transition-all"
@@ -484,18 +519,24 @@ export function Header() {
 
       {/* Category Navigation + Sale Badge */}
       <div className={`border-b border-border/40 transition-all duration-500 ${isScrolled ? 'glass' : 'bg-white'}`}>
-        <div className="mx-auto max-w-[1440px] flex items-center gap-0.5 overflow-x-auto px-4 scrollbar-hide lg:px-6">
-          {(categories || []).map((cat) => (
-            <Link
-              key={cat.slug}
-              href={`/products?category=${cat.slug}`}
-              className="flex-shrink-0 flex items-center gap-1.5 px-3.5 py-2.5 text-sm text-text-secondary hover:text-primary-700 hover:bg-primary-50 transition-all rounded-lg font-medium"
-            >
-              <span className="text-sm">{categoryIcons[cat.slug] || '🛍️'}</span>
-              {cat.name}
-            </Link>
-          ))}
-          <div className="ml-auto flex items-center gap-3">
+        <div className="mx-auto max-w-[1440px] flex items-center px-4 lg:px-6">
+          <div className="relative flex-1 min-w-0">
+            <div className="absolute left-0 top-0 bottom-0 w-8 bg-gradient-to-r from-white to-transparent z-10 pointer-events-none opacity-0 transition-opacity" id="cat-fade-left" />
+            <div className="flex items-center gap-0.5 overflow-x-auto scrollbar-hide scroll-smooth" id="category-scroll">
+              {(categories || []).map((cat) => (
+                <Link
+                  key={cat.slug}
+                  href={`/products?category=${cat.slug}`}
+                  className="flex-shrink-0 flex items-center gap-1.5 px-3.5 py-2.5 text-sm text-text-secondary hover:text-primary-700 hover:bg-primary-50 transition-all rounded-lg font-medium"
+                >
+                  <span className="text-sm">{categoryIcons[cat.slug] || '🛍️'}</span>
+                  {cat.name}
+                </Link>
+              ))}
+            </div>
+            <div className="absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-white to-transparent z-10 pointer-events-none" id="cat-fade-right" />
+          </div>
+          <div className="flex-shrink-0 flex items-center gap-3 pl-3 border-l border-border/30 ml-2">
             <Link
               href="/products?deals=sale"
               className="hidden sm:flex flex-shrink-0 items-center gap-1.5 bg-gradient-to-r from-danger-500 to-accent-500 text-white text-xs font-bold px-3.5 py-1.5 rounded-full animate-pulse-soft"

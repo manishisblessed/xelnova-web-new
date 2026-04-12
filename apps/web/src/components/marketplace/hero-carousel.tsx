@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronLeft, ChevronRight, ArrowRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ArrowRight, Sparkles } from 'lucide-react';
 import { productsApi } from '@xelnova/api';
 import type { Banner } from '@xelnova/api';
 
@@ -17,16 +17,15 @@ interface Slide {
   cta: string;
   href: string;
   accent: string;
-  /** Used only when `image` fails to load or is empty after merge */
-  gradient?: string;
+  gradient: string;
+  pattern?: string;
 }
 
-/** Stock hero photos when CMS has no image or API is unavailable (Unsplash, hotlink-safe) */
 const HERO_STOCK_IMAGES = [
-  'https://images.unsplash.com/photo-1607082349566-187342175e2f?auto=format&fit=crop&w=1920&q=80',
-  'https://images.unsplash.com/photo-1441986300917-64674bd600d8?auto=format&fit=crop&w=1920&q=80',
-  'https://images.unsplash.com/photo-1498049794561-7790b78638c4?auto=format&fit=crop&w=1920&q=80',
-  'https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?auto=format&fit=crop&w=1920&q=80',
+  'https://images.unsplash.com/photo-1607082348824-0a96f2a4b9da?auto=format&fit=crop&w=1920&q=85',
+  'https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=1920&q=85',
+  'https://images.unsplash.com/photo-1526178613552-2b45c6c302f0?auto=format&fit=crop&w=1920&q=85',
+  'https://images.unsplash.com/photo-1472851294608-062f824d29cc?auto=format&fit=crop&w=1920&q=85',
 ] as const;
 
 function resolveBannerImage(bannerImage: string | null | undefined, index: number): string {
@@ -39,50 +38,59 @@ const fallbackSlides: Slide[] = [
   {
     id: 'fb-1',
     image: HERO_STOCK_IMAGES[0],
-    title: 'Welcome to\nXelnova',
-    subtitle: 'Discover amazing products from trusted sellers across India',
-    badge: 'Shop Now',
-    cta: 'Browse Products',
-    href: '/products',
-    accent: 'bg-primary-500',
-    gradient: 'bg-gradient-to-br from-violet-600 via-purple-600 to-indigo-700',
+    title: 'Big Festive Sale',
+    subtitle: 'Up to 50% off on top brands. Grab the best deals before they are gone!',
+    badge: 'SHOP NOW',
+    cta: 'Shop now',
+    href: '/products?sort=discount',
+    accent: 'bg-gradient-to-r from-rose-500 to-orange-500',
+    gradient: 'bg-gradient-to-br from-rose-600 via-purple-700 to-indigo-800',
+    pattern: 'radial-gradient(circle at 80% 20%, rgba(255,255,255,0.08) 0%, transparent 50%)',
   },
   {
     id: 'fb-2',
     image: HERO_STOCK_IMAGES[1],
-    title: 'Mega Sale\nUp to 70% Off',
-    subtitle: 'Grab unbeatable deals on top brands. Limited time offer!',
-    badge: 'Hot Deals',
-    cta: 'Shop Deals',
-    href: '/products?sort=discount',
-    accent: 'bg-accent-500',
-    gradient: 'bg-gradient-to-br from-orange-500 via-rose-500 to-pink-600',
+    title: 'New Arrivals',
+    subtitle: 'Fresh styles every week. Discover the latest in fashion, electronics & more.',
+    badge: 'EXPLORE',
+    cta: 'Explore',
+    href: '/products?sort=newest',
+    accent: 'bg-gradient-to-r from-violet-500 to-purple-600',
+    gradient: 'bg-gradient-to-br from-violet-700 via-fuchsia-700 to-pink-700',
+    pattern: 'radial-gradient(circle at 20% 80%, rgba(255,255,255,0.06) 0%, transparent 50%)',
   },
   {
     id: 'fb-3',
     image: HERO_STOCK_IMAGES[2],
-    title: 'Sell on\nXelnova',
-    subtitle: 'Join thousands of sellers and grow your business with India\'s fastest marketplace',
-    badge: 'Start Selling',
-    cta: 'Register Now',
-    href: '/seller',
-    accent: 'bg-primary-500',
-    gradient: 'bg-gradient-to-br from-emerald-500 via-teal-600 to-cyan-700',
+    title: 'Top Electronics',
+    subtitle: 'Latest gadgets, phones & accessories at unbeatable prices.',
+    badge: 'TRENDING',
+    cta: 'Browse Electronics',
+    href: '/products?category=electronics',
+    accent: 'bg-gradient-to-r from-blue-500 to-cyan-500',
+    gradient: 'bg-gradient-to-br from-blue-700 via-indigo-800 to-slate-900',
+    pattern: 'radial-gradient(circle at 70% 30%, rgba(59,130,246,0.15) 0%, transparent 50%)',
   },
   {
     id: 'fb-4',
     image: HERO_STOCK_IMAGES[3],
-    title: 'New Arrivals\nEvery Day',
-    subtitle: 'Explore the latest trends in fashion, electronics, home & more',
-    badge: 'Trending',
-    cta: 'Explore Now',
-    href: '/products?sort=newest',
-    accent: 'bg-accent-500',
-    gradient: 'bg-gradient-to-br from-blue-600 via-indigo-600 to-purple-700',
+    title: 'Sell on Xelnova',
+    subtitle: 'Join thousands of sellers. Free logistics, secure payments & 50L+ customers.',
+    badge: 'START SELLING',
+    cta: 'Register Now',
+    href: '/seller',
+    accent: 'bg-gradient-to-r from-emerald-500 to-teal-500',
+    gradient: 'bg-gradient-to-br from-emerald-700 via-teal-700 to-cyan-800',
+    pattern: 'radial-gradient(circle at 30% 70%, rgba(16,185,129,0.12) 0%, transparent 50%)',
   },
 ];
 
-const accentColors = ['bg-primary-500', 'bg-accent-500', 'bg-primary-500', 'bg-accent-500'];
+const accentColors = [
+  'bg-gradient-to-r from-rose-500 to-orange-500',
+  'bg-gradient-to-r from-violet-500 to-purple-600',
+  'bg-gradient-to-r from-blue-500 to-cyan-500',
+  'bg-gradient-to-r from-emerald-500 to-teal-500',
+];
 
 function mapBannerToSlide(banner: Banner, index: number): Slide {
   return {
@@ -94,14 +102,22 @@ function mapBannerToSlide(banner: Banner, index: number): Slide {
     cta: banner.ctaText || 'Shop Now',
     href: banner.ctaLink || '/products',
     accent: accentColors[index % accentColors.length],
-    gradient: 'bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900',
+    gradient: fallbackSlides[index % fallbackSlides.length].gradient,
   };
 }
 
 const slideVariants = {
-  enter: (direction: number) => ({ x: direction > 0 ? 300 : -300, opacity: 0, scale: 0.98 }),
+  enter: (direction: number) => ({
+    x: direction > 0 ? '100%' : '-100%',
+    opacity: 0,
+    scale: 1.05,
+  }),
   center: { x: 0, opacity: 1, scale: 1 },
-  exit: (direction: number) => ({ x: direction < 0 ? 300 : -300, opacity: 0, scale: 0.98 }),
+  exit: (direction: number) => ({
+    x: direction < 0 ? '100%' : '-100%',
+    opacity: 0,
+    scale: 0.95,
+  }),
 };
 
 export function HeroCarousel() {
@@ -141,8 +157,8 @@ export function HeroCarousel() {
   const showPhoto = Boolean(slide.image) && !heroImgError;
 
   return (
-    <div className="relative overflow-hidden rounded-2xl lg:rounded-3xl bg-surface-dark group shadow-lg shadow-black/10 h-full">
-      <div className="relative h-full min-h-[220px] sm:min-h-[280px] md:min-h-[340px]">
+    <div className="relative overflow-hidden rounded-2xl lg:rounded-3xl bg-surface-dark group shadow-2xl shadow-black/20 h-full">
+      <div className="relative h-full min-h-[260px] sm:min-h-[320px] md:min-h-[380px]">
         <AnimatePresence initial={false} custom={direction} mode="popLayout">
           <motion.div
             key={page}
@@ -152,9 +168,9 @@ export function HeroCarousel() {
             animate="center"
             exit="exit"
             transition={{
-              x: { type: 'spring', stiffness: 200, damping: 25 },
-              opacity: { duration: 0.3 },
-              scale: { duration: 0.4 },
+              x: { type: 'spring', stiffness: 180, damping: 28 },
+              opacity: { duration: 0.4 },
+              scale: { duration: 0.5 },
             }}
             className="absolute inset-0"
           >
@@ -169,36 +185,80 @@ export function HeroCarousel() {
                 onError={() => setHeroImgError(true)}
               />
             ) : (
-              <div className={`absolute inset-0 ${slide.gradient || 'bg-gradient-to-br from-violet-600 via-purple-600 to-indigo-700'}`} />
+              <div className={`absolute inset-0 ${slide.gradient}`} />
             )}
-            <div className="absolute inset-0 bg-gradient-to-r from-black/60 via-black/35 to-black/10" />
+
+            {/* Multi-layer gradient overlay for depth */}
+            <div className="absolute inset-0 bg-gradient-to-r from-black/70 via-black/40 to-transparent" />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent" />
+
+            {/* Decorative pattern overlay */}
+            {slide.pattern && (
+              <div className="absolute inset-0" style={{ background: slide.pattern }} />
+            )}
+
+            {/* Animated decorative elements */}
+            <div className="absolute top-8 right-8 hidden lg:block">
+              <motion.div
+                animate={{ rotate: 360 }}
+                transition={{ duration: 30, repeat: Infinity, ease: 'linear' }}
+                className="w-64 h-64 border border-white/[0.06] rounded-full"
+              />
+            </div>
+            <div className="absolute -bottom-16 -right-16 hidden lg:block">
+              <motion.div
+                animate={{ rotate: -360 }}
+                transition={{ duration: 40, repeat: Infinity, ease: 'linear' }}
+                className="w-80 h-80 border border-white/[0.04] rounded-full"
+              />
+            </div>
 
             <div className="absolute inset-0 flex items-center">
               <div className="w-full px-6 md:px-10 lg:px-14">
                 <motion.div
-                  initial={{ opacity: 0, y: 30 }}
+                  initial={{ opacity: 0, y: 40 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.2, duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
-                  className="max-w-md"
+                  transition={{ delay: 0.15, duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
+                  className="max-w-lg"
                 >
                   {slide.badge && (
-                    <span className={`inline-block text-white text-[10px] font-bold uppercase tracking-[0.15em] px-3 py-1 rounded-full mb-3 ${slide.accent}`}>
+                    <motion.span
+                      initial={{ opacity: 0, scale: 0.8 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      transition={{ delay: 0.3 }}
+                      className={`inline-flex items-center gap-1.5 text-white text-[10px] font-bold uppercase tracking-[0.2em] px-3.5 py-1.5 rounded-full mb-4 ${slide.accent} shadow-lg`}
+                    >
+                      <Sparkles size={10} />
                       {slide.badge}
-                    </span>
+                    </motion.span>
                   )}
-                  <h2 className="text-2xl sm:text-3xl lg:text-[2.75rem] font-extrabold text-white mb-3 leading-[1.1] font-display whitespace-pre-line">
+                  <h2
+                    className="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-white mb-4 leading-[1.1] font-display whitespace-pre-line drop-shadow-lg"
+                    style={{ textShadow: '0 2px 20px rgba(0,0,0,0.3)' }}
+                  >
                     {slide.title}
                   </h2>
-                  <p className="text-sm sm:text-base text-white/65 mb-6 leading-relaxed max-w-sm">
-                    {slide.subtitle}
-                  </p>
-                  <Link
-                    href={slide.href}
-                    className="inline-flex items-center gap-2 bg-white text-text-primary px-5 py-2.5 sm:px-6 sm:py-3 rounded-xl font-semibold text-sm hover:bg-primary-50 hover:text-primary-700 transition-all duration-200 shadow-xl shadow-black/15 active:scale-[0.97] group/btn"
+                  <motion.p
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ delay: 0.35 }}
+                    className="text-sm sm:text-base text-white/80 mb-8 leading-relaxed max-w-md"
                   >
-                    {slide.cta}
-                    <ArrowRight className="w-4 h-4 group-hover/btn:translate-x-0.5 transition-transform" />
-                  </Link>
+                    {slide.subtitle}
+                  </motion.p>
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.45 }}
+                  >
+                    <Link
+                      href={slide.href}
+                      className="inline-flex items-center gap-2.5 bg-white text-gray-900 px-6 py-3 sm:px-7 sm:py-3.5 rounded-xl font-bold text-sm hover:bg-gray-50 transition-all duration-200 shadow-2xl shadow-black/20 active:scale-[0.97] group/btn"
+                    >
+                      {slide.cta}
+                      <ArrowRight className="w-4 h-4 group-hover/btn:translate-x-1 transition-transform duration-200" />
+                    </Link>
+                  </motion.div>
                 </motion.div>
               </div>
             </div>
@@ -207,28 +267,38 @@ export function HeroCarousel() {
 
         <button
           onClick={() => paginate(-1)}
-          className="absolute left-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-white/15 hover:bg-white/30 text-white flex items-center justify-center backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-all duration-300 active:scale-90"
+          className="absolute left-3 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-white/10 hover:bg-white/25 text-white flex items-center justify-center backdrop-blur-md border border-white/10 opacity-0 group-hover:opacity-100 transition-all duration-300 active:scale-90"
         >
           <ChevronLeft className="w-5 h-5" />
         </button>
         <button
           onClick={() => paginate(1)}
-          className="absolute right-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-white/15 hover:bg-white/30 text-white flex items-center justify-center backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-all duration-300 active:scale-90"
+          className="absolute right-3 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-white/10 hover:bg-white/25 text-white flex items-center justify-center backdrop-blur-md border border-white/10 opacity-0 group-hover:opacity-100 transition-all duration-300 active:scale-90"
         >
           <ChevronRight className="w-5 h-5" />
         </button>
 
-        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2">
+        {/* Progress bar indicators */}
+        <div className="absolute bottom-5 left-1/2 -translate-x-1/2 flex items-center gap-2.5">
           {slides.map((_, i) => (
             <button
               key={i}
               onClick={() => setPage([i, i > activeIndex ? 1 : -1])}
-              className="relative h-1.5 rounded-full overflow-hidden transition-all duration-500"
-              style={{ width: i === activeIndex ? 28 : 8 }}
+              className="relative h-1.5 rounded-full overflow-hidden transition-all duration-500 bg-white/20"
+              style={{ width: i === activeIndex ? 32 : 10 }}
             >
-              <div className={`absolute inset-0 rounded-full transition-colors duration-300 ${
-                i === activeIndex ? 'bg-white' : 'bg-white/35'
-              }`} />
+              {i === activeIndex && (
+                <motion.div
+                  className="absolute inset-0 rounded-full bg-white"
+                  initial={{ scaleX: 0 }}
+                  animate={{ scaleX: 1 }}
+                  transition={{ duration: 6, ease: 'linear' }}
+                  style={{ transformOrigin: 'left' }}
+                />
+              )}
+              {i !== activeIndex && (
+                <div className="absolute inset-0 rounded-full bg-white/40" />
+              )}
             </button>
           ))}
         </div>

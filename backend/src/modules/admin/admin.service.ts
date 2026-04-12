@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { PrismaService } from '../../prisma/prisma.service';
 import { Prisma, Role } from '@prisma/client';
 import { LoggingService } from '../logging/logging.service';
+import { NotificationService } from '../notifications/notification.service';
 import {
   AdminProductQueryDto, AdminUpdateProductDto,
   AdminOrderQueryDto, AdminUpdateOrderDto,
@@ -25,6 +26,7 @@ export class AdminService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly logging: LoggingService,
+    private readonly notifications: NotificationService,
   ) {}
 
   private slugify(text: string): string {
@@ -187,14 +189,24 @@ export class AdminService {
       data.rejectionReason = dto.rejectionReason || null;
     }
 
-    return this.prisma.product.update({ 
+    const product = await this.prisma.product.update({ 
       where: { id }, 
       data,
       include: {
         category: { select: { name: true } },
-        seller: { select: { storeName: true, email: true, user: { select: { email: true } } } },
+        seller: { select: { storeName: true, email: true, userId: true, user: { select: { email: true } } } },
       },
     });
+
+    if (product.seller?.userId && dto.status) {
+      if (dto.status === 'ACTIVE') {
+        this.notifications.notifyProductApproved(product.seller.userId, product.name).catch(() => {});
+      } else if (dto.status === 'REJECTED') {
+        this.notifications.notifyProductRejected(product.seller.userId, product.name, dto.rejectionReason).catch(() => {});
+      }
+    }
+
+    return product;
   }
 
   async deleteProduct(id: string) {
@@ -361,6 +373,14 @@ export class AdminService {
       });
     }
 
+    if (profile.userId && dto.verified !== undefined) {
+      if (dto.verified) {
+        this.notifications.notifySellerVerified(profile.userId, result.storeName).catch(() => {});
+      } else {
+        this.notifications.notifySellerRejected(profile.userId, result.storeName).catch(() => {});
+      }
+    }
+
     return result;
   }
 
@@ -416,7 +436,7 @@ export class AdminService {
     const page = query.page || 1;
     const limit = query.limit || 20;
     const where: Prisma.UserWhereInput = {
-      role: Role.CUSTOMER,
+      role: { not: Role.ADMIN },
     };
 
     if (query.search) {

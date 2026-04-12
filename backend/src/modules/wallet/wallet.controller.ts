@@ -10,7 +10,15 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { WalletService } from './wallet.service';
-import { WalletCreditDebitDto, PayoutRequestDto } from './dto/wallet.dto';
+import {
+  WalletCreditDebitDto,
+  PayoutRequestDto,
+  AddMoneyDto,
+  VerifyAddMoneyDto,
+  BankTransferDto,
+  RechargeDto,
+  BillPaymentDto,
+} from './dto/wallet.dto';
 import { successResponse } from '../../common/helpers/response.helper';
 import { Auth } from '../../common/decorators/auth.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -46,6 +54,69 @@ export class WalletController {
       parseInt(limit || '20'),
     );
     return successResponse(result, 'Transactions retrieved');
+  }
+
+  @Post('customer/add-money')
+  @Auth()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Create Razorpay order to add money to wallet (2% convenience fee)' })
+  async addMoney(@CurrentUser('id') userId: string, @Body() dto: AddMoneyDto) {
+    const result = await this.walletService.createAddMoneyOrder(userId, dto.amount);
+    return successResponse(result, 'Payment order created');
+  }
+
+  @Post('customer/verify-add-money')
+  @Auth()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Verify Razorpay payment and credit wallet' })
+  async verifyAddMoney(@CurrentUser('id') userId: string, @Body() dto: VerifyAddMoneyDto) {
+    const result = await this.walletService.verifyAddMoney(userId, dto);
+    return successResponse(result, 'Wallet credited successfully');
+  }
+
+  @Post('customer/transfer')
+  @Auth()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Transfer money from wallet to bank account' })
+  async bankTransfer(@CurrentUser('id') userId: string, @Body() dto: BankTransferDto) {
+    const result = await this.walletService.requestBankTransfer(
+      userId, dto.amount, dto.accountNumber, dto.ifscCode, dto.accountHolder,
+    );
+    return successResponse(result, 'Transfer request submitted');
+  }
+
+  @Get('customer/transfers')
+  @Auth()
+  @ApiOperation({ summary: 'Get bank transfer history' })
+  async getTransfers(
+    @CurrentUser('id') userId: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const result = await this.walletService.getBankTransfers(userId, parseInt(page || '1'), parseInt(limit || '20'));
+    return successResponse(result, 'Transfers retrieved');
+  }
+
+  @Post('customer/recharge')
+  @Auth()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Mobile/DTH recharge from wallet' })
+  async recharge(@CurrentUser('id') userId: string, @Body() dto: RechargeDto) {
+    const result = await this.walletService.processRecharge(
+      userId, dto.amount, dto.identifier, dto.operator, dto.type,
+    );
+    return successResponse(result, 'Recharge processing');
+  }
+
+  @Post('customer/bill-payment')
+  @Auth()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Pay bill from wallet' })
+  async billPayment(@CurrentUser('id') userId: string, @Body() dto: BillPaymentDto) {
+    const result = await this.walletService.processBillPayment(
+      userId, dto.amount, dto.billerId, dto.consumerNumber, dto.category,
+    );
+    return successResponse(result, 'Bill payment processing');
   }
 
   // ========== Seller Endpoints ==========

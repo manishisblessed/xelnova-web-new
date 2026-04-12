@@ -31,6 +31,7 @@ import {
   PenTool,
   Trash2,
   Undo2,
+  X,
 } from 'lucide-react';
 import { Button } from '@xelnova/ui';
 import { publicApiBase } from '@/lib/public-api-base';
@@ -160,6 +161,9 @@ export default function RegisterPage() {
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [termsDialog, setTermsDialog] = useState<'tos' | 'seller' | null>(null);
+  const [termsScrolled, setTermsScrolled] = useState({ tos: false, seller: false });
+  const [termsAccepted, setTermsAccepted] = useState({ tos: false, seller: false });
   const [emailOtp, setEmailOtp] = useState<OtpState>({ sent: false, verified: false, loading: false });
   const [phoneOtp, setPhoneOtp] = useState<OtpState>({ sent: false, verified: false, loading: false });
   const [emailOtpInput, setEmailOtpInput] = useState('');
@@ -193,6 +197,11 @@ export default function RegisterPage() {
     setErrors({});
     try { sessionStorage.removeItem('xelnova-reg'); } catch { /* ignore */ }
   }, []);
+
+  // Scroll to top when step changes
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [currentStep]);
 
   // Persist sellerId + step so the user can resume after page refresh
   useEffect(() => {
@@ -1642,12 +1651,127 @@ export default function RegisterPage() {
                         {bankVerification.status === 'error' && <p className="text-xs text-red-500 mt-1">{bankVerification.error}</p>}
                       </div>
 
-                      {/* Terms */}
-                      <label className="flex items-start gap-3 cursor-pointer mb-2">
-                        <input type="checkbox" name="agreeTerms" checked={formData.agreeTerms} onChange={handleChange} className="rounded border-gray-300 text-primary-600 focus:ring-primary-500 mt-0.5" />
-                        <span className="text-sm text-gray-700">I agree to the <a href="#" className="text-primary-600 underline">Terms of Service</a> and <a href="#" className="text-primary-600 underline">Seller Agreement</a></span>
-                      </label>
-                      {errors.agreeTerms && <p className="text-xs text-red-500 ml-7">{errors.agreeTerms}</p>}
+                      {/* Terms & Agreements */}
+                      <div className="space-y-3 mb-2">
+                        <div className="flex items-center gap-3">
+                          <div className={`w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 ${termsAccepted.tos ? 'bg-primary-600 border-primary-600' : 'border-gray-300'}`}>
+                            {termsAccepted.tos && <CheckCircle size={12} className="text-white" />}
+                          </div>
+                          <button type="button" onClick={() => setTermsDialog('tos')} className="text-sm text-primary-600 underline font-medium hover:text-primary-700">
+                            Terms of Service {termsAccepted.tos ? '(Accepted)' : '(Read & Accept)'}
+                          </button>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <div className={`w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 ${termsAccepted.seller ? 'bg-primary-600 border-primary-600' : 'border-gray-300'}`}>
+                            {termsAccepted.seller && <CheckCircle size={12} className="text-white" />}
+                          </div>
+                          <button type="button" onClick={() => setTermsDialog('seller')} className="text-sm text-primary-600 underline font-medium hover:text-primary-700">
+                            Seller Agreement {termsAccepted.seller ? '(Accepted)' : '(Read & Accept)'}
+                          </button>
+                        </div>
+                      </div>
+                      {errors.agreeTerms && <p className="text-xs text-red-500">{errors.agreeTerms}</p>}
+
+                      {/* Terms Dialog */}
+                      {termsDialog && (
+                        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+                          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col">
+                            <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between shrink-0">
+                              <h3 className="text-lg font-bold text-gray-900">
+                                {termsDialog === 'tos' ? 'Terms of Service' : 'Seller Agreement'}
+                              </h3>
+                              <button type="button" onClick={() => setTermsDialog(null)} className="text-gray-400 hover:text-gray-600">
+                                <X size={20} />
+                              </button>
+                            </div>
+                            <div
+                              className="flex-1 overflow-y-auto px-6 py-4 text-sm text-gray-700 leading-relaxed"
+                              onScroll={(e) => {
+                                const el = e.currentTarget;
+                                const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+                                if (atBottom) setTermsScrolled(prev => ({ ...prev, [termsDialog]: true }));
+                              }}
+                            >
+                              {termsDialog === 'tos' ? (
+                                <div className="space-y-4">
+                                  <h4 className="font-bold text-base">Xelnova Terms of Service</h4>
+                                  <p>Last updated: April 2026</p>
+                                  <p>Welcome to Xelnova. By accessing or using our platform, you agree to be bound by these Terms of Service. Please read them carefully.</p>
+                                  <h5 className="font-semibold">1. Acceptance of Terms</h5>
+                                  <p>By creating an account and using the Xelnova platform, you confirm that you have read, understood, and agree to these Terms. If you do not agree, you may not use the platform.</p>
+                                  <h5 className="font-semibold">2. Account Registration</h5>
+                                  <p>You must provide accurate and complete information during registration. You are responsible for maintaining the confidentiality of your account credentials. You must be at least 18 years of age to create an account.</p>
+                                  <h5 className="font-semibold">3. Platform Usage</h5>
+                                  <p>You agree to use the platform only for lawful purposes. You shall not use the platform to sell prohibited items, engage in fraudulent activities, or violate any applicable laws or regulations.</p>
+                                  <h5 className="font-semibold">4. Intellectual Property</h5>
+                                  <p>All content on the Xelnova platform, including logos, designs, and software, is the property of Xelnova Private Limited. You may not copy, modify, or distribute any content without prior written consent.</p>
+                                  <h5 className="font-semibold">5. Privacy</h5>
+                                  <p>Your use of the platform is also governed by our Privacy Policy. We collect, use, and protect your data in accordance with applicable data protection laws.</p>
+                                  <h5 className="font-semibold">6. Payment & Fees</h5>
+                                  <p>Xelnova may charge commission fees on sales made through the platform. All fees will be transparently disclosed before any transaction. Payment processing is handled through secure third-party payment gateways.</p>
+                                  <h5 className="font-semibold">7. Dispute Resolution</h5>
+                                  <p>Any disputes arising from the use of the platform shall be resolved through arbitration in accordance with the laws of India. The jurisdiction shall be New Delhi, India.</p>
+                                  <h5 className="font-semibold">8. Limitation of Liability</h5>
+                                  <p>Xelnova shall not be liable for any indirect, incidental, or consequential damages arising from the use of the platform. Our total liability shall not exceed the fees paid by you in the preceding 12 months.</p>
+                                  <h5 className="font-semibold">9. Termination</h5>
+                                  <p>Xelnova reserves the right to suspend or terminate your account at any time for violation of these Terms. You may also terminate your account by contacting support.</p>
+                                  <h5 className="font-semibold">10. Changes to Terms</h5>
+                                  <p>Xelnova may update these Terms from time to time. Continued use of the platform after changes constitutes acceptance of the updated Terms.</p>
+                                  <p className="pt-4 font-medium">By scrolling to the bottom, you confirm you have read and understood these Terms.</p>
+                                </div>
+                              ) : (
+                                <div className="space-y-4">
+                                  <h4 className="font-bold text-base">Xelnova Seller Agreement</h4>
+                                  <p>Last updated: April 2026</p>
+                                  <p>This Seller Agreement governs the relationship between you (the &quot;Seller&quot;) and Xelnova Private Limited (the &quot;Platform&quot;).</p>
+                                  <h5 className="font-semibold">1. Seller Obligations</h5>
+                                  <p>As a seller on Xelnova, you agree to: provide accurate product information, fulfill orders within the specified timeframe, maintain product quality standards, and comply with all applicable laws including GST regulations.</p>
+                                  <h5 className="font-semibold">2. Product Listings</h5>
+                                  <p>All product listings must be accurate, not misleading, and comply with Xelnova&apos;s listing policies. Xelnova reserves the right to remove any listing that violates these policies without prior notice.</p>
+                                  <h5 className="font-semibold">3. Pricing & Commission</h5>
+                                  <p>Sellers set their own prices. Xelnova charges a commission on each sale, which varies by category. The commission structure will be communicated during onboarding and may be updated with 30 days&apos; notice.</p>
+                                  <h5 className="font-semibold">4. Payments & Settlements</h5>
+                                  <p>Payments for completed orders will be settled to your registered bank account as per the payment cycle (typically 7-14 business days after delivery). Xelnova deducts applicable commission and fees before settlement.</p>
+                                  <h5 className="font-semibold">5. Shipping & Delivery</h5>
+                                  <p>Sellers using Easy Ship agree to Xelnova&apos;s shipping terms. Self-ship sellers must use approved carriers and provide valid tracking information. Delivery SLAs must be maintained.</p>
+                                  <h5 className="font-semibold">6. Returns & Refunds</h5>
+                                  <p>Sellers must honor Xelnova&apos;s return policy. Refunds for returned items will be deducted from future settlements. Sellers are responsible for quality issues that lead to returns.</p>
+                                  <h5 className="font-semibold">7. Account Suspension</h5>
+                                  <p>Xelnova may suspend or terminate your seller account for: policy violations, high return rates, poor seller ratings, fraudulent activities, or failure to fulfill orders.</p>
+                                  <h5 className="font-semibold">8. Intellectual Property</h5>
+                                  <p>You warrant that all products and content you list do not infringe on any third-party intellectual property rights. You are solely liable for any IP infringement claims.</p>
+                                  <h5 className="font-semibold">9. Indemnification</h5>
+                                  <p>You agree to indemnify and hold Xelnova harmless from any claims, damages, or expenses arising from your use of the platform, your products, or your violation of this Agreement.</p>
+                                  <h5 className="font-semibold">10. Governing Law</h5>
+                                  <p>This Agreement shall be governed by the laws of India. Any disputes shall be subject to the exclusive jurisdiction of courts in New Delhi.</p>
+                                  <p className="pt-4 font-medium">By scrolling to the bottom, you confirm you have read and understood this Seller Agreement.</p>
+                                </div>
+                              )}
+                            </div>
+                            <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3 shrink-0">
+                              <button type="button" onClick={() => setTermsDialog(null)} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">
+                                Cancel
+                              </button>
+                              <button
+                                type="button"
+                                disabled={!termsScrolled[termsDialog]}
+                                onClick={() => {
+                                  setTermsAccepted(prev => ({ ...prev, [termsDialog]: true }));
+                                  if (termsDialog === 'tos' && termsAccepted.seller) {
+                                    setFormData(prev => ({ ...prev, agreeTerms: true }));
+                                  } else if (termsDialog === 'seller' && termsAccepted.tos) {
+                                    setFormData(prev => ({ ...prev, agreeTerms: true }));
+                                  }
+                                  setTermsDialog(null);
+                                }}
+                                className="px-6 py-2.5 rounded-xl text-sm font-semibold text-white bg-primary-600 hover:bg-primary-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shadow-lg shadow-primary-600/25"
+                              >
+                                {termsScrolled[termsDialog] ? 'I Accept' : 'Scroll to read all terms'}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </>
                   )}
 
@@ -1669,7 +1793,7 @@ export default function RegisterPage() {
                     {currentStep === 3 ? (
                       <button
                         type="submit"
-                        disabled={loading || signatureUploading}
+                        disabled={loading || signatureUploading || !termsAccepted.tos || !termsAccepted.seller}
                         className="relative inline-flex items-center justify-center gap-2.5 px-8 py-3.5 rounded-xl text-[15px] font-bold text-white bg-gradient-to-r from-violet-600 via-purple-600 to-indigo-700 shadow-lg shadow-primary-600/25 hover:shadow-xl hover:shadow-primary-600/30 hover:-translate-y-0.5 active:translate-y-0 disabled:opacity-60 disabled:pointer-events-none transition-all duration-200 min-w-[200px] overflow-hidden group"
                       >
                         <span className="absolute inset-0 bg-gradient-to-r from-violet-700 via-purple-700 to-indigo-800 opacity-0 group-hover:opacity-100 transition-opacity duration-200" />

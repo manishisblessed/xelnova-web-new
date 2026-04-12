@@ -30,6 +30,10 @@ export async function proxyToBackend(
   if (contentType) headers.set('Content-Type', contentType);
   const role = request.headers.get('x-role');
   if (role) headers.set('X-Role', role);
+  const userAgent = request.headers.get('user-agent');
+  if (userAgent) headers.set('User-Agent', userAgent);
+  const forwarded = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip');
+  if (forwarded) headers.set('X-Forwarded-For', forwarded);
 
   const method = request.method;
   const init: RequestInit = { method, headers, signal: AbortSignal.timeout(PROXY_TIMEOUT_MS) };

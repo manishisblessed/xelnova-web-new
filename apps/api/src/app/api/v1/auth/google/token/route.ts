@@ -10,11 +10,13 @@ export async function POST(request: NextRequest) {
   const BACKEND_URL = getBackendUrl();
   const body = await request.text();
   try {
+    const clientIp = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || '';
     const res = await fetch(`${BACKEND_URL}/api/v1/auth/google/token`, {
       method: 'POST',
       headers: {
         'Content-Type': request.headers.get('content-type') || 'application/json',
         'User-Agent': request.headers.get('user-agent') || '',
+        ...(clientIp ? { 'X-Forwarded-For': clientIp } : {}),
       },
       body: body || undefined,
     });

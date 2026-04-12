@@ -5,9 +5,10 @@ import { ReportsService } from './reports.service';
 import { DuplicateListingService } from './duplicate-listing.service';
 import { PricingCheckService } from './pricing-check.service';
 import { PaymentModule } from '../payment/payment.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
-  imports: [PaymentModule],
+  imports: [PaymentModule, NotificationsModule],
   controllers: [AdminController],
   providers: [AdminService, ReportsService, DuplicateListingService, PricingCheckService],
   exports: [AdminService, ReportsService],

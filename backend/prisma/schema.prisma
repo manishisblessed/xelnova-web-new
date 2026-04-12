@@ -927,6 +927,17 @@ enum WalletReferenceType {
   COMMISSION
   MANUAL
   REFUND
+  WALLET_TOPUP
+  TRANSFER
+  RECHARGE
+  BILL_PAYMENT
+}
+
+enum BankTransferStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
 }
 
 model Wallet {
@@ -962,6 +973,29 @@ model WalletTransaction {
   @@index([walletId])
   @@index([referenceType])
   @@map("wallet_transactions")
+}
+
+model BankTransferRequest {
+  id              String             @id @default(cuid())
+  walletId        String
+  userId          String
+  amount          Float
+  accountNumber   String
+  ifscCode        String
+  accountHolder   String
+  status          BankTransferStatus @default(PENDING)
+  transactionRef  String?
+  failureReason   String?
+  processedAt     DateTime?
+  processedBy     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([walletId])
+  @@index([userId])
+  @@index([status])
+  @@map("bank_transfer_requests")
 }
 
 // ─── Site-wide admin settings (singleton row id = 1) ───
