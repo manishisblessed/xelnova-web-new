@@ -639,6 +639,11 @@ export default function CheckoutPage() {
           <div className="lg:col-span-1">
             <div className="sticky top-28 rounded-2xl border border-border bg-white p-6 shadow-sm">
               <h2 className="mb-4 text-lg font-bold text-text-primary">Price Details</h2>
+              {(() => {
+                const shippingCharge = priceTotal > 499 ? 0 : 49;
+                const tax = Math.round(priceTotal * 0.18);
+                const grandTotal = priceTotal + shippingCharge + tax;
+                return (
               <div className="space-y-3 text-sm">
                 <div className="flex justify-between text-text-secondary">
                   <span>Price ({itemCount} items)</span>
@@ -652,12 +657,27 @@ export default function CheckoutPage() {
                 )}
                 <div className="flex justify-between text-text-secondary">
                   <span>Delivery</span>
-                  <span className="font-semibold text-success-600">FREE</span>
+                  {shippingCharge === 0 ? (
+                    <span className="font-semibold text-success-600">FREE</span>
+                  ) : (
+                    <span>{formatCurrency(shippingCharge)}</span>
+                  )}
                 </div>
+                {tax > 0 && (
+                  <div className="flex justify-between text-text-secondary">
+                    <span>GST (18%)</span>
+                    <span>{formatCurrency(tax)}</span>
+                  </div>
+                )}
+                {shippingCharge > 0 && priceTotal < 499 && (
+                  <p className="text-xs text-text-muted">
+                    Add {formatCurrency(499 - priceTotal)} more for free delivery
+                  </p>
+                )}
                 <hr className="border-border" />
                 <div className="flex justify-between text-lg font-bold text-text-primary">
                   <span>Total Amount</span>
-                  <span>{formatCurrency(priceTotal)}</span>
+                  <span>{formatCurrency(grandTotal)}</span>
                 </div>
                 {savings > 0 && (
                   <p className="rounded-xl bg-success-50 border border-success-200 p-2.5 text-center text-sm font-medium text-success-700">
@@ -665,6 +685,8 @@ export default function CheckoutPage() {
                   </p>
                 )}
               </div>
+                );
+              })()}
 
               <div className="mt-6 flex gap-3">
                 {stepIndex > 0 && (
