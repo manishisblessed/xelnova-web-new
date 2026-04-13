@@ -10,6 +10,7 @@ import { JwtService } from '@nestjs/jwt';
 import { sendFortiusOtpSms } from '../../common/helpers/fortius-sms.helper';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VerificationService } from '../verification/verification.service';
+import { NotificationService } from '../notifications/notification.service';
 import * as bcrypt from 'bcrypt';
 import { v4 as uuidv4 } from 'uuid';
 import {
@@ -37,6 +38,7 @@ export class SellerOnboardingService {
     private prisma: PrismaService,
     private verificationService: VerificationService,
     private jwtService: JwtService,
+    private notificationService: NotificationService,
   ) {}
 
   /**
@@ -870,6 +872,16 @@ export class SellerOnboardingService {
         create: { ownerId: seller.userId, ownerType: 'SELLER', balance: 0 },
         update: {},
       });
+
+      // Send approval notifications (In-app + Email + SMS)
+      this.notificationService
+        .notifySellerVerified(seller.userId, seller.storeName)
+        .catch((err) => console.error(`Failed to notify seller approval: ${err.message}`));
+    } else if (dto.decision === 'REJECTED' && seller.userId) {
+      // Send rejection notifications (In-app + Email + SMS)
+      this.notificationService
+        .notifySellerRejected(seller.userId, seller.storeName, dto.rejectionReason)
+        .catch((err) => console.error(`Failed to notify seller rejection: ${err.message}`));
     }
 
     return {

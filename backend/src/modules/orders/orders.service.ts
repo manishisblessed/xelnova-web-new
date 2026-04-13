@@ -278,8 +278,13 @@ export class OrdersService {
       this.logger.warn(`Failed to send order confirmation email: ${err.message}`),
     );
 
-    // In-app notification (fire-and-forget)
+    // In-app notification + SMS for customer (fire-and-forget)
     this.notificationService.notifyOrderPlaced(userId, order.orderNumber, order.total).catch(() => {});
+
+    // Notify sellers about new order (fire-and-forget)
+    this.notifySellerNewOrder(order).catch((err) =>
+      this.logger.warn(`Failed to notify sellers for order ${order.orderNumber}: ${err.message}`),
+    );
 
     // Fraud detection (fire-and-forget)
     this.fraudService.evaluateOrder(order.id).catch((err) =>
@@ -313,6 +318,30 @@ export class OrdersService {
         price: i.price,
       })),
     });
+  }
+
+  private async notifySellerNewOrder(order: { orderNumber: string; total: number; items: { productId: string; price: number; quantity: number }[] }) {
+    const productIds = order.items.map((item) => item.productId);
+
+    const products = await this.prisma.product.findMany({
+      where: { id: { in: productIds } },
+      select: { id: true, sellerId: true },
+    });
+
+    const sellerAmounts = new Map<string, number>();
+    for (const item of order.items) {
+      const product = products.find((p) => p.id === item.productId);
+      if (product?.sellerId) {
+        const current = sellerAmounts.get(product.sellerId) || 0;
+        sellerAmounts.set(product.sellerId, current + item.price * item.quantity);
+      }
+    }
+
+    for (const [sellerId, amount] of sellerAmounts) {
+      this.notificationService
+        .notifyNewOrder(sellerId, order.orderNumber, amount)
+        .catch((err) => this.logger.warn(`Failed to notify seller ${sellerId}: ${err.message}`));
+    }
   }
 
   private static readonly CANCELLABLE_STATUSES = ['PENDING', 'PROCESSING', 'CONFIRMED'];

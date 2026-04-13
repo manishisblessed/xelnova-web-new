@@ -6,6 +6,7 @@ import { FraudDetectionService } from './fraud-detection.service';
 import { CodVerificationService } from './cod-verification.service';
 import { WhatsAppService } from './whatsapp.service';
 import { WebPushService } from './web-push.service';
+import { SmsService } from './sms.service';
 import {
   NotificationsController,
   LoyaltyController,
@@ -24,6 +25,7 @@ import {
     NotificationService,
     WhatsAppService,
     WebPushService,
+    SmsService,
     LoyaltyService,
     AbandonedCartService,
     FraudDetectionService,
@@ -33,6 +35,7 @@ import {
     NotificationService,
     WhatsAppService,
     WebPushService,
+    SmsService,
     LoyaltyService,
     AbandonedCartService,
     FraudDetectionService,

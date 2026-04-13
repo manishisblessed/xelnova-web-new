@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
+import { NotificationService } from '../notifications/notification.service';
 import {
   ShippingMode,
   ShipmentStatus,
@@ -32,6 +33,7 @@ export class ShippingService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
+    private readonly notificationService: NotificationService,
     delhivery: DelhiveryProvider,
     shiprocket: ShipRocketProvider,
     xpressbees: XpressBeesProvider,
@@ -184,6 +186,18 @@ export class ShippingService {
         where: { id: order.id },
         data: { status: OrderStatus.SHIPPED },
       });
+
+      // Send shipped notification to customer
+      this.notificationService
+        .notifyOrderShipped(
+          order.userId,
+          order.orderNumber,
+          dto.carrierName || 'Seller Courier',
+          `https://xelnova.in/track/${order.orderNumber}`,
+        )
+        .catch((err) =>
+          this.logger.warn(`Failed to send shipped notification for ${order.orderNumber}: ${err.message}`),
+        );
     }
 
     return shipment;
@@ -296,6 +310,18 @@ export class ShippingService {
       where: { id: order.id },
       data: { status: OrderStatus.SHIPPED },
     });
+
+    // Send shipped notification to customer
+    this.notificationService
+      .notifyOrderShipped(
+        order.userId,
+        order.orderNumber,
+        provider.providerName,
+        result.trackingUrl || `https://xelnova.in/track/${order.orderNumber}`,
+      )
+      .catch((err) =>
+        this.logger.warn(`Failed to send shipped notification for ${order.orderNumber}: ${err.message}`),
+      );
 
     return shipment;
   }
@@ -780,10 +806,54 @@ export class ShippingService {
 
     const orderStatus = statusMap[shipmentStatus];
     if (orderStatus) {
-      await this.prisma.order.update({
+      const order = await this.prisma.order.update({
         where: { id: orderId },
         data: { status: orderStatus },
+        include: { shipment: true },
       });
+
+      // Send customer notifications based on shipment status
+      this.sendStatusNotification(order, shipmentStatus).catch((err) =>
+        this.logger.warn(`Failed to send status notification for order ${orderId}: ${err.message}`),
+      );
+    }
+  }
+
+  private async sendStatusNotification(
+    order: { id: string; userId: string; orderNumber: string; shipment?: { courierProvider: string | null; trackingUrl: string | null } | null },
+    shipmentStatus: ShipmentStatus,
+  ) {
+    const courier = order.shipment?.courierProvider || 'Xelnova Courier';
+    const trackingUrl = order.shipment?.trackingUrl || `https://xelnova.in/track/${order.orderNumber}`;
+
+    switch (shipmentStatus) {
+      case ShipmentStatus.BOOKED:
+      case ShipmentStatus.PICKED_UP:
+        await this.notificationService.notifyOrderShipped(
+          order.userId,
+          order.orderNumber,
+          courier,
+          trackingUrl,
+        );
+        break;
+
+      case ShipmentStatus.OUT_FOR_DELIVERY:
+        await this.notificationService.logNotification({
+          userId: order.userId,
+          channel: 'in_app',
+          type: 'ORDER_OUT_FOR_DELIVERY',
+          title: 'Out for Delivery',
+          body: `Your order #${order.orderNumber} is out for delivery today!`,
+          data: { orderNumber: order.orderNumber },
+        });
+        break;
+
+      case ShipmentStatus.DELIVERED:
+        await this.notificationService.notifyOrderDelivered(order.userId, order.orderNumber);
+        break;
+
+      default:
+        break;
     }
   }
 

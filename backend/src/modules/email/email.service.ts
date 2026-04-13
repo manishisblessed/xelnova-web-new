@@ -179,4 +179,310 @@ export class EmailService {
       `,
     });
   }
+
+  // ─── Order Lifecycle Emails ───
+
+  async sendOrderCancelled(to: string, name: string, orderNumber: string, refundAmount: number) {
+    return this.sendEmail({
+      to,
+      subject: `Order #${orderNumber} Cancelled - XelNova`,
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+          <h1 style="color:#7c3aed">Order Cancelled</h1>
+          <p>Hi ${name},</p>
+          <p>Your order <strong>#${orderNumber}</strong> has been cancelled.</p>
+          <p>Refund of <strong>₹${refundAmount}</strong> will be processed within 5-7 business days.</p>
+          <a href="${this.config.get('APP_URL') || 'https://xelnova.in'}/account/orders" 
+             style="display:inline-block;padding:12px 24px;background:#7c3aed;color:white;text-decoration:none;border-radius:8px;margin-top:16px">
+            View Orders
+          </a>
+        </div>
+      `,
+    });
+  }
+
+  async sendOrderPacked(to: string, name: string, orderNumber: string) {
+    return this.sendEmail({
+      to,
+      subject: `Order #${orderNumber} Packed - XelNova`,
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+          <h1 style="color:#7c3aed">Order Packed!</h1>
+          <p>Hi ${name},</p>
+          <p>Great news! Your order <strong>#${orderNumber}</strong> is packed and ready for dispatch.</p>
+          <p>You'll receive tracking details once it's shipped.</p>
+        </div>
+      `,
+    });
+  }
+
+  async sendOrderOutForDelivery(to: string, name: string, orderNumber: string) {
+    return this.sendEmail({
+      to,
+      subject: `Order #${orderNumber} Out for Delivery! - XelNova`,
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+          <h1 style="color:#7c3aed">Out for Delivery!</h1>
+          <p>Hi ${name},</p>
+          <p>Exciting news! Your order <strong>#${orderNumber}</strong> is out for delivery today.</p>
+          <p>Please keep your phone handy for delivery updates.</p>
+        </div>
+      `,
+    });
+  }
+
+  // ─── Payment Emails ───
+
+  async sendPaymentSuccess(to: string, name: string, orderNumber: string, amount: number) {
+    return this.sendEmail({
+      to,
+      subject: `Payment Received for Order #${orderNumber} - XelNova`,
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+          <h1 style="color:#7c3aed">Payment Successful!</h1>
+          <p>Hi ${name},</p>
+          <p>We've received your payment of <strong>₹${amount}</strong> for order <strong>#${orderNumber}</strong>.</p>
+          <p>Thank you for shopping with us!</p>
+        </div>
+      `,
+    });
+  }
+
+  async sendPaymentFailed(to: string, name: string, orderNumber: string, paymentUrl: string) {
+    return this.sendEmail({
+      to,
+      subject: `Payment Failed for Order #${orderNumber} - XelNova`,
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+          <h1 style="color:#dc2626">Payment Failed</h1>
+          <p>Hi ${name},</p>
+          <p>Your payment for order <strong>#${orderNumber}</strong> was unsuccessful.</p>
+          <p>Please retry to avoid order cancellation.</p>
+          <a href="${paymentUrl}" 
+             style="display:inline-block;padding:12px 24px;background:#7c3aed;color:white;text-decoration:none;border-radius:8px;margin-top:16px">
+            Retry Payment
+          </a>
+        </div>
+      `,
+    });
+  }
+
+  // ─── Refund & Return Emails ───
+
+  async sendRefundProcessed(to: string, name: string, orderNumber: string, amount: number) {
+    return this.sendEmail({
+      to,
+      subject: `Refund Processed for Order #${orderNumber} - XelNova`,
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+          <h1 style="color:#7c3aed">Refund Processed</h1>
+          <p>Hi ${name},</p>
+          <p>Your refund of <strong>₹${amount}</strong> for order <strong>#${orderNumber}</strong> has been processed.</p>
+          <p>It will reflect in your account within 5-7 business days.</p>
+        </div>
+      `,
+    });
+  }
+
+  async sendReturnApproved(to: string, name: string, orderNumber: string) {
+    return this.sendEmail({
+      to,
+      subject: `Return Approved for Order #${orderNumber} - XelNova`,
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+          <h1 style="color:#7c3aed">Return Approved</h1>
+          <p>Hi ${name},</p>
+          <p>Your return request for order <strong>#${orderNumber}</strong> has been approved.</p>
+          <p>Pickup will be scheduled shortly. Please keep the item packed and ready.</p>
+        </div>
+      `,
+    });
+  }
+
+  async sendReturnRejected(to: string, name: string, orderNumber: string, reason: string) {
+    return this.sendEmail({
+      to,
+      subject: `Return Request Update for Order #${orderNumber} - XelNova`,
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+          <h1 style="color:#7c3aed">Return Request Update</h1>
+          <p>Hi ${name},</p>
+          <p>Your return request for order <strong>#${orderNumber}</strong> could not be approved.</p>
+          <p><strong>Reason:</strong> ${reason}</p>
+          <p>If you have questions, please contact our support team.</p>
+          <a href="${this.config.get('APP_URL') || 'https://xelnova.in'}/support" 
+             style="display:inline-block;padding:12px 24px;background:#7c3aed;color:white;text-decoration:none;border-radius:8px;margin-top:16px">
+            Contact Support
+          </a>
+        </div>
+      `,
+    });
+  }
+
+  async sendReturnPickupScheduled(to: string, name: string, orderNumber: string, pickupDate: string) {
+    return this.sendEmail({
+      to,
+      subject: `Return Pickup Scheduled for Order #${orderNumber} - XelNova`,
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+          <h1 style="color:#7c3aed">Pickup Scheduled</h1>
+          <p>Hi ${name},</p>
+          <p>Return pickup for order <strong>#${orderNumber}</strong> has been scheduled.</p>
+          <p><strong>Pickup Date:</strong> ${pickupDate}</p>
+          <p>Please keep the package ready for pickup.</p>
+        </div>
+      `,
+    });
+  }
+
+  // ─── Wallet Emails ───
+
+  async sendWalletCredit(to: string, name: string, amount: number, newBalance: number, reason?: string) {
+    return this.sendEmail({
+      to,
+      subject: `₹${amount} Credited to Your Wallet - XelNova`,
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+          <h1 style="color:#7c3aed">Wallet Credited</h1>
+          <p>Hi ${name},</p>
+          <p><strong>₹${amount}</strong> has been added to your Xelnova wallet${reason ? ` (${reason})` : ''}.</p>
+          <p><strong>New Balance:</strong> ₹${newBalance}</p>
+        </div>
+      `,
+    });
+  }
+
+  // ─── Seller Emails ───
+
+  async sendSellerRejection(to: string, storeName: string, reason?: string) {
+    return this.sendEmail({
+      to,
+      subject: 'Seller Verification Update - XelNova',
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+          <h1 style="color:#7c3aed">Verification Update</h1>
+          <p>Your seller account <strong>${storeName}</strong> verification requires attention.</p>
+          ${reason ? `<p><strong>Reason:</strong> ${reason}</p>` : ''}
+          <p>Please review and update your details to proceed.</p>
+          <a href="${this.config.get('SELLER_URL') || 'https://seller.xelnova.in'}" 
+             style="display:inline-block;padding:12px 24px;background:#7c3aed;color:white;text-decoration:none;border-radius:8px;margin-top:16px">
+            Update Details
+          </a>
+        </div>
+      `,
+    });
+  }
+
+  async sendNewOrderToSeller(to: string, sellerName: string, orderNumber: string, amount: number) {
+    return this.sendEmail({
+      to,
+      subject: `New Order Received - #${orderNumber} - XelNova`,
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+          <h1 style="color:#7c3aed">New Order!</h1>
+          <p>Hi ${sellerName},</p>
+          <p>You have received a new order.</p>
+          <p><strong>Order #:</strong> ${orderNumber}</p>
+          <p><strong>Amount:</strong> ₹${amount}</p>
+          <p>Please process and ship the order soon.</p>
+          <a href="${this.config.get('SELLER_URL') || 'https://seller.xelnova.in'}/orders" 
+             style="display:inline-block;padding:12px 24px;background:#7c3aed;color:white;text-decoration:none;border-radius:8px;margin-top:16px">
+            View Order
+          </a>
+        </div>
+      `,
+    });
+  }
+
+  async sendProductApproved(to: string, sellerName: string, productName: string) {
+    return this.sendEmail({
+      to,
+      subject: `Product Approved - ${productName} - XelNova`,
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+          <h1 style="color:#7c3aed">Product Approved!</h1>
+          <p>Hi ${sellerName},</p>
+          <p>Your product <strong>${productName}</strong> has been approved and is now live on the marketplace.</p>
+          <a href="${this.config.get('SELLER_URL') || 'https://seller.xelnova.in'}/products" 
+             style="display:inline-block;padding:12px 24px;background:#7c3aed;color:white;text-decoration:none;border-radius:8px;margin-top:16px">
+            View Products
+          </a>
+        </div>
+      `,
+    });
+  }
+
+  async sendProductRejected(to: string, sellerName: string, productName: string, reason?: string) {
+    return this.sendEmail({
+      to,
+      subject: `Product Review Update - ${productName} - XelNova`,
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+          <h1 style="color:#7c3aed">Product Review Update</h1>
+          <p>Hi ${sellerName},</p>
+          <p>Your product <strong>${productName}</strong> was not approved.</p>
+          ${reason ? `<p><strong>Reason:</strong> ${reason}</p>` : ''}
+          <p>Please update and resubmit.</p>
+          <a href="${this.config.get('SELLER_URL') || 'https://seller.xelnova.in'}/products" 
+             style="display:inline-block;padding:12px 24px;background:#7c3aed;color:white;text-decoration:none;border-radius:8px;margin-top:16px">
+            Edit Product
+          </a>
+        </div>
+      `,
+    });
+  }
+
+  // ─── Support Ticket Emails ───
+
+  async sendTicketCreated(to: string, name: string, ticketNumber: string) {
+    return this.sendEmail({
+      to,
+      subject: `Support Ticket Created - #${ticketNumber} - XelNova`,
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+          <h1 style="color:#7c3aed">Ticket Created</h1>
+          <p>Hi ${name},</p>
+          <p>Your support ticket <strong>#${ticketNumber}</strong> has been created.</p>
+          <p>We will respond within 24 hours.</p>
+          <a href="${this.config.get('APP_URL') || 'https://xelnova.in'}/account/tickets" 
+             style="display:inline-block;padding:12px 24px;background:#7c3aed;color:white;text-decoration:none;border-radius:8px;margin-top:16px">
+            Track Ticket
+          </a>
+        </div>
+      `,
+    });
+  }
+
+  async sendTicketReply(to: string, name: string, ticketNumber: string, replierName: string) {
+    return this.sendEmail({
+      to,
+      subject: `New Reply on Ticket #${ticketNumber} - XelNova`,
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+          <h1 style="color:#7c3aed">New Reply</h1>
+          <p>Hi ${name},</p>
+          <p><strong>${replierName}</strong> has replied to your support ticket <strong>#${ticketNumber}</strong>.</p>
+          <a href="${this.config.get('APP_URL') || 'https://xelnova.in'}/account/tickets" 
+             style="display:inline-block;padding:12px 24px;background:#7c3aed;color:white;text-decoration:none;border-radius:8px;margin-top:16px">
+            View Reply
+          </a>
+        </div>
+      `,
+    });
+  }
+
+  async sendTicketResolved(to: string, name: string, ticketNumber: string) {
+    return this.sendEmail({
+      to,
+      subject: `Ticket #${ticketNumber} Resolved - XelNova`,
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+          <h1 style="color:#7c3aed">Ticket Resolved</h1>
+          <p>Hi ${name},</p>
+          <p>Your support ticket <strong>#${ticketNumber}</strong> has been resolved.</p>
+          <p>Thank you for contacting us. If you need further assistance, feel free to create a new ticket.</p>
+        </div>
+      `,
+    });
+  }
 }

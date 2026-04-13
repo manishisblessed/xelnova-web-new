@@ -1,18 +1,20 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
+import { NotificationService } from '../notifications/notification.service';
 import Razorpay from 'razorpay';
 import * as crypto from 'crypto';
 
 @Injectable()
 export class PaymentService {
+  private readonly logger = new Logger(PaymentService.name);
   private razorpay: Razorpay | null = null;
-
   private readonly isTestMode: boolean;
 
   constructor(
     private readonly config: ConfigService,
     private readonly prisma: PrismaService,
+    private readonly notificationService: NotificationService,
   ) {
     const keyId = this.config.get('RAZORPAY_KEY_ID') || '';
     const keySecret = this.config.get('RAZORPAY_KEY_SECRET') || '';
@@ -120,6 +122,11 @@ export class PaymentService {
       },
     });
 
+    // Send payment success notification (In-app + SMS)
+    this.notificationService
+      .notifyPaymentSuccessful(order.userId, order.orderNumber, Number(order.total))
+      .catch((err) => this.logger.warn(`Payment success notification failed: ${err.message}`));
+
     return { verified: true, orderId: order.id };
   }
 
@@ -146,6 +153,11 @@ export class PaymentService {
           where: { id: order.id },
           data: { paymentStatus: 'PAID', status: 'CONFIRMED' },
         });
+
+        // Send payment success notification
+        this.notificationService
+          .notifyPaymentSuccessful(order.userId, order.orderNumber, Number(order.total))
+          .catch((err) => this.logger.warn(`Payment webhook notification failed: ${err.message}`));
       }
     }
 
@@ -158,6 +170,11 @@ export class PaymentService {
           where: { id: order.id },
           data: { paymentStatus: 'FAILED' },
         });
+
+        // Send payment failed notification
+        this.notificationService
+          .notifyPaymentFailed(order.userId, order.orderNumber, order.id)
+          .catch((err) => this.logger.warn(`Payment failed notification failed: ${err.message}`));
       }
     }
 

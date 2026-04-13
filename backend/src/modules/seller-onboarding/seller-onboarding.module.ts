@@ -6,12 +6,14 @@ import { SellerOnboardingService } from './seller-onboarding.service';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { VerificationModule } from '../verification/verification.module';
 import { UploadModule } from '../upload/upload.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
     PrismaModule,
     VerificationModule,
     UploadModule,
+    NotificationsModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       useFactory: (configService: ConfigService) => ({
