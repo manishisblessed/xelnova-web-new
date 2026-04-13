@@ -381,6 +381,13 @@ function LoginFormInner() {
       const next = document.getElementById(`seller-otp-${index + 1}`);
       next?.focus();
     }
+    // Auto-submit when all 6 digits are entered
+    if (value && newOtp.every((d) => d !== '') && newOtp.join('').length === 6) {
+      setTimeout(() => {
+        const otpString = newOtp.join('');
+        if (otpString.length === 6) handleVerifyOtp();
+      }, 100);
+    }
   };
 
   const handleOtpKeyDown = (index: number, e: React.KeyboardEvent) => {
@@ -401,6 +408,10 @@ function LoginFormInner() {
     setOtp(newOtp);
     const focusIdx = Math.min(pasted.length, 5);
     document.getElementById(`seller-otp-${focusIdx}`)?.focus();
+    // Auto-submit if pasted a full 6-digit OTP
+    if (pasted.length === 6) {
+      setTimeout(() => handleVerifyOtp(), 100);
+    }
   };
 
   // ─── Render ───

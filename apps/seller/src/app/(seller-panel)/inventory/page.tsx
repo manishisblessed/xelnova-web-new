@@ -15,6 +15,8 @@ import {
   apiUpdateProduct,
   apiUploadImage,
 } from '@/lib/api';
+import { useSellerProfile } from '@/lib/seller-profile-context';
+import { VerificationBanner } from '@/components/dashboard/verification-banner';
 import { publicApiBase } from '@/lib/public-api-base';
 import {
   formRowsToVariantGroups,
@@ -408,6 +410,7 @@ function ProductImageGallery({
 // ─── Main Page ───
 
 export default function SellerInventoryPage() {
+  const { isApproved } = useSellerProfile();
   const [products, setProducts] = useState<SellerProduct[]>([]);
   const [loading, setLoading] = useState(true);
   const [categories, setCategories] = useState<{ id: string; name: string }[]>([]);
@@ -1314,6 +1317,7 @@ export default function SellerInventoryPage() {
   return (
     <>
       <DashboardHeader title="Inventory" />
+      <VerificationBanner />
       <div className="p-6 space-y-6">
         <motion.div
           initial={{ opacity: 0, y: 8 }}
@@ -1321,7 +1325,12 @@ export default function SellerInventoryPage() {
           className="flex flex-wrap items-center justify-between gap-3"
         >
           <p className="text-sm text-text-muted">Manage your products and stock.</p>
-          <Button type="button" onClick={openCreate}>
+          <Button
+            type="button"
+            onClick={openCreate}
+            disabled={!isApproved}
+            title={!isApproved ? 'Account verification required' : undefined}
+          >
             <Plus className="h-4 w-4 mr-1" />
             Add product
           </Button>

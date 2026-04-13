@@ -248,12 +248,36 @@ function LoginPageContent() {
       const next = document.getElementById(`otp-${index + 1}`);
       next?.focus();
     }
+    // Auto-submit when all 6 digits are entered
+    if (value && newOtp.every((d) => d !== '') && newOtp.join('').length === 6) {
+      setTimeout(() => {
+        const otpString = newOtp.join('');
+        if (otpString.length === 6) handleVerifyOtp();
+      }, 100);
+    }
   };
 
   const handleKeyDown = (index: number, e: React.KeyboardEvent) => {
     if (e.key === 'Backspace' && !otp[index] && index > 0) {
       const prev = document.getElementById(`otp-${index - 1}`);
       prev?.focus();
+    }
+  };
+
+  const handleOtpPaste = (e: React.ClipboardEvent) => {
+    e.preventDefault();
+    const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6);
+    if (pasted.length === 0) return;
+    const newOtp = [...otp];
+    for (let i = 0; i < 6; i++) {
+      newOtp[i] = pasted[i] || '';
+    }
+    setOtp(newOtp);
+    const focusIdx = Math.min(pasted.length, 5);
+    document.getElementById(`otp-${focusIdx}`)?.focus();
+    // Auto-submit if pasted a full 6-digit OTP
+    if (pasted.length === 6) {
+      setTimeout(() => handleVerifyOtp(), 100);
     }
   };
 
@@ -461,6 +485,7 @@ function LoginPageContent() {
                           value={digit}
                           onChange={(e) => handleOtpChange(i, e.target.value.replace(/\D/g, ''))}
                           onKeyDown={(e) => handleKeyDown(i, e)}
+                          onPaste={handleOtpPaste}
                           className="h-12 w-12 rounded-xl border border-gray-200 bg-gray-50 text-center text-lg font-bold text-gray-900 outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 transition-all"
                         />
                       ))}

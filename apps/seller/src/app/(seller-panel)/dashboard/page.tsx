@@ -15,6 +15,7 @@ import {
 import { toast } from 'sonner';
 import { DashboardHeader } from '@/components/dashboard/dashboard-header';
 import { StatCard } from '@/components/dashboard/stat-card';
+import { VerificationBanner } from '@/components/dashboard/verification-banner';
 import { Badge } from '@xelnova/ui';
 import { apiDashboard } from '@/lib/api';
 
@@ -72,6 +73,7 @@ export default function SellerDashboardPage() {
   return (
     <>
       <DashboardHeader title="Seller Dashboard" />
+      <VerificationBanner />
       <div className="p-6 space-y-6">
         <motion.div
           variants={container}

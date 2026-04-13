@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { useDashboardAuth } from '@/lib/auth-context';
 import { Clock, LogOut, Shield } from 'lucide-react';
 
-const SESSION_DURATION_MS = 25 * 60 * 1000;
+const SESSION_DURATION_MS = 25 * 60 * 1000; // 25 minutes (JWT expires in 30m)
 const WARNING_BEFORE_MS = 60 * 1000;
 const ACTIVITY_DEBOUNCE_MS = 5000;
 
@@ -55,7 +55,7 @@ export function SessionTimer() {
         setShowModal(true);
       }
 
-      if (left === 0) {
+      if (left <= 0) {
         clearInterval(tick);
         logout();
       }

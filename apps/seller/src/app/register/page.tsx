@@ -1341,7 +1341,11 @@ export default function RegisterPage() {
                                 className="ml-auto text-primary-600 hover:text-primary-700 font-medium whitespace-nowrap">Change</button>
                             </div>
                             <div className="flex gap-2">
-                              <input type="text" value={emailOtpInput} onChange={(e) => setEmailOtpInput(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                              <input type="text" value={emailOtpInput} onChange={(e) => {
+                                const val = e.target.value.replace(/\D/g, '').slice(0, 6);
+                                setEmailOtpInput(val);
+                                if (val.length === 6) setTimeout(() => verifyOtp('EMAIL'), 100);
+                              }}
                                 placeholder="Enter 6-digit OTP" className="flex-1 min-w-0 px-3.5 py-2.5 rounded-lg border border-gray-200 bg-white text-sm text-center font-mono tracking-[0.3em] placeholder:tracking-normal placeholder:font-sans focus:border-primary-400 focus:ring-2 focus:ring-primary-500/10 outline-none transition-all"
                                 maxLength={6} autoFocus />
                               <Button type="button" onClick={() => verifyOtp('EMAIL')} loading={emailOtp.loading} size="sm" className="shrink-0">Verify</Button>
@@ -1388,7 +1392,11 @@ export default function RegisterPage() {
                                 className="ml-auto text-primary-600 hover:text-primary-700 font-medium whitespace-nowrap">Change</button>
                             </div>
                             <div className="flex gap-2">
-                              <input type="text" value={phoneOtpInput} onChange={(e) => setPhoneOtpInput(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                              <input type="text" value={phoneOtpInput} onChange={(e) => {
+                                const val = e.target.value.replace(/\D/g, '').slice(0, 6);
+                                setPhoneOtpInput(val);
+                                if (val.length === 6) setTimeout(() => verifyOtp('PHONE'), 100);
+                              }}
                                 placeholder="Enter 6-digit OTP" className="flex-1 min-w-0 px-3.5 py-2.5 rounded-lg border border-gray-200 bg-white text-sm text-center font-mono tracking-[0.3em] placeholder:tracking-normal placeholder:font-sans focus:border-primary-400 focus:ring-2 focus:ring-primary-500/10 outline-none transition-all"
                                 maxLength={6} autoFocus />
                               <Button type="button" onClick={() => verifyOtp('PHONE')} loading={phoneOtp.loading} size="sm" className="shrink-0">Verify</Button>
