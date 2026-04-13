@@ -4,6 +4,8 @@ import { useState, useEffect, useRef } from 'react';
 import { Bell } from 'lucide-react';
 import { useDashboardAuth } from '@/lib/auth-context';
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
+
 interface Notification {
   id: string;
   title: string;
@@ -27,7 +29,7 @@ export function NotificationBell() {
       try {
         const token = document.cookie.match(/(?:^|;\s*)xelnova-dashboard-token=([^;]*)/)?.[1];
         if (!token) return;
-        const res = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL || ''}/api/v1/notifications?limit=10`, {
+        const res = await fetch(`${API_URL}/notifications?limit=10`, {
           headers: { Authorization: `Bearer ${decodeURIComponent(token)}` },
         });
         const data = await res.json();
@@ -55,7 +57,7 @@ export function NotificationBell() {
     try {
       const token = document.cookie.match(/(?:^|;\s*)xelnova-dashboard-token=([^;]*)/)?.[1];
       if (!token) return;
-      await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL || ''}/api/v1/notifications/read-all`, {
+      await fetch(`${API_URL}/notifications/read-all`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${decodeURIComponent(token)}` },
       });
