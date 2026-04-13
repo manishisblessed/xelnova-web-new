@@ -38,12 +38,18 @@ export function NotificationBell() {
       const headers = authHeaders();
       if (!headers.Authorization) return;
       const res = await fetch(`${API_URL}/notifications?limit=10`, { headers });
+      if (!res.ok) {
+        console.warn(`[NotificationBell] fetch failed: ${res.status} ${res.statusText}`);
+        return;
+      }
       const data = await res.json();
       if (data.success) {
         setNotifications(data.data?.notifications || []);
         setUnread(data.data?.unread || 0);
       }
-    } catch { /* network errors are silently ignored; next poll will retry */ }
+    } catch (err) {
+      console.warn('[NotificationBell] fetch error:', err);
+    }
   }, []);
 
   useEffect(() => {

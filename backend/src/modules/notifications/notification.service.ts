@@ -75,6 +75,7 @@ export class NotificationService {
       this.prisma.notificationLog.count({ where: { userId } }),
       this.prisma.notificationLog.count({ where: { userId, read: false } }),
     ]);
+    this.logger.debug(`[GET_NOTIFICATIONS] userId=${userId} total=${total} unread=${unread} returned=${notifications.length}`);
     return { notifications, unread, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } };
   }
 
@@ -641,12 +642,19 @@ export class NotificationService {
    * Channels: In-app, Email, SMS
    */
   async notifySellerVerified(sellerId: string, storeName: string) {
+    this.logger.log(`[SELLER_VERIFIED] Starting notification for userId=${sellerId}, store="${storeName}"`);
+
     const user = await this.prisma.user.findUnique({
       where: { id: sellerId },
       select: { phone: true, email: true, name: true },
     });
 
-    await this.logNotification({
+    if (!user) {
+      this.logger.warn(`[SELLER_VERIFIED] User not found for id=${sellerId} — skipping all channels`);
+      return;
+    }
+
+    const notif = await this.logNotification({
       userId: sellerId,
       channel: 'in_app',
       type: 'SELLER_VERIFIED',
@@ -654,14 +662,15 @@ export class NotificationService {
       body: `Congratulations! Your seller account "${storeName}" has been verified. You can now start adding products.`,
       data: { storeName },
     });
+    this.logger.log(`[SELLER_VERIFIED] In-app notification created: id=${notif.id} for userId=${sellerId}`);
 
-    if (user?.email) {
+    if (user.email) {
       this.email.sendSellerApproval(user.email, storeName).catch((err) =>
         this.logger.warn(`Email failed for seller approval ${sellerId}: ${err.message}`),
       );
     }
 
-    if (user?.phone) {
+    if (user.phone) {
       this.sms.sendSellerApproved(user.phone, storeName).catch((err) =>
         this.logger.warn(`SMS failed for seller approval ${sellerId}: ${err.message}`),
       );

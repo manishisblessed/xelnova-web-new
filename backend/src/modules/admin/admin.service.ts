@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { Prisma, Role } from '@prisma/client';
 import { LoggingService } from '../logging/logging.service';
@@ -23,6 +23,8 @@ import {
 
 @Injectable()
 export class AdminService {
+  private readonly logger = new Logger(AdminService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly logging: LoggingService,
@@ -375,9 +377,13 @@ export class AdminService {
 
     if (profile.userId && dto.verified !== undefined) {
       if (dto.verified) {
-        this.notifications.notifySellerVerified(profile.userId, result.storeName).catch(() => {});
+        this.notifications.notifySellerVerified(profile.userId, result.storeName).catch((err) =>
+          this.logger.error(`Failed to notify seller verification: ${err.message}`),
+        );
       } else {
-        this.notifications.notifySellerRejected(profile.userId, result.storeName).catch(() => {});
+        this.notifications.notifySellerRejected(profile.userId, result.storeName).catch((err) =>
+          this.logger.error(`Failed to notify seller rejection: ${err.message}`),
+        );
       }
     }
 
