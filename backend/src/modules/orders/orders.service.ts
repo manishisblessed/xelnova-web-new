@@ -385,7 +385,7 @@ export class OrdersService {
       },
     });
 
-    this.notificationService.notifyOrderCancelled(userId, orderNumber, reason).catch((err) =>
+    this.notificationService.notifyOrderCancelled(userId, orderNumber, Number(updated.total) || 0).catch((err) =>
       this.logger.warn(`Failed to send order-cancelled notification: ${err.message}`),
     );
 
