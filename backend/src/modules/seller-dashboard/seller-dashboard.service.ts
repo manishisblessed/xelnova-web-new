@@ -316,6 +316,7 @@ export class SellerDashboardService {
             include: { product: { select: { name: true, images: true } } },
           },
           shippingAddress: true,
+          shipment: true,
         },
       }),
       this.prisma.order.count({ where }),
@@ -342,7 +343,7 @@ export class SellerDashboardService {
     return this.prisma.order.update({
       where: { id: orderId },
       data: { status: status as any },
-      include: { items: true, user: { select: { name: true, email: true, phone: true } }, shippingAddress: true },
+      include: { items: true, user: { select: { name: true, email: true, phone: true } }, shippingAddress: true, shipment: true },
     });
   }
 

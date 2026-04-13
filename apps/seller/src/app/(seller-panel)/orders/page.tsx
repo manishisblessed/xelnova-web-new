@@ -64,6 +64,7 @@ interface SellerOrder {
     state: string;
     pincode: string;
   };
+  shipment?: ShipmentData | null;
 }
 
 interface ShipmentData {
@@ -433,7 +434,9 @@ function OrderDetail({
   saving: boolean;
 }) {
   const [shipModal, setShipModal] = useState(false);
-  const [shipment, setShipment] = useState<ShipmentData | null>(null);
+  const [shipment, setShipment] = useState<ShipmentData | null>(
+    (order.shipment as ShipmentData) || null,
+  );
   const [shipmentLoading, setShipmentLoading] = useState(false);
   const [trackingData, setTrackingData] = useState<any>(null);
   const [trackingLoading, setTrackingLoading] = useState(false);
@@ -472,10 +475,10 @@ function OrderDetail({
   }, [order.id]);
 
   useEffect(() => {
-    if (['SHIPPED', 'DELIVERED'].includes(order.status)) {
+    if (['SHIPPED', 'DELIVERED'].includes(order.status) && !shipment) {
       loadShipment();
     }
-  }, [order.status, loadShipment]);
+  }, [order.status, loadShipment, shipment]);
 
   const handleLiveTrack = async () => {
     setTrackingLoading(true);
