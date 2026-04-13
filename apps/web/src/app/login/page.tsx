@@ -19,7 +19,7 @@ import {
 import { authApi, setAccessToken } from '@xelnova/api';
 
 const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '';
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL?.trim().replace(/\/$/, '') || '/api/v1';
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
 
 const benefits = [

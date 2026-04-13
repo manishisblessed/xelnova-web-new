@@ -25,7 +25,7 @@ interface VerificationLog {
   createdAt: string;
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL?.trim().replace(/\/$/, '') || '/api/v1';
 
 async function fetchWithAuth(endpoint: string) {
   const token = typeof window !== 'undefined' 

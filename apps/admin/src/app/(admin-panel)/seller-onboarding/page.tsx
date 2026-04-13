@@ -24,7 +24,7 @@ import { DataTable, type Column } from '@/components/dashboard/data-table';
 import { ActionModal } from '@/components/dashboard/action-modal';
 import { FormField, FormTextarea, FormInput } from '@/components/dashboard/form-field';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL?.trim().replace(/\/$/, '') || '/api/v1';
 
 interface SellerDocument {
   id: string;
