@@ -1006,9 +1006,13 @@ export default function RegisterPage() {
     if (currentStep === 1) {
       setLoading(true);
       try {
+        const token = getDashboardToken();
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+
         const res = await fetch(`${API_BASE}/seller-onboarding/register/step-1`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers,
           body: JSON.stringify({
             fullName: formData.fullName,
             email: formData.email,
