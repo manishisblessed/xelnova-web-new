@@ -437,7 +437,7 @@ export class AdminService {
     const page = query.page || 1;
     const limit = query.limit || 20;
     const where: Prisma.UserWhereInput = {
-      role: { not: Role.ADMIN },
+      role: Role.CUSTOMER,
     };
 
     if (query.search) {
