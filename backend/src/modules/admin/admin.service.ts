@@ -92,8 +92,7 @@ export class AdminService {
     ] = await Promise.all([
       this.prisma.product.count(),
       this.prisma.order.count(),
-      // All marketplace accounts shown on /customers (everyone except admins)
-      this.prisma.user.count({ where: { role: { not: Role.ADMIN } } }),
+      this.prisma.user.count({ where: { role: Role.CUSTOMER } }),
       this.prisma.sellerProfile.count(),
       this.prisma.order.count({ where: { createdAt: { gte: monthStart } } }),
       this.prisma.order.count({ where: { createdAt: { gte: lastMonthStart, lt: monthStart } } }),
