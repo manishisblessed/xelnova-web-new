@@ -35,8 +35,11 @@ import {
 } from 'lucide-react';
 import { Button } from '@xelnova/ui';
 import { publicApiBase } from '@/lib/public-api-base';
+import { apiGetUserProfile, getDashboardToken } from '@/lib/api';
 
 const API_BASE = publicApiBase();
+/** Placeholder token for step-1 when email/phone were already verified (session); backend accepts any non-empty string today. */
+const SESSION_VERIFIED_TOKEN = 'session-verified';
 const RECAPTCHA_SITE_KEY = process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY || '';
 
 declare global {
@@ -177,6 +180,10 @@ export default function RegisterPage() {
   const [bankVerification, setBankVerification] = useState<VerificationState>({ status: 'idle' });
   const [aadhaar, setAadhaar] = useState<AadhaarState>({ status: 'idle' });
 
+  /** Last 10 digits from profile phone (for invalidating session-verified OTP if user edits the field). */
+  const sessionPhoneDigitsRef = useRef<string | null>(null);
+  const sessionEmailLowerRef = useRef<string | null>(null);
+
   // Signature state
   const [signatureMode, setSignatureMode] = useState<'draw' | 'upload'>('draw');
   const [signatureFile, setSignatureFile] = useState<File | null>(null);
@@ -230,6 +237,72 @@ export default function RegisterPage() {
       }
     } catch { /* ignore */ }
   }, [resumeChecked]);
+
+  // Logged-in user (e.g. phone OTP at login): reflect already-verified email/phone so we do not ask for OTP again.
+  // Google OAuth users typically have phoneVerified false until they complete phone verification — they still verify here.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!getDashboardToken()) return;
+      try {
+        const u = await apiGetUserProfile();
+        if (cancelled) return;
+        const digits = (u.phone || '').replace(/\D/g, '');
+        const ten = digits.length >= 10 ? digits.slice(-10) : '';
+        sessionPhoneDigitsRef.current = ten || null;
+        sessionEmailLowerRef.current = u.email ? u.email.trim().toLowerCase() : null;
+
+        setFormData((prev) => ({
+          ...prev,
+          fullName: prev.fullName || u.name || '',
+          email: prev.email || u.email || '',
+          phone: prev.phone || ten,
+        }));
+
+        if (u.emailVerified) {
+          setEmailOtp((prev) => ({
+            ...prev,
+            verified: true,
+            sent: false,
+            loading: false,
+            token: prev.token || SESSION_VERIFIED_TOKEN,
+          }));
+        }
+        if (u.phoneVerified && ten) {
+          setPhoneOtp((prev) => ({
+            ...prev,
+            verified: true,
+            sent: false,
+            loading: false,
+            token: prev.token || SESSION_VERIFIED_TOKEN,
+          }));
+        }
+      } catch {
+        /* unauthenticated or profile error */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const ten = sessionPhoneDigitsRef.current;
+    const p = formData.phone.replace(/\D/g, '').slice(-10);
+    if (!ten || p.length !== 10) return;
+    if (phoneOtp.verified && phoneOtp.token === SESSION_VERIFIED_TOKEN && p !== ten) {
+      setPhoneOtp((prev) => ({ ...prev, verified: false, token: undefined, error: undefined }));
+    }
+  }, [formData.phone, phoneOtp.verified, phoneOtp.token]);
+
+  useEffect(() => {
+    const em = sessionEmailLowerRef.current;
+    const cur = formData.email.trim().toLowerCase();
+    if (!em || !cur) return;
+    if (emailOtp.verified && emailOtp.token === SESSION_VERIFIED_TOKEN && cur !== em) {
+      setEmailOtp((prev) => ({ ...prev, verified: false, token: undefined, error: undefined }));
+    }
+  }, [formData.email, emailOtp.verified, emailOtp.token]);
 
   // ========== Captcha ==========
 

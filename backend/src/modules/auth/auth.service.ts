@@ -239,7 +239,11 @@ export class AuthService {
 
     await this.prisma.user.update({
       where: { id: user.id },
-      data: { authProvider: 'PHONE' },
+      data: {
+        authProvider: 'PHONE',
+        phoneVerified: true,
+        phone: user.phone ?? phone,
+      },
     });
 
     const tokens = await this.generateTokens(user.id, user.email, user.role);

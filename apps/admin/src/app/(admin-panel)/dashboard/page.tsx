@@ -12,6 +12,7 @@ import { apiDashboard } from '@/lib/api';
 interface DashboardData {
   totalProducts: number;
   totalOrders: number;
+  /** Non-admin user accounts (customers + sellers); matches Customers list */
   totalCustomers: number;
   totalSellers: number;
   monthOrders: number;
@@ -81,7 +82,7 @@ export default function DashboardPage() {
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard loading={loading} label="Total Revenue" value={data ? `₹${data.totalRevenue.toLocaleString()}` : '—'} icon={DollarSign} />
           <StatCard loading={loading} label="Total Orders" value={data?.totalOrders ?? '—'} change={orderChange || undefined} changeLabel="vs last month" icon={ShoppingCart} />
-          <StatCard loading={loading} label="Customers" value={data?.totalCustomers ?? '—'} icon={Users} />
+          <StatCard loading={loading} label="Users" value={data?.totalCustomers ?? '—'} icon={Users} />
           <StatCard loading={loading} label="Sellers" value={data ? `${data.activeSellers} / ${data.totalSellers}` : '—'} icon={Store} />
         </motion.div>
 

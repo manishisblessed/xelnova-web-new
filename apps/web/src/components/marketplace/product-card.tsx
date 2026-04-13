@@ -55,9 +55,9 @@ export const ProductCard = memo(function ProductCard({ product, index = 0 }: Pro
       className="group h-full"
     >
       <Link href={`/products/${product.slug}`} className="block h-full">
-        <div className="bg-white rounded-2xl border border-border/60 overflow-hidden h-full flex flex-col transition-all duration-300 hover:shadow-card-hover hover:border-border hover:-translate-y-1">
+        <div className="card-3d shine-effect bg-white rounded-2xl border border-white/80 overflow-hidden h-full flex flex-col ring-1 ring-primary-100/30 hover:ring-primary-200/50">
           {/* Image */}
-          <div className="relative aspect-[4/5] overflow-hidden bg-surface-raised">
+          <div className="relative aspect-[4/5] overflow-hidden bg-gradient-to-br from-surface-raised via-white to-primary-50/30">
             {!imgLoaded && !imgError && <div className="absolute inset-0 animate-shimmer" />}
             {!imgError && product.images[0] ? (
               <Image
@@ -84,13 +84,13 @@ export const ProductCard = memo(function ProductCard({ product, index = 0 }: Pro
             {/* Top badges */}
             <div className="absolute top-3 left-3 z-10 flex flex-col gap-1.5">
               {product.discount > 0 && (
-                <span className="inline-flex items-center px-2 py-0.5 text-[10px] font-bold rounded-md bg-primary-600 text-white shadow-sm">
-                  {product.discount}% OFF
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-bold rounded-lg bg-gradient-to-r from-primary-600 to-primary-700 text-white shadow-lg shadow-primary-600/30 animate-bounce-subtle">
+                  <span className="text-accent-300">⚡</span> {product.discount}% OFF
                 </span>
               )}
               {isBestseller && (
-                <span className="inline-flex items-center px-2 py-0.5 text-[10px] font-bold rounded-md bg-accent-500 text-white shadow-sm">
-                  Bestseller
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-bold rounded-lg bg-gradient-to-r from-accent-500 to-accent-600 text-white shadow-lg shadow-accent-500/30">
+                  🏆 Bestseller
                 </span>
               )}
             </div>
@@ -111,12 +111,15 @@ export const ProductCard = memo(function ProductCard({ product, index = 0 }: Pro
 
             {/* Quick actions on hover */}
             {product.inStock && (
-              <div className="absolute bottom-3 left-3 right-3 flex gap-2 opacity-0 group-hover:opacity-100 translate-y-2 group-hover:translate-y-0 transition-all duration-300">
+              <div className="absolute bottom-3 left-3 right-3 flex gap-2 opacity-0 group-hover:opacity-100 translate-y-4 group-hover:translate-y-0 transition-all duration-400 ease-[cubic-bezier(0.16,1,0.3,1)]">
                 <button
                   onClick={handleAddToCart}
-                  className="flex-1 rounded-xl bg-primary-600 py-2.5 text-xs font-semibold text-white hover:bg-primary-700 active:scale-[0.98] shadow-lg shadow-primary-600/25 transition-all"
+                  className="btn-premium flex-1 rounded-xl py-2.5 text-xs font-bold text-white active:scale-[0.97]"
                 >
-                  Add to Cart
+                  <span className="relative z-10 flex items-center justify-center gap-1.5">
+                    <ShoppingCart size={14} />
+                    Add to Cart
+                  </span>
                 </button>
               </div>
             )}
@@ -143,15 +146,15 @@ export const ProductCard = memo(function ProductCard({ product, index = 0 }: Pro
             </h3>
 
             <div className="flex items-center gap-2">
-              <div className="flex items-center gap-0.5 bg-primary-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-md">
+              <div className="flex items-center gap-0.5 bg-gradient-to-r from-primary-600 to-primary-700 text-white text-[10px] font-bold px-2 py-1 rounded-lg shadow-sm">
+                <Star className="w-3 h-3 fill-accent-300 text-accent-300" />
                 <span>{product.rating.toFixed(1)}</span>
-                <Star className="w-2.5 h-2.5 fill-current" />
               </div>
               <span className="text-[11px] text-text-muted">
                 ({product.reviewCount.toLocaleString('en-IN')})
               </span>
               {isTopRated && !isBestseller && (
-                <span className="text-[10px] text-primary-600 font-semibold">Top Rated</span>
+                <span className="text-[10px] text-primary-600 font-semibold bg-primary-50 px-1.5 py-0.5 rounded-md">✨ Top Rated</span>
               )}
             </div>
 
@@ -167,7 +170,7 @@ export const ProductCard = memo(function ProductCard({ product, index = 0 }: Pro
                 )}
               </div>
               {product.price >= 499 && (
-                <p className="flex items-center gap-1 text-[11px] text-primary-600 font-medium mt-1">
+                <p className="flex items-center gap-1.5 text-[11px] text-emerald-600 font-medium mt-1.5 bg-emerald-50 px-2 py-1 rounded-lg w-fit">
                   <Truck className="w-3 h-3" />
                   Free delivery
                 </p>

@@ -5,6 +5,7 @@ import { productsApi, categoriesApi, searchApi } from '@xelnova/api';
 import type { Product as ApiProduct, Category as ApiCategory } from '@xelnova/api';
 import type { Product, ProductReview } from './data/products';
 import type { Category } from './data/categories';
+import { FALLBACK_CATEGORIES } from './data/fallback-categories';
 
 // ─── In-flight request deduplication cache ───
 
@@ -173,10 +174,13 @@ export function useFlashDeals() {
 // ─── Category hooks ───
 
 export function useCategories() {
-  return useFetch(async () => {
+  const state = useFetch(async () => {
     const cats = await deduplicatedFetch('categories', () => categoriesApi.getCategories());
     return cats.map(mapCategory);
   }, []);
+  const data =
+    state.data && state.data.length > 0 ? state.data : FALLBACK_CATEGORIES;
+  return { ...state, data };
 }
 
 // ─── Search hooks ───

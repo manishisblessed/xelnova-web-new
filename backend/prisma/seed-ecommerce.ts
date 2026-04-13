@@ -72,7 +72,7 @@ export async function upsertEcommerceDemoData(prisma: PrismaClient) {
       title: "Big festive sale",
       subtitle: "Up to 50% off",
       description: "Shop electronics, fashion, and home essentials.",
-      image: "https://images.unsplash.com/photo-1607082349566-187342175e2f?w=1200&h=400&fit=crop",
+      image: "/images/big-festive-sale-banner-design.png",
       ctaText: "Shop now",
       ctaLink: "/categories/electronics",
       bgColor: "#7c3aed",

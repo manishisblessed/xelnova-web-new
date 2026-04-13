@@ -101,17 +101,22 @@ export async function sendFortiusOtpSms(phone: string, otp: string): Promise<voi
     }
 
     let res: Response;
+    const controller = new AbortController();
+    const timeoutMs = 15000;
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
       res = await fetch(url, {
         method: 'GET',
         headers: { Accept: 'application/json, text/plain' },
-        signal: AbortSignal.timeout(15000),
+        signal: controller.signal,
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`[SMS] Network error (attempt ${attempt + 1}): ${msg}`);
       lastError = new BadGatewayException(`SMS gateway unreachable: ${msg}`);
       continue;
+    } finally {
+      clearTimeout(timer);
     }
 
     const raw = await res.text();

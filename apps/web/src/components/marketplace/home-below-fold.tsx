@@ -6,8 +6,8 @@ import Image from 'next/image';
 import {
   Zap, ShoppingBag, Eye, Star,
   Truck, RotateCcw, ShieldCheck, Headphones, Flame,
-  ChevronRight, ArrowRight, Smartphone, Mail,
-  ChevronDown, Wallet, Gift, Award, Sparkles,
+  ChevronRight, ArrowRight, Smartphone,
+  Wallet, Gift, Award, Sparkles,
 } from 'lucide-react';
 import { productsApi } from '@xelnova/api';
 import type { Banner } from '@xelnova/api';
@@ -109,12 +109,12 @@ export function HomeBelowFold() {
       {/* ─── 5. FLASH DEALS STRIP ─── */}
       <section className="py-4">
         <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
-          <div className="bg-white rounded-2xl border border-border/60 overflow-hidden shadow-card">
+          <div className="panel-glass overflow-hidden">
             <div className="flex flex-col md:flex-row">
-              <div className="md:w-56 lg:w-64 bg-gradient-to-br from-violet-600 via-purple-600 to-indigo-700 p-6 flex flex-col justify-center items-center text-center relative overflow-hidden">
-                <div className="absolute inset-0 opacity-10">
-                  <div className="absolute top-4 left-4 w-32 h-32 rounded-full bg-white/20 blur-2xl" />
-                  <div className="absolute bottom-4 right-4 w-24 h-24 rounded-full bg-accent-400/30 blur-xl" />
+              <div className="md:w-56 lg:w-64 bg-gradient-to-br from-violet-600/95 via-purple-600 to-indigo-800 p-6 flex flex-col justify-center items-center text-center relative overflow-hidden border-b md:border-b-0 md:border-r border-white/10 backdrop-blur-sm">
+                <div className="absolute inset-0 opacity-20">
+                  <div className="absolute top-4 left-4 w-32 h-32 rounded-full bg-white/25 blur-2xl" />
+                  <div className="absolute bottom-4 right-4 w-24 h-24 rounded-full bg-accent-400/40 blur-xl" />
                 </div>
                 <div className="relative">
                   <div className="w-12 h-12 rounded-2xl bg-accent-400 flex items-center justify-center mb-4 shadow-accent mx-auto">
@@ -168,8 +168,8 @@ export function HomeBelowFold() {
       {/* ─── 6. TRENDING PRODUCTS ─── */}
       <section className="py-6">
         <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
-          <div className="bg-white rounded-2xl border border-border/60 p-5 md:p-6 shadow-card">
-            <SectionHeader title="Trending Now" subtitle="Products everyone is talking about" seeAllHref="/products?sort=trending" />
+            <div className="panel-glass p-5 md:p-6">
+              <SectionHeader title="Trending Now" subtitle="Products everyone is talking about" seeAllHref="/products?sort=trending" />
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 md:gap-4">
               {trendingProducts.map((product, i) => (
                 <ProductCard key={product.id} product={product} index={i} />
@@ -183,7 +183,7 @@ export function HomeBelowFold() {
       {newArrivals.length > 0 && (
         <section className="py-6">
           <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
-            <div className="bg-white rounded-2xl border border-border/60 p-5 md:p-6 shadow-card">
+            <div className="panel-glass p-5 md:p-6">
               <SectionHeader title="New Arrivals" subtitle="Just landed — fresh picks for you" seeAllHref="/products?sort=newest" />
               <div className="flex gap-4 overflow-x-auto pb-2 scrollbar-hide">
                 {newArrivals.map((product, i) => (
@@ -232,7 +232,7 @@ export function HomeBelowFold() {
       {dealProduct && (
         <section className="py-6">
           <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
-            <div className="relative rounded-3xl border border-border/60 overflow-hidden bg-white shadow-card">
+            <div className="relative overflow-hidden rounded-3xl border border-white/80 bg-white/75 shadow-elevated backdrop-blur-xl ring-1 ring-primary-100/25">
               <div className="grid md:grid-cols-2">
                 {/* Image side */}
                 <div className="relative bg-gradient-to-br from-primary-50 via-accent-50/60 to-white flex items-center justify-center p-8 md:p-12 min-h-[280px] md:min-h-[400px]">
@@ -319,7 +319,7 @@ export function HomeBelowFold() {
       {bestSellers.length > 0 && (
         <section className="py-6">
           <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
-            <div className="bg-white rounded-2xl border border-border/60 p-5 md:p-6 shadow-card">
+            <div className="panel-glass p-5 md:p-6">
               <SectionHeader title="Best Sellers" subtitle="Most loved by our customers" seeAllHref="/products?sort=best-selling" />
               <div className="flex gap-4 overflow-x-auto pb-2 scrollbar-hide">
                 {bestSellers.map((product, i) => (
@@ -342,7 +342,7 @@ export function HomeBelowFold() {
               <Link
                 key={item.id}
                 href={item.href}
-                className="group flex items-center gap-5 bg-white border border-border/60 rounded-2xl p-5 hover:shadow-card-hover hover:-translate-y-0.5 transition-all duration-300"
+                className="group panel-glass-sm flex items-center gap-5 rounded-2xl p-5 transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_16px_40px_-12px_rgba(124,58,237,0.2)]"
               >
                 <div className="w-24 h-24 flex-shrink-0 rounded-xl bg-gradient-to-br from-gray-50 to-gray-100 overflow-hidden flex items-center justify-center border border-border/50">
                   <CategoryImageOrIcon slug={item.slug} name={item.title} imageSrc={item.image} size="lg" />
@@ -364,7 +364,7 @@ export function HomeBelowFold() {
       {recommended.length > 0 && (
         <section className="py-6">
           <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
-            <div className="bg-white rounded-2xl border border-border/60 p-5 md:p-6 shadow-card">
+            <div className="panel-glass p-5 md:p-6">
               <SectionHeader title="Recommended for You" subtitle="Handpicked based on top ratings" seeAllHref="/products" />
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 md:gap-4">
                 {recommended.map((product, i) => (
@@ -379,24 +379,35 @@ export function HomeBelowFold() {
       {/* ─── SHOP BY PRICE RANGE ─── */}
       <section className="py-6">
         <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
-          <SectionHeader title="Shop by Budget" subtitle="Find products that fit your budget" />
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 md:gap-4">
+          <SectionHeader title="Shop by Budget" subtitle="Find products that fit your budget" accent />
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 md:gap-5">
             {[
-              { label: 'Under ₹499', range: '0-499', gradient: 'from-emerald-500 to-teal-600', icon: '💰' },
-              { label: 'Under ₹999', range: '0-999', gradient: 'from-blue-500 to-indigo-600', icon: '🛍️' },
-              { label: 'Under ₹1,999', range: '0-1999', gradient: 'from-purple-500 to-violet-600', icon: '✨' },
-              { label: 'Premium', range: '2000-99999', gradient: 'from-amber-500 to-orange-600', icon: '👑' },
-            ].map((tier) => (
+              { label: 'Under ₹499', range: '0-499', gradient: 'from-emerald-500 to-teal-600', lightGradient: 'from-emerald-50 to-teal-50', icon: '💰', iconBg: 'bg-emerald-100' },
+              { label: 'Under ₹999', range: '0-999', gradient: 'from-blue-500 to-indigo-600', lightGradient: 'from-blue-50 to-indigo-50', icon: '🛍️', iconBg: 'bg-blue-100' },
+              { label: 'Under ₹1,999', range: '0-1999', gradient: 'from-purple-500 to-violet-600', lightGradient: 'from-purple-50 to-violet-50', icon: '✨', iconBg: 'bg-purple-100' },
+              { label: 'Premium', range: '2000-99999', gradient: 'from-amber-500 to-orange-600', lightGradient: 'from-amber-50 to-orange-50', icon: '👑', iconBg: 'bg-amber-100' },
+            ].map((tier, i) => (
               <Link
                 key={tier.range}
                 href={`/products?priceRange=${tier.range}`}
-                className="group relative overflow-hidden rounded-2xl border border-border/60 bg-white p-6 text-center hover:shadow-card-hover hover:-translate-y-1 transition-all duration-300"
+                className="group card-3d shine-effect relative overflow-hidden rounded-2xl p-6 text-center bg-white border border-white/80 ring-1 ring-gray-100/50"
               >
-                <div className={`absolute inset-0 bg-gradient-to-br ${tier.gradient} opacity-0 group-hover:opacity-5 transition-opacity duration-300`} />
-                <div className="text-3xl mb-3">{tier.icon}</div>
-                <h3 className="text-lg font-bold text-text-primary group-hover:text-primary-700 transition-colors">{tier.label}</h3>
-                <p className="text-xs text-text-muted mt-1">Free delivery included</p>
-                <span className="inline-flex items-center gap-1 text-xs font-semibold text-primary-600 mt-3 group-hover:gap-2 transition-all">
+                {/* Gradient background on hover */}
+                <div className={`absolute inset-0 bg-gradient-to-br ${tier.lightGradient} opacity-0 group-hover:opacity-100 transition-opacity duration-500`} />
+                
+                {/* Animated ring */}
+                <div className={`absolute -inset-1 bg-gradient-to-r ${tier.gradient} rounded-2xl opacity-0 group-hover:opacity-20 blur-sm transition-all duration-500`} />
+                
+                {/* Icon with bounce */}
+                <div className={`relative z-10 w-14 h-14 ${tier.iconBg} rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-sm group-hover:shadow-md transition-all duration-300 group-hover:scale-110`}>
+                  <span className="text-2xl">{tier.icon}</span>
+                </div>
+                
+                <h3 className="relative z-10 text-lg font-bold text-text-primary group-hover:text-transparent group-hover:bg-clip-text group-hover:bg-gradient-to-r group-hover:${tier.gradient} transition-all duration-300">
+                  {tier.label}
+                </h3>
+                <p className="relative z-10 text-xs text-text-muted mt-1.5">Free delivery included</p>
+                <span className={`relative z-10 inline-flex items-center gap-1.5 text-xs font-bold mt-4 px-3 py-1.5 rounded-full bg-gradient-to-r ${tier.gradient} text-white shadow-sm group-hover:shadow-md group-hover:gap-2 transition-all duration-300`}>
                   Explore <ArrowRight size={12} />
                 </span>
               </Link>
@@ -408,28 +419,38 @@ export function HomeBelowFold() {
       {/* ─── CURATED COLLECTIONS ─── */}
       <section className="py-6">
         <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
-          <SectionHeader title="Curated Collections" subtitle="Hand-picked for every occasion" />
+          <SectionHeader title="Curated Collections" subtitle="Hand-picked for every occasion" accent />
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {[
-              { title: 'Work From Home Essentials', desc: 'Desks, chairs, tech & more', gradient: 'from-blue-600 to-indigo-700', href: '/products?collection=wfh' },
-              { title: 'Wedding Season Picks', desc: 'Outfits, gifts & decorations', gradient: 'from-rose-500 to-pink-600', href: '/products?collection=wedding' },
-              { title: 'Summer Must-Haves', desc: 'Stay cool this season', gradient: 'from-amber-500 to-orange-600', href: '/products?collection=summer' },
-              { title: 'Fitness & Wellness', desc: 'Gym gear, supplements & yoga', gradient: 'from-emerald-500 to-teal-600', href: '/products?collection=fitness' },
-              { title: 'Home Makeover', desc: 'Decor, furniture & organization', gradient: 'from-violet-500 to-purple-600', href: '/products?collection=home' },
-              { title: 'Tech Accessories', desc: 'Cases, chargers & gadgets', gradient: 'from-cyan-500 to-blue-600', href: '/products?collection=tech' },
+              { title: 'Work From Home Essentials', desc: 'Desks, chairs, tech & more', gradient: 'from-blue-600 to-indigo-700', href: '/products?collection=wfh', icon: '💻' },
+              { title: 'Wedding Season Picks', desc: 'Outfits, gifts & decorations', gradient: 'from-rose-500 to-pink-600', href: '/products?collection=wedding', icon: '💍' },
+              { title: 'Summer Must-Haves', desc: 'Stay cool this season', gradient: 'from-amber-500 to-orange-600', href: '/products?collection=summer', icon: '☀️' },
+              { title: 'Fitness & Wellness', desc: 'Gym gear, supplements & yoga', gradient: 'from-emerald-500 to-teal-600', href: '/products?collection=fitness', icon: '💪' },
+              { title: 'Home Makeover', desc: 'Decor, furniture & organization', gradient: 'from-violet-500 to-purple-600', href: '/products?collection=home', icon: '🏠' },
+              { title: 'Tech Accessories', desc: 'Cases, chargers & gadgets', gradient: 'from-cyan-500 to-blue-600', href: '/products?collection=tech', icon: '📱' },
             ].map((collection) => (
               <Link
                 key={collection.title}
                 href={collection.href}
-                className={`group relative overflow-hidden rounded-2xl bg-gradient-to-br ${collection.gradient} p-6 min-h-[140px] flex flex-col justify-end hover:shadow-lg hover:-translate-y-1 transition-all duration-300`}
+                className={`group shine-effect relative overflow-hidden rounded-3xl bg-gradient-to-br ${collection.gradient} p-7 min-h-[160px] flex flex-col justify-end shadow-lg shadow-black/10 hover:shadow-2xl hover:shadow-black/15 hover:-translate-y-2 hover:scale-[1.02] transition-all duration-400`}
               >
-                <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent" />
-                <div className="absolute top-4 right-4 w-20 h-20 rounded-full bg-white/[0.06] group-hover:scale-125 transition-transform duration-500" />
+                {/* Animated background shapes */}
+                <div className="absolute inset-0 overflow-hidden">
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-black/20 to-transparent" />
+                  <div className="absolute top-4 right-4 w-24 h-24 rounded-full bg-white/[0.08] blur-sm group-hover:scale-150 group-hover:bg-white/[0.12] transition-all duration-700" />
+                  <div className="absolute -bottom-8 -left-8 w-32 h-32 rounded-full bg-white/[0.04] blur-md group-hover:scale-125 transition-transform duration-700" />
+                </div>
+                
+                {/* Collection icon */}
+                <div className="absolute top-4 left-4 text-3xl opacity-80 group-hover:scale-125 group-hover:opacity-100 transition-all duration-300">
+                  {collection.icon}
+                </div>
+                
                 <div className="relative">
-                  <h3 className="text-lg font-bold text-white mb-1">{collection.title}</h3>
-                  <p className="text-xs text-white/75">{collection.desc}</p>
-                  <span className="inline-flex items-center gap-1 text-xs font-semibold text-white/90 mt-3 group-hover:gap-2 transition-all">
-                    Shop Collection <ArrowRight size={12} />
+                  <h3 className="text-xl font-bold text-white mb-1.5 drop-shadow-sm">{collection.title}</h3>
+                  <p className="text-sm text-white/80">{collection.desc}</p>
+                  <span className="inline-flex items-center gap-1.5 text-xs font-bold text-white mt-4 bg-white/20 backdrop-blur-sm px-3 py-1.5 rounded-full w-fit group-hover:bg-white/30 group-hover:gap-2.5 transition-all duration-300">
+                    Shop Collection <ArrowRight size={12} className="group-hover:translate-x-0.5 transition-transform" />
                   </span>
                 </div>
               </Link>
@@ -464,7 +485,7 @@ export function HomeBelowFold() {
                 return (
                   <div
                     key={review.id}
-                    className="bg-white rounded-2xl border border-border/60 p-6 shadow-card hover:shadow-card-hover transition-all duration-300"
+                    className="panel-glass p-6 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_16px_40px_-12px_rgba(124,58,237,0.15)]"
                   >
                     <div className="flex items-center gap-1 mb-3">
                       {Array.from({ length: review.rating }).map((_, j) => (
@@ -539,13 +560,13 @@ export function HomeBelowFold() {
       </section>
 
       {/* ─── 15. TRUST FEATURES ─── */}
-      <section className="border-t border-border bg-white py-10 mt-4">
+      <section className="mt-4 border-t border-border/60 bg-gradient-to-b from-white via-primary-50/20 to-surface-raised py-10">
         <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-8 md:gap-12">
             {trustFeatures.map((item, i) => (
               <div key={i} className="text-center group">
-                <div className="w-12 h-12 mx-auto mb-3 rounded-2xl bg-primary-50 flex items-center justify-center group-hover:bg-primary-100 group-hover:scale-110 transition-all duration-300">
-                  <item.icon className="w-5 h-5 text-primary-600" />
+                <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl border border-primary-100/80 bg-white/90 shadow-sm backdrop-blur-sm transition-all duration-300 group-hover:scale-110 group-hover:border-primary-200 group-hover:shadow-md">
+                  <item.icon className="h-5 w-5 text-primary-600" />
                 </div>
                 <h3 className="font-semibold text-text-primary text-sm">{item.title}</h3>
                 <p className="text-xs text-text-muted mt-0.5">{item.desc}</p>
@@ -558,88 +579,27 @@ export function HomeBelowFold() {
       {/* ─── WHY SHOP WITH US ─── */}
       <section className="py-8">
         <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
-          <SectionHeader title="Why Xelnova?" subtitle="The smarter way to shop" />
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <SectionHeader title="Why Xelnova?" subtitle="The smarter way to shop" accent />
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-5">
             {[
-              { icon: Wallet, title: 'Xelnova Wallet', desc: 'Add money & pay for recharges, bills & more', color: 'text-emerald-600 bg-emerald-50' },
-              { icon: Gift, title: 'Daily Rewards', desc: 'Earn loyalty points on every purchase', color: 'text-violet-600 bg-violet-50' },
-              { icon: Award, title: 'Genuine Products', desc: '100% authentic from verified sellers', color: 'text-blue-600 bg-blue-50' },
-              { icon: Sparkles, title: 'Best Prices', desc: 'Price match guarantee across the platform', color: 'text-amber-600 bg-amber-50' },
-            ].map((item) => (
-              <div key={item.title} className="bg-white border border-border/60 rounded-2xl p-5 text-center hover:shadow-card-hover transition-all duration-300">
-                <div className={`w-12 h-12 mx-auto mb-3 rounded-2xl ${item.color} flex items-center justify-center`}>
-                  <item.icon size={22} />
+              { icon: Wallet, title: 'Xelnova Wallet', desc: 'Add money & pay for recharges, bills & more', color: 'text-emerald-600', bg: 'bg-emerald-50', gradient: 'from-emerald-500 to-teal-500', emoji: '💳' },
+              { icon: Gift, title: 'Daily Rewards', desc: 'Earn loyalty points on every purchase', color: 'text-violet-600', bg: 'bg-violet-50', gradient: 'from-violet-500 to-purple-500', emoji: '🎁' },
+              { icon: Award, title: 'Genuine Products', desc: '100% authentic from verified sellers', color: 'text-blue-600', bg: 'bg-blue-50', gradient: 'from-blue-500 to-indigo-500', emoji: '✅' },
+              { icon: Sparkles, title: 'Best Prices', desc: 'Price match guarantee across the platform', color: 'text-amber-600', bg: 'bg-amber-50', gradient: 'from-amber-500 to-orange-500', emoji: '⭐' },
+            ].map((item, i) => (
+              <div key={item.title} className="group card-3d shine-effect rounded-2xl p-6 text-center bg-white border border-white/80 ring-1 ring-gray-100/50">
+                {/* Gradient background on hover */}
+                <div className={`absolute inset-0 rounded-2xl bg-gradient-to-br ${item.gradient} opacity-0 group-hover:opacity-5 transition-opacity duration-500`} />
+                
+                {/* Icon container with animation */}
+                <div className={`relative w-14 h-14 mx-auto mb-4 rounded-2xl ${item.bg} flex items-center justify-center shadow-sm group-hover:shadow-lg group-hover:scale-110 transition-all duration-300`}>
+                  <item.icon size={24} className={item.color} />
+                  <span className="absolute -top-1 -right-1 text-sm opacity-0 group-hover:opacity-100 transition-opacity duration-300">{item.emoji}</span>
                 </div>
-                <h3 className="text-sm font-bold text-text-primary">{item.title}</h3>
-                <p className="text-xs text-text-muted mt-1 leading-relaxed">{item.desc}</p>
+                
+                <h3 className="text-sm font-bold text-text-primary group-hover:text-primary-700 transition-colors">{item.title}</h3>
+                <p className="text-xs text-text-muted mt-1.5 leading-relaxed">{item.desc}</p>
               </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ─── NEWSLETTER SIGNUP ─── */}
-      <section className="py-6">
-        <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
-          <div className="bg-gradient-to-r from-primary-50 via-accent-50/50 to-primary-50 rounded-3xl border border-primary-100/60 p-8 md:p-12">
-            <div className="max-w-xl mx-auto text-center">
-              <div className="w-14 h-14 bg-primary-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
-                <Mail size={24} className="text-primary-600" />
-              </div>
-              <h2 className="text-2xl md:text-3xl font-extrabold text-text-primary mb-2 font-display">Stay in the Loop</h2>
-              <p className="text-sm text-text-secondary mb-6">Get exclusive deals, new arrivals & special offers delivered to your inbox.</p>
-              <form
-                className="flex gap-2 max-w-md mx-auto"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  const form = e.currentTarget;
-                  const input = form.querySelector('input') as HTMLInputElement;
-                  if (input?.value) {
-                    input.value = '';
-                    alert('Thanks for subscribing!');
-                  }
-                }}
-              >
-                <input
-                  type="email"
-                  placeholder="Enter your email"
-                  required
-                  className="flex-1 px-4 py-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
-                />
-                <button
-                  type="submit"
-                  className="px-6 py-3 rounded-xl bg-primary-600 text-white text-sm font-semibold hover:bg-primary-700 transition-colors shadow-primary"
-                >
-                  Subscribe
-                </button>
-              </form>
-              <p className="text-[11px] text-text-muted mt-3">No spam, unsubscribe anytime.</p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ─── FAQ SECTION ─── */}
-      <section className="py-8">
-        <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
-          <SectionHeader title="Frequently Asked Questions" subtitle="Quick answers to common queries" />
-          <div className="max-w-3xl mx-auto space-y-3">
-            {[
-              { q: 'Is Cash on Delivery available?', a: 'Yes! We offer COD across India for most products. OTP verification is required at delivery.' },
-              { q: 'What is the return policy?', a: 'Most products can be returned within 7 days of delivery. Simply raise a return request from your order page.' },
-              { q: 'How do I track my order?', a: 'After your order ships, you will receive a tracking link via email and SMS. You can also track from your account dashboard.' },
-              { q: 'Is my payment information secure?', a: 'Absolutely. All payments are processed through Razorpay with 256-bit SSL encryption. We never store your card details.' },
-              { q: 'How do I become a seller on Xelnova?', a: 'Register at seller.xelnova.in with your GST details and bank account. After verification, you can start listing products immediately.' },
-            ].map((faq) => (
-              <details key={faq.q} className="group bg-white border border-border/60 rounded-2xl overflow-hidden">
-                <summary className="flex items-center justify-between p-5 cursor-pointer text-sm font-semibold text-text-primary hover:text-primary-700 transition-colors list-none">
-                  {faq.q}
-                  <ChevronDown size={16} className="text-text-muted group-open:rotate-180 transition-transform duration-200 shrink-0 ml-4" />
-                </summary>
-                <div className="px-5 pb-5 text-sm text-text-secondary leading-relaxed border-t border-border/40 pt-4">
-                  {faq.a}
-                </div>
-              </details>
             ))}
           </div>
         </div>
@@ -658,7 +618,7 @@ export function HomeBelowFold() {
               <Link
                 key={post.title}
                 href={post.href}
-                className="group bg-white border border-border/60 rounded-2xl overflow-hidden hover:shadow-card-hover hover:-translate-y-0.5 transition-all duration-300"
+                className="group panel-glass overflow-hidden rounded-2xl transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_16px_40px_-12px_rgba(124,58,237,0.15)]"
               >
                 <div className={`h-2 ${post.color}`} />
                 <div className="p-5">
@@ -678,7 +638,7 @@ export function HomeBelowFold() {
       <section className="py-6 pb-10">
         <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
           <SectionHeader title="Recently Viewed" />
-          <div className="flex items-center justify-center rounded-2xl border border-dashed border-border bg-white py-14 text-center">
+          <div className="panel-glass-sm flex items-center justify-center rounded-2xl border border-dashed border-primary-200/50 bg-primary-50/25 py-14 text-center backdrop-blur-sm">
             <div className="flex flex-col items-center gap-3">
               <div className="rounded-2xl bg-surface-raised p-4">
                 <Eye size={28} className="text-text-muted" />

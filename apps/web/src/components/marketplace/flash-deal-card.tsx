@@ -77,12 +77,17 @@ export const FlashDealCard = memo(function FlashDealCard({ product }: { product:
       <motion.div
         whileHover={{ y: -4 }}
         transition={{ type: 'spring', stiffness: 300, damping: 20 }}
-        className="group flex w-[200px] flex-shrink-0 flex-col overflow-hidden rounded-2xl border border-border/60 bg-white shadow-sm transition-all hover:shadow-xl hover:shadow-black/[0.06] hover:border-border sm:w-[220px]"
+        className="group card-3d shine-effect flex w-[200px] flex-shrink-0 flex-col overflow-hidden rounded-2xl border border-white/80 bg-white ring-1 ring-danger-100/50 sm:w-[220px]"
       >
         {/* Deal Badge */}
-        <div className="flex items-center gap-1.5 bg-gradient-to-r from-danger-600 to-danger-500 px-3 py-1.5">
-          <Zap size={12} className="fill-accent-300 text-accent-300" />
-          <span className="text-[10px] font-bold text-white uppercase tracking-wide">Flash Deal</span>
+        <div className="relative flex items-center justify-center gap-1.5 bg-gradient-to-r from-danger-600 via-danger-500 to-accent-500 px-3 py-2 overflow-hidden">
+          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent animate-[shine_2s_ease-in-out_infinite]" style={{ transform: 'skewX(-15deg)' }} />
+          <Zap size={14} className="fill-accent-300 text-accent-300 animate-pulse" />
+          <span className="text-[11px] font-bold text-white uppercase tracking-wider">Flash Deal</span>
+          <span className="absolute right-2 flex h-2 w-2">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent-300 opacity-75" />
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-accent-400" />
+          </span>
         </div>
 
         {/* Image */}
@@ -156,26 +161,33 @@ export const FlashDealCard = memo(function FlashDealCard({ product }: { product:
           {/* Countdown */}
           <div className="flex gap-1.5">
             {[
-              { label: 'H', val: pad(h) },
-              { label: 'M', val: pad(m) },
-              { label: 'S', val: pad(s) },
-            ].map((t) => (
-              <div key={t.label} className="flex flex-col items-center rounded-lg bg-surface-raised px-2.5 py-1.5 border border-border/60">
-                <span className="text-sm font-bold text-primary-700 tabular-nums">{expired ? '00' : t.val}</span>
-                <span className="text-[8px] text-text-muted">{t.label}</span>
+              { label: 'HRS', val: pad(h) },
+              { label: 'MIN', val: pad(m) },
+              { label: 'SEC', val: pad(s) },
+            ].map((t, i) => (
+              <div key={t.label} className="flex flex-col items-center rounded-xl bg-gradient-to-b from-surface-raised to-primary-50/50 px-2.5 py-2 border border-primary-100/60 shadow-sm flex-1">
+                <span className={`text-base font-extrabold tabular-nums ${expired ? 'text-text-muted' : 'text-primary-700'}`}>
+                  {expired ? '00' : t.val}
+                </span>
+                <span className="text-[8px] font-semibold text-text-muted uppercase tracking-wider">{t.label}</span>
               </div>
             ))}
           </div>
 
           {/* Progress */}
-          <div>
-            <div className="mb-0.5 h-1.5 w-full overflow-hidden rounded-full bg-gray-100">
+          <div className="relative">
+            <div className="mb-1 h-2 w-full overflow-hidden rounded-full bg-gradient-to-r from-gray-100 to-gray-50 shadow-inner">
               <div
-                className="h-full rounded-full bg-gradient-to-r from-danger-500 to-accent-400"
+                className="h-full rounded-full bg-gradient-to-r from-danger-500 via-danger-400 to-accent-400 relative overflow-hidden transition-all duration-500"
                 style={{ width: `${claimed}%` }}
-              />
+              >
+                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent animate-[shine_1.5s_ease-in-out_infinite]" />
+              </div>
             </div>
-            <p className="text-[10px] text-text-muted">{claimed}% claimed</p>
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] font-semibold text-danger-600">{claimed}% claimed</p>
+              <p className="text-[10px] text-text-muted">🔥 Hurry!</p>
+            </div>
           </div>
         </div>
       </motion.div>

@@ -53,6 +53,7 @@ const categoryIcons: Record<string, string> = {
   sports: '🏃',
   toys: '🧸',
   grocery: '🛒',
+  groceries: '🛍️',
   health: '💊',
   automotive: '🚗',
   'baby-kids': '👶',
@@ -292,7 +293,7 @@ export function Header() {
 
           {/* Search Bar with Category Dropdown + Autocomplete */}
           <form onSubmit={handleSearch} className="hidden md:flex flex-1 max-w-2xl mx-auto">
-            <div ref={searchContainerRef} className="relative flex w-full items-center rounded-xl overflow-visible border-2 border-gray-200 focus-within:border-primary-500 transition-all duration-200">
+            <div ref={searchContainerRef} className="relative flex w-full items-center overflow-visible rounded-xl border border-white/80 bg-white/85 shadow-sm backdrop-blur-md transition-all duration-300 focus-within:border-primary-400 focus-within:bg-white focus-within:shadow-md focus-within:shadow-primary-500/10 focus-within:ring-2 focus-within:ring-primary-500/20">
               <select
                 value={searchCategory}
                 onChange={(e) => setSearchCategory(e.target.value)}

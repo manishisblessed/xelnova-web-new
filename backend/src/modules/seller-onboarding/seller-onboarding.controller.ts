@@ -91,10 +91,12 @@ export class SellerOnboardingController {
     @Body() dto: Step1AccountDto,
     @Req() req: Request,
   ) {
+    const sessionUser = await this.onboardingService.extractSessionUser(req);
     const result = await this.onboardingService.createSellerAccount(
       dto,
       this.getClientIp(req),
       req.headers['user-agent'],
+      sessionUser,
     );
     return successResponse(result, 'Account created successfully');
   }

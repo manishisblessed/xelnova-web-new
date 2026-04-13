@@ -28,16 +28,27 @@ const HERO_STOCK_IMAGES = [
   'https://images.unsplash.com/photo-1472851294608-062f824d29cc?auto=format&fit=crop&w=1920&q=85',
 ] as const;
 
+/** Hero art for the “Big festive sale” slide (served from `public/images/`). */
+const BIG_FESTIVE_SALE_BANNER_IMAGE = '/images/big-festive-sale-banner-design.png';
+
+function isBigFestiveSaleTitle(title: string): boolean {
+  return title.trim().toLowerCase() === 'big festive sale';
+}
+
 function resolveBannerImage(bannerImage: string | null | undefined, index: number): string {
   const trimmed = bannerImage?.trim();
   if (trimmed) return trimmed;
   return HERO_STOCK_IMAGES[index % HERO_STOCK_IMAGES.length];
 }
 
+function isAbsoluteHttpUrl(href: string): boolean {
+  return /^https?:\/\//i.test(href.trim());
+}
+
 const fallbackSlides: Slide[] = [
   {
     id: 'fb-1',
-    image: HERO_STOCK_IMAGES[0],
+    image: BIG_FESTIVE_SALE_BANNER_IMAGE,
     title: 'Big Festive Sale',
     subtitle: 'Up to 50% off on top brands. Grab the best deals before they are gone!',
     badge: 'SHOP NOW',
@@ -78,7 +89,7 @@ const fallbackSlides: Slide[] = [
     subtitle: 'Join thousands of sellers. Free logistics, secure payments & 50L+ customers.',
     badge: 'START SELLING',
     cta: 'Register Now',
-    href: '/seller',
+    href: 'https://seller.xelnova.in/',
     accent: 'bg-gradient-to-r from-emerald-500 to-teal-500',
     gradient: 'bg-gradient-to-br from-emerald-700 via-teal-700 to-cyan-800',
     pattern: 'radial-gradient(circle at 30% 70%, rgba(16,185,129,0.12) 0%, transparent 50%)',
@@ -93,9 +104,12 @@ const accentColors = [
 ];
 
 function mapBannerToSlide(banner: Banner, index: number): Slide {
+  const image = isBigFestiveSaleTitle(banner.title)
+    ? BIG_FESTIVE_SALE_BANNER_IMAGE
+    : resolveBannerImage(banner.image, index);
   return {
     id: banner.id,
-    image: resolveBannerImage(banner.image, index),
+    image,
     title: banner.title,
     subtitle: banner.subtitle || '',
     badge: banner.ctaText || undefined,
@@ -157,7 +171,7 @@ export function HeroCarousel() {
   const showPhoto = Boolean(slide.image) && !heroImgError;
 
   return (
-    <div className="relative overflow-hidden rounded-2xl lg:rounded-3xl bg-surface-dark group shadow-2xl shadow-black/20 h-full">
+    <div className="group relative h-full overflow-hidden rounded-2xl border border-white/10 bg-surface-dark shadow-2xl shadow-black/25 ring-1 ring-white/5 transition-shadow duration-500 hover:shadow-[0_32px_64px_-16px_rgba(124,58,237,0.35)] lg:rounded-3xl">
       <div className="relative h-full min-h-[260px] sm:min-h-[320px] md:min-h-[380px]">
         <AnimatePresence initial={false} custom={direction} mode="popLayout">
           <motion.div
@@ -251,13 +265,25 @@ export function HeroCarousel() {
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.45 }}
                   >
-                    <Link
-                      href={slide.href}
-                      className="inline-flex items-center gap-2.5 bg-white text-gray-900 px-6 py-3 sm:px-7 sm:py-3.5 rounded-xl font-bold text-sm hover:bg-gray-50 transition-all duration-200 shadow-2xl shadow-black/20 active:scale-[0.97] group/btn"
-                    >
-                      {slide.cta}
-                      <ArrowRight className="w-4 h-4 group-hover/btn:translate-x-1 transition-transform duration-200" />
-                    </Link>
+                    {isAbsoluteHttpUrl(slide.href) ? (
+                      <a
+                        href={slide.href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-2.5 bg-white text-gray-900 px-6 py-3 sm:px-7 sm:py-3.5 rounded-xl font-bold text-sm hover:bg-gray-50 transition-all duration-200 shadow-2xl shadow-black/20 active:scale-[0.97] group/btn"
+                      >
+                        {slide.cta}
+                        <ArrowRight className="w-4 h-4 group-hover/btn:translate-x-1 transition-transform duration-200" />
+                      </a>
+                    ) : (
+                      <Link
+                        href={slide.href}
+                        className="inline-flex items-center gap-2.5 bg-white text-gray-900 px-6 py-3 sm:px-7 sm:py-3.5 rounded-xl font-bold text-sm hover:bg-gray-50 transition-all duration-200 shadow-2xl shadow-black/20 active:scale-[0.97] group/btn"
+                      >
+                        {slide.cta}
+                        <ArrowRight className="w-4 h-4 group-hover/btn:translate-x-1 transition-transform duration-200" />
+                      </Link>
+                    )}
                   </motion.div>
                 </motion.div>
               </div>

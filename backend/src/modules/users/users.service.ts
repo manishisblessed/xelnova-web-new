@@ -23,6 +23,8 @@ export class UsersService {
         avatar: true,
         role: true,
         authProvider: true,
+        emailVerified: true,
+        phoneVerified: true,
         createdAt: true,
       },
     });

@@ -30,6 +30,23 @@ async function handleResponse<T = unknown>(res: Response): Promise<T> {
   return json.data;
 }
 
+/** Public user profile (any authenticated role). Used e.g. seller /register to skip duplicate OTP when already verified. */
+export async function apiGetUserProfile() {
+  const res = await fetch(`${API_URL}/users/profile`, { headers: authHeaders() });
+  return handleResponse<{
+    id: string;
+    name: string;
+    email: string;
+    phone: string | null;
+    avatar: string | null;
+    role: string;
+    authProvider: string;
+    emailVerified: boolean;
+    phoneVerified: boolean;
+    createdAt: string;
+  }>(res);
+}
+
 // ─── Auth ───
 
 export interface LoginResponse {

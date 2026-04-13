@@ -5,6 +5,8 @@ import {
   BadGatewayException,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import { Request } from 'express';
+import { JwtService } from '@nestjs/jwt';
 import { sendFortiusOtpSms } from '../../common/helpers/fortius-sms.helper';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VerificationService } from '../verification/verification.service';
@@ -19,12 +21,45 @@ import {
   AdminReviewDto,
 } from './dto/seller-onboarding.dto';
 
+export interface SessionUser {
+  id: string;
+  email: string;
+  phone: string | null;
+  emailVerified: boolean;
+  phoneVerified: boolean;
+}
+
+const SESSION_VERIFIED_TOKEN = 'session-verified';
+
 @Injectable()
 export class SellerOnboardingService {
   constructor(
     private prisma: PrismaService,
     private verificationService: VerificationService,
+    private jwtService: JwtService,
   ) {}
+
+  /**
+   * Extract user from Authorization Bearer token (optional; does not throw if missing/invalid).
+   * Used to allow session-based email/phone verification skip.
+   */
+  async extractSessionUser(req: Request): Promise<SessionUser | null> {
+    const authHeader = req.headers['authorization'];
+    if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
+    const token = authHeader.slice(7);
+    try {
+      // Must match AuthModule / JwtStrategy (JWT_ACCESS_SECRET); do not use JWT_SECRET here.
+      const payload = this.jwtService.verify<{ sub?: string }>(token);
+      if (!payload?.sub) return null;
+      const user = await this.prisma.user.findUnique({
+        where: { id: payload.sub },
+        select: { id: true, email: true, phone: true, emailVerified: true, phoneVerified: true },
+      });
+      return user || null;
+    } catch {
+      return null;
+    }
+  }
 
   // ========== OTP Services ==========
 
@@ -312,12 +347,74 @@ export class SellerOnboardingService {
     return { success: true, captchaToken };
   }
 
+  // ========== Verification Token Helpers ==========
+
+  private normalizePhone(phone: string | null | undefined): string {
+    if (!phone) return '';
+    const digits = phone.replace(/\D/g, '');
+    return digits.length >= 10 ? digits.slice(-10) : digits;
+  }
+
+  /**
+   * Validate emailVerificationToken and phoneVerificationToken.
+   * - If the token is SESSION_VERIFIED_TOKEN, the request must include a valid JWT and
+   *   the submitted email/phone must match the JWT user's values with the verified flag true.
+   * - Otherwise we accept any non-empty string (OTP flow already marked it verified via /otp/verify).
+   */
+  private async validateVerificationTokens(
+    dto: Step1AccountDto,
+    sessionUser: SessionUser | null | undefined,
+  ) {
+    const emailToken = dto.emailVerificationToken?.trim() || '';
+    const phoneToken = dto.phoneVerificationToken?.trim() || '';
+
+    if (!emailToken) {
+      throw new HttpException('Email verification token is required', HttpStatus.BAD_REQUEST);
+    }
+    if (!phoneToken) {
+      throw new HttpException('Phone verification token is required', HttpStatus.BAD_REQUEST);
+    }
+
+    if (emailToken === SESSION_VERIFIED_TOKEN) {
+      if (!sessionUser) {
+        throw new HttpException('Session expired. Please verify email via OTP.', HttpStatus.UNAUTHORIZED);
+      }
+      if (sessionUser.email.toLowerCase() !== dto.email.toLowerCase()) {
+        throw new HttpException('Email does not match session. Please verify via OTP.', HttpStatus.BAD_REQUEST);
+      }
+      if (!sessionUser.emailVerified) {
+        throw new HttpException('Email not verified in session. Please verify via OTP.', HttpStatus.BAD_REQUEST);
+      }
+    }
+
+    if (phoneToken === SESSION_VERIFIED_TOKEN) {
+      if (!sessionUser) {
+        throw new HttpException('Session expired. Please verify phone via OTP.', HttpStatus.UNAUTHORIZED);
+      }
+      const sessionPhoneDigits = this.normalizePhone(sessionUser.phone);
+      const dtoPhoneDigits = this.normalizePhone(dto.phone);
+      if (!sessionPhoneDigits || sessionPhoneDigits !== dtoPhoneDigits) {
+        throw new HttpException('Phone does not match session. Please verify via OTP.', HttpStatus.BAD_REQUEST);
+      }
+      if (!sessionUser.phoneVerified) {
+        throw new HttpException('Phone not verified in session. Please verify via OTP.', HttpStatus.BAD_REQUEST);
+      }
+    }
+  }
+
   // ========== Step 1: Account Creation ==========
 
-  async createSellerAccount(dto: Step1AccountDto, ipAddress?: string, userAgent?: string) {
+  async createSellerAccount(
+    dto: Step1AccountDto,
+    ipAddress?: string,
+    userAgent?: string,
+    sessionUser?: SessionUser | null,
+  ) {
     dto.email = dto.email.trim().toLowerCase();
     dto.fullName = dto.fullName.trim();
     dto.phone = dto.phone.trim();
+
+    await this.validateVerificationTokens(dto, sessionUser);
 
     const existingSeller = await this.prisma.sellerProfile.findUnique({
       where: { email: dto.email },

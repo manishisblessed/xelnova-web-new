@@ -101,7 +101,7 @@ export default function HomePage() {
       {/* ─── 1. BENTO HERO GRID ─── */}
       <section className="pt-3 pb-2">
         <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
-          <div className={`grid grid-cols-1 ${sidePromos.length > 0 ? 'lg:grid-cols-4' : ''} gap-3 lg:h-[420px]`}>
+          <div className={`grid grid-cols-1 ${sidePromos.length > 0 ? 'lg:grid-cols-4' : ''} gap-3 lg:gap-4 lg:h-[420px]`}>
             <div className={`${sidePromos.length > 0 ? 'lg:col-span-3' : ''} h-[220px] sm:h-[300px] lg:h-full`}>
               <HeroCarousel />
             </div>
@@ -139,7 +139,7 @@ export default function HomePage() {
                 <Link
                   key={term}
                   href={`/products?search=${encodeURIComponent(term)}`}
-                  className="flex-shrink-0 text-xs bg-white border border-border/60 rounded-full px-3.5 py-1.5 text-text-secondary hover:border-primary-400 hover:text-primary-600 hover:bg-primary-50 transition-all"
+                  className="flex-shrink-0 text-xs glass-subtle border border-white/70 rounded-full px-3.5 py-1.5 text-text-secondary shadow-sm hover:border-primary-300/80 hover:text-primary-700 hover:bg-primary-50/90 hover:shadow-md hover:-translate-y-0.5 transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]"
                 >
                   {term}
                 </Link>
@@ -150,21 +150,24 @@ export default function HomePage() {
       )}
 
       {/* ─── 3. SOCIAL PROOF STATS ─── */}
-      <section className="py-4">
+      <section className="py-5">
         <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
-          <div className="bg-gradient-to-r from-primary-700 via-primary-600 to-primary-800 rounded-2xl p-5 md:p-7 relative overflow-hidden">
-            <div className="absolute inset-0 opacity-[0.07]">
-              <div className="absolute top-0 left-1/4 w-40 h-40 bg-white rounded-full blur-3xl" />
-              <div className="absolute bottom-0 right-1/4 w-56 h-56 bg-accent-400 rounded-full blur-3xl" />
+          <div className="stats-ribbon p-5 md:p-7">
+            <div className="pointer-events-none absolute inset-0 z-0 opacity-[0.12]">
+              <div className="absolute top-0 left-1/4 h-44 w-44 rounded-full bg-white blur-3xl" />
+              <div className="absolute right-1/4 bottom-0 h-60 w-60 rounded-full bg-accent-300/80 blur-3xl" />
             </div>
-            <div className="relative grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
+            <div className="relative z-10 grid grid-cols-2 gap-3 text-center md:grid-cols-4 md:gap-4">
               {stats.map((stat, i) => (
-                <div key={i} className="flex flex-col items-center">
-                  <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center mb-2.5">
-                    <stat.icon className="w-5 h-5 text-primary-200" />
+                <div
+                  key={i}
+                  className="group flex flex-col items-center rounded-2xl border border-white/15 bg-white/10 px-3 py-4 backdrop-blur-md transition-all duration-300 hover:bg-white/18 hover:border-white/25 hover:shadow-lg hover:-translate-y-0.5"
+                >
+                  <div className="mb-2.5 flex h-11 w-11 items-center justify-center rounded-2xl bg-white/15 shadow-inner ring-1 ring-white/20 transition-transform duration-300 group-hover:scale-105">
+                    <stat.icon className="h-5 w-5 text-white/95" />
                   </div>
-                  <div className="text-2xl md:text-3xl font-extrabold text-white font-display">{stat.value}</div>
-                  <div className="text-xs text-white/80 mt-0.5 font-medium">{stat.label}</div>
+                  <div className="text-2xl md:text-3xl font-extrabold text-white font-display tracking-tight drop-shadow-sm">{stat.value}</div>
+                  <div className="mt-1 text-[11px] md:text-xs font-medium text-white/85 leading-snug max-w-[9rem] mx-auto">{stat.label}</div>
                 </div>
               ))}
             </div>
@@ -173,10 +176,16 @@ export default function HomePage() {
       </section>
 
       {/* ─── 4. CATEGORIES ─── */}
-      <section className="py-4">
+      <section className="py-5">
         <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
-          <div className="bg-white rounded-2xl border border-border/60 py-5 px-4 shadow-card">
-            <div className="flex items-center justify-between sm:justify-center gap-4 sm:gap-8 lg:gap-12 overflow-x-auto scrollbar-hide">
+          <div className="relative panel-glass py-7 px-4 sm:px-6 transition-all duration-500 hover:shadow-[0_24px_56px_-14px_rgba(124,58,237,0.22)]">
+            {/* Decorative background shapes */}
+            <div className="absolute inset-0 overflow-hidden rounded-[1.25rem] pointer-events-none">
+              <div className="absolute -top-10 -left-10 w-40 h-40 bg-gradient-to-br from-primary-200/30 to-transparent rounded-full blur-2xl" />
+              <div className="absolute -bottom-10 -right-10 w-32 h-32 bg-gradient-to-tl from-accent-200/25 to-transparent rounded-full blur-2xl" />
+            </div>
+            
+            <div className="relative flex items-center justify-between sm:justify-center gap-5 sm:gap-7 lg:gap-10 overflow-x-auto scrollbar-hide pb-1">
               {(categories || []).map((cat, i) => (
                 <CategoryCard key={cat.id} category={cat} index={i} />
               ))}
