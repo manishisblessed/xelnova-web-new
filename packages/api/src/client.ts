@@ -12,7 +12,7 @@ export function getAccessToken(): string | null {
 
 export function createApiClient(baseURL?: string): AxiosInstance {
   const client = axios.create({
-    baseURL: baseURL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1',
+    baseURL: baseURL || process.env.NEXT_PUBLIC_API_URL || '/api/v1',
     headers: { 'Content-Type': 'application/json' },
     timeout: 15000,
   });
