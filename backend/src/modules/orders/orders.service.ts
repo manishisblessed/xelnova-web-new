@@ -279,7 +279,9 @@ export class OrdersService {
     );
 
     // In-app notification + SMS for customer (fire-and-forget)
-    this.notificationService.notifyOrderPlaced(userId, order.orderNumber, order.total).catch(() => {});
+    this.notificationService.notifyOrderPlaced(userId, order.orderNumber, order.total).catch((err) =>
+      this.logger.warn(`Failed to send order-placed notification: ${err.message}`),
+    );
 
     // Notify sellers about new order (fire-and-forget)
     this.notifySellerNewOrder(order).catch((err) =>
@@ -382,6 +384,10 @@ export class OrdersService {
         shippingAddress: true,
       },
     });
+
+    this.notificationService.notifyOrderCancelled(userId, orderNumber, reason).catch((err) =>
+      this.logger.warn(`Failed to send order-cancelled notification: ${err.message}`),
+    );
 
     return updated;
   }

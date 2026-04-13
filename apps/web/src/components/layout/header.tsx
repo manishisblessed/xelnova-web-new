@@ -94,12 +94,20 @@ export function Header() {
     if (!isAuthenticated) return;
     let cancelled = false;
     const fetchCount = () => {
+      const raw = typeof window !== 'undefined'
+        ? document.cookie.match(/(?:^|;\s*)xelnova-token=([^;]*)/)?.[1]
+        : undefined;
+      if (!raw) return;
+      const token = decodeURIComponent(raw);
       fetch('/api/v1/notifications?limit=1', {
-        headers: { 'Authorization': `Bearer ${typeof window !== 'undefined' ? document.cookie.match(/(?:^|;\s*)xelnova-token=([^;]*)/)?.[1] || '' : ''}` },
+        headers: { Authorization: `Bearer ${token}` },
       })
-        .then(r => r.json())
-        .then(d => { if (!cancelled && d.success) setUnreadNotifications(d.data?.unread ?? 0); })
-        .catch(() => {});
+        .then(r => {
+          if (!r.ok) { console.warn(`[Header] notification fetch failed: ${r.status}`); return null; }
+          return r.json();
+        })
+        .then(d => { if (!cancelled && d?.success) setUnreadNotifications(d.data?.unread ?? 0); })
+        .catch(err => console.warn('[Header] notification fetch error:', err));
     };
     fetchCount();
     const interval = setInterval(fetchCount, 30000);
@@ -652,6 +660,7 @@ export function Header() {
                   ? [
                       { href: '/account/profile', icon: User, label: 'My Profile' },
                       { href: '/account/orders', icon: Package, label: 'Your Orders' },
+                      { href: '/account/notifications', icon: Bell, label: 'Notifications' },
                       { href: '/account/wishlist', icon: Heart, label: 'Wishlist' },
                       { href: '/track-order', icon: MapPin, label: 'Track Order' },
                     ]

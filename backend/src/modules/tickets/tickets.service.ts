@@ -72,6 +72,10 @@ export class TicketsService {
       this.logger.warn(`Failed to notify admin: ${e.message}`),
     );
 
+    this.notificationService.notifyTicketCreated(customerId, ticket.ticketNumber).catch((err) =>
+      this.logger.warn(`Failed to notify customer ticket created: ${err.message}`),
+    );
+
     return ticket;
   }
 
@@ -208,7 +212,9 @@ export class TicketsService {
         this.logger.warn(`Failed to notify customer: ${e.message}`),
       );
       const admin = await this.prisma.user.findUnique({ where: { id: adminId }, select: { name: true } });
-      this.notificationService.notifyTicketReply(ticket.customerId, '', admin?.name || 'Support').catch(() => {});
+      this.notificationService.notifyTicketReply(ticket.customerId, '', admin?.name || 'Support').catch((err) =>
+        this.logger.warn(`Failed to notify ticket reply: ${err.message}`),
+      );
     }
 
     return msg;
@@ -247,7 +253,9 @@ export class TicketsService {
 
     await this.prisma.$transaction(updates as any);
 
-    this.notificationService.notifyTicketForwarded(sellerId, ticket.ticketNumber).catch(() => {});
+    this.notificationService.notifyTicketForwarded(sellerId, ticket.ticketNumber).catch((err) =>
+      this.logger.warn(`Failed to notify ticket forwarded: ${err.message}`),
+    );
 
     return this.getTicketDetail(ticketId);
   }
@@ -263,7 +271,9 @@ export class TicketsService {
       include: TICKET_INCLUDE,
     });
 
-    this.notificationService.notifyTicketUpdate(ticket.customerId, ticket.ticketNumber, status).catch(() => {});
+    this.notificationService.notifyTicketUpdate(ticket.customerId, ticket.ticketNumber, status).catch((err) =>
+      this.logger.warn(`Failed to notify ticket update: ${err.message}`),
+    );
 
     return ticket;
   }

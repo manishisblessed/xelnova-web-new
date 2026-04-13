@@ -114,7 +114,9 @@ export class NotificationService {
       data: { orderNumber },
     });
 
-    this.webPush.sendOrderNotification(userId, orderNumber, 'CONFIRMED').catch(() => {});
+    this.webPush.sendOrderNotification(userId, orderNumber, 'CONFIRMED').catch((err) =>
+      this.logger.warn(`WebPush failed for order confirmed ${orderNumber}: ${err.message}`),
+    );
 
     if (user?.phone) {
       this.sms.sendOrderPlaced(user.phone, orderNumber, total.toFixed(0)).catch((err) =>
@@ -142,7 +144,9 @@ export class NotificationService {
       data: { orderNumber },
     });
 
-    this.webPush.sendOrderNotification(userId, orderNumber, 'PROCESSING').catch(() => {});
+    this.webPush.sendOrderNotification(userId, orderNumber, 'PROCESSING').catch((err) =>
+      this.logger.warn(`WebPush failed for order processing ${orderNumber}: ${err.message}`),
+    );
 
     if (user?.phone) {
       this.sms.sendOrderProcessing(user.phone, orderNumber).catch((err) =>
@@ -151,7 +155,9 @@ export class NotificationService {
     }
 
     if (user?.email) {
-      this.email.sendOrderStatusUpdate(user.email, user.name || 'Customer', orderNumber, 'PROCESSING').catch(() => {});
+      this.email.sendOrderStatusUpdate(user.email, user.name || 'Customer', orderNumber, 'PROCESSING').catch((err) =>
+        this.logger.warn(`Email failed for order processing ${orderNumber}: ${err.message}`),
+      );
     }
   }
 
@@ -200,7 +206,9 @@ export class NotificationService {
       data: { orderNumber, trackingUrl, courier },
     });
 
-    this.webPush.sendOrderNotification(userId, orderNumber, 'SHIPPED').catch(() => {});
+    this.webPush.sendOrderNotification(userId, orderNumber, 'SHIPPED').catch((err) =>
+      this.logger.warn(`WebPush failed for order shipped ${orderNumber}: ${err.message}`),
+    );
 
     if (user?.phone) {
       this.sms.sendOrderShipped(
@@ -214,7 +222,9 @@ export class NotificationService {
     }
 
     if (user?.email) {
-      this.email.sendOrderStatusUpdate(user.email, user.name || 'Customer', orderNumber, 'SHIPPED').catch(() => {});
+      this.email.sendOrderStatusUpdate(user.email, user.name || 'Customer', orderNumber, 'SHIPPED').catch((err) =>
+        this.logger.warn(`Email failed for order shipped ${orderNumber}: ${err.message}`),
+      );
     }
   }
 
@@ -237,7 +247,9 @@ export class NotificationService {
       data: { orderNumber },
     });
 
-    this.webPush.sendOrderNotification(userId, orderNumber, 'DELIVERED').catch(() => {});
+    this.webPush.sendOrderNotification(userId, orderNumber, 'DELIVERED').catch((err) =>
+      this.logger.warn(`WebPush failed for order delivered ${orderNumber}: ${err.message}`),
+    );
 
     if (user?.phone) {
       this.sms.sendOrderDelivered(user.phone, orderNumber).catch((err) =>
@@ -246,7 +258,9 @@ export class NotificationService {
     }
 
     if (user?.email) {
-      this.email.sendOrderStatusUpdate(user.email, user.name || 'Customer', orderNumber, 'DELIVERED').catch(() => {});
+      this.email.sendOrderStatusUpdate(user.email, user.name || 'Customer', orderNumber, 'DELIVERED').catch((err) =>
+        this.logger.warn(`Email failed for order delivered ${orderNumber}: ${err.message}`),
+      );
     }
   }
 
@@ -271,7 +285,9 @@ export class NotificationService {
     });
 
     // Push notification
-    this.webPush.sendOrderNotification(userId, orderNumber, 'CANCELLED').catch(() => {});
+    this.webPush.sendOrderNotification(userId, orderNumber, 'CANCELLED').catch((err) =>
+      this.logger.warn(`WebPush failed for order cancelled ${orderNumber}: ${err.message}`),
+    );
 
     // Email (always works)
     if (user?.email) {
@@ -700,7 +716,9 @@ export class NotificationService {
       sellerId,
       'Verification Not Approved',
       `Your seller account "${storeName}" could not be verified.${reason ? ` Reason: ${reason}` : ''} Please update your details and resubmit.`,
-    ).catch(() => {});
+    ).catch((err) =>
+      this.logger.warn(`Email failed for seller rejection ${sellerId}: ${err.message}`),
+    );
 
     if (user?.phone) {
       this.sms.sendSellerRejected(user.phone, storeName, reason || 'Please review requirements').catch((err) =>

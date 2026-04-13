@@ -202,9 +202,13 @@ export class AdminService {
 
     if (product.seller?.userId && dto.status) {
       if (dto.status === 'ACTIVE') {
-        this.notifications.notifyProductApproved(product.seller.userId, product.name).catch(() => {});
+        this.notifications.notifyProductApproved(product.seller.userId, product.name).catch((err) =>
+          this.logger.error(`Failed to notify product approval: ${err.message}`),
+        );
       } else if (dto.status === 'REJECTED') {
-        this.notifications.notifyProductRejected(product.seller.userId, product.name, dto.rejectionReason).catch(() => {});
+        this.notifications.notifyProductRejected(product.seller.userId, product.name, dto.rejectionReason).catch((err) =>
+          this.logger.error(`Failed to notify product rejection: ${err.message}`),
+        );
       }
     }
 

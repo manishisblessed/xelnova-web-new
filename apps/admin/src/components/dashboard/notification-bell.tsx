@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Bell } from 'lucide-react';
 import { useDashboardAuth } from '@/lib/auth-context';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
+const API_URL = process.env.NEXT_PUBLIC_API_URL?.trim().replace(/\/$/, '') || '/api/v1';
 
 interface Notification {
   id: string;
@@ -14,6 +14,17 @@ interface Notification {
   createdAt: string;
 }
 
+function getToken(): string | null {
+  if (typeof document === 'undefined') return null;
+  const m = document.cookie.match(/(?:^|;\s*)xelnova-dashboard-token=([^;]*)/);
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
+function authHeaders(): Record<string, string> {
+  const t = getToken();
+  return t ? { Authorization: `Bearer ${t}` } : {};
+}
+
 export function NotificationBell() {
   const { isAuthenticated } = useDashboardAuth();
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -21,29 +32,31 @@ export function NotificationBell() {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
+  const fetchNotifications = useCallback(async () => {
+    try {
+      const headers = authHeaders();
+      if (!headers.Authorization) return;
+      const res = await fetch(`${API_URL}/notifications?limit=10`, { headers });
+      if (!res.ok) {
+        console.warn(`[NotificationBell] fetch failed: ${res.status} ${res.statusText}`);
+        return;
+      }
+      const data = await res.json();
+      if (data.success) {
+        setNotifications(data.data?.notifications || []);
+        setUnread(data.data?.unread || 0);
+      }
+    } catch (err) {
+      console.warn('[NotificationBell] fetch error:', err);
+    }
+  }, []);
+
   useEffect(() => {
     if (!isAuthenticated) return;
-    let cancelled = false;
-
-    const fetchNotifications = async () => {
-      try {
-        const token = document.cookie.match(/(?:^|;\s*)xelnova-dashboard-token=([^;]*)/)?.[1];
-        if (!token) return;
-        const res = await fetch(`${API_URL}/notifications?limit=10`, {
-          headers: { Authorization: `Bearer ${decodeURIComponent(token)}` },
-        });
-        const data = await res.json();
-        if (!cancelled && data.success) {
-          setNotifications(data.data?.notifications || []);
-          setUnread(data.data?.unread || 0);
-        }
-      } catch {}
-    };
-
     fetchNotifications();
     const interval = setInterval(fetchNotifications, 30000);
-    return () => { cancelled = true; clearInterval(interval); };
-  }, [isAuthenticated]);
+    return () => clearInterval(interval);
+  }, [isAuthenticated, fetchNotifications]);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -55,15 +68,17 @@ export function NotificationBell() {
 
   const markAllRead = async () => {
     try {
-      const token = document.cookie.match(/(?:^|;\s*)xelnova-dashboard-token=([^;]*)/)?.[1];
-      if (!token) return;
+      const headers = authHeaders();
+      if (!headers.Authorization) return;
       await fetch(`${API_URL}/notifications/read-all`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${decodeURIComponent(token)}` },
+        headers,
       });
       setUnread(0);
       setNotifications(prev => prev.map(n => ({ ...n, read: true })));
-    } catch {}
+    } catch (err) {
+      console.warn('[NotificationBell] mark-all-read error:', err);
+    }
   };
 
   if (!isAuthenticated) return null;
@@ -71,7 +86,11 @@ export function NotificationBell() {
   return (
     <div ref={ref} className="relative">
       <button
-        onClick={() => setOpen(!open)}
+        onClick={() => {
+          const next = !open;
+          setOpen(next);
+          if (next) fetchNotifications();
+        }}
         className="relative p-2 rounded-lg text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-colors"
       >
         <Bell size={18} />
