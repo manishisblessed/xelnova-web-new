@@ -129,6 +129,11 @@ model User {
   banReason         String?
   adminRoleId       String?
 
+  // Aadhaar verification for wallet access
+  aadhaarVerified     Boolean   @default(false)
+  aadhaarVerifiedAt   DateTime?
+  aadhaarVerifiedData Json?
+
   passwordResetToken   String?   @unique
   passwordResetExpires DateTime?
 

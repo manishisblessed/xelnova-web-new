@@ -480,7 +480,7 @@ export class AdminService {
     const page = query.page || 1;
     const limit = query.limit || 20;
     const where: Prisma.UserWhereInput = {
-      role: { not: Role.ADMIN },
+      role: query.role ? (query.role as Role) : { not: Role.ADMIN },
     };
 
     if (query.search) {
@@ -509,6 +509,7 @@ export class AdminService {
           isActive: true,
           isBanned: true,
           banReason: true,
+          aadhaarVerified: true,
           createdAt: true,
           _count: { select: { orders: true } },
         },
