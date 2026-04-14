@@ -466,7 +466,7 @@ function OrderDetail({
   order: SellerOrder;
   onBack: () => void;
   onStatusUpdate: (orderId: string, status: string) => Promise<void>;
-  onCancel: (orderId: string) => Promise<void>;
+  onCancel: (orderId: string) => void;
   onShipped: (orderId: string) => void;
   saving: boolean;
 }) {

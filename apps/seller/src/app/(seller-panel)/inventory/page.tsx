@@ -530,9 +530,9 @@ export default function SellerInventoryPage() {
         setFormLowStock(String(full.lowStockThreshold ?? '5'));
         setFormWeight(full.weight != null ? String(full.weight) : '');
         setFormDimensions(String(full.dimensions ?? ''));
-        setFormIsCancellable(full.isCancellable ?? true);
-        setFormIsReturnable(full.isReturnable ?? true);
-        setFormIsReplaceable(full.isReplaceable ?? false);
+        setFormIsCancellable(full.isCancellable === true);
+        setFormIsReturnable(full.isReturnable !== false);
+        setFormIsReplaceable(full.isReplaceable === true);
         setFormReturnWindow(String(full.returnWindow ?? '7'));
         setFormCancellationWindow(String(full.cancellationWindow ?? '0'));
       })
