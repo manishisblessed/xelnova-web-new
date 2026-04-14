@@ -435,6 +435,8 @@ export default function SellerInventoryPage() {
   const [formHsnCode, setFormHsnCode] = useState('');
   const [formGstRate, setFormGstRate] = useState('');
   const [formLowStock, setFormLowStock] = useState('5');
+  const [formWeight, setFormWeight] = useState('');
+  const [formDimensions, setFormDimensions] = useState('');
 
   const loadProducts = useCallback(() => {
     setLoading(true);
@@ -478,6 +480,8 @@ export default function SellerInventoryPage() {
     setFormHsnCode('');
     setFormGstRate('');
     setFormLowStock('5');
+    setFormWeight('');
+    setFormDimensions('');
   };
 
   const openCreate = () => {
@@ -512,6 +516,8 @@ export default function SellerInventoryPage() {
         setFormHsnCode(String(full.hsnCode ?? ''));
         setFormGstRate(full.gstRate != null ? String(full.gstRate) : '');
         setFormLowStock(String(full.lowStockThreshold ?? '5'));
+        setFormWeight(full.weight != null ? String(full.weight) : '');
+        setFormDimensions(String(full.dimensions ?? ''));
       })
       .catch((err: Error) => {
         toast.error(err.message || 'Could not load product details');
@@ -721,6 +727,8 @@ export default function SellerInventoryPage() {
         hsnCode: formHsnCode.trim() || undefined,
         gstRate: formGstRate ? Number(formGstRate) : undefined,
         lowStockThreshold: formLowStock ? Number(formLowStock) : undefined,
+        weight: formWeight ? Number(formWeight) : undefined,
+        dimensions: formDimensions.trim() || undefined,
       });
       toast.success('Product created and submitted for approval', { 
         description: 'Your product will be reviewed by our team and go live once approved.' 
@@ -765,6 +773,8 @@ export default function SellerInventoryPage() {
         hsnCode: formHsnCode.trim() || undefined,
         gstRate: formGstRate ? Number(formGstRate) : undefined,
         lowStockThreshold: formLowStock ? Number(formLowStock) : undefined,
+        weight: formWeight ? Number(formWeight) : undefined,
+        dimensions: formDimensions.trim() || undefined,
       });
       toast.success('Product updated');
       setEditProduct(null);
@@ -1283,6 +1293,23 @@ export default function SellerInventoryPage() {
           value={formShort}
           onChange={(e) => setFormShort(e.target.value)}
         />
+      </div>
+
+      {/* Shipping Details */}
+      <div className="border-t border-border pt-4 mt-4">
+        <p className="text-xs font-semibold text-text-primary mb-3">Shipping Details</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs text-text-muted block mb-1">Weight (kg) *</label>
+            <Input type="number" step="0.01" min="0" placeholder="e.g. 0.5" value={formWeight} onChange={(e) => setFormWeight(e.target.value)} />
+            <p className="text-[10px] text-text-muted mt-0.5">Package weight for shipping calculations</p>
+          </div>
+          <div>
+            <label className="text-xs text-text-muted block mb-1">Dimensions (L×W×H in cm) *</label>
+            <Input placeholder="e.g. 30x20x15" value={formDimensions} onChange={(e) => setFormDimensions(e.target.value)} />
+            <p className="text-[10px] text-text-muted mt-0.5">Length × Width × Height for shipping</p>
+          </div>
+        </div>
       </div>
 
       {/* SEO & Tax Fields */}

@@ -223,6 +223,8 @@ export class SellerDashboardService {
         hsnCode: dto.hsnCode,
         gstRate: dto.gstRate,
         lowStockThreshold: dto.lowStockThreshold ?? 5,
+        weight: dto.weight,
+        dimensions: dto.dimensions,
         status: 'PENDING',
       },
       include: { category: { select: { name: true } } },
@@ -313,7 +315,7 @@ export class SellerDashboardService {
           user: { select: { name: true, email: true, phone: true } },
           items: {
             where: { productId: { in: productIds } },
-            include: { product: { select: { name: true, images: true } } },
+            include: { product: { select: { name: true, images: true, weight: true, dimensions: true } } },
           },
           shippingAddress: true,
           shipment: true,

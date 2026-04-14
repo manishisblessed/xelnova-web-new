@@ -465,40 +465,55 @@ export class AdminService {
     });
     if (!seller) throw new NotFoundException('Seller not found');
     if (seller.userId === adminId) throw new BadRequestException('Cannot delete your own account');
-    if (seller._count.products > 0) {
-      throw new BadRequestException('Cannot delete seller with listed products. Remove or unpublish products first.');
-    }
+
+    // Suspend the seller: mark as rejected, unverify, and deactivate all their products
+    await this.prisma.$transaction(async (tx) => {
+      // Deactivate all seller products so they disappear from storefront
+      await tx.product.updateMany({
+        where: { sellerId: sellerProfileId },
+        data: { isActive: false },
+      });
+
+      // Suspend the seller profile
+      await tx.sellerProfile.update({
+        where: { id: sellerProfileId },
+        data: {
+          onboardingStatus: 'REJECTED',
+          verified: false,
+          rejectionReason: 'Account suspended by admin',
+          reviewedAt: new Date(),
+        },
+      });
+
+      // Downgrade user role back to CUSTOMER
+      if (seller.userId) {
+        await tx.user.update({
+          where: { id: seller.userId },
+          data: { role: 'CUSTOMER' },
+        });
+      }
+    });
+
     if (audit) {
       await this.logging.logAdminAudit({
         adminId: audit.adminId,
         adminRole: audit.adminRole,
-        action: 'SELLER_DELETE',
-        message: `Deleted seller "${seller.storeName}" (${seller.email ?? seller.user?.email ?? 'unknown'})`,
+        action: 'SELLER_SUSPEND',
+        message: `Suspended seller "${seller.storeName}" (${seller.email ?? seller.user?.email ?? 'unknown'}) — ${seller._count.products} products deactivated`,
         ipAddress: audit.ipAddress,
         userAgent: audit.userAgent,
         meta: {
           sellerProfileId,
           targetUserId: seller.userId,
           targetEmail: seller.email ?? seller.user?.email,
+          productsDeactivated: seller._count.products,
         },
         endpoint: '/admin/sellers/:id',
         method: 'DELETE',
       });
     }
 
-    // Only delete the SellerProfile — the linked User (customer account)
-    // is unaffected and remains intact.
-    await this.prisma.sellerProfile.delete({ where: { id: sellerProfileId } });
-
-    // Downgrade user role back to CUSTOMER if they were marked as SELLER
-    if (seller.userId) {
-      await this.prisma.user.update({
-        where: { id: seller.userId },
-        data: { role: 'CUSTOMER' },
-      }).catch(() => {});
-    }
-
-    return { deleted: true };
+    return { suspended: true, productsDeactivated: seller._count.products };
   }
 
   // ─── Customers ───

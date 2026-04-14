@@ -30,6 +30,8 @@ import {
 interface OrderProduct {
   name: string;
   images?: string[];
+  weight?: number | null;
+  dimensions?: string | null;
 }
 
 interface SellerOrderItem {
@@ -844,6 +846,7 @@ function OrderDetail({
         open={shipModal}
         onClose={() => setShipModal(false)}
         orderId={order.id}
+        orderItems={order.items}
         onSuccess={() => {
           setShipModal(false);
           onShipped(order.id);
@@ -1048,19 +1051,25 @@ function ShipmentInfoPanel({
 
 // ─── Ship Order Modal ───
 
+interface CourierConfig {
+  provider: string;
+  isActive: boolean;
+}
+
 function ShipOrderModal({
   open,
   onClose,
   orderId,
+  orderItems,
   onSuccess,
 }: {
   open: boolean;
   onClose: () => void;
   orderId: string;
+  orderItems?: SellerOrderItem[];
   onSuccess: () => void;
 }) {
-  const [step, setStep] = useState<'mode' | 'courier' | 'details' | 'selfship' | 'result'>('mode');
-  const [shippingMode, setShippingMode] = useState<string>('');
+  const [step, setStep] = useState<'loading' | 'select' | 'details' | 'selfship' | 'result'>('loading');
   const [selectedCourier, setSelectedCourier] = useState<string>('');
   const [weight, setWeight] = useState('');
   const [dimensions, setDimensions] = useState('');
@@ -1069,24 +1078,35 @@ function ShipOrderModal({
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [configuredProviders, setConfiguredProviders] = useState<string[]>([]);
-  const [loadingConfigs, setLoadingConfigs] = useState(false);
+  const [loadingConfigs, setLoadingConfigs] = useState(true);
   const [shippingRates, setShippingRates] = useState<ShippingRates | null>(null);
 
-  useEffect(() => {
-    if (open) {
-      setStep('mode');
-      setShippingMode('');
-      setSelectedCourier('');
-      setWeight('');
-      setDimensions('');
-      setAwbNumber('');
-      setCarrierName('');
-      setResult(null);
-      loadConfigs();
+  const getDefaultShippingInfo = useCallback(() => {
+    if (!orderItems?.length) return { weight: '', dimensions: '' };
+    
+    let totalWeight = 0;
+    let hasDimensions = false;
+    let maxDimensions = '';
+    
+    for (const item of orderItems) {
+      const productWeight = item.product?.weight;
+      if (productWeight && productWeight > 0) {
+        totalWeight += productWeight * item.quantity;
+      }
+      const productDimensions = item.product?.dimensions;
+      if (productDimensions && !hasDimensions) {
+        maxDimensions = productDimensions;
+        hasDimensions = true;
+      }
     }
-  }, [open]);
+    
+    return {
+      weight: totalWeight > 0 ? totalWeight.toFixed(2) : '',
+      dimensions: maxDimensions,
+    };
+  }, [orderItems]);
 
-  const loadConfigs = async () => {
+  const loadConfigs = useCallback(async () => {
     setLoadingConfigs(true);
     try {
       const [configs, rates] = await Promise.allSettled([
@@ -1094,16 +1114,40 @@ function ShipOrderModal({
         apiGetShippingRates(),
       ]);
       const providers = configs.status === 'fulfilled' && Array.isArray(configs.value)
-        ? configs.value.filter((c: any) => c.isActive).map((c: any) => c.provider)
+        ? (configs.value as CourierConfig[]).filter((c) => c.isActive).map((c) => c.provider)
         : [];
       setConfiguredProviders(providers);
       if (rates.status === 'fulfilled') setShippingRates(rates.value);
+      return providers;
     } catch {
       setConfiguredProviders([]);
+      return [];
     } finally {
       setLoadingConfigs(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    if (open) {
+      setStep('loading');
+      setSelectedCourier('');
+      const defaults = getDefaultShippingInfo();
+      setWeight(defaults.weight);
+      setDimensions(defaults.dimensions);
+      setAwbNumber('');
+      setCarrierName('');
+      setResult(null);
+      
+      loadConfigs().then((providers) => {
+        if (providers.length > 0) {
+          setSelectedCourier(providers[0]);
+          setStep('details');
+        } else {
+          setStep('select');
+        }
+      });
+    }
+  }, [open, getDefaultShippingInfo, loadConfigs]);
 
   const estimatedShipping = (() => {
     if (!shippingRates) return null;
@@ -1127,27 +1171,22 @@ function ShipOrderModal({
     return { total: weightCharge + dimSurcharge, weightCharge, dimSurcharge };
   })();
 
-  const handleSelectMode = (mode: string) => {
-    setShippingMode(mode);
-    if (mode === 'SELF_SHIP') {
+  const handleSelectCourier = (courier: string) => {
+    if (courier === 'SELF_SHIP') {
       setStep('selfship');
     } else {
-      setStep('courier');
+      setSelectedCourier(courier);
+      setStep('details');
     }
-  };
-
-  const handleSelectCourier = (courier: string) => {
-    setSelectedCourier(courier);
-    setStep('details');
   };
 
   const handleShip = async () => {
     setSaving(true);
     try {
       const body: any = {
-        shippingMode: shippingMode === 'SELF_SHIP' ? 'SELF_SHIP' : selectedCourier,
+        shippingMode: step === 'selfship' ? 'SELF_SHIP' : selectedCourier,
       };
-      if (shippingMode === 'SELF_SHIP') {
+      if (step === 'selfship') {
         body.carrierName = carrierName.trim() || undefined;
         body.awbNumber = awbNumber.trim() || undefined;
       } else {
@@ -1165,90 +1204,109 @@ function ShipOrderModal({
     }
   };
 
+  const availableCouriers = COURIER_PROVIDERS.filter(
+    (cp) => cp.alwaysAvailable || configuredProviders.includes(cp.id)
+  );
+
+  const getProviderName = (id: string) => COURIER_PROVIDERS.find((c) => c.id === id)?.name || id;
+
   return (
     <Modal open={open} onClose={onClose} title="Ship Order" size="lg">
       <AnimatePresence mode="wait">
-        {step === 'mode' && (
-          <motion.div key="mode" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
-            <p className="text-sm text-text-muted">How would you like to ship this order?</p>
-            <div className="grid gap-3">
-              <button onClick={() => handleSelectMode('SELF_SHIP')}
-                className="flex items-start gap-4 p-4 rounded-xl border-2 border-border hover:border-primary-300 hover:bg-primary-50/30 transition-all text-left"
-              >
-                <div className="rounded-lg bg-gray-100 p-2.5"><Package size={20} className="text-gray-600" /></div>
-                <div>
-                  <h4 className="text-sm font-bold text-text-primary">Ship By Own</h4>
-                  <p className="text-xs text-text-muted mt-0.5">Ship using your own courier. You&apos;ll enter AWB and update status manually.</p>
-                </div>
-              </button>
-              <button onClick={() => handleSelectMode('XELNOVA')}
-                className="flex items-start gap-4 p-4 rounded-xl border-2 border-primary-200 bg-primary-50/30 hover:border-primary-400 transition-all text-left"
-              >
-                <div className="rounded-lg bg-primary-100 p-2.5"><Truck size={20} className="text-primary-600" /></div>
-                <div>
-                  <h4 className="text-sm font-bold text-text-primary">Ship By Xelnova</h4>
-                  <p className="text-xs text-text-muted mt-0.5">Choose from Xelnova Courier, Delhivery, ShipRocket, XpressBees, or Ekart.</p>
-                </div>
-              </button>
-            </div>
+        {step === 'loading' && (
+          <motion.div key="loading" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="py-12 flex flex-col items-center gap-3">
+            <Loader2 size={28} className="animate-spin text-primary-500" />
+            <p className="text-sm text-text-muted">Loading your courier partners...</p>
           </motion.div>
         )}
 
-        {step === 'courier' && (
-          <motion.div key="courier" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
-            <div className="flex items-center gap-2">
-              <button onClick={() => setStep('mode')} className="p-1 rounded hover:bg-gray-100 text-text-muted"><ChevronLeft size={16} /></button>
-              <p className="text-sm text-text-muted">Select a courier partner</p>
+        {step === 'select' && (
+          <motion.div key="select" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
+            <div className="rounded-xl bg-amber-50 border border-amber-200 p-3">
+              <p className="text-xs text-amber-700">
+                <strong>No courier partners connected.</strong> Connect your Delhivery, ShipRocket, XpressBees, or Ekart account in{' '}
+                <a href="/shipping" className="underline font-medium">Shipping Settings</a> for automated shipping with AWB generation.
+              </p>
             </div>
+            <p className="text-sm text-text-muted">Select a shipping method:</p>
             {loadingConfigs ? (
               <div className="flex justify-center py-8"><Loader2 size={20} className="animate-spin text-primary-500" /></div>
             ) : (
               <div className="grid gap-3">
-                {COURIER_PROVIDERS.map((cp) => {
-                  const isAvailable = cp.alwaysAvailable || configuredProviders.includes(cp.id);
-                  return (
-                    <button key={cp.id} onClick={() => isAvailable && handleSelectCourier(cp.id)} disabled={!isAvailable}
-                      className={`flex items-center justify-between p-4 rounded-xl border-2 transition-all text-left ${
-                        isAvailable ? 'border-border hover:border-primary-300 hover:bg-primary-50/30' : 'border-gray-100 bg-gray-50 opacity-60 cursor-not-allowed'
-                      }`}
-                    >
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <h4 className="text-sm font-bold text-text-primary">{cp.name}</h4>
-                          {cp.alwaysAvailable && <Badge variant="success">Always Available</Badge>}
-                          {!cp.alwaysAvailable && isAvailable && <Badge variant="info">Configured</Badge>}
-                          {!cp.alwaysAvailable && !isAvailable && <Badge variant="default">Not Configured</Badge>}
-                        </div>
-                        <p className="text-xs text-text-muted mt-0.5">{cp.desc}</p>
-                      </div>
-                      {isAvailable && <ArrowRight size={14} className="text-text-muted" />}
-                    </button>
-                  );
-                })}
+                <button onClick={() => handleSelectCourier('XELNOVA_COURIER')}
+                  className="flex items-start gap-4 p-4 rounded-xl border-2 border-primary-200 bg-primary-50/30 hover:border-primary-400 transition-all text-left"
+                >
+                  <div className="rounded-lg bg-primary-100 p-2.5"><Truck size={20} className="text-primary-600" /></div>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <h4 className="text-sm font-bold text-text-primary">Xelnova Courier</h4>
+                      <Badge variant="success">Always Available</Badge>
+                    </div>
+                    <p className="text-xs text-text-muted mt-0.5">We handle pickup, delivery, AWB & tracking. No setup needed.</p>
+                  </div>
+                  <ArrowRight size={14} className="text-text-muted mt-3" />
+                </button>
+                <button onClick={() => handleSelectCourier('SELF_SHIP')}
+                  className="flex items-start gap-4 p-4 rounded-xl border-2 border-border hover:border-gray-300 hover:bg-gray-50/50 transition-all text-left"
+                >
+                  <div className="rounded-lg bg-gray-100 p-2.5"><Package size={20} className="text-gray-600" /></div>
+                  <div className="flex-1">
+                    <h4 className="text-sm font-bold text-text-primary">Ship By Own</h4>
+                    <p className="text-xs text-text-muted mt-0.5">Ship using your own courier. Enter AWB and update status manually.</p>
+                  </div>
+                  <ArrowRight size={14} className="text-text-muted mt-3" />
+                </button>
               </div>
             )}
-            <p className="text-xs text-text-muted">
-              Configure courier API keys in{' '}
-              <a href="/shipping" className="text-primary-600 hover:underline">Shipping Settings</a>
-            </p>
           </motion.div>
         )}
 
         {step === 'details' && (
           <motion.div key="details" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
-            <div className="flex items-center gap-2">
-              <button onClick={() => setStep('courier')} className="p-1 rounded hover:bg-gray-100 text-text-muted"><ChevronLeft size={16} /></button>
-              <p className="text-sm text-text-muted">
-                Shipping via <strong>{COURIER_PROVIDERS.find((c) => c.id === selectedCourier)?.name}</strong>
-              </p>
-            </div>
-            <div className="rounded-xl bg-blue-50 border border-blue-200 p-3">
-              <p className="text-xs text-blue-700">
+            {availableCouriers.length > 1 && (
+              <div className="space-y-2">
+                <label className="block text-xs font-medium text-text-muted">Ship via</label>
+                <div className="flex flex-wrap gap-2">
+                  {availableCouriers.map((cp) => (
+                    <button
+                      key={cp.id}
+                      onClick={() => setSelectedCourier(cp.id)}
+                      className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-all ${
+                        selectedCourier === cp.id
+                          ? 'border-primary-500 bg-primary-50 text-primary-700'
+                          : 'border-border bg-white text-text-secondary hover:border-gray-300'
+                      }`}
+                    >
+                      {cp.name}
+                      {configuredProviders.includes(cp.id) && (
+                        <CheckCircle size={10} className="inline ml-1 text-emerald-500" />
+                      )}
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => setStep('selfship')}
+                    className="px-3 py-1.5 text-xs font-medium rounded-lg border border-border bg-white text-text-secondary hover:border-gray-300 transition-all"
+                  >
+                    Ship By Own
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-3">
+              <div className="flex items-center gap-2">
+                <CheckCircle size={14} className="text-emerald-600" />
+                <p className="text-xs text-emerald-700 font-medium">
+                  Shipping via {getProviderName(selectedCourier)}
+                </p>
+              </div>
+              <p className="text-xs text-emerald-600/80 mt-1">
                 {selectedCourier === 'XELNOVA_COURIER'
                   ? 'Xelnova will handle pickup, delivery, and all status updates automatically.'
-                  : 'The shipment will be booked using your courier account. AWB and tracking will be auto-assigned.'}
+                  : 'Shipment will be booked automatically. AWB number and tracking will be generated instantly.'}
               </p>
             </div>
+
             <Input
               label="Package Weight (kg)"
               type="number"
@@ -1288,7 +1346,7 @@ function ShipOrderModal({
         {step === 'selfship' && (
           <motion.div key="selfship" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
             <div className="flex items-center gap-2">
-              <button onClick={() => setStep('mode')} className="p-1 rounded hover:bg-gray-100 text-text-muted"><ChevronLeft size={16} /></button>
+              <button onClick={() => configuredProviders.length > 0 ? setStep('details') : setStep('select')} className="p-1 rounded hover:bg-gray-100 text-text-muted"><ChevronLeft size={16} /></button>
               <p className="text-sm text-text-muted">Ship By Own</p>
             </div>
             <div className="rounded-xl bg-amber-50 border border-amber-200 p-3">
@@ -1339,6 +1397,11 @@ function ShipOrderModal({
                   </button>
                 </div>
               </div>
+            )}
+            {result.courierProvider && (
+              <p className="text-sm text-text-secondary">
+                Shipped via <strong>{result.courierProvider}</strong>
+              </p>
             )}
             {result.trackingUrl ? (
               <a href={result.trackingUrl} target="_blank" rel="noopener noreferrer"

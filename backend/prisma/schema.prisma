@@ -428,6 +428,10 @@ model Product {
   gstRate         Float?
   lowStockThreshold Int @default(5)
 
+  // Shipping details
+  weight     Float?   // Weight in kg
+  dimensions String?  // Format: LxWxH in cm (e.g., "30x20x15")
+
   reviews    Review[]
   orderItems OrderItem[]
   cartItems  CartItem[]

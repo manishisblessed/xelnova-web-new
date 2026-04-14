@@ -249,18 +249,24 @@ export default function SellersPage() {
       <ActionModal
         open={!!deleteTarget}
         onClose={() => setDeleteTarget(null)}
-        title="Delete seller?"
-        submitLabel="Delete"
+        title="Suspend seller?"
+        submitLabel="Suspend"
         submitVariant="danger"
         onSubmit={() => void handleDelete()}
         loading={deleting}
       >
         <p className="text-sm text-text-muted">
-          Removes the seller account and linked user when they have no orders and no products. This cannot be undone.
+          Suspends the seller account and deactivates all their products from the storefront. The seller will no longer be able to access their dashboard.
         </p>
+        <ul className="mt-2 text-xs text-text-muted space-y-1 list-disc list-inside">
+          <li>All products will be hidden from customers</li>
+          <li>Seller role will be downgraded to customer</li>
+          <li>Order history and data will be preserved</li>
+          <li>The account can be reactivated later if needed</li>
+        </ul>
         {deleteTarget && (
-          <p className="text-sm text-text-primary pt-2">
-            Delete <strong>{deleteTarget.storeName}</strong> ({deleteTarget.email ?? deleteTarget.user?.email ?? '—'})?
+          <p className="text-sm text-text-primary pt-3">
+            Suspend <strong>{deleteTarget.storeName}</strong> ({deleteTarget.email ?? deleteTarget.user?.email ?? '—'})?
           </p>
         )}
       </ActionModal>

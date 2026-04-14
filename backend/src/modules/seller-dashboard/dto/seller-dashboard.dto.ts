@@ -22,6 +22,8 @@ export class CreateProductDto {
   @ApiPropertyOptional() @IsOptional() @IsString() hsnCode?: string;
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Type(() => Number) gstRate?: number;
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Type(() => Number) lowStockThreshold?: number;
+  @ApiPropertyOptional({ description: 'Weight in kg' }) @IsOptional() @IsNumber() @Type(() => Number) weight?: number;
+  @ApiPropertyOptional({ description: 'Dimensions in LxWxH cm format (e.g., 30x20x15)' }) @IsOptional() @IsString() dimensions?: string;
 }
 
 export class UpdateProductDto {
@@ -46,6 +48,8 @@ export class UpdateProductDto {
   @ApiPropertyOptional() @IsOptional() @IsString() hsnCode?: string;
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Type(() => Number) gstRate?: number;
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Type(() => Number) lowStockThreshold?: number;
+  @ApiPropertyOptional({ description: 'Weight in kg' }) @IsOptional() @IsNumber() @Type(() => Number) weight?: number;
+  @ApiPropertyOptional({ description: 'Dimensions in LxWxH cm format (e.g., 30x20x15)' }) @IsOptional() @IsString() dimensions?: string;
 }
 
 export class SellerProductQueryDto {
