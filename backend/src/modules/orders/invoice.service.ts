@@ -7,6 +7,20 @@ const A4_HEIGHT = 842;
 const MARGIN = 40;
 const LINE_HEIGHT = 16;
 
+function toNum(val: unknown): number {
+  if (val == null) return 0;
+  if (typeof val === 'number') return val;
+  if (typeof val === 'object' && 'toNumber' in val && typeof (val as { toNumber: () => number }).toNumber === 'function') {
+    return (val as { toNumber: () => number }).toNumber();
+  }
+  return Number(val) || 0;
+}
+
+function safeStr(val: unknown): string {
+  if (val == null) return '';
+  return String(val);
+}
+
 @Injectable()
 export class InvoiceService {
   constructor(private readonly prisma: PrismaService) {}
@@ -41,7 +55,7 @@ export class InvoiceService {
       yPos: number,
       opts?: { size?: number; color?: typeof black; bold?: boolean },
     ) => {
-      page.drawText(text, {
+      page.drawText(safeStr(text), {
         x,
         y: yPos,
         size: opts?.size || 10,
@@ -83,14 +97,14 @@ export class InvoiceService {
     drawText('Ship To:', A4_WIDTH / 2, y, { bold: true, color: gray, size: 9 });
     y -= LINE_HEIGHT;
 
-    drawText(order.user.name, MARGIN, y, { bold: true });
+    drawText(safeStr(order.user.name) || 'Customer', MARGIN, y, { bold: true });
     if (order.shippingAddress) {
-      drawText(order.shippingAddress.fullName, A4_WIDTH / 2, y, { bold: true });
+      drawText(safeStr(order.shippingAddress.fullName), A4_WIDTH / 2, y, { bold: true });
       y -= LINE_HEIGHT;
-      drawText(order.user.email, MARGIN, y, { size: 9 });
-      drawText(order.shippingAddress.addressLine1, A4_WIDTH / 2, y, { size: 9 });
+      drawText(safeStr(order.user.email), MARGIN, y, { size: 9 });
+      drawText(safeStr(order.shippingAddress.addressLine1), A4_WIDTH / 2, y, { size: 9 });
       y -= LINE_HEIGHT;
-      if (order.user.phone) drawText(order.user.phone, MARGIN, y, { size: 9 });
+      if (order.user.phone) drawText(safeStr(order.user.phone), MARGIN, y, { size: 9 });
       const cityLine = [
         order.shippingAddress.city,
         order.shippingAddress.state,
@@ -100,10 +114,10 @@ export class InvoiceService {
         .join(', ');
       drawText(cityLine, A4_WIDTH / 2, y, { size: 9 });
       y -= LINE_HEIGHT;
-      drawText(order.shippingAddress.phone, A4_WIDTH / 2, y, { size: 9 });
+      drawText(safeStr(order.shippingAddress.phone), A4_WIDTH / 2, y, { size: 9 });
     } else {
       y -= LINE_HEIGHT;
-      drawText(order.user.email, MARGIN, y, { size: 9 });
+      drawText(safeStr(order.user.email), MARGIN, y, { size: 9 });
     }
 
     y -= 30;
@@ -123,14 +137,14 @@ export class InvoiceService {
     y -= 20;
 
     for (const item of order.items) {
-      const name =
-        item.productName.length > 45
-          ? item.productName.slice(0, 42) + '...'
-          : item.productName;
+      const productName = safeStr(item.productName);
+      const name = productName.length > 45 ? productName.slice(0, 42) + '...' : productName;
+      const itemPrice = toNum(item.price);
+      const itemQty = toNum(item.quantity);
       drawText(name, colX.item, y, { size: 9 });
-      drawText(String(item.quantity), colX.qty, y, { size: 9 });
-      drawText(`₹${item.price.toFixed(2)}`, colX.rate, y, { size: 9 });
-      drawText(`₹${(item.price * item.quantity).toFixed(2)}`, colX.amount, y, {
+      drawText(String(itemQty), colX.qty, y, { size: 9 });
+      drawText(`₹${itemPrice.toFixed(2)}`, colX.rate, y, { size: 9 });
+      drawText(`₹${(itemPrice * itemQty).toFixed(2)}`, colX.amount, y, {
         size: 9,
       });
       y -= LINE_HEIGHT;
@@ -167,12 +181,18 @@ export class InvoiceService {
       y -= LINE_HEIGHT;
     };
 
-    drawSummaryLine('Subtotal', `₹${order.subtotal.toFixed(2)}`);
-    if (order.discount > 0) {
-      drawSummaryLine('Discount', `-₹${order.discount.toFixed(2)}`);
+    const subtotal = toNum(order.subtotal);
+    const discount = toNum(order.discount);
+    const shipping = toNum(order.shipping);
+    const tax = toNum(order.tax);
+    const total = toNum(order.total);
+
+    drawSummaryLine('Subtotal', `₹${subtotal.toFixed(2)}`);
+    if (discount > 0) {
+      drawSummaryLine('Discount', `-₹${discount.toFixed(2)}`);
     }
-    drawSummaryLine('Shipping', order.shipping > 0 ? `₹${order.shipping.toFixed(2)}` : 'FREE');
-    drawSummaryLine('Tax (GST)', `₹${order.tax.toFixed(2)}`);
+    drawSummaryLine('Shipping', shipping > 0 ? `₹${shipping.toFixed(2)}` : 'FREE');
+    drawSummaryLine('Tax (GST)', `₹${tax.toFixed(2)}`);
     y -= 4;
     page.drawLine({
       start: { x: summaryX, y: y + 10 },
@@ -180,7 +200,7 @@ export class InvoiceService {
       thickness: 1,
       color: primary,
     });
-    drawSummaryLine('Total', `₹${order.total.toFixed(2)}`, true);
+    drawSummaryLine('Total', `₹${total.toFixed(2)}`, true);
 
     y -= 40;
     drawText(

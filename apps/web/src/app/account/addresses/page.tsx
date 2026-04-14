@@ -1,12 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
-import { MapPin, Plus, Home, Briefcase, Pencil, Trash2 } from "lucide-react";
+import { MapPin, Plus, Home, Briefcase, Pencil, Trash2, Loader2 } from "lucide-react";
+import { usersApi, setAccessToken } from "@xelnova/api";
+import type { Address } from "@xelnova/api";
 
-interface Address {
+type AddressType = "HOME" | "OFFICE" | "OTHER";
+
+interface LocalAddress {
   id: string;
-  label: "Home" | "Work" | "Other";
+  label: AddressType;
   name: string;
   phone: string;
   line1: string;
@@ -17,8 +21,8 @@ interface Address {
   isDefault: boolean;
 }
 
-const emptyAddress: Omit<Address, "id"> = {
-  label: "Home",
+const emptyAddress: Omit<LocalAddress, "id"> = {
+  label: "HOME",
   name: "",
   phone: "",
   line1: "",
@@ -29,29 +33,125 @@ const emptyAddress: Omit<Address, "id"> = {
   isDefault: false,
 };
 
-const labelIcons = { Home: Home, Work: Briefcase, Other: MapPin } as const;
+const labelIcons = { HOME: Home, OFFICE: Briefcase, OTHER: MapPin } as const;
+const labelDisplay = { HOME: "Home", OFFICE: "Work", OTHER: "Other" } as const;
+
+function mapApiToLocal(addr: Address): LocalAddress {
+  return {
+    id: addr.id,
+    label: (addr.type?.toUpperCase() as AddressType) || "HOME",
+    name: addr.fullName,
+    phone: addr.phone,
+    line1: addr.addressLine1,
+    line2: addr.addressLine2 || undefined,
+    city: addr.city,
+    state: addr.state,
+    pincode: addr.pincode,
+    isDefault: addr.isDefault,
+  };
+}
+
+function syncToken() {
+  if (typeof document === "undefined") return;
+  const m = document.cookie.match(/(?:^|;\s*)xelnova-token=([^;]*)/);
+  if (m) setAccessToken(decodeURIComponent(m[1]));
+}
 
 export default function AddressesPage() {
-  const [addresses, setAddresses] = useState<Address[]>([]);
-  const [editing, setEditing] = useState<Omit<Address, "id"> & { id?: string } | null>(null);
+  const [addresses, setAddresses] = useState<LocalAddress[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const [editing, setEditing] = useState<(Omit<LocalAddress, "id"> & { id?: string }) | null>(null);
+  const [error, setError] = useState("");
 
-  const handleSave = () => {
-    if (!editing || !editing.name || !editing.line1 || !editing.city || !editing.pincode) return;
-    if (editing.id) {
-      setAddresses((prev) => prev.map((a) => (a.id === editing.id ? { ...editing, id: a.id } as Address : a)));
-    } else {
-      setAddresses((prev) => [...prev, { ...editing, id: crypto.randomUUID() } as Address]);
+  const fetchAddresses = useCallback(async () => {
+    try {
+      syncToken();
+      const data = await usersApi.getAddresses();
+      setAddresses((data || []).map(mapApiToLocal));
+    } catch (err) {
+      console.error("Failed to fetch addresses:", err);
+    } finally {
+      setLoading(false);
     }
-    setEditing(null);
+  }, []);
+
+  useEffect(() => {
+    fetchAddresses();
+  }, [fetchAddresses]);
+
+  const handleSave = async () => {
+    if (!editing || !editing.name || !editing.line1 || !editing.city || !editing.pincode || !editing.phone) {
+      setError("Please fill all required fields");
+      return;
+    }
+    
+    setSaving(true);
+    setError("");
+    
+    try {
+      syncToken();
+      
+      const payload = {
+        fullName: editing.name.trim(),
+        phone: editing.phone.trim(),
+        addressLine1: editing.line1.trim(),
+        addressLine2: editing.line2?.trim() || null,
+        city: editing.city.trim(),
+        state: editing.state.trim(),
+        pincode: editing.pincode.trim(),
+        landmark: null,
+        type: editing.label,
+      };
+
+      if (editing.id) {
+        const updated = await usersApi.updateAddress(editing.id, payload);
+        setAddresses((prev) => prev.map((a) => (a.id === editing.id ? mapApiToLocal(updated) : a)));
+      } else {
+        const created = await usersApi.addAddress(payload);
+        setAddresses((prev) => [...prev, mapApiToLocal(created)]);
+      }
+      setEditing(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save address");
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const handleDelete = (id: string) => {
-    setAddresses((prev) => prev.filter((a) => a.id !== id));
+  const handleDelete = async (id: string) => {
+    if (!confirm("Are you sure you want to delete this address?")) return;
+    
+    setDeleting(id);
+    try {
+      syncToken();
+      await usersApi.deleteAddress(id);
+      setAddresses((prev) => prev.filter((a) => a.id !== id));
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to delete address");
+    } finally {
+      setDeleting(null);
+    }
   };
 
-  const handleSetDefault = (id: string) => {
-    setAddresses((prev) => prev.map((a) => ({ ...a, isDefault: a.id === id })));
+  const handleSetDefault = async (id: string) => {
+    try {
+      syncToken();
+      await usersApi.setDefaultAddress(id);
+      setAddresses((prev) => prev.map((a) => ({ ...a, isDefault: a.id === id })));
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to set default address");
+    }
   };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 className="h-8 w-8 animate-spin text-primary-600" />
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -76,13 +176,21 @@ export default function AddressesPage() {
           <h3 className="text-base font-semibold text-text-primary mb-4">
             {editing.id ? "Edit Address" : "Add New Address"}
           </h3>
+          
+          {error && (
+            <div className="mb-4 rounded-xl bg-danger-50 border border-danger-200 p-3 text-sm text-danger-700">
+              {error}
+            </div>
+          )}
+          
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="sm:col-span-2">
               <label className="block text-sm font-medium text-text-secondary mb-1">Address Type</label>
               <div className="flex gap-2">
-                {(["Home", "Work", "Other"] as const).map((type) => (
+                {(["HOME", "OFFICE", "OTHER"] as const).map((type) => (
                   <button
                     key={type}
+                    type="button"
                     onClick={() => setEditing({ ...editing, label: type })}
                     className={`rounded-lg px-4 py-2 text-sm font-medium border transition-colors ${
                       editing.label === type
@@ -90,13 +198,13 @@ export default function AddressesPage() {
                         : "border-gray-200 text-text-secondary hover:border-gray-300"
                     }`}
                   >
-                    {type}
+                    {labelDisplay[type]}
                   </button>
                 ))}
               </div>
             </div>
             <div>
-              <label className="block text-sm font-medium text-text-secondary mb-1">Full Name</label>
+              <label className="block text-sm font-medium text-text-secondary mb-1">Full Name *</label>
               <input
                 type="text"
                 value={editing.name}
@@ -106,7 +214,7 @@ export default function AddressesPage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-text-secondary mb-1">Phone Number</label>
+              <label className="block text-sm font-medium text-text-secondary mb-1">Phone Number *</label>
               <input
                 type="tel"
                 value={editing.phone}
@@ -116,7 +224,7 @@ export default function AddressesPage() {
               />
             </div>
             <div className="sm:col-span-2">
-              <label className="block text-sm font-medium text-text-secondary mb-1">Address Line 1</label>
+              <label className="block text-sm font-medium text-text-secondary mb-1">Address Line 1 *</label>
               <input
                 type="text"
                 value={editing.line1}
@@ -136,7 +244,7 @@ export default function AddressesPage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-text-secondary mb-1">City</label>
+              <label className="block text-sm font-medium text-text-secondary mb-1">City *</label>
               <input
                 type="text"
                 value={editing.city}
@@ -146,7 +254,7 @@ export default function AddressesPage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-text-secondary mb-1">State</label>
+              <label className="block text-sm font-medium text-text-secondary mb-1">State *</label>
               <input
                 type="text"
                 value={editing.state}
@@ -156,7 +264,7 @@ export default function AddressesPage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-text-secondary mb-1">PIN Code</label>
+              <label className="block text-sm font-medium text-text-secondary mb-1">PIN Code *</label>
               <input
                 type="text"
                 value={editing.pincode}
@@ -170,13 +278,16 @@ export default function AddressesPage() {
           <div className="mt-5 flex gap-3">
             <button
               onClick={handleSave}
-              className="rounded-xl bg-primary-600 px-6 py-2.5 text-sm font-semibold text-white hover:bg-primary-700 transition-colors"
+              disabled={saving}
+              className="rounded-xl bg-primary-600 px-6 py-2.5 text-sm font-semibold text-white hover:bg-primary-700 transition-colors disabled:opacity-50 inline-flex items-center gap-2"
             >
-              Save Address
+              {saving && <Loader2 size={16} className="animate-spin" />}
+              {saving ? "Saving..." : "Save Address"}
             </button>
             <button
-              onClick={() => setEditing(null)}
-              className="rounded-xl border border-gray-200 px-6 py-2.5 text-sm font-medium text-text-secondary hover:bg-gray-50 transition-colors"
+              onClick={() => { setEditing(null); setError(""); }}
+              disabled={saving}
+              className="rounded-xl border border-gray-200 px-6 py-2.5 text-sm font-medium text-text-secondary hover:bg-gray-50 transition-colors disabled:opacity-50"
             >
               Cancel
             </button>
@@ -202,6 +313,7 @@ export default function AddressesPage() {
         <div className="grid gap-4 sm:grid-cols-2">
           {addresses.map((addr) => {
             const Icon = labelIcons[addr.label] ?? MapPin;
+            const isDeleting = deleting === addr.id;
             return (
               <motion.div
                 key={addr.id}
@@ -209,11 +321,11 @@ export default function AddressesPage() {
                 animate={{ opacity: 1, y: 0 }}
                 className={`rounded-2xl border bg-white p-5 shadow-card relative ${
                   addr.isDefault ? "border-primary-300 ring-1 ring-primary-200" : "border-border"
-                }`}
+                } ${isDeleting ? "opacity-50 pointer-events-none" : ""}`}
               >
                 <div className="flex items-center gap-2 mb-3">
                   <span className="inline-flex items-center gap-1.5 rounded-full bg-surface-muted px-3 py-1 text-xs font-semibold text-text-secondary">
-                    <Icon size={12} /> {addr.label}
+                    <Icon size={12} /> {labelDisplay[addr.label] || addr.label}
                   </span>
                   {addr.isDefault && (
                     <span className="rounded-full bg-primary-50 px-2.5 py-0.5 text-[10px] font-bold text-primary-700 uppercase tracking-wider">
@@ -236,9 +348,10 @@ export default function AddressesPage() {
                   <span className="text-border">|</span>
                   <button
                     onClick={() => handleDelete(addr.id)}
-                    className="inline-flex items-center gap-1 text-xs font-medium text-danger-600 hover:text-danger-700 transition-colors"
+                    disabled={isDeleting}
+                    className="inline-flex items-center gap-1 text-xs font-medium text-danger-600 hover:text-danger-700 transition-colors disabled:opacity-50"
                   >
-                    <Trash2 size={12} /> Remove
+                    {isDeleting ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />} Remove
                   </button>
                   {!addr.isDefault && (
                     <>

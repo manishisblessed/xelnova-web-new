@@ -55,6 +55,20 @@ export async function addAddress(address: Omit<Address, 'id' | 'isDefault'>): Pr
   return data.data;
 }
 
+export async function updateAddress(addressId: string, address: Partial<Omit<Address, 'id'>>): Promise<Address> {
+  const { data } = await api.patch<ApiResponse<Address>>(`/users/addresses/${addressId}`, address);
+  return data.data;
+}
+
+export async function deleteAddress(addressId: string): Promise<void> {
+  await api.delete(`/users/addresses/${addressId}`);
+}
+
+export async function setDefaultAddress(addressId: string): Promise<Address> {
+  const { data } = await api.patch<ApiResponse<Address>>(`/users/addresses/${addressId}`, { isDefault: true });
+  return data.data;
+}
+
 export async function getWishlist(): Promise<Product[]> {
   const { data } = await api.get<ApiResponse<Product[]>>('/users/wishlist');
   return data.data;

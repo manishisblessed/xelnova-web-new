@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, HttpException, HttpStatus, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { Prisma, Role } from '@prisma/client';
 import { LoggingService } from '../logging/logging.service';
@@ -216,6 +216,33 @@ export class AdminService {
   }
 
   async deleteProduct(id: string) {
+    // Check if product exists
+    const product = await this.prisma.product.findUnique({
+      where: { id },
+      include: {
+        _count: {
+          select: { orderItems: true },
+        },
+      },
+    });
+
+    if (!product) {
+      throw new HttpException('Product not found', HttpStatus.NOT_FOUND);
+    }
+
+    // If product has been ordered, soft delete by deactivating instead of hard delete
+    if (product._count.orderItems > 0) {
+      await this.prisma.product.update({
+        where: { id },
+        data: {
+          isActive: false,
+          name: `[DELETED] ${product.name}`,
+        },
+      });
+      return { deleted: true, softDeleted: true, message: 'Product has order history and was deactivated instead of deleted' };
+    }
+
+    // No orders - safe to hard delete
     await this.prisma.product.delete({ where: { id } });
     return { deleted: true };
   }

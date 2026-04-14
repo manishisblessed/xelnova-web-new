@@ -57,9 +57,16 @@ export class PaymentService {
     if (!order) throw new NotFoundException('Order not found');
     if (order.userId !== userId) throw new BadRequestException('Not your order');
 
+    // Check if order is already paid
+    if (order.paymentStatus === 'PAID') {
+      throw new BadRequestException('Order is already paid');
+    }
+
     const amountInPaise = Math.round(Number(order.total) * 100);
+    this.logger.log(`Creating payment for order ${orderId}: total=${order.total}, amountInPaise=${amountInPaise}`);
+    
     if (!amountInPaise || amountInPaise < 100) {
-      throw new BadRequestException(`Invalid order total for payment: ₹${order.total}`);
+      throw new BadRequestException(`Invalid order total for payment: ₹${order.total} (${amountInPaise} paise)`);
     }
 
     let razorpayOrder;
@@ -70,9 +77,10 @@ export class PaymentService {
         receipt: order.orderNumber,
         notes: { orderId: order.id, userId },
       });
+      this.logger.log(`Razorpay order created: ${razorpayOrder.id} for ${amountInPaise} paise`);
     } catch (err: any) {
       const msg = err?.error?.description || err?.message || 'Unknown Razorpay error';
-      console.error('Razorpay order creation failed:', { orderId, amountInPaise, error: msg });
+      this.logger.error(`Razorpay order creation failed for order ${orderId}:`, { amountInPaise, error: err });
       throw new BadRequestException(`Payment gateway error: ${msg}`);
     }
 

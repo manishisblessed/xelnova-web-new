@@ -189,24 +189,222 @@ export default function CheckoutPage() {
 
   if (orderPlaced) {
     return (
-      <div className="flex min-h-[70vh] flex-col items-center justify-center px-4 text-center">
-        <motion.div
-          initial={{ scale: 0.5, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          transition={{ type: "spring", damping: 15, stiffness: 200 }}
-          className="mb-6 inline-flex rounded-full bg-success-100 p-6 border border-success-200"
-        >
-          <Check size={48} className="text-success-600" />
-        </motion.div>
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
-          <h1 className="text-2xl font-bold text-text-primary font-display">Order Placed!</h1>
-          <p className="mt-2 text-text-secondary max-w-md mx-auto">Your order has been placed successfully. You will receive a confirmation shortly.</p>
-          {orderNumber && <p className="mt-3 text-sm font-medium text-primary-600">Order #{orderNumber}</p>}
-          <div className="mt-6 flex flex-col sm:flex-row gap-3 justify-center">
-            <Link href="/account/orders" className="rounded-xl bg-primary-600 px-6 py-3 text-sm font-semibold text-white hover:bg-primary-700 transition-colors">View Orders</Link>
-            <Link href="/products" className="rounded-xl border border-border px-6 py-3 text-sm font-semibold text-text-primary hover:bg-surface-raised transition-colors">Continue Shopping</Link>
+      <div className="relative min-h-screen overflow-hidden bg-gradient-to-br from-primary-50 via-white to-success-50">
+        {/* Animated confetti particles */}
+        <div className="pointer-events-none absolute inset-0">
+          {[...Array(50)].map((_, i) => (
+            <motion.div
+              key={i}
+              initial={{ 
+                y: -20, 
+                x: Math.random() * (typeof window !== 'undefined' ? window.innerWidth : 1000),
+                rotate: 0,
+                opacity: 1 
+              }}
+              animate={{ 
+                y: typeof window !== 'undefined' ? window.innerHeight + 100 : 1000,
+                rotate: Math.random() * 720 - 360,
+                opacity: [1, 1, 0]
+              }}
+              transition={{ 
+                duration: Math.random() * 3 + 2,
+                delay: Math.random() * 0.5,
+                ease: "linear",
+                repeat: Infinity,
+                repeatDelay: Math.random() * 2
+              }}
+              className="absolute h-3 w-3 rounded-sm"
+              style={{
+                backgroundColor: ['#10b981', '#6366f1', '#f59e0b', '#ec4899', '#3b82f6', '#8b5cf6'][Math.floor(Math.random() * 6)],
+                left: `${Math.random() * 100}%`,
+              }}
+            />
+          ))}
+        </div>
+
+        {/* Decorative circles */}
+        <motion.div 
+          initial={{ scale: 0, opacity: 0 }}
+          animate={{ scale: 1, opacity: 0.1 }}
+          transition={{ duration: 0.8, ease: "easeOut" }}
+          className="absolute -top-32 -right-32 h-96 w-96 rounded-full bg-success-500"
+        />
+        <motion.div 
+          initial={{ scale: 0, opacity: 0 }}
+          animate={{ scale: 1, opacity: 0.1 }}
+          transition={{ duration: 0.8, delay: 0.2, ease: "easeOut" }}
+          className="absolute -bottom-32 -left-32 h-80 w-80 rounded-full bg-primary-500"
+        />
+
+        <div className="relative flex min-h-screen flex-col items-center justify-center px-4 py-12">
+          {/* Success icon with rings */}
+          <div className="relative mb-8">
+            <motion.div
+              initial={{ scale: 0 }}
+              animate={{ scale: [0, 1.2, 1] }}
+              transition={{ duration: 0.6, times: [0, 0.6, 1] }}
+              className="absolute inset-0 rounded-full bg-success-200/50"
+              style={{ transform: 'scale(1.8)' }}
+            />
+            <motion.div
+              initial={{ scale: 0 }}
+              animate={{ scale: [0, 1.3, 1] }}
+              transition={{ duration: 0.6, delay: 0.1, times: [0, 0.6, 1] }}
+              className="absolute inset-0 rounded-full bg-success-300/40"
+              style={{ transform: 'scale(1.4)' }}
+            />
+            <motion.div
+              initial={{ scale: 0 }}
+              animate={{ scale: 1 }}
+              transition={{ type: "spring", damping: 12, stiffness: 200, delay: 0.2 }}
+              className="relative flex h-28 w-28 items-center justify-center rounded-full bg-gradient-to-br from-success-400 to-success-600 shadow-lg shadow-success-500/30"
+            >
+              <motion.div
+                initial={{ scale: 0, rotate: -180 }}
+                animate={{ scale: 1, rotate: 0 }}
+                transition={{ type: "spring", damping: 10, stiffness: 150, delay: 0.4 }}
+              >
+                <Check size={56} className="text-white" strokeWidth={3} />
+              </motion.div>
+            </motion.div>
           </div>
-        </motion.div>
+
+          {/* Content card */}
+          <motion.div 
+            initial={{ opacity: 0, y: 30 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.5, duration: 0.5 }}
+            className="w-full max-w-md rounded-3xl bg-white/80 backdrop-blur-sm p-8 shadow-xl shadow-gray-200/50 border border-white/50"
+          >
+            <div className="text-center">
+              <motion.h1 
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.6 }}
+                className="text-3xl font-bold bg-gradient-to-r from-success-600 to-primary-600 bg-clip-text text-transparent font-display"
+              >
+                Order Confirmed!
+              </motion.h1>
+              <motion.p 
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.7 }}
+                className="mt-3 text-text-secondary"
+              >
+                Thank you for your purchase! We&apos;re preparing your order with care.
+              </motion.p>
+              
+              {orderNumber && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ delay: 0.8 }}
+                  className="mt-6 inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-primary-50 to-success-50 px-5 py-2.5 border border-primary-100"
+                >
+                  <span className="text-sm text-text-secondary">Order ID:</span>
+                  <span className="font-mono font-bold text-primary-700">#{orderNumber}</span>
+                </motion.div>
+              )}
+
+              {/* Timeline preview */}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.9 }}
+                className="mt-8 flex justify-center gap-2"
+              >
+                {[
+                  { icon: Check, label: 'Confirmed', active: true },
+                  { icon: Truck, label: 'Shipping', active: false },
+                  { icon: MapPin, label: 'Delivered', active: false },
+                ].map((step, i) => (
+                  <div key={i} className="flex items-center">
+                    <div className={cn(
+                      "flex flex-col items-center",
+                      step.active ? "text-success-600" : "text-gray-300"
+                    )}>
+                      <div className={cn(
+                        "flex h-10 w-10 items-center justify-center rounded-full border-2",
+                        step.active 
+                          ? "border-success-500 bg-success-50" 
+                          : "border-gray-200 bg-gray-50"
+                      )}>
+                        <step.icon size={18} />
+                      </div>
+                      <span className={cn(
+                        "mt-1.5 text-xs font-medium",
+                        step.active ? "text-success-700" : "text-gray-400"
+                      )}>
+                        {step.label}
+                      </span>
+                    </div>
+                    {i < 2 && (
+                      <div className={cn(
+                        "mx-1 h-0.5 w-8 rounded",
+                        i === 0 ? "bg-gradient-to-r from-success-400 to-gray-200" : "bg-gray-200"
+                      )} />
+                    )}
+                  </div>
+                ))}
+              </motion.div>
+
+              {/* Action buttons */}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 1 }}
+                className="mt-8 flex flex-col gap-3"
+              >
+                <Link 
+                  href="/account/orders" 
+                  className="group relative overflow-hidden rounded-2xl bg-gradient-to-r from-primary-600 to-primary-700 px-6 py-4 text-sm font-semibold text-white shadow-lg shadow-primary-500/25 transition-all hover:shadow-xl hover:shadow-primary-500/30 hover:-translate-y-0.5"
+                >
+                  <span className="relative z-10 flex items-center justify-center gap-2">
+                    <Truck size={18} />
+                    Track Your Order
+                    <ChevronRight size={16} className="transition-transform group-hover:translate-x-1" />
+                  </span>
+                  <div className="absolute inset-0 bg-gradient-to-r from-primary-700 to-primary-800 opacity-0 transition-opacity group-hover:opacity-100" />
+                </Link>
+                <Link 
+                  href="/products" 
+                  className="flex items-center justify-center gap-2 rounded-2xl border-2 border-gray-200 px-6 py-4 text-sm font-semibold text-text-primary transition-all hover:border-primary-300 hover:bg-primary-50 hover:text-primary-700"
+                >
+                  Continue Shopping
+                  <ArrowLeft size={16} className="rotate-180" />
+                </Link>
+              </motion.div>
+
+              {/* Additional info */}
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 1.1 }}
+                className="mt-8 flex items-center justify-center gap-4 text-xs text-text-muted"
+              >
+                <div className="flex items-center gap-1.5">
+                  <ShieldCheck size={14} className="text-success-500" />
+                  <span>Secure Payment</span>
+                </div>
+                <span className="h-3 w-px bg-gray-200" />
+                <div className="flex items-center gap-1.5">
+                  <Truck size={14} className="text-primary-500" />
+                  <span>Fast Delivery</span>
+                </div>
+              </motion.div>
+            </div>
+          </motion.div>
+
+          {/* Celebration message */}
+          <motion.p
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 1.2 }}
+            className="mt-6 text-sm text-text-muted"
+          >
+            A confirmation email has been sent to your registered email address.
+          </motion.p>
+        </div>
       </div>
     );
   }
@@ -331,10 +529,14 @@ export default function CheckoutPage() {
         paymentOrder = await paymentApi.createPaymentOrder(order.id);
       } catch (payErr: unknown) {
         const msg = payErr instanceof Error ? payErr.message : "";
+        console.error("Payment order creation failed:", payErr);
         if (msg.toLowerCase().includes("not configured")) {
           throw new Error("Payment gateway is not configured. Please contact support.");
         }
-        throw new Error(msg || "Failed to initialize payment. Please try again.");
+        if (msg.toLowerCase().includes("already paid")) {
+          throw new Error("This order is already paid. Check your orders page.");
+        }
+        throw new Error(msg || "Failed to initialize payment. Please try again or contact support.");
       }
       await openRazorpay(paymentOrder, order.orderNumber);
 

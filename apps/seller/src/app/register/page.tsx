@@ -972,6 +972,9 @@ export default function RegisterPage() {
         if (!formData.gstNumber.trim()) newErrors.gstNumber = 'GST number required';
         else if (gstVerification.status !== 'verified') newErrors.gstNumber = 'GST not verified';
       }
+      if (aadhaar.status !== 'verified') {
+        newErrors.aadhaar = 'Aadhaar verification via DigiLocker is mandatory';
+      }
       if (!formData.storeName.trim()) newErrors.storeName = 'Store name required';
       else if (formData.storeName.length < 3) newErrors.storeName = 'Min 3 characters';
       if (formData.categorySelectionType === 'choose' && formData.selectedCategories.length === 0) {
@@ -1514,18 +1517,7 @@ export default function RegisterPage() {
                           </div>
                         )}
                         {aadhaar.error && <p className="text-xs text-red-500 mt-1">{aadhaar.error}</p>}
-                        {aadhaar.status !== 'verified' && process.env.NODE_ENV === 'development' && (
-                          <button
-                            type="button"
-                            onClick={() => setAadhaar({
-                              status: 'verified',
-                              verifiedData: { name: 'Test User', dob: '01-01-1990', gender: 'M', uid: '000000001234' },
-                            })}
-                            className="mt-2 text-xs font-medium text-amber-600 hover:text-amber-700 underline underline-offset-2"
-                          >
-                            Skip for testing
-                          </button>
-                        )}
+                        {errors.aadhaar && <p className="text-xs text-red-500 mt-1">{errors.aadhaar}</p>}
                       </div>
 
                       {/* Store Name */}

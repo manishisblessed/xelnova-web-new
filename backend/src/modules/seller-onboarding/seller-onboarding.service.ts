@@ -553,6 +553,14 @@ export class SellerOnboardingService {
       throw new HttpException('Store name already taken', HttpStatus.CONFLICT);
     }
 
+    // Aadhaar verification via DigiLocker is mandatory in production
+    if (!dto.aadhaarVerified || !dto.aadhaarVerifiedData) {
+      throw new HttpException(
+        'Aadhaar verification via DigiLocker is mandatory. Please complete Aadhaar verification to proceed.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
     // Mask Aadhaar for storage (keep last 4 digits)
     let maskedAadhaar: string | undefined;
     if (dto.aadhaarNumber) {
