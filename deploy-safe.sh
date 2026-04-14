@@ -32,9 +32,18 @@ echo ""
 echo "========================================="
 echo "  STEP 2: Fix Razorpay + copy .env"
 echo "========================================="
-# Ensure test keys in both locations
-sed -i 's|RAZORPAY_KEY_ID=rzp_live_[^"]*|RAZORPAY_KEY_ID=rzp_test_SYXLNzHZjBIdRu|' ~/backend/.env 2>/dev/null || true
-cp ~/backend/.env ~/xelnova-web-new/backend/.env
+# Copy .env from ~/backend if it exists, otherwise use the one already in the repo
+if [ -f ~/backend/.env ]; then
+  sed -i 's|RAZORPAY_KEY_ID=rzp_live_[^"]*|RAZORPAY_KEY_ID=rzp_test_SYXLNzHZjBIdRu|' ~/backend/.env 2>/dev/null || true
+  cp ~/backend/.env ~/xelnova-web-new/backend/.env
+  echo "Copied .env from ~/backend/"
+elif [ -f ~/xelnova-web-new/backend/.env ]; then
+  echo "Using existing .env in ~/xelnova-web-new/backend/"
+  sed -i 's|RAZORPAY_KEY_ID=rzp_live_[^"]*|RAZORPAY_KEY_ID=rzp_test_SYXLNzHZjBIdRu|' ~/xelnova-web-new/backend/.env 2>/dev/null || true
+else
+  echo "ERROR: No .env found! Create one at ~/xelnova-web-new/backend/.env"
+  exit 1
+fi
 grep -q '^NODE_ENV=' ~/xelnova-web-new/backend/.env || echo 'NODE_ENV=production' >> ~/xelnova-web-new/backend/.env
 echo "Razorpay key: $(grep RAZORPAY_KEY_ID ~/xelnova-web-new/backend/.env)"
 echo "Fortius key: $(grep FORTIUS_API_KEY ~/xelnova-web-new/backend/.env | cut -c1-30)..."
