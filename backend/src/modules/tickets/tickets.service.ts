@@ -182,7 +182,7 @@ export class TicketsService {
   ) {
     const ticket = await this.prisma.ticket.findUnique({
       where: { id: ticketId },
-      select: { id: true, customerId: true, status: true },
+      select: { id: true, customerId: true, status: true, ticketNumber: true },
     });
     if (!ticket) throw new NotFoundException('Ticket not found');
 
@@ -212,7 +212,7 @@ export class TicketsService {
         this.logger.warn(`Failed to notify customer: ${e.message}`),
       );
       const admin = await this.prisma.user.findUnique({ where: { id: adminId }, select: { name: true } });
-      this.notificationService.notifyTicketReply(ticket.customerId, '', admin?.name || 'Support').catch((err) =>
+      this.notificationService.notifyTicketReply(ticket.customerId, ticket.ticketNumber, admin?.name || 'Support').catch((err) =>
         this.logger.warn(`Failed to notify ticket reply: ${err.message}`),
       );
     }

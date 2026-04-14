@@ -24,6 +24,13 @@ export class CreateProductDto {
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Type(() => Number) lowStockThreshold?: number;
   @ApiPropertyOptional({ description: 'Weight in kg' }) @IsOptional() @IsNumber() @Type(() => Number) weight?: number;
   @ApiPropertyOptional({ description: 'Dimensions in LxWxH cm format (e.g., 30x20x15)' }) @IsOptional() @IsString() dimensions?: string;
+  
+  // Return/Cancellation/Replacement policies
+  @ApiPropertyOptional({ description: 'Can be cancelled before shipping' }) @IsOptional() @IsBoolean() @Transform(({ value }) => value === 'true' || value === true) isCancellable?: boolean;
+  @ApiPropertyOptional({ description: 'Can be returned after delivery' }) @IsOptional() @IsBoolean() @Transform(({ value }) => value === 'true' || value === true) isReturnable?: boolean;
+  @ApiPropertyOptional({ description: 'Can be replaced/exchanged' }) @IsOptional() @IsBoolean() @Transform(({ value }) => value === 'true' || value === true) isReplaceable?: boolean;
+  @ApiPropertyOptional({ description: 'Return window in days after delivery' }) @IsOptional() @IsNumber() @Type(() => Number) returnWindow?: number;
+  @ApiPropertyOptional({ description: 'Cancellation window in hours (0 = until shipped)' }) @IsOptional() @IsNumber() @Type(() => Number) cancellationWindow?: number;
 }
 
 export class UpdateProductDto {
@@ -50,6 +57,13 @@ export class UpdateProductDto {
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Type(() => Number) lowStockThreshold?: number;
   @ApiPropertyOptional({ description: 'Weight in kg' }) @IsOptional() @IsNumber() @Type(() => Number) weight?: number;
   @ApiPropertyOptional({ description: 'Dimensions in LxWxH cm format (e.g., 30x20x15)' }) @IsOptional() @IsString() dimensions?: string;
+  
+  // Return/Cancellation/Replacement policies
+  @ApiPropertyOptional({ description: 'Can be cancelled before shipping' }) @IsOptional() @IsBoolean() @Transform(({ value }) => value === 'true' || value === true) isCancellable?: boolean;
+  @ApiPropertyOptional({ description: 'Can be returned after delivery' }) @IsOptional() @IsBoolean() @Transform(({ value }) => value === 'true' || value === true) isReturnable?: boolean;
+  @ApiPropertyOptional({ description: 'Can be replaced/exchanged' }) @IsOptional() @IsBoolean() @Transform(({ value }) => value === 'true' || value === true) isReplaceable?: boolean;
+  @ApiPropertyOptional({ description: 'Return window in days after delivery' }) @IsOptional() @IsNumber() @Type(() => Number) returnWindow?: number;
+  @ApiPropertyOptional({ description: 'Cancellation window in hours (0 = until shipped)' }) @IsOptional() @IsNumber() @Type(() => Number) cancellationWindow?: number;
 }
 
 export class SellerProductQueryDto {

@@ -189,21 +189,89 @@ export class PaymentService {
     return { received: true };
   }
 
-  async refund(orderId: string, amount?: number) {
+  /**
+   * Refund to original payment source via Razorpay
+   * Used when seller cancels or customer chooses "refund to source"
+   */
+  async refundToSource(orderId: string, amount?: number, reason?: string): Promise<{
+    success: boolean;
+    refundId?: string;
+    amount: number;
+    message: string;
+  }> {
     const order = await this.prisma.order.findUnique({ where: { id: orderId } });
-    if (!order || !order.paymentId) throw new NotFoundException('Order/Payment not found');
+    if (!order) throw new NotFoundException('Order not found');
+    
+    if (order.paymentStatus !== 'PAID') {
+      return { success: false, amount: 0, message: 'Order payment was not captured, no refund needed' };
+    }
 
-    const refundAmount = amount ? Math.round(amount * 100) : Math.round(order.total * 100);
+    if (!order.paymentId) {
+      throw new BadRequestException('No payment ID found for this order. Cannot process refund to source.');
+    }
 
-    const refund = await this.getRazorpay().payments.refund(order.paymentId, {
-      amount: refundAmount,
-    });
+    // COD orders cannot be refunded to source
+    if (order.paymentMethod === 'COD') {
+      throw new BadRequestException('COD orders cannot be refunded to payment source. Use wallet refund instead.');
+    }
 
-    await this.prisma.order.update({
-      where: { id: orderId },
-      data: { paymentStatus: 'REFUNDED', status: 'REFUNDED' },
-    });
+    const refundAmount = amount ? Math.round(amount * 100) : Math.round(Number(order.total) * 100);
 
-    return { refundId: refund.id, amount: refundAmount / 100 };
+    try {
+      const refund = await this.getRazorpay().payments.refund(order.paymentId, {
+        amount: refundAmount,
+        notes: {
+          orderId: order.id,
+          orderNumber: order.orderNumber,
+          reason: reason || 'Order cancelled',
+        },
+      });
+
+      await this.prisma.order.update({
+        where: { id: orderId },
+        data: { 
+          paymentStatus: 'REFUNDED', 
+          status: 'REFUNDED',
+        },
+      });
+
+      this.logger.log(`Razorpay refund processed: ${refund.id} for order ${order.orderNumber}, amount: ₹${refundAmount / 100}`);
+
+      // Notify customer about refund
+      this.notificationService.notifyRefundProcessed(
+        order.userId, 
+        order.orderNumber, 
+        refundAmount / 100
+      ).catch((err) => this.logger.warn(`Refund notification failed: ${err.message}`));
+
+      return { 
+        success: true, 
+        refundId: refund.id, 
+        amount: refundAmount / 100,
+        message: `₹${refundAmount / 100} will be refunded to your original payment method within 5-7 business days`,
+      };
+    } catch (err: any) {
+      const msg = err?.error?.description || err?.message || 'Unknown Razorpay error';
+      this.logger.error(`Razorpay refund failed for order ${order.orderNumber}:`, err);
+      throw new BadRequestException(`Refund failed: ${msg}`);
+    }
+  }
+
+  /**
+   * Check if order can be refunded to source (not COD, has payment ID)
+   */
+  canRefundToSource(order: { paymentMethod?: string | null; paymentId?: string | null; paymentStatus?: string }): boolean {
+    return (
+      order.paymentStatus === 'PAID' &&
+      order.paymentMethod !== 'COD' &&
+      !!order.paymentId
+    );
+  }
+
+  /**
+   * Legacy refund method for admin (refunds to source)
+   */
+  async refund(orderId: string, amount?: number) {
+    return this.refundToSource(orderId, amount, 'Admin initiated refund');
   }
 }

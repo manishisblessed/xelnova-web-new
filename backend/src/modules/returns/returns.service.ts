@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationService } from '../notifications/notification.service';
+import { WalletService } from '../wallet/wallet.service';
 
 @Injectable()
 export class ReturnsService {
@@ -14,6 +15,7 @@ export class ReturnsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationService: NotificationService,
+    private readonly walletService: WalletService,
   ) {}
 
   private static readonly RETURNABLE_STATUSES = ['DELIVERED'];
@@ -131,6 +133,22 @@ export class ReturnsService {
         where: { id: request.orderId },
         data: { status: 'REFUNDED', paymentStatus: 'REFUNDED' },
       });
+
+      // Process refund to customer wallet
+      const actualRefundAmount = refundAmount ?? Number(request.refundAmount) ?? Number(request.order.total);
+      if (actualRefundAmount > 0) {
+        try {
+          await this.walletService.refundToWallet(
+            request.userId,
+            actualRefundAmount,
+            request.order.orderNumber,
+            'Return approved - refund processed',
+          );
+          this.logger.log(`Refund of ₹${actualRefundAmount} processed for return ${id}`);
+        } catch (err) {
+          this.logger.error(`Failed to process refund for return ${id}: ${err.message}`);
+        }
+      }
     }
 
     const updated = await this.prisma.returnRequest.update({

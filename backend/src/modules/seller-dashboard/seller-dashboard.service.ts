@@ -1,6 +1,9 @@
 import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
+import { WalletService } from '../wallet/wallet.service';
+import { PaymentService } from '../payment/payment.service';
+import { NotificationService } from '../notifications/notification.service';
 import {
   CreateProductDto,
   UpdateProductDto,
@@ -60,6 +63,9 @@ export class SellerDashboardService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly emailService: EmailService,
+    private readonly walletService: WalletService,
+    private readonly paymentService: PaymentService,
+    private readonly notificationService: NotificationService,
   ) {}
 
   private async getSellerProfile(userId: string) {
@@ -225,6 +231,11 @@ export class SellerDashboardService {
         lowStockThreshold: dto.lowStockThreshold ?? 5,
         weight: dto.weight,
         dimensions: dto.dimensions,
+        isCancellable: dto.isCancellable ?? true,
+        isReturnable: dto.isReturnable ?? true,
+        isReplaceable: dto.isReplaceable ?? false,
+        returnWindow: dto.returnWindow ?? 7,
+        cancellationWindow: dto.cancellationWindow ?? 0,
         status: 'PENDING',
       },
       include: { category: { select: { name: true } } },
@@ -335,13 +346,100 @@ export class SellerDashboardService {
 
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
-      include: { items: true },
+      include: { items: true, user: true },
     });
     if (!order) throw new NotFoundException('Order not found');
 
     const hasSellerProducts = order.items.some((item) => productIds.includes(item.productId));
     if (!hasSellerProducts) throw new ForbiddenException('Order has none of your products');
 
+    // Handle order cancellation by seller
+    if (status === 'CANCELLED') {
+      const cancellableStatuses = ['PENDING', 'PROCESSING', 'CONFIRMED'];
+      if (!cancellableStatuses.includes(order.status)) {
+        throw new BadRequestException(
+          `Order cannot be cancelled — it is already ${order.status.toLowerCase()}. ` +
+          `Only orders in Pending, Processing, or Confirmed status can be cancelled.`,
+        );
+      }
+
+      // Restore stock for seller's products only
+      for (const item of order.items) {
+        if (!productIds.includes(item.productId)) continue;
+        await this.prisma.product.update({
+          where: { id: item.productId },
+          data: { stock: { increment: item.quantity } },
+        });
+      }
+
+      // Process refund - seller cancellations MUST refund to original payment source
+      let refundResult: { success: boolean; message: string; refundId?: string } | null = null;
+      if (order.paymentStatus === 'PAID') {
+        const refundAmount = Number(order.total) || 0;
+        if (refundAmount > 0) {
+          const canRefundToSource = this.paymentService.canRefundToSource(order);
+          
+          try {
+            if (canRefundToSource) {
+              // Refund to original payment source via Razorpay
+              refundResult = await this.paymentService.refundToSource(
+                order.id,
+                refundAmount,
+                'Order cancelled by seller',
+              );
+              this.logger.log(`Seller cancelled order ${order.orderNumber}, source refund of ₹${refundAmount} initiated`);
+            } else {
+              // COD or no payment ID - refund to wallet
+              const walletResult = await this.walletService.refundToWallet(
+                order.userId,
+                refundAmount,
+                order.orderNumber,
+                'Order cancelled by seller',
+              );
+              refundResult = { success: walletResult.success, message: walletResult.message };
+              this.logger.log(`Seller cancelled order ${order.orderNumber}, wallet refund of ₹${refundAmount} processed`);
+            }
+          } catch (err: any) {
+            this.logger.error(`Failed to process source refund for order ${order.orderNumber}: ${err.message}`);
+            // Fallback to wallet refund
+            try {
+              const walletResult = await this.walletService.refundToWallet(
+                order.userId,
+                refundAmount,
+                order.orderNumber,
+                'Order cancelled by seller (source refund failed)',
+              );
+              refundResult = { success: walletResult.success, message: `Source refund failed. ${walletResult.message}` };
+            } catch (walletErr: any) {
+              this.logger.error(`Wallet fallback also failed: ${walletErr.message}`);
+            }
+          }
+        }
+      }
+
+      const updated = await this.prisma.order.update({
+        where: { id: orderId },
+        data: { 
+          status: 'CANCELLED',
+          paymentStatus: refundResult?.success ? 'REFUNDED' : order.paymentStatus,
+        },
+        include: { items: true, user: { select: { name: true, email: true, phone: true } }, shippingAddress: true, shipment: true },
+      });
+
+      // Notify customer
+      this.notificationService.notifyOrderCancelled(order.userId, order.orderNumber, Number(order.total) || 0).catch((err) =>
+        this.logger.warn(`Failed to send order-cancelled notification: ${err.message}`),
+      );
+
+      return { 
+        ...updated, 
+        refundProcessed: refundResult?.success ?? false,
+        refundMessage: refundResult?.message,
+        refundId: refundResult?.refundId,
+      };
+    }
+
+    // Regular status update
     return this.prisma.order.update({
       where: { id: orderId },
       data: { status: status as any },

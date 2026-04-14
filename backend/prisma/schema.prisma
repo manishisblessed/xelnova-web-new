@@ -432,6 +432,13 @@ model Product {
   weight     Float?   // Weight in kg
   dimensions String?  // Format: LxWxH in cm (e.g., "30x20x15")
 
+  // Return/Cancellation/Replacement policies
+  isCancellable   Boolean @default(true)   // Can be cancelled before shipping
+  isReturnable    Boolean @default(true)   // Can be returned after delivery
+  isReplaceable   Boolean @default(false)  // Can be replaced (exchange)
+  returnWindow    Int     @default(7)      // Return window in days after delivery
+  cancellationWindow Int  @default(0)      // Hours after order placement (0 = until shipped)
+
   reviews    Review[]
   orderItems OrderItem[]
   cartItems  CartItem[]

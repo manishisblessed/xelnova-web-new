@@ -444,7 +444,7 @@ export class EmailService {
           <p>Hi ${name},</p>
           <p>Your support ticket <strong>#${ticketNumber}</strong> has been created.</p>
           <p>We will respond within 24 hours.</p>
-          <a href="${this.config.get('APP_URL') || 'https://xelnova.in'}/account/tickets" 
+          <a href="${this.config.get('APP_URL') || 'https://xelnova.in'}/account/support" 
              style="display:inline-block;padding:12px 24px;background:#7c3aed;color:white;text-decoration:none;border-radius:8px;margin-top:16px">
             Track Ticket
           </a>
@@ -462,7 +462,7 @@ export class EmailService {
           <h1 style="color:#7c3aed">New Reply</h1>
           <p>Hi ${name},</p>
           <p><strong>${replierName}</strong> has replied to your support ticket <strong>#${ticketNumber}</strong>.</p>
-          <a href="${this.config.get('APP_URL') || 'https://xelnova.in'}/account/tickets" 
+          <a href="${this.config.get('APP_URL') || 'https://xelnova.in'}/account/support" 
              style="display:inline-block;padding:12px 24px;background:#7c3aed;color:white;text-decoration:none;border-radius:8px;margin-top:16px">
             View Reply
           </a>

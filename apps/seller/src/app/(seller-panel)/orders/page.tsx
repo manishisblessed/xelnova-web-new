@@ -161,6 +161,8 @@ export default function SellerOrdersPage() {
   const [search, setSearch] = useState('');
   const [activeTab, setActiveTab] = useState<TabFilter>('all');
   const [refreshing, setRefreshing] = useState(false);
+  const [cancelModal, setCancelModal] = useState<SellerOrder | null>(null);
+  const [cancelling, setCancelling] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -197,9 +199,29 @@ export default function SellerOrdersPage() {
     }
   };
 
-  const handleCancel = async (orderId: string) => {
-    if (!confirm('Are you sure you want to cancel this order?')) return;
-    await handleStatusUpdate(orderId, 'CANCELLED');
+  const openCancelModal = (order: SellerOrder) => {
+    setCancelModal(order);
+  };
+
+  const handleCancel = async () => {
+    if (!cancelModal) return;
+    setCancelling(true);
+    try {
+      const result = await apiUpdateOrderStatus(cancelModal.id, 'CANCELLED');
+      const refundMsg = (result as any)?.refundMessage;
+      if (refundMsg) {
+        toast.success(refundMsg);
+      } else {
+        toast.success('Order cancelled successfully');
+      }
+      setOrders((prev) => prev.map((o) => (o.id === cancelModal.id ? { ...o, status: 'CANCELLED' } : o)));
+      if (detail?.id === cancelModal.id) setDetail((d) => d ? { ...d, status: 'CANCELLED' } : d);
+      setCancelModal(null);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to cancel order');
+    } finally {
+      setCancelling(false);
+    }
   };
 
   const handleShipped = (orderId: string) => {
@@ -227,14 +249,27 @@ export default function SellerOrdersPage() {
 
   if (detail) {
     return (
-      <OrderDetail
-        order={detail}
-        onBack={() => setDetail(null)}
-        onStatusUpdate={handleStatusUpdate}
-        onCancel={handleCancel}
-        onShipped={handleShipped}
-        saving={saving}
-      />
+      <>
+        <OrderDetail
+          order={detail}
+          onBack={() => setDetail(null)}
+          onStatusUpdate={handleStatusUpdate}
+          onCancel={(orderId) => {
+            const order = orders.find(o => o.id === orderId);
+            if (order) openCancelModal(order);
+          }}
+          onShipped={handleShipped}
+          saving={saving}
+        />
+        {cancelModal && (
+          <CancelOrderModal
+            order={cancelModal}
+            onClose={() => setCancelModal(null)}
+            onConfirm={handleCancel}
+            cancelling={cancelling}
+          />
+        )}
+      </>
     );
   }
 
@@ -1435,6 +1470,112 @@ function TimelineItem({ label, time, active, danger }: { label: string; time: st
         <p className={`text-xs font-medium ${danger ? 'text-red-600' : 'text-text-primary'}`}>{label}</p>
         <p className="text-[10px] text-text-muted">{new Date(time).toLocaleString()}</p>
       </div>
+    </div>
+  );
+}
+
+// ─── Cancel Order Modal ───
+
+function CancelOrderModal({
+  order,
+  onClose,
+  onConfirm,
+  cancelling,
+}: {
+  order: SellerOrder;
+  onClose: () => void;
+  onConfirm: () => void;
+  cancelling: boolean;
+}) {
+  const isPaid = order.paymentStatus === 'PAID';
+  const isOnlinePayment = order.paymentMethod && order.paymentMethod !== 'COD';
+  const refundAmount = Number(order.total) || 0;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 space-y-4"
+      >
+        <div className="flex items-center gap-3">
+          <div className="flex items-center justify-center h-12 w-12 rounded-full bg-red-50">
+            <XCircle size={24} className="text-red-600" />
+          </div>
+          <div>
+            <h3 className="text-lg font-bold text-text-primary">Cancel Order</h3>
+            <p className="text-sm text-text-secondary">Order #{order.orderNumber}</p>
+          </div>
+        </div>
+
+        <div className="rounded-xl bg-amber-50 border border-amber-200 p-4">
+          <div className="flex items-start gap-3">
+            <AlertTriangle size={18} className="text-amber-600 mt-0.5" />
+            <div>
+              <p className="text-sm font-medium text-amber-800">Important</p>
+              <p className="text-xs text-amber-700 mt-1">
+                Cancelling this order will notify the customer and process a refund if payment was made.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {isPaid && (
+          <div className="rounded-xl bg-blue-50 border border-blue-200 p-4 space-y-2">
+            <p className="text-sm font-semibold text-blue-800">Refund Information</p>
+            <div className="space-y-1.5 text-xs text-blue-700">
+              <div className="flex justify-between">
+                <span>Refund Amount:</span>
+                <span className="font-bold">₹{refundAmount.toLocaleString('en-IN')}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Payment Method:</span>
+                <span className="font-medium">{order.paymentMethod || 'N/A'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Refund Destination:</span>
+                <span className="font-medium">
+                  {isOnlinePayment ? 'Original Payment Source' : 'Customer Wallet'}
+                </span>
+              </div>
+              {isOnlinePayment && (
+                <p className="text-[10px] text-blue-600 pt-1">
+                  Refund will be processed via Razorpay and credited to customer&apos;s bank/card/UPI within 5-7 business days.
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {!isPaid && order.paymentStatus !== 'PENDING' && (
+          <p className="text-sm text-text-secondary">
+            No refund needed — payment status is <strong>{order.paymentStatus}</strong>.
+          </p>
+        )}
+
+        <div className="flex gap-3 pt-2">
+          <button
+            onClick={onClose}
+            disabled={cancelling}
+            className="flex-1 rounded-xl border border-border px-4 py-2.5 text-sm font-semibold text-text-primary hover:bg-gray-50 transition-colors disabled:opacity-50"
+          >
+            Keep Order
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={cancelling}
+            className="flex-1 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-red-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            {cancelling ? (
+              <>
+                <Loader2 size={14} className="animate-spin" /> Processing...
+              </>
+            ) : (
+              <>Cancel & Refund</>
+            )}
+          </button>
+        </div>
+      </motion.div>
     </div>
   );
 }

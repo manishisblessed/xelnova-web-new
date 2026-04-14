@@ -478,4 +478,35 @@ export class WalletService {
       billPayment: { referenceId: billRef, status: 'PROCESSING', billerId, consumerNumber, category, amount },
     };
   }
+
+  // ========== Order Refund to Customer Wallet ==========
+
+  async refundToWallet(
+    userId: string,
+    amount: number,
+    orderNumber: string,
+    reason: string = 'Order cancelled',
+  ) {
+    if (amount <= 0) {
+      return { success: false, message: 'Invalid refund amount' };
+    }
+
+    const wallet = await this.getOrCreateWallet(userId, 'CUSTOMER');
+
+    const result = await this.credit(
+      wallet.id,
+      amount,
+      `Refund for order #${orderNumber}: ${reason}`,
+      'SYSTEM',
+      'REFUND',
+      orderNumber,
+    );
+
+    return {
+      success: true,
+      message: `₹${amount} refunded to wallet`,
+      wallet: result.wallet,
+      transaction: result.transaction,
+    };
+  }
 }

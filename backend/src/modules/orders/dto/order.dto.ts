@@ -93,4 +93,13 @@ export class CancelOrderDto {
   @IsOptional()
   @IsString()
   reason?: string;
+
+  @ApiPropertyOptional({ 
+    description: 'Where to refund: WALLET (instant) or SOURCE (original payment method, 5-7 days)',
+    enum: ['WALLET', 'SOURCE'],
+    default: 'WALLET',
+  })
+  @IsOptional()
+  @IsString()
+  refundTo?: 'WALLET' | 'SOURCE';
 }

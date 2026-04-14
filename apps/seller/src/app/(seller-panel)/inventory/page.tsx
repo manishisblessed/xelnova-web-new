@@ -437,6 +437,13 @@ export default function SellerInventoryPage() {
   const [formLowStock, setFormLowStock] = useState('5');
   const [formWeight, setFormWeight] = useState('');
   const [formDimensions, setFormDimensions] = useState('');
+  
+  // Return/Cancellation/Replacement policy
+  const [formIsCancellable, setFormIsCancellable] = useState(true);
+  const [formIsReturnable, setFormIsReturnable] = useState(true);
+  const [formIsReplaceable, setFormIsReplaceable] = useState(false);
+  const [formReturnWindow, setFormReturnWindow] = useState('7');
+  const [formCancellationWindow, setFormCancellationWindow] = useState('0');
 
   const loadProducts = useCallback(() => {
     setLoading(true);
@@ -482,6 +489,11 @@ export default function SellerInventoryPage() {
     setFormLowStock('5');
     setFormWeight('');
     setFormDimensions('');
+    setFormIsCancellable(true);
+    setFormIsReturnable(true);
+    setFormIsReplaceable(false);
+    setFormReturnWindow('7');
+    setFormCancellationWindow('0');
   };
 
   const openCreate = () => {
@@ -518,6 +530,11 @@ export default function SellerInventoryPage() {
         setFormLowStock(String(full.lowStockThreshold ?? '5'));
         setFormWeight(full.weight != null ? String(full.weight) : '');
         setFormDimensions(String(full.dimensions ?? ''));
+        setFormIsCancellable(full.isCancellable ?? true);
+        setFormIsReturnable(full.isReturnable ?? true);
+        setFormIsReplaceable(full.isReplaceable ?? false);
+        setFormReturnWindow(String(full.returnWindow ?? '7'));
+        setFormCancellationWindow(String(full.cancellationWindow ?? '0'));
       })
       .catch((err: Error) => {
         toast.error(err.message || 'Could not load product details');
@@ -729,6 +746,11 @@ export default function SellerInventoryPage() {
         lowStockThreshold: formLowStock ? Number(formLowStock) : undefined,
         weight: formWeight ? Number(formWeight) : undefined,
         dimensions: formDimensions.trim() || undefined,
+        isCancellable: formIsCancellable,
+        isReturnable: formIsReturnable,
+        isReplaceable: formIsReplaceable,
+        returnWindow: formReturnWindow ? Number(formReturnWindow) : 7,
+        cancellationWindow: formCancellationWindow ? Number(formCancellationWindow) : 0,
       });
       toast.success('Product created and submitted for approval', { 
         description: 'Your product will be reviewed by our team and go live once approved.' 
@@ -775,6 +797,11 @@ export default function SellerInventoryPage() {
         lowStockThreshold: formLowStock ? Number(formLowStock) : undefined,
         weight: formWeight ? Number(formWeight) : undefined,
         dimensions: formDimensions.trim() || undefined,
+        isCancellable: formIsCancellable,
+        isReturnable: formIsReturnable,
+        isReplaceable: formIsReplaceable,
+        returnWindow: formReturnWindow ? Number(formReturnWindow) : 7,
+        cancellationWindow: formCancellationWindow ? Number(formCancellationWindow) : 0,
       });
       toast.success('Product updated');
       setEditProduct(null);
@@ -1308,6 +1335,68 @@ export default function SellerInventoryPage() {
             <label className="text-xs text-text-muted block mb-1">Dimensions (L×W×H in cm) *</label>
             <Input placeholder="e.g. 30x20x15" value={formDimensions} onChange={(e) => setFormDimensions(e.target.value)} />
             <p className="text-[10px] text-text-muted mt-0.5">Length × Width × Height for shipping</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Return/Cancellation Policy */}
+      <div className="border-t border-border pt-4 mt-4">
+        <p className="text-xs font-semibold text-text-primary mb-3">Return & Cancellation Policy</p>
+        <div className="space-y-3">
+          <div className="flex flex-wrap gap-4">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={formIsCancellable}
+                onChange={(e) => setFormIsCancellable(e.target.checked)}
+                className="w-4 h-4 rounded border-border text-primary-600 focus:ring-primary-500"
+              />
+              <span className="text-xs text-text-primary">Cancellable</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={formIsReturnable}
+                onChange={(e) => setFormIsReturnable(e.target.checked)}
+                className="w-4 h-4 rounded border-border text-primary-600 focus:ring-primary-500"
+              />
+              <span className="text-xs text-text-primary">Returnable</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={formIsReplaceable}
+                onChange={(e) => setFormIsReplaceable(e.target.checked)}
+                className="w-4 h-4 rounded border-border text-primary-600 focus:ring-primary-500"
+              />
+              <span className="text-xs text-text-primary">Replaceable</span>
+            </label>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-text-muted block mb-1">Return Window (days)</label>
+              <Input
+                type="number"
+                min="0"
+                placeholder="7"
+                value={formReturnWindow}
+                onChange={(e) => setFormReturnWindow(e.target.value)}
+                disabled={!formIsReturnable}
+              />
+              <p className="text-[10px] text-text-muted mt-0.5">Days after delivery for returns</p>
+            </div>
+            <div>
+              <label className="text-xs text-text-muted block mb-1">Cancellation Window (hours)</label>
+              <Input
+                type="number"
+                min="0"
+                placeholder="0"
+                value={formCancellationWindow}
+                onChange={(e) => setFormCancellationWindow(e.target.value)}
+                disabled={!formIsCancellable}
+              />
+              <p className="text-[10px] text-text-muted mt-0.5">0 = cancellable until shipped</p>
+            </div>
           </div>
         </div>
       </div>

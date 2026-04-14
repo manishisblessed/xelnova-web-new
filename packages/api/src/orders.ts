@@ -50,8 +50,38 @@ export async function createOrder(payload: CreateOrderPayload): Promise<Order> {
   return data.data;
 }
 
-export async function cancelOrder(orderNumber: string, reason?: string): Promise<Order> {
-  const { data, status } = await api.post<ApiResponse<Order>>(`/orders/${orderNumber}/cancel`, { reason });
+export interface RefundOption {
+  destination: 'WALLET' | 'SOURCE';
+  available: boolean;
+  label: string;
+  description: string;
+  timeline: string;
+}
+
+export interface RefundOptions {
+  orderNumber: string;
+  refundAmount: number;
+  paymentMethod: string | null;
+  options: RefundOption[];
+}
+
+export async function getRefundOptions(orderNumber: string): Promise<RefundOptions> {
+  const { data, status } = await api.get<ApiResponse<RefundOptions>>(`/orders/${orderNumber}/refund-options`);
+  if (!data.success || !data.data) {
+    throw apiError(data.message || 'Failed to get refund options', status >= 400 ? status : 500);
+  }
+  return data.data;
+}
+
+export async function cancelOrder(
+  orderNumber: string, 
+  reason?: string,
+  refundTo: 'WALLET' | 'SOURCE' = 'WALLET',
+): Promise<Order & { refundProcessed?: boolean; refundMessage?: string }> {
+  const { data, status } = await api.post<ApiResponse<Order & { refundProcessed?: boolean; refundMessage?: string }>>(
+    `/orders/${orderNumber}/cancel`, 
+    { reason, refundTo },
+  );
   if (!data.success || !data.data) {
     throw apiError(data.message || 'Failed to cancel order', status >= 400 ? status : 500);
   }

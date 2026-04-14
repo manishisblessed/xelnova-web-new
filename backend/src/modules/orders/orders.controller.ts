@@ -28,6 +28,17 @@ export class OrdersController {
     );
   }
 
+  @Get(':orderNumber/refund-options')
+  @Auth()
+  @ApiOperation({ summary: 'Get refund options for an order' })
+  async getRefundOptions(
+    @Param('orderNumber') orderNumber: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    const options = await this.ordersService.getRefundOptions(orderNumber, userId);
+    return successResponse(options, 'Refund options fetched');
+  }
+
   @Post(':orderNumber/cancel')
   @Auth()
   @ApiOperation({ summary: 'Cancel an order (customer)' })
@@ -36,7 +47,13 @@ export class OrdersController {
     @CurrentUser('id') userId: string,
     @Body() dto: CancelOrderDto,
   ) {
-    const order = await this.ordersService.cancelOrder(orderNumber, userId, dto.reason);
+    const order = await this.ordersService.cancelOrder(
+      orderNumber, 
+      userId, 
+      dto.reason, 
+      'CUSTOMER',
+      dto.refundTo || 'WALLET',
+    );
     return successResponse(order, 'Order cancelled successfully');
   }
 

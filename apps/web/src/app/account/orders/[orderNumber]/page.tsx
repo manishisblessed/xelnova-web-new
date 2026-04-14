@@ -58,6 +58,9 @@ export default function OrderDetailPage() {
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
   const [cancelling, setCancelling] = useState(false);
+  const [refundOptions, setRefundOptions] = useState<Awaited<ReturnType<typeof ordersApi.getRefundOptions>> | null>(null);
+  const [selectedRefundTo, setSelectedRefundTo] = useState<'WALLET' | 'SOURCE'>('WALLET');
+  const [loadingRefundOptions, setLoadingRefundOptions] = useState(false);
   const [returnModalOpen, setReturnModalOpen] = useState(false);
   const [returnReason, setReturnReason] = useState("");
   const [submittingReturn, setSubmittingReturn] = useState(false);
@@ -78,15 +81,38 @@ export default function OrderDetailPage() {
 
   const canCancel = order && ["PENDING", "PROCESSING", "CONFIRMED"].includes(order.status.toUpperCase());
 
+  const openCancelModal = async () => {
+    if (!order) return;
+    setCancelModalOpen(true);
+    setLoadingRefundOptions(true);
+    try {
+      syncToken();
+      const options = await ordersApi.getRefundOptions(order.orderNumber);
+      setRefundOptions(options);
+      // Default to wallet if source not available
+      const sourceOption = options.options.find(o => o.destination === 'SOURCE');
+      setSelectedRefundTo(sourceOption?.available ? 'WALLET' : 'WALLET');
+    } catch {
+      setRefundOptions(null);
+    } finally {
+      setLoadingRefundOptions(false);
+    }
+  };
+
   const handleCancelOrder = async () => {
     if (!order) return;
     setCancelling(true);
     try {
       syncToken();
-      const updated = await ordersApi.cancelOrder(order.orderNumber, cancelReason || undefined);
+      const updated = await ordersApi.cancelOrder(order.orderNumber, cancelReason || undefined, selectedRefundTo);
       setOrder(updated);
       setCancelModalOpen(false);
       setCancelReason("");
+      setRefundOptions(null);
+      // Show refund message if available
+      if ((updated as any).refundMessage) {
+        alert((updated as any).refundMessage);
+      }
     } catch (e: any) {
       alert(e.message || "Failed to cancel order");
     } finally {
@@ -208,7 +234,7 @@ export default function OrderDetailPage() {
             </span>
             {canCancel && (
               <button
-                onClick={() => setCancelModalOpen(true)}
+                onClick={() => void openCancelModal()}
                 className="inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-semibold text-red-700 bg-red-50 border border-red-200 hover:bg-red-100 transition-colors"
               >
                 <XCircle size={15} /> Cancel Order
@@ -427,8 +453,60 @@ export default function OrderDetailPage() {
 
             <p className="text-sm text-text-secondary">
               Are you sure you want to cancel order <strong>#{order.orderNumber}</strong>?
-              {order.paymentMethod !== "cod" && " If payment was made, a refund will be initiated."}
             </p>
+
+            {/* Refund Options */}
+            {order.paymentStatus === "PAID" && (
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-text-primary">
+                  Where should we send your refund?
+                </label>
+                {loadingRefundOptions ? (
+                  <div className="flex items-center justify-center py-4">
+                    <Loader2 size={20} className="animate-spin text-primary-600" />
+                  </div>
+                ) : refundOptions ? (
+                  <div className="space-y-2">
+                    {refundOptions.options.map((option) => (
+                      <label
+                        key={option.destination}
+                        className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all ${
+                          !option.available 
+                            ? 'opacity-50 cursor-not-allowed border-gray-200 bg-gray-50'
+                            : selectedRefundTo === option.destination
+                            ? 'border-primary-500 bg-primary-50 ring-1 ring-primary-500'
+                            : 'border-border hover:border-primary-300'
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="refundTo"
+                          value={option.destination}
+                          checked={selectedRefundTo === option.destination}
+                          onChange={() => setSelectedRefundTo(option.destination)}
+                          disabled={!option.available}
+                          className="mt-1 text-primary-600 focus:ring-primary-500"
+                        />
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-semibold text-text-primary">{option.label}</span>
+                            <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-text-muted">
+                              {option.timeline}
+                            </span>
+                          </div>
+                          <p className="text-xs text-text-secondary mt-0.5">{option.description}</p>
+                        </div>
+                      </label>
+                    ))}
+                    <p className="text-xs text-text-muted mt-2">
+                      Refund amount: <strong className="text-text-primary">₹{refundOptions.refundAmount}</strong>
+                    </p>
+                  </div>
+                ) : (
+                  <p className="text-sm text-text-secondary">Refund will be credited to your Xelnova Wallet.</p>
+                )}
+              </div>
+            )}
 
             <div>
               <label className="block text-sm font-medium text-text-primary mb-1.5">
@@ -445,7 +523,7 @@ export default function OrderDetailPage() {
 
             <div className="flex gap-3 pt-2">
               <button
-                onClick={() => { setCancelModalOpen(false); setCancelReason(""); }}
+                onClick={() => { setCancelModalOpen(false); setCancelReason(""); setRefundOptions(null); }}
                 disabled={cancelling}
                 className="flex-1 rounded-xl border border-border px-4 py-2.5 text-sm font-semibold text-text-primary hover:bg-gray-50 transition-colors"
               >
@@ -453,7 +531,7 @@ export default function OrderDetailPage() {
               </button>
               <button
                 onClick={() => void handleCancelOrder()}
-                disabled={cancelling}
+                disabled={cancelling || loadingRefundOptions}
                 className="flex-1 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-red-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
               >
                 {cancelling ? (

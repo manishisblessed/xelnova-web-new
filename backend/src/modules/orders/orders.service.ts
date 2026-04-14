@@ -5,9 +5,13 @@ import { NotificationService } from '../notifications/notification.service';
 import { FraudDetectionService } from '../notifications/fraud-detection.service';
 import { AbandonedCartService } from '../notifications/abandoned-cart.service';
 import { LoyaltyService } from '../notifications/loyalty.service';
+import { WalletService } from '../wallet/wallet.service';
+import { PaymentService } from '../payment/payment.service';
 import { CreateOrderDto } from './dto/order.dto';
 
 import { OrderStatus } from '@prisma/client';
+
+export type RefundDestination = 'WALLET' | 'SOURCE';
 
 const VALID_ORDER_TRANSITIONS: Record<string, string[]> = {
   PENDING: ['PROCESSING', 'CONFIRMED', 'CANCELLED'],
@@ -95,6 +99,8 @@ export class OrdersService {
     private readonly fraudService: FraudDetectionService,
     private readonly abandonedCartService: AbandonedCartService,
     private readonly loyaltyService: LoyaltyService,
+    private readonly walletService: WalletService,
+    private readonly paymentService: PaymentService,
   ) {}
 
   async findAll(userId: string) {
@@ -374,7 +380,18 @@ export class OrdersService {
 
   private static readonly CANCELLABLE_STATUSES = ['PENDING', 'PROCESSING', 'CONFIRMED'];
 
-  async cancelOrder(orderNumber: string, userId: string, reason?: string) {
+  /**
+   * Cancel an order with refund options
+   * @param refundTo - 'WALLET' for instant wallet credit, 'SOURCE' for original payment method (5-7 days)
+   * @param cancelledBy - Who initiated the cancellation (affects refund destination for seller cancellations)
+   */
+  async cancelOrder(
+    orderNumber: string, 
+    userId: string, 
+    reason?: string, 
+    cancelledBy: 'CUSTOMER' | 'SELLER' | 'ADMIN' = 'CUSTOMER',
+    refundTo: RefundDestination = 'WALLET',
+  ) {
     const order = await this.prisma.order.findUnique({
       where: { orderNumber },
       include: { items: true },
@@ -425,9 +442,67 @@ export class OrdersService {
       });
     }
 
+    // Process refund if payment was captured (PAID status)
+    let refundResult: { success: boolean; message: string; refundId?: string } | null = null;
+    if (order.paymentStatus === 'PAID') {
+      const refundAmount = Number(order.total) || 0;
+      if (refundAmount > 0) {
+        const cancelReason = reason || `Order cancelled by ${cancelledBy.toLowerCase()}`;
+        
+        // Seller cancellations MUST refund to source (not wallet)
+        // Customer can choose, but if SOURCE not available (COD), fall back to wallet
+        const actualRefundTo = cancelledBy === 'SELLER' ? 'SOURCE' : refundTo;
+        const canRefundToSource = this.paymentService.canRefundToSource(order);
+
+        try {
+          if (actualRefundTo === 'SOURCE' && canRefundToSource) {
+            // Refund to original payment source via Razorpay
+            refundResult = await this.paymentService.refundToSource(order.id, refundAmount, cancelReason);
+            this.logger.log(`Source refund of ₹${refundAmount} initiated for order ${orderNumber}`);
+          } else {
+            // Refund to wallet (instant)
+            const walletResult = await this.walletService.refundToWallet(
+              order.userId,
+              refundAmount,
+              orderNumber,
+              cancelReason,
+            );
+            refundResult = { 
+              success: walletResult.success, 
+              message: walletResult.message,
+            };
+            this.logger.log(`Wallet refund of ₹${refundAmount} processed for order ${orderNumber}`);
+          }
+        } catch (err: any) {
+          this.logger.error(`Failed to process refund for order ${orderNumber}: ${err.message}`);
+          // If source refund fails, try wallet as fallback
+          if (actualRefundTo === 'SOURCE') {
+            try {
+              const walletResult = await this.walletService.refundToWallet(
+                order.userId,
+                refundAmount,
+                orderNumber,
+                `${cancelReason} (source refund failed, credited to wallet)`,
+              );
+              refundResult = { 
+                success: walletResult.success, 
+                message: `Source refund failed. ${walletResult.message}`,
+              };
+              this.logger.log(`Fallback wallet refund of ₹${refundAmount} for order ${orderNumber}`);
+            } catch (walletErr: any) {
+              this.logger.error(`Wallet fallback also failed: ${walletErr.message}`);
+            }
+          }
+        }
+      }
+    }
+
     const updated = await this.prisma.order.update({
       where: { id: order.id },
-      data: { status: 'CANCELLED' },
+      data: { 
+        status: 'CANCELLED',
+        paymentStatus: refundResult?.success ? 'REFUNDED' : order.paymentStatus,
+      },
       include: {
         items: { include: { product: { select: { name: true, images: true } } } },
         shippingAddress: true,
@@ -438,7 +513,51 @@ export class OrdersService {
       this.logger.warn(`Failed to send order-cancelled notification: ${err.message}`),
     );
 
-    return updated;
+    return { 
+      ...updated, 
+      refundProcessed: refundResult?.success ?? false, 
+      refundMessage: refundResult?.message,
+      refundId: refundResult?.refundId,
+    };
+  }
+
+  /**
+   * Check refund options for an order
+   */
+  async getRefundOptions(orderNumber: string, userId: string) {
+    const order = await this.prisma.order.findUnique({ where: { orderNumber } });
+    if (!order || order.userId !== userId) {
+      throw new NotFoundException('Order not found');
+    }
+
+    const canRefundToSource = this.paymentService.canRefundToSource(order);
+    const refundAmount = Number(order.total) || 0;
+
+    return {
+      orderNumber,
+      refundAmount,
+      paymentMethod: order.paymentMethod,
+      options: [
+        {
+          destination: 'WALLET',
+          available: true,
+          label: 'Xelnova Wallet',
+          description: 'Instant credit to your wallet. Use for future purchases.',
+          timeline: 'Instant',
+        },
+        {
+          destination: 'SOURCE',
+          available: canRefundToSource,
+          label: 'Original Payment Method',
+          description: canRefundToSource 
+            ? 'Refund to your bank account/card/UPI used for payment.'
+            : order.paymentMethod === 'COD' 
+              ? 'Not available for Cash on Delivery orders.'
+              : 'Not available for this order.',
+          timeline: '5-7 business days',
+        },
+      ],
+    };
   }
 
   private async getShippingRate(subtotal: number): Promise<number> {
