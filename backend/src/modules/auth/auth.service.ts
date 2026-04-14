@@ -18,9 +18,6 @@ import { Role } from '@prisma/client';
 
 @Injectable()
 export class AuthService {
-  private otpStore: Map<string, { otp: string; expiresAt: number; attempts: number }> =
-    new Map();
-  private verifiedPhones: Map<string, number> = new Map();
   private static readonly MAX_OTP_ATTEMPTS = 5;
 
   constructor(
@@ -172,10 +169,24 @@ export class AuthService {
 
   async sendOtp(phone: string) {
     const otp = String(Math.floor(100000 + Math.random() * 900000));
-    const expiresAt = Date.now() + 5 * 60 * 1000; // 5 minutes
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+
+    await this.prisma.otpVerification.deleteMany({
+      where: { identifier: phone, type: 'PHONE', purpose: 'LOGIN' },
+    });
+
+    await this.prisma.otpVerification.create({
+      data: {
+        identifier: phone,
+        type: 'PHONE',
+        otp,
+        purpose: 'LOGIN',
+        expiresAt,
+        maxAttempts: AuthService.MAX_OTP_ATTEMPTS,
+      },
+    });
 
     await sendFortiusOtpSms(phone, otp);
-    this.otpStore.set(phone, { otp, expiresAt, attempts: 0 });
 
     return {
       message: `OTP sent to ${phone}`,
@@ -184,26 +195,37 @@ export class AuthService {
   }
 
   async verifyOtp(phone: string, otp: string) {
-    const stored = this.otpStore.get(phone);
+    const stored = await this.prisma.otpVerification.findFirst({
+      where: { identifier: phone, type: 'PHONE', purpose: 'LOGIN', verified: false },
+      orderBy: { createdAt: 'desc' },
+    });
+
     if (!stored) {
       throw new BadRequestException('No OTP was sent to this number');
     }
 
-    if (Date.now() > stored.expiresAt) {
-      this.otpStore.delete(phone);
+    if (new Date() > stored.expiresAt) {
+      await this.prisma.otpVerification.delete({ where: { id: stored.id } });
       throw new BadRequestException('OTP has expired');
     }
 
     if (stored.otp !== otp) {
-      stored.attempts += 1;
-      if (stored.attempts >= AuthService.MAX_OTP_ATTEMPTS) {
-        this.otpStore.delete(phone);
+      const newAttempts = stored.attempts + 1;
+      if (newAttempts >= stored.maxAttempts) {
+        await this.prisma.otpVerification.delete({ where: { id: stored.id } });
         throw new BadRequestException('Too many incorrect attempts. Please request a new OTP.');
       }
+      await this.prisma.otpVerification.update({
+        where: { id: stored.id },
+        data: { attempts: newAttempts },
+      });
       throw new BadRequestException('Invalid OTP');
     }
 
-    this.otpStore.delete(phone);
+    await this.prisma.otpVerification.update({
+      where: { id: stored.id },
+      data: { verified: true, verifiedAt: new Date() },
+    });
 
     // Build all plausible phone variants so we can find the user regardless
     // of whether the DB stores "+919090702705" or "9090702705".
@@ -229,7 +251,6 @@ export class AuthService {
     }
 
     if (!user) {
-      this.verifiedPhones.set(phone, Date.now() + 10 * 60 * 1000);
       return { isNewUser: true, phone };
     }
 
@@ -270,12 +291,20 @@ export class AuthService {
     email = email.trim().toLowerCase();
     name = name.trim();
 
-    const expiresAt = this.verifiedPhones.get(phone);
-    if (!expiresAt || Date.now() > expiresAt) {
-      this.verifiedPhones.delete(phone);
+    const verified = await this.prisma.otpVerification.findFirst({
+      where: {
+        identifier: phone,
+        type: 'PHONE',
+        purpose: 'LOGIN',
+        verified: true,
+        expiresAt: { gt: new Date(Date.now() - 10 * 60 * 1000) },
+      },
+      orderBy: { verifiedAt: 'desc' },
+    });
+    if (!verified) {
       throw new BadRequestException('Phone not verified or verification expired. Please verify OTP again.');
     }
-    this.verifiedPhones.delete(phone);
+    await this.prisma.otpVerification.delete({ where: { id: verified.id } });
 
     const phoneVariants = this.getPhoneVariants(phone);
     const existingPhone = await this.prisma.user.findFirst({

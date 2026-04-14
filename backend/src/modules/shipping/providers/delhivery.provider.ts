@@ -10,6 +10,17 @@ import {
   ServiceabilityResult,
 } from './courier-provider.interface';
 
+/**
+ * Delhivery One / Express API integration.
+ *
+ * Auth: Static API Token (never expires). Header: `Authorization: Token <token>`
+ * Docs: https://delhivery-express-api-doc.readme.io/reference
+ *
+ * Config mapping:
+ *   apiKey       → API Token (from Delhivery One → Settings → API Setup)
+ *   accountId    → Client Name (registered business name, case-sensitive)
+ *   warehouseId  → Pickup Location Name (exact registered warehouse name)
+ */
 @Injectable()
 export class DelhiveryProvider implements CourierProvider {
   readonly providerName = 'Delhivery';
@@ -26,7 +37,7 @@ export class DelhiveryProvider implements CourierProvider {
       : this.stagingBase;
   }
 
-  private headers(config: SellerCourierConfig) {
+  private authHeaders(config: SellerCourierConfig): Record<string, string> {
     return {
       Authorization: `Token ${config.apiKey}`,
       'Content-Type': 'application/json',
@@ -38,35 +49,47 @@ export class DelhiveryProvider implements CourierProvider {
     details: ShipmentDetails,
   ): Promise<CreateShipmentResult> {
     const base = this.getBaseUrl();
+    const clientName = config.accountId || '';
+    const pickupName = config.warehouseId || clientName;
 
-    // Step 1: Fetch a waybill (AWB)
-    const clientName =
-      config.accountId || (config.metadata as any)?.clientName || '';
-    const waybillRes = await fetch(
-      `${base}/waybill/api/fetch/json/?cl=${encodeURIComponent(clientName)}&token=${config.apiKey}`,
-      { headers: this.headers(config) },
-    );
-    if (!waybillRes.ok) {
-      const errText = await waybillRes.text();
-      this.logger.error(`Delhivery waybill fetch failed: ${errText}`);
-      throw new Error(`Failed to fetch Delhivery waybill: ${errText}`);
+    // Step 1: Fetch a waybill (AWB) — Delhivery auto-generates one
+    let awb = '';
+    try {
+      const waybillRes = await fetch(
+        `${base}/waybill/api/fetch/json/?cl=${encodeURIComponent(clientName)}&token=${config.apiKey}`,
+      );
+      if (waybillRes.ok) {
+        const waybillData = await waybillRes.text();
+        try {
+          const parsed = JSON.parse(waybillData);
+          awb = parsed?.waybill || '';
+        } catch {
+          awb = waybillData.trim();
+        }
+      }
+    } catch (err) {
+      this.logger.warn('Waybill pre-fetch failed, will let Delhivery auto-assign');
     }
-    const waybillData = await waybillRes.json();
-    const awb = waybillData?.waybill || waybillData;
 
-    // Step 2: Create the shipment order
+    // Step 2: Create the shipment
+    const isCod = details.isCod ?? false;
+    const dims = details.dimensions?.split('x') || [];
+
     const shipmentPayload = {
       shipments: [
         {
           name: details.deliveryAddress.fullName,
-          add: details.deliveryAddress.addressLine1,
+          add: [
+            details.deliveryAddress.addressLine1,
+            details.deliveryAddress.addressLine2,
+          ].filter(Boolean).join(', '),
           pin: details.deliveryAddress.pincode,
           city: details.deliveryAddress.city,
           state: details.deliveryAddress.state,
           country: 'India',
           phone: details.deliveryAddress.phone,
           order: details.orderNumber,
-          payment_mode: details.isCod ? 'COD' : 'Prepaid',
+          payment_mode: isCod ? 'COD' : 'Pre-paid',
           return_pin: details.sellerAddress.pincode,
           return_city: details.sellerAddress.city,
           return_phone: details.sellerAddress.phone,
@@ -74,33 +97,26 @@ export class DelhiveryProvider implements CourierProvider {
           return_state: details.sellerAddress.state,
           return_country: 'India',
           return_name: details.sellerAddress.name,
-          products_desc: details.items.map((i) => i.name).join(', '),
+          products_desc: details.items.map((i) => i.name).join(', ').slice(0, 200) || 'Products',
           hsn_code: '',
-          cod_amount: details.isCod ? details.totalAmount.toString() : '0',
+          cod_amount: isCod ? String(details.totalAmount || 0) : '0',
           order_date: new Date().toISOString(),
-          total_amount: details.totalAmount.toString(),
+          total_amount: String(details.totalAmount || 0),
           seller_add: details.sellerAddress.address,
           seller_name: details.sellerAddress.name,
           seller_inv: details.orderNumber,
-          quantity: details.items
-            .reduce((sum, i) => sum + i.quantity, 0)
-            .toString(),
-          waybill: awb,
-          shipment_width: details.dimensions?.split('x')[1] || '10',
-          shipment_height: details.dimensions?.split('x')[2] || '10',
-          weight: ((details.weight || 0.5) * 1000).toString(),
+          quantity: String(details.items.reduce((sum, i) => sum + i.quantity, 0) || 1),
+          waybill: awb || '',
+          shipment_width: dims[1] || '10',
+          shipment_height: dims[2] || '10',
+          weight: String(Math.round((details.weight || 0.5) * 1000)),
           seller_gst_tin: '',
           shipping_mode: 'Surface',
           address_type: 'home',
         },
       ],
       pickup_location: {
-        name: clientName,
-        add: details.sellerAddress.address,
-        city: details.sellerAddress.city,
-        pin_code: details.sellerAddress.pincode,
-        country: 'India',
-        phone: details.sellerAddress.phone,
+        name: pickupName,
       },
     };
 
@@ -116,17 +132,24 @@ export class DelhiveryProvider implements CourierProvider {
 
     if (!createRes.ok) {
       const errText = await createRes.text();
-      this.logger.error(`Delhivery create shipment failed: ${errText}`);
+      this.logger.error(`Delhivery create shipment failed: ${createRes.status} ${errText}`);
       throw new Error(`Failed to create Delhivery shipment: ${errText}`);
     }
 
     const createData = await createRes.json();
-    const pkg = createData?.packages?.[0];
+
+    if (!createData.success) {
+      const errMsg = createData.rmk || createData.packages?.[0]?.remarks?.[0] || 'Unknown error';
+      throw new Error(`Delhivery rejected shipment: ${errMsg}`);
+    }
+
+    const pkg = createData.packages?.[0];
+    const finalAwb = pkg?.waybill || awb;
 
     return {
-      awbNumber: String(awb),
+      awbNumber: String(finalAwb),
       courierOrderId: pkg?.refnum || details.orderNumber,
-      trackingUrl: `https://www.delhivery.com/track/package/${awb}`,
+      trackingUrl: `https://www.delhivery.com/track/package/${finalAwb}`,
     };
   }
 
@@ -135,9 +158,10 @@ export class DelhiveryProvider implements CourierProvider {
     config: SellerCourierConfig,
   ): Promise<TrackingResult> {
     const base = this.getBaseUrl();
+
     const res = await fetch(
-      `${base}/api/v1/packages/json/?waybill=${awbNumber}`,
-      { headers: this.headers(config) },
+      `${base}/api/v1/packages/json/?waybill=${encodeURIComponent(awbNumber)}&token=${config.apiKey}`,
+      { headers: this.authHeaders(config) },
     );
 
     if (!res.ok) {
@@ -173,13 +197,17 @@ export class DelhiveryProvider implements CourierProvider {
     config: SellerCourierConfig,
   ): Promise<CancelResult> {
     const base = this.getBaseUrl();
+
     const res = await fetch(`${base}/api/p/edit`, {
       method: 'POST',
       headers: {
         Authorization: `Token ${config.apiKey}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ waybill: awbNumber, cancellation: true }),
+      body: JSON.stringify({
+        waybill: awbNumber,
+        cancellation: 'true',
+      }),
     });
 
     if (!res.ok) {
@@ -191,14 +219,15 @@ export class DelhiveryProvider implements CourierProvider {
   }
 
   async checkServiceability(
-    pickupPincode: string,
+    _pickupPincode: string,
     deliveryPincode: string,
     config: SellerCourierConfig,
   ): Promise<ServiceabilityResult> {
     const base = this.getBaseUrl();
+
     const res = await fetch(
-      `${base}/c/api/pin-codes/json/?filter_codes=${deliveryPincode}`,
-      { headers: this.headers(config) },
+      `${base}/c/api/pin-codes/json/?token=${config.apiKey}&filter_codes=${deliveryPincode}`,
+      { headers: this.authHeaders(config) },
     );
 
     if (!res.ok) {
@@ -214,21 +243,45 @@ export class DelhiveryProvider implements CourierProvider {
 
     return {
       serviceable: true,
-      estimatedDays: deliveryInfo.estimated_delivery_days || 5,
+      estimatedDays: deliveryInfo.max_days || deliveryInfo.estimated_delivery_days || 5,
     };
+  }
+
+  async downloadLabel(
+    awbNumber: string,
+    config: SellerCourierConfig,
+  ): Promise<any> {
+    const base = this.getBaseUrl();
+
+    const res = await fetch(
+      `${base}/api/p/packing_slip?wbns=${encodeURIComponent(awbNumber)}&token=${config.apiKey}`,
+      { headers: this.authHeaders(config) },
+    );
+
+    if (!res.ok) {
+      throw new Error('Failed to download Delhivery packing slip');
+    }
+
+    return res.json();
   }
 
   private mapDelhiveryStatus(status: string): string {
     const map: Record<string, string> = {
       Manifested: 'BOOKED',
-      'In Transit': 'IN_TRANSIT',
-      'Pending': 'PENDING',
       Dispatched: 'IN_TRANSIT',
+      'In Transit': 'IN_TRANSIT',
+      Pending: 'PENDING',
+      'Reached Destination Hub': 'IN_TRANSIT',
       'Out For Delivery': 'OUT_FOR_DELIVERY',
       Delivered: 'DELIVERED',
+      'Picked Up': 'PICKED_UP',
+      'Not Picked': 'BOOKED',
       'RTO Initiated': 'RTO_INITIATED',
+      'RTO In Transit': 'RTO_INITIATED',
       'RTO Delivered': 'RTO_DELIVERED',
+      Returned: 'RTO_DELIVERED',
       Cancelled: 'CANCELLED',
+      Undelivered: 'IN_TRANSIT',
     };
     return map[status] || 'IN_TRANSIT';
   }

@@ -112,6 +112,7 @@ export class AuthController {
   }
 
   @Post('logout')
+  @Auth()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Logout and invalidate refresh token' })
   async logout(

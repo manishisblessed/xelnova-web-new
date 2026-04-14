@@ -65,6 +65,8 @@ export const ProductCard = memo(function ProductCard({ product, index = 0 }: Pro
                 alt={product.name}
                 fill
                 sizes="(max-width: 640px) 50vw, (max-width: 1024px) 25vw, 16vw"
+                priority={index < 4}
+                loading={index < 4 ? 'eager' : 'lazy'}
                 className={cn(
                   'object-cover transition-transform duration-500 group-hover:scale-105',
                   imgLoaded ? 'opacity-100' : 'opacity-0'

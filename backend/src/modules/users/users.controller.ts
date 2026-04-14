@@ -1,4 +1,4 @@
-import { Controller, Get, Put, Post, Patch, Body } from '@nestjs/common';
+import { Controller, Get, Put, Post, Patch, Delete, Body, Param } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { UsersService } from './users.service';
 import { successResponse } from '../../common/helpers/response.helper';
@@ -73,6 +73,44 @@ export class UsersController {
     return successResponse(
       await this.usersService.addAddress(userId, body),
       'Address added successfully',
+    );
+  }
+
+  @Patch('addresses/:id')
+  @Auth()
+  @ApiOperation({ summary: 'Update an address' })
+  async updateAddress(
+    @CurrentUser('id') userId: string,
+    @Param('id') addressId: string,
+    @Body() body: {
+      fullName?: string;
+      phone?: string;
+      addressLine1?: string;
+      addressLine2?: string;
+      city?: string;
+      state?: string;
+      pincode?: string;
+      landmark?: string;
+      type?: string;
+      isDefault?: boolean;
+    },
+  ) {
+    return successResponse(
+      await this.usersService.updateAddress(userId, addressId, body),
+      'Address updated successfully',
+    );
+  }
+
+  @Delete('addresses/:id')
+  @Auth()
+  @ApiOperation({ summary: 'Delete an address' })
+  async deleteAddress(
+    @CurrentUser('id') userId: string,
+    @Param('id') addressId: string,
+  ) {
+    return successResponse(
+      await this.usersService.deleteAddress(userId, addressId),
+      'Address deleted successfully',
     );
   }
 

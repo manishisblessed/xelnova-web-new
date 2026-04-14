@@ -185,13 +185,15 @@ export function useCategories() {
 
 // ─── Search hooks ───
 
-export function useSearch(query: string, page?: number) {
+export function useSearch(query: string, page?: number, filters?: Record<string, any>) {
+  const filterKey = filters ? JSON.stringify(filters) : '';
   return useFetch(async () => {
-    if (!query) return { products: [], meta: undefined };
-    const result = await searchApi.searchProducts(query, page);
+    if (!query && !filters?.category) return { products: [], meta: undefined, filters: undefined };
+    const result = await searchApi.searchProducts(query, page, undefined, filters as any);
     return {
       products: (result.products || []).map(mapProduct),
       meta: result.meta,
+      filters: result.filters,
     };
-  }, [query, page]);
+  }, [query, page, filterKey]);
 }

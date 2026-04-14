@@ -727,7 +727,7 @@ function OrderDetail({
                   const img = itemImg(line);
                   return (
                     <div key={i} className="flex gap-3 items-center rounded-xl border border-border p-3">
-                      <div className="h-14 w-14 rounded-lg bg-gray-50 border border-border overflow-hidden shrink-0">
+                      <div className="h-14 w-14 rounded-lg bg-gray-50 border border-border overflow-hidden shrink-0 relative">
                         {img ? <Image src={img} alt="" fill className="object-cover" /> : (
                           <div className="h-full w-full flex items-center justify-center"><Package size={18} className="text-gray-300" /></div>
                         )}

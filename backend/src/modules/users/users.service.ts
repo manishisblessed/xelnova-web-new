@@ -66,6 +66,19 @@ export class UsersService {
     userId: string,
     data: { name?: string; email?: string; phone?: string },
   ) {
+    if (data.email) {
+      const existing = await this.prisma.user.findFirst({
+        where: { email: data.email, id: { not: userId } },
+      });
+      if (existing) throw new BadRequestException('Email already in use');
+    }
+    if (data.phone) {
+      const existing = await this.prisma.user.findFirst({
+        where: { phone: data.phone, id: { not: userId } },
+      });
+      if (existing) throw new BadRequestException('Phone number already in use');
+    }
+
     return this.prisma.user.update({
       where: { id: userId },
       data,
@@ -121,6 +134,60 @@ export class UsersService {
         type: addressType as any,
       },
     });
+  }
+
+  async updateAddress(
+    userId: string,
+    addressId: string,
+    data: {
+      fullName?: string;
+      phone?: string;
+      addressLine1?: string;
+      addressLine2?: string;
+      city?: string;
+      state?: string;
+      pincode?: string;
+      landmark?: string;
+      type?: string;
+      isDefault?: boolean;
+    },
+  ) {
+    const address = await this.prisma.address.findUnique({ where: { id: addressId } });
+    if (!address || address.userId !== userId) throw new NotFoundException('Address not found');
+
+    const updateData: Record<string, unknown> = {};
+    if (data.fullName !== undefined) updateData.fullName = data.fullName;
+    if (data.phone !== undefined) updateData.phone = data.phone;
+    if (data.addressLine1 !== undefined) updateData.addressLine1 = data.addressLine1;
+    if (data.addressLine2 !== undefined) updateData.addressLine2 = data.addressLine2;
+    if (data.city !== undefined) updateData.city = data.city;
+    if (data.state !== undefined) updateData.state = data.state;
+    if (data.pincode !== undefined) updateData.pincode = data.pincode;
+    if (data.landmark !== undefined) updateData.landmark = data.landmark;
+    if (data.isDefault !== undefined) updateData.isDefault = data.isDefault;
+    if (data.type !== undefined) {
+      const VALID_TYPES = ['HOME', 'OFFICE', 'OTHER'] as const;
+      const TYPE_ALIASES: Record<string, (typeof VALID_TYPES)[number]> = { WORK: 'OFFICE' };
+      const raw = data.type.toUpperCase();
+      updateData.type = VALID_TYPES.includes(raw as any) ? raw : (TYPE_ALIASES[raw] || 'HOME');
+    }
+
+    if (data.isDefault) {
+      await this.prisma.address.updateMany({
+        where: { userId, isDefault: true },
+        data: { isDefault: false },
+      });
+    }
+
+    return this.prisma.address.update({ where: { id: addressId }, data: updateData as any });
+  }
+
+  async deleteAddress(userId: string, addressId: string) {
+    const address = await this.prisma.address.findUnique({ where: { id: addressId } });
+    if (!address || address.userId !== userId) throw new NotFoundException('Address not found');
+
+    await this.prisma.address.delete({ where: { id: addressId } });
+    return { deleted: true };
   }
 
   async getWishlist(userId: string) {

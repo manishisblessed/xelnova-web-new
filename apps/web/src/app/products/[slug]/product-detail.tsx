@@ -12,6 +12,7 @@ import {
 import { cn } from "@xelnova/utils";
 import { formatCurrency, formatDate } from "@xelnova/utils";
 import { useProductBySlug } from "@/lib/api";
+import { reviewsApi, setAccessToken } from "@xelnova/api";
 import { useCartStore } from "@/lib/store/cart-store";
 import { useWishlistStore } from "@/lib/store/wishlist-store";
 import { ProductCard } from "@/components/marketplace/product-card";
@@ -285,10 +286,10 @@ export default function ProductDetail() {
                         src={activeGallery[selectedImage] ?? activeGallery[0]}
                         alt={product.name}
                         fill
+                        priority
                         sizes="(max-width: 1024px) 100vw, 40vw"
                         className="object-contain p-4"
                         style={isZooming ? { transform: "scale(2)", transformOrigin: `${zoomPos.x}% ${zoomPos.y}%` } : undefined}
-                        priority
                       />
                     ) : (
                       <div className="flex h-full flex-col items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100">
@@ -370,7 +371,7 @@ export default function ProductDetail() {
                   <span className="text-sm text-text-muted">₹</span>
                   <span className="text-3xl font-extrabold text-text-primary">{effectivePrice.toLocaleString("en-IN")}</span>
                 </div>
-                <p className="mt-1 text-xs text-text-muted">Inclusive of all taxes</p>
+                <p className="mt-1 text-xs text-text-muted">+ GST as applicable</p>
               </div>
 
               <hr className="border-border" />
@@ -725,56 +726,7 @@ export default function ProductDetail() {
                 </motion.div>
               )}
               {activeTab === "reviews" && (
-                <motion.div key="reviews" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-6">
-                  {/* Rating summary */}
-                  <div className="flex items-center gap-6 rounded-xl bg-gray-50 p-5 border border-border">
-                    <div className="text-center">
-                      <div className="text-4xl font-extrabold text-text-primary">{product.rating.toFixed(1)}</div>
-                      <div className="mt-1.5 flex items-center gap-0.5">
-                        {Array.from({ length: 5 }).map((_, i) => (
-                          <Star key={i} size={16} className={i < Math.floor(product.rating) ? "fill-accent-400 text-accent-400" : "text-gray-200"} />
-                        ))}
-                      </div>
-                      <p className="mt-1 text-sm text-text-muted">{product.reviewCount.toLocaleString("en-IN")} ratings</p>
-                    </div>
-                  </div>
-
-                  {/* Individual reviews */}
-                  {product.reviews.length > 0 ? (
-                    product.reviews.map((review) => (
-                      <div key={review.id} className="border-b border-border pb-5 last:border-0">
-                        <div className="mb-2 flex items-center gap-3">
-                          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary-100 text-xs font-bold text-primary-700">
-                            {review.author.charAt(0)}
-                          </div>
-                          <div>
-                            <p className="text-sm font-medium text-text-primary">{review.author}</p>
-                            {review.verified && (
-                              <span className="flex items-center gap-1 text-xs text-success-700">
-                                <Check size={10} /> Verified Purchase
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                        <div className="mb-2 flex items-center gap-2">
-                          <div className="flex items-center gap-0.5">
-                            {Array.from({ length: 5 }).map((_, i) => (
-                              <Star key={i} size={14} className={i < review.rating ? "fill-accent-400 text-accent-400" : "text-gray-200"} />
-                            ))}
-                          </div>
-                          {review.title && <span className="text-sm font-semibold text-text-primary">{review.title}</span>}
-                        </div>
-                        <p className="text-xs text-text-muted">Reviewed on {formatDate(review.date)}</p>
-                        <p className="mt-2 text-sm leading-relaxed text-text-secondary">{review.content}</p>
-                        <button className="mt-2 flex items-center gap-1.5 text-xs text-text-muted hover:text-primary-600 transition-colors">
-                          <ThumbsUp size={12} /> Helpful ({review.helpful})
-                        </button>
-                      </div>
-                    ))
-                  ) : (
-                    <p className="text-sm text-text-muted">No reviews yet. Be the first to review this product!</p>
-                  )}
-                </motion.div>
+                <ReviewsTab product={product} />
               )}
             </AnimatePresence>
           </div>
@@ -853,5 +805,145 @@ export default function ProductDetail() {
         )}
       </AnimatePresence>
     </div>
+  );
+}
+
+function ReviewsTab({ product }: { product: any }) {
+  const [showForm, setShowForm] = useState(false);
+  const [rating, setRating] = useState(0);
+  const [hoverRating, setHoverRating] = useState(0);
+  const [title, setTitle] = useState("");
+  const [comment, setComment] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+  const [helpfulClicked, setHelpfulClicked] = useState<Set<string>>(new Set());
+
+  const handleSubmit = async () => {
+    if (rating === 0) { setError("Please select a rating"); return; }
+    setSubmitting(true);
+    setError("");
+    try {
+      const m = typeof document !== "undefined" ? document.cookie.match(/(?:^|;\s*)xelnova-token=([^;]*)/) : null;
+      if (m) setAccessToken(decodeURIComponent(m[1]));
+      await reviewsApi.createReview({ productId: product.id, rating, title: title || undefined, comment: comment || undefined });
+      setShowForm(false);
+      setRating(0);
+      setTitle("");
+      setComment("");
+      window.location.reload();
+    } catch (e: any) {
+      setError(e?.response?.data?.message || e?.message || "Failed to submit review");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleHelpful = async (reviewId: string) => {
+    if (helpfulClicked.has(reviewId)) return;
+    try {
+      const m = typeof document !== "undefined" ? document.cookie.match(/(?:^|;\s*)xelnova-token=([^;]*)/) : null;
+      if (m) setAccessToken(decodeURIComponent(m[1]));
+      await reviewsApi.markReviewHelpful(reviewId);
+      setHelpfulClicked((prev) => new Set(prev).add(reviewId));
+    } catch {}
+  };
+
+  return (
+    <motion.div key="reviews" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-6 rounded-xl bg-gray-50 p-5 border border-border flex-1">
+          <div className="text-center">
+            <div className="text-4xl font-extrabold text-text-primary">{product.rating.toFixed(1)}</div>
+            <div className="mt-1.5 flex items-center gap-0.5">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <Star key={i} size={16} className={i < Math.floor(product.rating) ? "fill-accent-400 text-accent-400" : "text-gray-200"} />
+              ))}
+            </div>
+            <p className="mt-1 text-sm text-text-muted">{product.reviewCount.toLocaleString("en-IN")} ratings</p>
+          </div>
+        </div>
+        <button
+          onClick={() => setShowForm(!showForm)}
+          className="ml-4 shrink-0 rounded-xl bg-primary-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-primary-700 transition-colors"
+        >
+          Write a Review
+        </button>
+      </div>
+
+      {showForm && (
+        <div className="rounded-xl border border-border bg-white p-5 space-y-4">
+          <h4 className="text-sm font-bold text-text-primary">Your Review</h4>
+          <div>
+            <p className="text-sm text-text-secondary mb-2">Rating *</p>
+            <div className="flex gap-1">
+              {[1, 2, 3, 4, 5].map((s) => (
+                <button key={s} onMouseEnter={() => setHoverRating(s)} onMouseLeave={() => setHoverRating(0)} onClick={() => setRating(s)}>
+                  <Star size={24} className={s <= (hoverRating || rating) ? "fill-accent-400 text-accent-400" : "text-gray-300"} />
+                </button>
+              ))}
+            </div>
+          </div>
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="Review title (optional)"
+            className="w-full rounded-xl border border-border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+          />
+          <textarea
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            placeholder="Write your review..."
+            rows={3}
+            className="w-full rounded-xl border border-border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none"
+          />
+          {error && <p className="text-sm text-danger-600">{error}</p>}
+          <div className="flex gap-3">
+            <button onClick={() => setShowForm(false)} className="rounded-xl border border-border px-4 py-2 text-sm font-medium text-text-primary hover:bg-gray-50">Cancel</button>
+            <button onClick={handleSubmit} disabled={submitting || rating === 0} className="rounded-xl bg-primary-600 px-5 py-2 text-sm font-semibold text-white hover:bg-primary-700 disabled:opacity-50 flex items-center gap-2">
+              {submitting && <Loader2 size={14} className="animate-spin" />} Submit Review
+            </button>
+          </div>
+        </div>
+      )}
+
+      {product.reviews.length > 0 ? (
+        product.reviews.map((review: any) => (
+          <div key={review.id} className="border-b border-border pb-5 last:border-0">
+            <div className="mb-2 flex items-center gap-3">
+              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary-100 text-xs font-bold text-primary-700">
+                {review.author.charAt(0)}
+              </div>
+              <div>
+                <p className="text-sm font-medium text-text-primary">{review.author}</p>
+                {review.verified && (
+                  <span className="flex items-center gap-1 text-xs text-success-700">
+                    <Check size={10} /> Verified Purchase
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="mb-2 flex items-center gap-2">
+              <div className="flex items-center gap-0.5">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <Star key={i} size={14} className={i < review.rating ? "fill-accent-400 text-accent-400" : "text-gray-200"} />
+                ))}
+              </div>
+              {review.title && <span className="text-sm font-semibold text-text-primary">{review.title}</span>}
+            </div>
+            <p className="text-xs text-text-muted">Reviewed on {formatDate(review.date)}</p>
+            <p className="mt-2 text-sm leading-relaxed text-text-secondary">{review.content}</p>
+            <button
+              onClick={() => handleHelpful(review.id)}
+              disabled={helpfulClicked.has(review.id)}
+              className="mt-2 flex items-center gap-1.5 text-xs text-text-muted hover:text-primary-600 transition-colors disabled:text-primary-600"
+            >
+              <ThumbsUp size={12} /> Helpful ({(review.helpful || 0) + (helpfulClicked.has(review.id) ? 1 : 0)})
+            </button>
+          </div>
+        ))
+      ) : (
+        <p className="text-sm text-text-muted">No reviews yet. Be the first to review this product!</p>
+      )}
+    </motion.div>
   );
 }

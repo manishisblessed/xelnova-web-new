@@ -84,9 +84,10 @@ export default function CartPage() {
               <div className="space-y-3 text-sm">
                 <div className="flex justify-between text-text-secondary"><span>Subtotal ({itemCount} items)</span><span className="font-medium text-text-primary">{formatCurrency(priceTotal + savings)}</span></div>
                 {savings > 0 && (<div className="flex justify-between text-success-600"><span className="flex items-center gap-1"><Tag size={14} />Discount</span><span className="font-medium">-{formatCurrency(savings)}</span></div>)}
-                <div className="flex justify-between text-text-secondary"><span>Delivery</span><span className="font-semibold text-success-600">FREE</span></div>
+                <div className="flex justify-between text-text-secondary"><span>Delivery</span><span className={priceTotal > 499 ? "font-semibold text-success-600" : "font-medium text-text-primary"}>{priceTotal > 499 ? "FREE" : formatCurrency(49)}</span></div>
+                <div className="flex justify-between text-text-secondary"><span>Est. Tax (GST)</span><span className="font-medium text-text-primary">Calculated at checkout</span></div>
                 <hr className="border-border-light" />
-                <div className="flex justify-between text-lg font-bold text-text-primary"><span>Total</span><span>{formatCurrency(priceTotal)}</span></div>
+                <div className="flex justify-between text-lg font-bold text-text-primary"><span>Subtotal</span><span>{formatCurrency(priceTotal)}</span></div>
                 {savings > 0 && (<p className="rounded-xl bg-success-50 border border-success-100 px-3 py-2 text-center text-sm font-medium text-success-700">You save {formatCurrency(savings)} on this order</p>)}
               </div>
               <button onClick={handleCheckout} className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-primary-600 py-3.5 text-sm font-bold text-white shadow-primary hover:bg-primary-700 transition-all cursor-pointer">
@@ -108,8 +109,12 @@ function CartItemCard({ item, onRemove, onUpdateQty, onSaveForLater }: { item: C
   return (
     <motion.div layout initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, x: -100, height: 0, marginBottom: 0, padding: 0 }} transition={{ duration: 0.3 }} className="rounded-2xl border border-border bg-white p-4 shadow-card sm:p-5">
       <div className="flex gap-4">
-        <Link href={`/products/${item.slug}`} className="relative h-28 w-28 shrink-0 overflow-hidden rounded-xl border border-border-light bg-surface-muted sm:h-32 sm:w-32">
-          <Image src={item.image} alt={item.name} fill sizes="128px" className="object-cover" />
+        <Link href={`/products/${item.slug || '#'}`} className="relative h-28 w-28 shrink-0 overflow-hidden rounded-xl border border-border-light bg-surface-muted sm:h-32 sm:w-32">
+          {item.image ? (
+            <Image src={item.image} alt={item.name} fill sizes="128px" className="object-cover" />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center"><ShoppingBag size={24} className="text-text-muted" /></div>
+          )}
         </Link>
         <div className="flex flex-1 flex-col">
           <Link href={`/products/${item.slug}`} className="text-sm font-medium text-text-primary hover:text-primary-600 transition-colors line-clamp-2 sm:text-base">{item.name}</Link>

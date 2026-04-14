@@ -12,8 +12,17 @@ import {
   CheckCircle,
   XCircle,
   MessageSquare,
+  ChevronDown,
 } from "lucide-react";
 import { ticketsApi, setAccessToken } from "@xelnova/api";
+
+const FAQ_ITEMS = [
+  { q: "How do I track my order?", a: "Go to My Orders, click on the order, and you'll see real-time tracking information." },
+  { q: "How do I return a product?", a: "Navigate to My Orders, open the delivered order, and click 'Request Return'. Fill in the reason and submit." },
+  { q: "When will I get my refund?", a: "Refunds are typically processed within 5-7 business days after the return is approved." },
+  { q: "How do I change my delivery address?", a: "You can update your address from Account > Addresses before placing an order." },
+  { q: "What payment methods are accepted?", a: "We accept UPI, Credit/Debit cards, Net Banking, Wallets, and Cash on Delivery." },
+];
 
 type Ticket = Awaited<ReturnType<typeof ticketsApi.getMyTickets>>[number];
 
@@ -55,9 +64,12 @@ export default function SupportPage() {
 
   useEffect(() => { loadTickets(); }, []);
 
+  const [createError, setCreateError] = useState<string | null>(null);
+
   const handleCreate = async () => {
     if (!subject.trim() || !message.trim()) return;
     setCreating(true);
+    setCreateError(null);
     try {
       syncToken();
       await ticketsApi.createTicket(subject, message, orderNumber || undefined);
@@ -65,10 +77,11 @@ export default function SupportPage() {
       setSubject("");
       setMessage("");
       setOrderNumber("");
+      setError(null);
       setLoading(true);
       loadTickets();
     } catch (e: any) {
-      alert(e.message || "Failed to create ticket");
+      setCreateError(e.message || "Failed to create ticket");
     } finally {
       setCreating(false);
     }
@@ -145,6 +158,16 @@ export default function SupportPage() {
         </div>
       )}
 
+      {/* FAQ Section */}
+      <div className="mt-8">
+        <h3 className="text-sm font-bold text-text-primary mb-3">Frequently Asked Questions</h3>
+        <div className="space-y-2">
+          {FAQ_ITEMS.map((item, i) => (
+            <FaqItem key={i} question={item.q} answer={item.a} />
+          ))}
+        </div>
+      </div>
+
       {/* Create Ticket Modal */}
       {showCreate && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
@@ -188,9 +211,13 @@ export default function SupportPage() {
               />
             </div>
 
+            {createError && (
+              <p className="text-sm text-danger-600 bg-danger-50 rounded-lg px-3 py-2">{createError}</p>
+            )}
+
             <div className="flex gap-3 pt-2">
               <button
-                onClick={() => setShowCreate(false)}
+                onClick={() => { setShowCreate(false); setCreateError(null); }}
                 disabled={creating}
                 className="flex-1 rounded-xl border border-border px-4 py-2.5 text-sm font-semibold text-text-primary hover:bg-gray-50 transition-colors"
               >
@@ -207,6 +234,24 @@ export default function SupportPage() {
             </div>
           </motion.div>
         </div>
+      )}
+    </div>
+  );
+}
+
+function FaqItem({ question, answer }: { question: string; answer: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="rounded-xl border border-border bg-white overflow-hidden">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center justify-between px-4 py-3 text-left text-sm font-medium text-text-primary hover:bg-gray-50 transition-colors"
+      >
+        {question}
+        <ChevronDown size={16} className={`shrink-0 text-text-muted transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
+        <div className="px-4 pb-3 text-sm text-text-secondary">{answer}</div>
       )}
     </div>
   );

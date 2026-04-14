@@ -32,6 +32,7 @@ import {
   CreditCard,
   ShoppingBag,
   ShieldAlert,
+  Flag,
 } from 'lucide-react';
 import { cn } from '@xelnova/utils';
 import { useDashboardAuth } from '@/lib/auth-context';
@@ -47,6 +48,7 @@ const NAV_SECTIONS: NavSection[] = [
       { href: '/performance', label: 'Performance', icon: Activity },
       { href: '/logs', label: 'System Logs', icon: FileText },
       { href: '/verifications', label: 'Verifications', icon: CheckCircle },
+      { href: '/feature-flags', label: 'Feature Flags', icon: Flag },
     ],
   },
   {

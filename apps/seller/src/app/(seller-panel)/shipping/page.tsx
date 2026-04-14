@@ -1,10 +1,11 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Truck, Plus, Trash2, Edit2, Check, X, Eye, EyeOff,
+  Truck, Plus, Trash2, Edit2, Check, Eye, EyeOff,
   ExternalLink, Loader2, AlertCircle, CheckCircle2, Settings,
+  Shield, Link2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { DashboardHeader } from '@/components/dashboard/dashboard-header';
@@ -29,55 +30,174 @@ interface CourierConfig {
   createdAt: string;
 }
 
-const PROVIDERS = [
+interface FieldDef {
+  key: string;
+  label: string;
+  required: boolean;
+  placeholder: string;
+  secret?: boolean;
+  helpText?: string;
+}
+
+interface ProviderDef {
+  id: string;
+  name: string;
+  tagline: string;
+  howToConnect: string;
+  logo: string;
+  fields: FieldDef[];
+  docsUrl: string;
+  docsLabel: string;
+}
+
+/**
+ * Each provider's `fields[].key` maps directly to the DB column
+ * that the backend reads when calling the courier API:
+ *
+ *   apiKey      → SellerCourierConfig.apiKey
+ *   apiSecret   → SellerCourierConfig.apiSecret
+ *   accountId   → SellerCourierConfig.accountId
+ *   warehouseId → SellerCourierConfig.warehouseId
+ */
+const PROVIDERS: ProviderDef[] = [
   {
     id: 'DELHIVERY',
     name: 'Delhivery',
-    description: 'One of India\'s largest logistics companies with pan-India coverage',
+    tagline: 'India\'s largest express logistics company',
+    howToConnect: 'Login to Delhivery One → Settings → API Setup → Copy your API Token.',
     logo: '📦',
     fields: [
-      { key: 'apiKey', label: 'API Token', required: true, placeholder: 'Your Delhivery API token' },
-      { key: 'accountId', label: 'Client Name', required: true, placeholder: 'Your Delhivery client name' },
-      { key: 'warehouseId', label: 'Warehouse Name', required: false, placeholder: 'Pickup warehouse name' },
+      {
+        key: 'apiKey',
+        label: 'API Token',
+        required: true,
+        placeholder: 'Paste your API token here',
+        secret: true,
+        helpText: 'Found at Settings → API Setup in your Delhivery One dashboard',
+      },
+      {
+        key: 'accountId',
+        label: 'Client Name',
+        required: true,
+        placeholder: 'Your registered business name',
+        helpText: 'Must match exactly (case-sensitive) as registered on Delhivery',
+      },
+      {
+        key: 'warehouseId',
+        label: 'Pickup Location Name',
+        required: false,
+        placeholder: 'e.g. Main Warehouse',
+        helpText: 'Name of your registered pickup location. Leave empty to use default.',
+      },
     ],
-    docsUrl: 'https://www.delhivery.com/developers',
+    docsUrl: 'https://one.delhivery.com/home',
+    docsLabel: 'Open Delhivery Dashboard',
   },
   {
     id: 'SHIPROCKET',
     name: 'ShipRocket',
-    description: 'Courier aggregator with 17+ courier partners and automated shipping',
+    tagline: 'Courier aggregator with 17+ courier partners',
+    howToConnect: 'Login to ShipRocket → Settings → API → Create a new API User (use a separate email, not your login).',
     logo: '🚀',
     fields: [
-      { key: 'accountId', label: 'API Email', required: true, placeholder: 'Your ShipRocket API user email' },
-      { key: 'apiKey', label: 'API Password', required: true, placeholder: 'Your ShipRocket API user password', secret: true },
-      { key: 'warehouseId', label: 'Pickup Location', required: false, placeholder: 'e.g. Primary' },
+      {
+        key: 'accountId',
+        label: 'API User Email',
+        required: true,
+        placeholder: 'e.g. api@yourcompany.com',
+        helpText: 'The email you used to create the API User (not your login email)',
+      },
+      {
+        key: 'apiKey',
+        label: 'API User Password',
+        required: true,
+        placeholder: 'Password for the API user',
+        secret: true,
+        helpText: 'The password you set while creating the API User in ShipRocket',
+      },
+      {
+        key: 'warehouseId',
+        label: 'Pickup Location',
+        required: false,
+        placeholder: 'e.g. Primary',
+        helpText: 'Exact name of your pickup address in ShipRocket. Defaults to "Primary".',
+      },
     ],
-    docsUrl: 'https://apidocs.shiprocket.in',
+    docsUrl: 'https://app.shiprocket.in/newlogin',
+    docsLabel: 'Open ShipRocket Dashboard',
   },
   {
     id: 'XPRESSBEES',
     name: 'XpressBees',
-    description: 'Fast-growing logistics provider with same-day and next-day delivery',
+    tagline: 'Fast-growing logistics with same-day & next-day delivery',
+    howToConnect: 'Use your login credentials from shipment.xpressbees.com to connect.',
     logo: '🐝',
     fields: [
-      { key: 'apiKey', label: 'XB Access Key / API Key', required: true, placeholder: 'Your XpressBees access key' },
-      { key: 'apiSecret', label: 'Password (for token auth)', required: false, placeholder: 'Leave empty for static key auth', secret: true },
-      { key: 'accountId', label: 'Enterprise ID / Email', required: false, placeholder: 'Your enterprise ID' },
-      { key: 'warehouseId', label: 'Warehouse Name', required: false, placeholder: 'Default pickup warehouse' },
+      {
+        key: 'accountId',
+        label: 'Login Email',
+        required: true,
+        placeholder: 'Your XpressBees login email',
+        helpText: 'The email you use to log in at shipment.xpressbees.com',
+      },
+      {
+        key: 'apiSecret',
+        label: 'Login Password',
+        required: true,
+        placeholder: 'Your XpressBees login password',
+        secret: true,
+        helpText: 'We use this to generate a temporary auth token (not stored in plain text)',
+      },
+      {
+        key: 'warehouseId',
+        label: 'Pickup Warehouse',
+        required: false,
+        placeholder: 'e.g. Main Warehouse',
+        helpText: 'Registered warehouse name from Settings → Warehouse in XpressBees.',
+      },
     ],
-    docsUrl: 'https://xbclientapi.xpressbees.com',
+    docsUrl: 'https://shipment.xpressbees.com/dash',
+    docsLabel: 'Open XpressBees Dashboard',
   },
   {
     id: 'EKART',
-    name: 'Ekart',
-    description: 'Flipkart\'s logistics arm with extensive reach across India',
+    name: 'Ekart Elite',
+    tagline: 'Flipkart\'s logistics arm with pan-India coverage',
+    howToConnect: 'Login to Ekart Elite → Settings → API Documentation → Copy your Client ID, Username and Password.',
     logo: '📬',
     fields: [
-      { key: 'apiKey', label: 'API Key / Password', required: true, placeholder: 'Your Ekart API key', secret: true },
-      { key: 'accountId', label: 'Merchant Code', required: true, placeholder: '3-character merchant code' },
-      { key: 'warehouseId', label: 'Location Code', required: false, placeholder: 'Source location code' },
+      {
+        key: 'accountId',
+        label: 'Client ID',
+        required: true,
+        placeholder: 'e.g. EKART_698317571ff77a997480dcce',
+        helpText: 'Found in your Ekart Elite dashboard under API settings',
+      },
+      {
+        key: 'apiKey',
+        label: 'API Username',
+        required: true,
+        placeholder: 'Your Ekart API username',
+        helpText: 'API username from Ekart Elite → Settings → API Documentation',
+      },
+      {
+        key: 'apiSecret',
+        label: 'API Password',
+        required: true,
+        placeholder: 'Your Ekart API password',
+        secret: true,
+        helpText: 'API password from Ekart Elite → Settings → API Documentation',
+      },
+      {
+        key: 'warehouseId',
+        label: 'Pickup Location Alias',
+        required: false,
+        placeholder: 'e.g. Delhi-Warehouse',
+        helpText: 'Registered pickup location alias in Ekart. Leave empty to use default.',
+      },
     ],
-    docsUrl: null,
+    docsUrl: 'https://app.elite.ekartlogistics.in/',
+    docsLabel: 'Open Ekart Dashboard',
   },
 ];
 
@@ -119,12 +239,18 @@ export default function ShippingSettingsPage() {
 
     const data: Record<string, string> = {};
     provider.fields.forEach((f) => {
-      if (f.key === 'apiKey') data.apiKey = '';
-      else if (f.key === 'apiSecret') data.apiSecret = '';
-      else if (f.key === 'accountId') data.accountId = existing?.accountId || '';
-      else if (f.key === 'warehouseId') data.warehouseId = existing?.warehouseId || '';
+      if (f.secret) {
+        data[f.key] = '';
+      } else if (f.key === 'accountId') {
+        data.accountId = existing?.accountId || '';
+      } else if (f.key === 'warehouseId') {
+        data.warehouseId = existing?.warehouseId || '';
+      } else {
+        data[f.key] = '';
+      }
     });
     setFormData(data);
+    setShowSecrets({});
     setEditModal(providerId);
   };
 
@@ -134,8 +260,11 @@ export default function ShippingSettingsPage() {
     if (!provider) return;
 
     const requiredFields = provider.fields.filter((f) => f.required);
+    const existing = getConfigForProvider(editModal);
+
     for (const field of requiredFields) {
-      if (!formData[field.key]?.trim()) {
+      const value = formData[field.key]?.trim();
+      if (!value && !(existing && field.secret)) {
         toast.error(`${field.label} is required`);
         return;
       }
@@ -143,19 +272,31 @@ export default function ShippingSettingsPage() {
 
     setSaving(true);
     try {
-      await apiSaveCourierConfig({
-        provider: editModal,
-        apiKey: formData.apiKey || '',
-        apiSecret: formData.apiSecret || undefined,
-        accountId: formData.accountId || undefined,
-        warehouseId: formData.warehouseId || undefined,
-        metadata: formData.metadata ? JSON.parse(formData.metadata) : undefined,
+      const payload: Record<string, any> = { provider: editModal };
+
+      provider.fields.forEach((f) => {
+        const value = formData[f.key]?.trim();
+        if (f.key === 'apiKey') {
+          payload.apiKey = value || '';
+        } else if (f.key === 'apiSecret') {
+          if (value) payload.apiSecret = value;
+        } else if (f.key === 'accountId') {
+          if (value) payload.accountId = value;
+        } else if (f.key === 'warehouseId') {
+          payload.warehouseId = value || undefined;
+        }
       });
-      toast.success(`${provider.name} configuration saved`);
+
+      if (!payload.apiKey) {
+        payload.apiKey = existing ? '__KEEP_EXISTING__' : '';
+      }
+
+      await apiSaveCourierConfig(payload as any);
+      toast.success(`${provider.name} connected successfully!`);
       setEditModal(null);
       load();
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Failed to save');
+      toast.error(err instanceof Error ? err.message : 'Failed to save configuration');
     } finally {
       setSaving(false);
     }
@@ -175,62 +316,71 @@ export default function ShippingSettingsPage() {
     }
   };
 
+  const activeProvider = PROVIDERS.find((p) => p.id === editModal);
+  const existingConfig = editModal ? getConfigForProvider(editModal) : null;
+
   return (
     <>
       <DashboardHeader title="Shipping Settings" />
       <div className="p-6 space-y-6 max-w-4xl">
-        {/* Xelnova Courier info */}
-        <motion.div
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="rounded-2xl border-2 border-primary-200 bg-primary-50/50 p-5"
-        >
-          <div className="flex items-start gap-3">
-            <div className="rounded-xl bg-primary-100 p-2.5">
-              <Truck size={20} className="text-primary-600" />
-            </div>
-            <div className="flex-1">
-              <h3 className="text-sm font-bold text-text-primary">Xelnova Courier</h3>
-              <p className="text-xs text-text-muted mt-1">
-                Always available. When you choose Xelnova Courier for an order, we handle everything — pickup, delivery, AWB generation, and status updates. No configuration needed.
-              </p>
-              <Badge variant="success" className="mt-2">
-                <CheckCircle2 size={10} className="mr-0.5" />
-                Always Active
-              </Badge>
-            </div>
-          </div>
-        </motion.div>
 
-        {/* Self-ship info */}
-        <motion.div
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.05 }}
-          className="rounded-2xl border border-border bg-white p-5"
-        >
-          <div className="flex items-start gap-3">
-            <div className="rounded-xl bg-gray-100 p-2.5">
-              <Settings size={20} className="text-gray-600" />
+        {/* Built-in options */}
+        <div className="grid gap-3 sm:grid-cols-2">
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="rounded-2xl border-2 border-primary-200 bg-gradient-to-br from-primary-50/80 to-white p-4"
+          >
+            <div className="flex items-start gap-3">
+              <div className="rounded-xl bg-primary-100 p-2">
+                <Truck size={18} className="text-primary-600" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-semibold text-text-primary">Xelnova Courier</h3>
+                  <Badge variant="success" className="text-[10px] px-1.5 py-0">Active</Badge>
+                </div>
+                <p className="text-xs text-text-muted mt-1 leading-relaxed">
+                  We handle pickup, delivery, AWB &amp; tracking. No setup needed.
+                </p>
+              </div>
             </div>
-            <div>
-              <h3 className="text-sm font-bold text-text-primary">Ship By Own</h3>
-              <p className="text-xs text-text-muted mt-1">
-                Ship orders yourself using any courier. You&apos;ll need to manually enter the AWB number and update the delivery status.
-              </p>
-              <Badge variant="info" className="mt-2">No Setup Required</Badge>
-            </div>
-          </div>
-        </motion.div>
+          </motion.div>
 
-        {/* Courier providers */}
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.05 }}
+            className="rounded-2xl border border-border bg-white p-4"
+          >
+            <div className="flex items-start gap-3">
+              <div className="rounded-xl bg-gray-100 p-2">
+                <Settings size={18} className="text-gray-500" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-semibold text-text-primary">Ship By Own</h3>
+                  <Badge variant="info" className="text-[10px] px-1.5 py-0">No Setup</Badge>
+                </div>
+                <p className="text-xs text-text-muted mt-1 leading-relaxed">
+                  Ship with any courier. Manually enter AWB &amp; update status.
+                </p>
+              </div>
+            </div>
+          </motion.div>
+        </div>
+
+        {/* Third-party courier integrations */}
         <div>
-          <h2 className="text-sm font-bold text-text-primary mb-3">Courier API Integrations</h2>
-          <p className="text-xs text-text-muted mb-4">
-            Connect your courier accounts to book shipments directly from your dashboard. Your API keys are encrypted and stored securely.
+          <div className="flex items-center gap-2 mb-1">
+            <Link2 size={15} className="text-text-muted" />
+            <h2 className="text-sm font-semibold text-text-primary">Connect Your Courier Accounts</h2>
+          </div>
+          <p className="text-xs text-text-muted mb-4 ml-[23px]">
+            Link your existing courier accounts to book shipments directly. Credentials are encrypted with AES-256.
           </p>
 
-          <div className="grid gap-4">
+          <div className="grid gap-3">
             {PROVIDERS.map((provider, i) => {
               const config = getConfigForProvider(provider.id);
               const isConfigured = !!config;
@@ -240,49 +390,40 @@ export default function ShippingSettingsPage() {
                   key={provider.id}
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.1 + i * 0.05 }}
-                  className="rounded-2xl border border-border bg-white p-5 shadow-sm"
+                  transition={{ delay: 0.1 + i * 0.04 }}
+                  className={`rounded-2xl border bg-white p-4 transition-shadow hover:shadow-md ${
+                    isConfigured ? 'border-green-200' : 'border-border'
+                  }`}
                 >
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-start gap-3">
-                      <div className="text-2xl">{provider.logo}</div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <h3 className="text-sm font-bold text-text-primary">{provider.name}</h3>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span className="text-2xl shrink-0">{provider.logo}</span>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h3 className="text-sm font-semibold text-text-primary">{provider.name}</h3>
                           {isConfigured ? (
-                            <Badge variant={config.isActive ? 'success' : 'warning'}>
-                              {config.isActive ? 'Connected' : 'Inactive'}
+                            <Badge variant="success" className="text-[10px] px-1.5 py-0">
+                              <CheckCircle2 size={9} className="mr-0.5" />
+                              Connected
                             </Badge>
                           ) : (
-                            <Badge variant="default">Not Configured</Badge>
+                            <Badge variant="default" className="text-[10px] px-1.5 py-0">Not Connected</Badge>
                           )}
                         </div>
-                        <p className="text-xs text-text-muted mt-1">{provider.description}</p>
-                        {isConfigured && (
-                          <div className="mt-2 flex items-center gap-3 text-xs text-text-muted">
-                            <span>API Key: {config.apiKey}</span>
-                            {config.accountId && <span>Account: {config.accountId}</span>}
-                          </div>
+                        <p className="text-xs text-text-muted mt-0.5">{provider.tagline}</p>
+                        {isConfigured && config.accountId && (
+                          <p className="text-[11px] text-text-muted mt-1 truncate">
+                            Account: <span className="font-medium text-text-secondary">{config.accountId}</span>
+                          </p>
                         )}
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      {provider.docsUrl && (
-                        <a
-                          href={provider.docsUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="p-2 rounded-lg border border-border hover:bg-gray-50 text-text-muted hover:text-text-primary transition-colors"
-                          title="API Docs"
-                        >
-                          <ExternalLink size={14} />
-                        </a>
-                      )}
+                    <div className="flex items-center gap-1.5 shrink-0">
                       {isConfigured && (
                         <button
                           onClick={() => setDeleteConfirm(provider.id)}
-                          className="p-2 rounded-lg border border-border hover:bg-red-50 text-text-muted hover:text-red-600 transition-colors"
-                          title="Remove"
+                          className="p-1.5 rounded-lg hover:bg-red-50 text-text-muted hover:text-red-500 transition-colors"
+                          title="Disconnect"
                         >
                           <Trash2 size={14} />
                         </button>
@@ -291,16 +432,17 @@ export default function ShippingSettingsPage() {
                         size="sm"
                         variant={isConfigured ? 'outline' : 'primary'}
                         onClick={() => openEditModal(provider.id)}
+                        className="text-xs"
                       >
                         {isConfigured ? (
                           <>
-                            <Edit2 size={13} />
+                            <Edit2 size={12} />
                             Edit
                           </>
                         ) : (
                           <>
-                            <Plus size={13} />
-                            Configure
+                            <Plus size={12} />
+                            Connect
                           </>
                         )}
                       </Button>
@@ -327,14 +469,13 @@ export default function ShippingSettingsPage() {
             className="rounded-2xl border border-border bg-white p-5 shadow-sm space-y-5"
           >
             <div>
-              <h2 className="text-sm font-bold text-text-primary">Xelnova Shipping Rate Chart</h2>
+              <h2 className="text-sm font-semibold text-text-primary">Xelnova Shipping Rate Chart</h2>
               <p className="text-xs text-text-muted mt-1">
-                These rates are set by the platform and apply when shipping via Xelnova Courier.
+                These rates apply when shipping via Xelnova Courier.
               </p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              {/* Weight-based rates */}
               <div className="rounded-xl border border-border overflow-hidden">
                 <div className="bg-primary-50 px-4 py-2.5 border-b border-border">
                   <h3 className="text-xs font-bold text-primary-700">Weight-based Charges</h3>
@@ -365,7 +506,6 @@ export default function ShippingSettingsPage() {
                 </table>
               </div>
 
-              {/* Dimension surcharges */}
               <div className="rounded-xl border border-border overflow-hidden">
                 <div className="bg-accent-50 px-4 py-2.5 border-b border-border">
                   <h3 className="text-xs font-bold text-accent-700">Volumetric Surcharges</h3>
@@ -404,32 +544,163 @@ export default function ShippingSettingsPage() {
             </p>
           </motion.div>
         )}
+
+        {/* ── Need Help? Section ── */}
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.35 }}
+          className="rounded-2xl border border-border bg-gradient-to-br from-gray-50 to-white p-5 space-y-4"
+        >
+          <div>
+            <h2 className="text-sm font-semibold text-text-primary flex items-center gap-2">
+              <AlertCircle size={15} className="text-primary-500" />
+              Need Help Connecting?
+            </h2>
+            <p className="text-xs text-text-muted mt-1">
+              Use the same credentials you use in your courier&apos;s dashboard. We only store them encrypted to book shipments for your orders.
+            </p>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            {/* Delhivery */}
+            <div className="rounded-xl border border-border bg-white p-3">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-lg">📦</span>
+                <h3 className="text-xs font-semibold text-text-primary">Delhivery</h3>
+              </div>
+              <ul className="text-[11px] text-text-muted space-y-1 mb-2">
+                <li>• Login → Settings → API Setup</li>
+                <li>• Copy your <strong>API Token</strong></li>
+                <li>• Enter your exact <strong>Client Name</strong></li>
+              </ul>
+              <a
+                href="https://one.delhivery.com/home"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-[11px] text-primary-600 font-medium hover:underline"
+              >
+                <ExternalLink size={10} />
+                Open Delhivery Dashboard
+              </a>
+            </div>
+
+            {/* ShipRocket */}
+            <div className="rounded-xl border border-border bg-white p-3">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-lg">🚀</span>
+                <h3 className="text-xs font-semibold text-text-primary">ShipRocket</h3>
+              </div>
+              <ul className="text-[11px] text-text-muted space-y-1 mb-2">
+                <li>• Login → Settings → API</li>
+                <li>• Create a new <strong>API User</strong> (separate email)</li>
+                <li>• Use that email &amp; password here</li>
+              </ul>
+              <a
+                href="https://app.shiprocket.in/newlogin"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-[11px] text-primary-600 font-medium hover:underline"
+              >
+                <ExternalLink size={10} />
+                Open ShipRocket Dashboard
+              </a>
+            </div>
+
+            {/* XpressBees */}
+            <div className="rounded-xl border border-border bg-white p-3">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-lg">🐝</span>
+                <h3 className="text-xs font-semibold text-text-primary">XpressBees</h3>
+              </div>
+              <ul className="text-[11px] text-text-muted space-y-1 mb-2">
+                <li>• Use your XpressBees <strong>login email &amp; password</strong></li>
+                <li>• Same credentials you use at shipment.xpressbees.com</li>
+              </ul>
+              <a
+                href="https://shipment.xpressbees.com/dash"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-[11px] text-primary-600 font-medium hover:underline"
+              >
+                <ExternalLink size={10} />
+                Open XpressBees Dashboard
+              </a>
+            </div>
+
+            {/* Ekart */}
+            <div className="rounded-xl border border-border bg-white p-3">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-lg">📬</span>
+                <h3 className="text-xs font-semibold text-text-primary">Ekart Elite</h3>
+              </div>
+              <ul className="text-[11px] text-text-muted space-y-1 mb-2">
+                <li>• Login → Settings → API Documentation</li>
+                <li>• Copy <strong>Client ID</strong>, <strong>Username</strong> &amp; <strong>Password</strong></li>
+              </ul>
+              <a
+                href="https://app.elite.ekartlogistics.in/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-[11px] text-primary-600 font-medium hover:underline"
+              >
+                <ExternalLink size={10} />
+                Open Ekart Dashboard
+              </a>
+            </div>
+          </div>
+
+          <p className="text-[10px] text-text-muted pt-2 border-t border-border">
+            Still stuck? Contact our support team and we&apos;ll help you set up your courier integrations.
+          </p>
+        </motion.div>
       </div>
 
-      {/* Edit Modal */}
+      {/* ── Connect / Edit Modal ── */}
       <Modal
         open={!!editModal}
         onClose={() => setEditModal(null)}
-        title={`Configure ${PROVIDERS.find((p) => p.id === editModal)?.name || ''}`}
+        title={existingConfig ? `Edit ${activeProvider?.name}` : `Connect ${activeProvider?.name}`}
         size="lg"
       >
-        {editModal && (() => {
-          const provider = PROVIDERS.find((p) => p.id === editModal)!;
-          const existing = getConfigForProvider(editModal);
-          return (
+        {activeProvider && (
+          <div className="space-y-5">
+            {/* How-to banner */}
+            <div className="rounded-xl bg-blue-50 border border-blue-100 px-4 py-3">
+              <p className="text-xs text-blue-700 leading-relaxed">
+                <span className="font-semibold">How to connect:</span>{' '}
+                {activeProvider.howToConnect}
+              </p>
+              <a
+                href={activeProvider.docsUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-xs text-blue-600 font-medium mt-1.5 hover:underline"
+              >
+                <ExternalLink size={11} />
+                {activeProvider.docsLabel}
+              </a>
+            </div>
+
+            {/* Update notice */}
+            {existingConfig && (
+              <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-2.5 flex items-start gap-2">
+                <AlertCircle size={13} className="text-amber-600 mt-0.5 shrink-0" />
+                <p className="text-xs text-amber-700">
+                  Sensitive fields are masked. Enter new values to update, or leave blank to keep existing.
+                </p>
+              </div>
+            )}
+
+            {/* Form fields */}
             <div className="space-y-4">
-              {existing && (
-                <div className="rounded-xl bg-amber-50 border border-amber-200 p-3 flex items-start gap-2">
-                  <AlertCircle size={14} className="text-amber-600 mt-0.5 shrink-0" />
-                  <p className="text-xs text-amber-700">
-                    Existing keys are masked. Enter new values to update them, or leave blank to keep current keys.
-                  </p>
-                </div>
-              )}
-              {provider.fields.map((field) => (
-                <div key={field.key}>
+              {activeProvider.fields.map((field) => (
+                <div key={field.key} className="space-y-1">
+                  <label className="block text-xs font-medium text-text-primary">
+                    {field.label}
+                    {field.required && <span className="text-red-500 ml-0.5">*</span>}
+                  </label>
                   <Input
-                    label={field.label + (field.required ? ' *' : '')}
                     type={field.secret && !showSecrets[field.key] ? 'password' : 'text'}
                     placeholder={field.placeholder}
                     value={formData[field.key] || ''}
@@ -446,53 +717,65 @@ export default function ShippingSettingsPage() {
                               [field.key]: !prev[field.key],
                             }))
                           }
-                          className="text-text-muted hover:text-text-primary"
+                          className="text-text-muted hover:text-text-primary transition-colors"
                         >
                           {showSecrets[field.key] ? <EyeOff size={14} /> : <Eye size={14} />}
                         </button>
                       ) : undefined
                     }
                   />
+                  {field.helpText && (
+                    <p className="text-[11px] text-text-muted leading-snug">{field.helpText}</p>
+                  )}
                 </div>
               ))}
-              <div className="flex justify-end gap-2 pt-2">
-                <Button variant="outline" onClick={() => setEditModal(null)}>
-                  Cancel
-                </Button>
-                <Button onClick={handleSave} loading={saving}>
-                  <Check size={14} />
-                  {existing ? 'Update' : 'Save'} Configuration
-                </Button>
-              </div>
             </div>
-          );
-        })()}
+
+            {/* Security note */}
+            <div className="flex items-center gap-1.5 text-[11px] text-text-muted">
+              <Shield size={11} />
+              All credentials are encrypted with AES-256 before storage.
+            </div>
+
+            {/* Actions */}
+            <div className="flex justify-end gap-2 pt-1 border-t border-border">
+              <Button variant="outline" onClick={() => setEditModal(null)} size="sm">
+                Cancel
+              </Button>
+              <Button onClick={handleSave} loading={saving} size="sm">
+                <Check size={13} />
+                {existingConfig ? 'Update' : 'Connect'}
+              </Button>
+            </div>
+          </div>
+        )}
       </Modal>
 
-      {/* Delete Confirmation Modal */}
+      {/* ── Delete Confirmation Modal ── */}
       <Modal
         open={!!deleteConfirm}
         onClose={() => setDeleteConfirm(null)}
-        title="Remove Configuration"
+        title="Disconnect Courier"
         size="sm"
       >
         <div className="space-y-4">
           <p className="text-sm text-text-secondary">
-            Are you sure you want to remove the{' '}
-            <strong>{PROVIDERS.find((p) => p.id === deleteConfirm)?.name}</strong>{' '}
-            configuration? You won&apos;t be able to book shipments with this courier until you reconfigure it.
+            Disconnect{' '}
+            <strong>{PROVIDERS.find((p) => p.id === deleteConfirm)?.name}</strong>?
+            You won&apos;t be able to book shipments with this courier until you reconnect.
           </p>
           <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setDeleteConfirm(null)}>
+            <Button variant="outline" onClick={() => setDeleteConfirm(null)} size="sm">
               Cancel
             </Button>
             <Button
               variant="danger"
               onClick={() => deleteConfirm && handleDelete(deleteConfirm)}
               loading={saving}
+              size="sm"
             >
-              <Trash2 size={14} />
-              Remove
+              <Trash2 size={13} />
+              Disconnect
             </Button>
           </div>
         </div>

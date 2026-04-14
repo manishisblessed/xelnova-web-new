@@ -12,25 +12,48 @@ export class SearchController {
   constructor(private readonly searchService: SearchService) {}
 
   @Get()
-  @ApiOperation({ summary: 'Search products' })
-  @ApiQuery({ name: 'q', required: true })
+  @ApiOperation({ summary: 'Search products with filters' })
+  @ApiQuery({ name: 'q', required: false })
   @ApiQuery({ name: 'page', required: false })
   @ApiQuery({ name: 'limit', required: false })
+  @ApiQuery({ name: 'category', required: false })
+  @ApiQuery({ name: 'brand', required: false })
+  @ApiQuery({ name: 'minPrice', required: false })
+  @ApiQuery({ name: 'maxPrice', required: false })
+  @ApiQuery({ name: 'minRating', required: false })
+  @ApiQuery({ name: 'sortBy', required: false, enum: ['relevance', 'price_asc', 'price_desc', 'rating', 'newest'] })
   async search(
-    @Query('q') q: string,
+    @Query('q') q?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('category') category?: string,
+    @Query('brand') brand?: string,
+    @Query('minPrice') minPrice?: string,
+    @Query('maxPrice') maxPrice?: string,
+    @Query('minRating') minRating?: string,
+    @Query('sortBy') sortBy?: string,
   ) {
     const pageNum = parseInt(page || '1', 10);
     const limitNum = parseInt(limit || '12', 10);
-    const result = await this.searchService.search(q || '', pageNum, limitNum);
-    return paginatedResponse(
-      result.products,
-      result.total,
-      result.page,
-      result.limit,
-      'Search results fetched successfully',
-    );
+    const filters = {
+      category: category || undefined,
+      brand: brand || undefined,
+      minPrice: minPrice ? parseFloat(minPrice) : undefined,
+      maxPrice: maxPrice ? parseFloat(maxPrice) : undefined,
+      minRating: minRating ? parseFloat(minRating) : undefined,
+      sortBy: (sortBy as any) || undefined,
+    };
+    const result = await this.searchService.search(q || '', pageNum, limitNum, filters);
+    return {
+      ...paginatedResponse(
+        result.products,
+        result.total,
+        result.page,
+        result.limit,
+        'Search results fetched successfully',
+      ),
+      filters: result.filters,
+    };
   }
 
   @Get('autocomplete')

@@ -15,14 +15,19 @@ async function fetchJson<T>(url: string): Promise<T | null> {
 }
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const [products, categories] = await Promise.all([
-    fetchJson<{ slug: string; updatedAt?: string }[]>(`${API_URL}/products?limit=5000`),
+  const [productsRaw, categories] = await Promise.all([
+    fetchJson<any>(`${API_URL}/products?limit=5000`),
     fetchJson<{ slug: string }[]>(`${API_URL}/categories`),
   ]);
+
+  const products: { slug: string; updatedAt?: string }[] = Array.isArray(productsRaw)
+    ? productsRaw
+    : Array.isArray(productsRaw?.products) ? productsRaw.products : [];
 
   const staticPages: MetadataRoute.Sitemap = [
     { url: SITE_URL, lastModified: new Date(), changeFrequency: 'daily', priority: 1 },
     { url: `${SITE_URL}/products`, lastModified: new Date(), changeFrequency: 'daily', priority: 0.9 },
+    { url: `${SITE_URL}/search`, changeFrequency: 'daily', priority: 0.8 },
     { url: `${SITE_URL}/about`, changeFrequency: 'monthly', priority: 0.5 },
     { url: `${SITE_URL}/contact`, changeFrequency: 'monthly', priority: 0.5 },
     { url: `${SITE_URL}/faq`, changeFrequency: 'monthly', priority: 0.4 },
@@ -39,12 +44,12 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   ];
 
   const categoryPages: MetadataRoute.Sitemap = (categories || []).map((cat) => ({
-    url: `${SITE_URL}/products?category=${cat.slug}`,
+    url: `${SITE_URL}/categories/${cat.slug}`,
     changeFrequency: 'daily' as const,
     priority: 0.8,
   }));
 
-  const productPages: MetadataRoute.Sitemap = (products || []).map((p) => ({
+  const productPages: MetadataRoute.Sitemap = products.map((p) => ({
     url: `${SITE_URL}/products/${p.slug}`,
     lastModified: p.updatedAt ? new Date(p.updatedAt) : undefined,
     changeFrequency: 'weekly' as const,

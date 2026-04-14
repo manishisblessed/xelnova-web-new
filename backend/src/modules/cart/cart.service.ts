@@ -21,6 +21,7 @@ export class CartService {
             brand: true,
             sellerId: true,
             stock: true,
+            gstRate: true,
           },
         },
       },
@@ -40,14 +41,20 @@ export class CartService {
       brand: item.product.brand,
       sellerId: item.product.sellerId,
       stock: item.product.stock,
+      gstRate: item.product.gstRate,
     }));
 
     const subtotal = cartItems.reduce(
       (sum, item) => sum + item.price * item.quantity,
       0,
     );
-    const shipping = subtotal > 499 ? 0 : 49;
-    const tax = Math.round((subtotal) * 0.18);
+    const { shipping, freeShippingMin } = await this.getShippingRate(subtotal);
+    const tax = Math.round(
+      cartItems.reduce((sum, item) => {
+        const lineTotal = item.price * item.quantity;
+        return sum + lineTotal * ((item.gstRate ?? 18) / 100);
+      }, 0),
+    );
     const total = subtotal + shipping + tax;
 
     return {
@@ -59,8 +66,18 @@ export class CartService {
         tax,
         total,
         itemCount: cartItems.reduce((sum, item) => sum + item.quantity, 0),
+        freeShippingMin,
       },
     };
+  }
+
+  private async getShippingRate(subtotal: number): Promise<{ shipping: number; freeShippingMin: number }> {
+    const row = await this.prisma.siteSettings.findUnique({ where: { id: 1 } });
+    const payload = (row?.payload && typeof row.payload === 'object' ? row.payload : {}) as Record<string, any>;
+    const config = payload.shipping as Record<string, any> | undefined;
+    const freeShippingMin = Number(config?.freeShippingMin ?? 499);
+    const defaultRate = Number(config?.defaultRate ?? 49);
+    return { shipping: subtotal >= freeShippingMin ? 0 : defaultRate, freeShippingMin };
   }
 
   async addItem(userId: string, dto: AddToCartDto) {
@@ -185,8 +202,14 @@ export class CartService {
     }
 
     const subtotal = cart.summary.subtotal;
-    const shipping = subtotal > 499 ? 0 : 49;
-    const tax = Math.round((subtotal - discount) * 0.18);
+    const { shipping } = await this.getShippingRate(subtotal);
+    const discountRatio = subtotal > 0 ? (subtotal - discount) / subtotal : 1;
+    const tax = Math.round(
+      cart.items.reduce((sum: number, item: any) => {
+        const lineTotal = item.price * item.quantity * discountRatio;
+        return sum + lineTotal * ((item.gstRate ?? 18) / 100);
+      }, 0),
+    );
     const total = subtotal - discount + shipping + tax;
 
     return {

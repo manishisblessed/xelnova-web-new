@@ -29,8 +29,8 @@ export function DashboardSidebar() {
   const { user, logout } = useDashboardAuth();
 
   return (
-    <aside className="w-64 min-h-screen border-r border-border bg-surface flex flex-col">
-      <div className="p-6 border-b border-border">
+    <aside className="fixed inset-y-0 left-0 z-40 flex h-dvh w-64 flex-col overflow-hidden border-r border-border bg-surface">
+      <div className="shrink-0 p-6 border-b border-border">
         <Link href="/dashboard" className="flex items-center gap-2">
           <Image
             src="/xelnova-logo-dark.png"
@@ -44,7 +44,7 @@ export function DashboardSidebar() {
           <span className="text-xs font-bold tracking-wide text-primary-600 uppercase shrink-0">Seller</span>
         </Link>
       </div>
-      <nav className="flex-1 p-3 space-y-0.5">
+      <nav className="flex-1 overflow-y-auto p-3 space-y-0.5">
         {NAV.map((item) => {
           const active = pathname === item.href || pathname.startsWith(item.href + '/');
           const Icon = item.icon;
@@ -65,7 +65,7 @@ export function DashboardSidebar() {
           );
         })}
       </nav>
-      <div className="p-3 border-t border-border">
+      <div className="shrink-0 p-3 border-t border-border">
         <div className="px-3 py-2 text-xs text-text-muted truncate" title={user?.email}>{user?.email}</div>
         <button onClick={() => logout()} className="flex items-center gap-3 w-full rounded-xl px-3 py-2.5 text-sm font-medium text-danger-600 hover:bg-danger-50 transition-colors">
           <LogOut size={18} />

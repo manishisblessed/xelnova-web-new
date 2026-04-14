@@ -51,7 +51,7 @@ export class ShipRocketProvider implements CourierProvider {
     return token;
   }
 
-  private async authHeaders(config: SellerCourierConfig) {
+  private async authHeaders(config: SellerCourierConfig): Promise<Record<string, string>> {
     const token = await this.getAuthToken(config);
     return {
       Authorization: `Bearer ${token}`,
@@ -139,8 +139,17 @@ export class ShipRocketProvider implements CourierProvider {
     const awbData = await awbRes.json();
     const awb =
       awbData?.response?.data?.awb_code || awbData?.awb_code || '';
-    const courierName =
-      awbData?.response?.data?.courier_name || 'ShipRocket Courier';
+
+    // Step 3: Generate pickup request
+    try {
+      await fetch(`${this.baseUrl}/v1/external/courier/generate/pickup`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ shipment_id: [shipmentId] }),
+      });
+    } catch (err) {
+      this.logger.warn('ShipRocket pickup generation failed (non-critical)');
+    }
 
     return {
       awbNumber: String(awb),
@@ -190,17 +199,17 @@ export class ShipRocketProvider implements CourierProvider {
   }
 
   async cancelShipment(
-    awbNumber: string,
+    cancelId: string,
     config: SellerCourierConfig,
   ): Promise<CancelResult> {
     const headers = await this.authHeaders(config);
 
-    // ShipRocket cancels by order IDs, not AWB. We use AWB to find the order.
-    // The courierOrderId should be stored in Shipment model
+    // ShipRocket cancels by Shiprocket order IDs (passed via courierOrderId from service layer)
+    const orderId = parseInt(cancelId, 10);
     const res = await fetch(`${this.baseUrl}/v1/external/orders/cancel`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ ids: [awbNumber] }),
+      body: JSON.stringify({ ids: [isNaN(orderId) ? cancelId : orderId] }),
     });
 
     if (!res.ok) {
@@ -253,6 +262,33 @@ export class ShipRocketProvider implements CourierProvider {
     };
   }
 
+  async downloadLabel(
+    awbNumber: string,
+    config: SellerCourierConfig,
+  ): Promise<any> {
+    const headers = await this.authHeaders(config);
+
+    // Shiprocket generates labels by shipment_id, but we can use the generate/label endpoint
+    // which also accepts shipment_ids. Since we store courierOrderId, we use that approach.
+    const res = await fetch(
+      `${this.baseUrl}/v1/external/courier/generate/label`,
+      {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ shipment_id: [awbNumber] }),
+      },
+    );
+
+    if (!res.ok) {
+      throw new Error('Failed to generate ShipRocket label');
+    }
+
+    const data = await res.json();
+    return {
+      labelUrl: data?.label_url || data?.label_created_url || null,
+    };
+  }
+
   private mapShipRocketStatus(statusCode: string): string {
     const map: Record<string, string> = {
       '1': 'BOOKED',
@@ -264,6 +300,11 @@ export class ShipRocketProvider implements CourierProvider {
       '7': 'CANCELLED',
       '8': 'RTO_INITIATED',
       '9': 'RTO_DELIVERED',
+      '10': 'RTO_DELIVERED',
+      '17': 'OUT_FOR_DELIVERY',
+      '18': 'IN_TRANSIT',
+      '19': 'OUT_FOR_DELIVERY',
+      '20': 'IN_TRANSIT',
     };
     return map[statusCode] || 'IN_TRANSIT';
   }

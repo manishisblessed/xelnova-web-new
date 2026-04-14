@@ -172,7 +172,7 @@ export class InvoiceService {
       drawSummaryLine('Discount', `-₹${order.discount.toFixed(2)}`);
     }
     drawSummaryLine('Shipping', order.shipping > 0 ? `₹${order.shipping.toFixed(2)}` : 'FREE');
-    drawSummaryLine('Tax (GST 18%)', `₹${order.tax.toFixed(2)}`);
+    drawSummaryLine('Tax (GST)', `₹${order.tax.toFixed(2)}`);
     y -= 4;
     page.drawLine({
       start: { x: summaryX, y: y + 10 },

@@ -2,12 +2,19 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { NotificationService } from '../notifications/notification.service';
 
 @Injectable()
 export class ReturnsService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(ReturnsService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationService: NotificationService,
+  ) {}
 
   private static readonly RETURNABLE_STATUSES = ['DELIVERED'];
 
@@ -126,7 +133,7 @@ export class ReturnsService {
       });
     }
 
-    return this.prisma.returnRequest.update({
+    const updated = await this.prisma.returnRequest.update({
       where: { id },
       data: data as any,
       include: {
@@ -135,6 +142,21 @@ export class ReturnsService {
         },
       },
     });
+
+    const orderNumber = request.order.orderNumber;
+    try {
+      if (status === 'APPROVED') {
+        this.notificationService.notifyReturnApproved(request.userId, orderNumber).catch(() => {});
+      } else if (status === 'REJECTED') {
+        this.notificationService.notifyReturnRejected(request.userId, orderNumber, adminNote || 'No reason provided').catch(() => {});
+      } else if (status === 'REFUNDED') {
+        this.notificationService.notifyRefundProcessed(request.userId, orderNumber, Number(updated.refundAmount || request.order.total)).catch(() => {});
+      }
+    } catch (err) {
+      this.logger.warn(`Failed to send return notification: ${err}`);
+    }
+
+    return updated;
   }
 
   async scheduleReversePickup(
@@ -150,19 +172,26 @@ export class ReturnsService {
       throw new BadRequestException('Return must be approved before scheduling reverse pickup');
     }
 
-    return this.prisma.returnRequest.update({
+    const updated = await this.prisma.returnRequest.update({
       where: { id },
       data: {
         reverseCourier: courier,
         reverseAwb: awb || null,
         reverseTrackingUrl: trackingUrl || null,
         reversePickupScheduled: pickupDate ? new Date(pickupDate) : new Date(),
-        status: 'PICKED_UP',
+        status: 'APPROVED',
       },
       include: {
         order: { select: { orderNumber: true, total: true, status: true } },
       },
     });
+
+    this.notificationService.notifyReturnPickupScheduled(
+      request.userId, updated.order.orderNumber,
+      (pickupDate || new Date().toISOString()).split('T')[0],
+    ).catch(() => {});
+
+    return updated;
   }
 
   async updateReversePickupStatus(id: string, pickedUp: boolean) {

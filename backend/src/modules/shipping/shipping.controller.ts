@@ -28,6 +28,21 @@ import {
   errorResponse,
 } from '../../common/helpers/response.helper';
 
+@ApiTags('Shipping')
+@Controller('shipping')
+export class ShippingRateController {
+  constructor(private readonly service: ShippingService) {}
+
+  @Post('calculate-rate')
+  @ApiOperation({ summary: 'Calculate shipping rate for a given subtotal' })
+  async calculateRate(@Body() body: { subtotal: number }) {
+    return successResponse(
+      await this.service.calculateShippingRate(body.subtotal ?? 0),
+      'Shipping rate calculated',
+    );
+  }
+}
+
 @ApiTags('Seller Shipping')
 @Controller('seller')
 @Auth('SELLER' as any)

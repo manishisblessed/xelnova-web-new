@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Param, Body, Res, Header } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Param, Body, Res, Header, NotFoundException } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { Response } from 'express';
 import { OrdersService } from './orders.service';
@@ -6,7 +6,6 @@ import { InvoiceService } from './invoice.service';
 import { CreateOrderDto, CancelOrderDto } from './dto/order.dto';
 import {
   successResponse,
-  errorResponse,
 } from '../../common/helpers/response.helper';
 import { Auth } from '../../common/decorators/auth.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -70,7 +69,7 @@ export class OrdersController {
       userId,
     );
     if (!order) {
-      return errorResponse('Order not found');
+      throw new NotFoundException('Order not found');
     }
     return successResponse(order, 'Order fetched successfully');
   }

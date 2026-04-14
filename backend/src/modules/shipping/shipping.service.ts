@@ -704,10 +704,20 @@ export class ShippingService {
       );
     }
 
-    const encryptedKey = this.encrypt(dto.apiKey);
+    const existing = await this.prisma.sellerCourierConfig.findUnique({
+      where: {
+        sellerId_provider: { sellerId: seller.id, provider: dto.provider },
+      },
+    });
+
+    const keepExistingKey = dto.apiKey === '__KEEP_EXISTING__' || !dto.apiKey;
+    const encryptedKey =
+      keepExistingKey && existing
+        ? existing.apiKey
+        : this.encrypt(dto.apiKey || '');
     const encryptedSecret = dto.apiSecret
       ? this.encrypt(dto.apiSecret)
-      : null;
+      : existing?.apiSecret ?? null;
 
     return this.prisma.sellerCourierConfig.upsert({
       where: {
@@ -718,16 +728,18 @@ export class ShippingService {
         provider: dto.provider,
         apiKey: encryptedKey,
         apiSecret: encryptedSecret,
-        accountId: dto.accountId,
-        warehouseId: dto.warehouseId,
+        accountId: dto.accountId || null,
+        warehouseId: dto.warehouseId || null,
         metadata: dto.metadata || {},
       },
       update: {
-        apiKey: encryptedKey,
-        apiSecret: encryptedSecret,
-        accountId: dto.accountId,
-        warehouseId: dto.warehouseId,
-        metadata: dto.metadata || {},
+        ...(keepExistingKey ? {} : { apiKey: encryptedKey }),
+        ...(dto.apiSecret ? { apiSecret: encryptedSecret } : {}),
+        ...(dto.accountId !== undefined ? { accountId: dto.accountId || null } : {}),
+        ...(dto.warehouseId !== undefined
+          ? { warehouseId: dto.warehouseId || null }
+          : {}),
+        metadata: dto.metadata || existing?.metadata || {},
         isActive: true,
       },
     });
@@ -885,15 +897,17 @@ export class ShippingService {
           break;
 
         case ShippingMode.SHIPROCKET:
-          awbNumber = payload.awb || payload.awb_code;
+          awbNumber =
+            payload.awb || payload.awb_code || payload.tracking_number || '';
           status = this.mapWebhookStatus(
             provider,
-            payload.current_status || payload.status || '',
+            payload.current_status || payload.status || payload.shipment_status || '',
           );
           location = payload.scans?.[0]?.location || '';
-          remark = payload.current_status || '';
+          remark =
+            payload.current_status || payload.status || '';
           timestamp =
-            payload.scans?.[0]?.date || new Date().toISOString();
+            payload.current_timestamp || payload.scans?.[0]?.date || new Date().toISOString();
           break;
 
         case ShippingMode.XPRESSBEES:
@@ -908,14 +922,16 @@ export class ShippingService {
           break;
 
         case ShippingMode.EKART:
-          awbNumber = payload.tracking_id || payload.awb_number;
+          awbNumber = payload.id || payload.tracking_id;
           status = this.mapWebhookStatus(
             provider,
-            payload.current_status || payload.status || '',
+            payload.status || '',
           );
           location = payload.location || '';
-          remark = payload.description || '';
-          timestamp = payload.timestamp || new Date().toISOString();
+          remark = payload.desc || '';
+          timestamp = payload.ctime
+            ? new Date(payload.ctime).toISOString()
+            : new Date().toISOString();
           break;
 
         default:
@@ -979,26 +995,54 @@ export class ShippingService {
       normalized.includes('pickup generated')
     )
       return ShipmentStatus.PICKUP_SCHEDULED;
-    if (normalized.includes('manifested') || normalized.includes('booked'))
+    if (
+      normalized.includes('manifested') ||
+      normalized.includes('booked') ||
+      normalized.includes('order placed') ||
+      normalized.includes('pickup pending')
+    )
       return ShipmentStatus.BOOKED;
-    if (normalized.includes('rto initiated') || normalized.includes('rto'))
-      return ShipmentStatus.RTO_INITIATED;
     if (normalized.includes('rto delivered'))
       return ShipmentStatus.RTO_DELIVERED;
-    if (normalized.includes('cancel')) return ShipmentStatus.CANCELLED;
+    if (normalized.includes('rto initiated') || normalized.includes('rto requested') || normalized.includes('rto in transit'))
+      return ShipmentStatus.RTO_INITIATED;
+    if (normalized.includes('cancel') || normalized.includes('lost') || normalized.includes('damaged'))
+      return ShipmentStatus.CANCELLED;
 
-    // Provider-specific numeric codes (ShipRocket)
+    // Provider-specific numeric codes (ShipRocket status IDs)
     if (provider === ShippingMode.SHIPROCKET) {
       const codeMap: Record<string, string> = {
+        '1': ShipmentStatus.BOOKED,
+        '2': ShipmentStatus.PICKED_UP,
+        '3': ShipmentStatus.IN_TRANSIT,
+        '4': ShipmentStatus.IN_TRANSIT,
+        '5': ShipmentStatus.OUT_FOR_DELIVERY,
         '6': ShipmentStatus.DELIVERED,
+        '7': ShipmentStatus.CANCELLED,
+        '8': ShipmentStatus.RTO_INITIATED,
+        '9': ShipmentStatus.PICKED_UP,
+        '10': ShipmentStatus.RTO_DELIVERED,
         '17': ShipmentStatus.OUT_FOR_DELIVERY,
         '18': ShipmentStatus.IN_TRANSIT,
-        '7': ShipmentStatus.CANCELLED,
-        '9': ShipmentStatus.PICKED_UP,
+        '19': ShipmentStatus.OUT_FOR_DELIVERY,
+        '20': ShipmentStatus.IN_TRANSIT,
       };
       if (codeMap[rawStatus]) return codeMap[rawStatus];
     }
 
     return ShipmentStatus.IN_TRANSIT;
+  }
+
+  async calculateShippingRate(subtotal: number): Promise<{ shipping: number; freeShippingMin: number }> {
+    const row = await this.prisma.siteSettings.findUnique({ where: { id: 1 } });
+    const payload = (row?.payload && typeof row.payload === 'object' ? row.payload : {}) as Record<string, any>;
+    const shippingConfig = payload.shipping as Record<string, any> | undefined;
+    const freeShippingMin = Number(shippingConfig?.freeShippingMin ?? 499);
+    const defaultRate = Number(shippingConfig?.defaultRate ?? 49);
+
+    if (subtotal >= freeShippingMin) {
+      return { shipping: 0, freeShippingMin };
+    }
+    return { shipping: defaultRate, freeShippingMin };
   }
 }

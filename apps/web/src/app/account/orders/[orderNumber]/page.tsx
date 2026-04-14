@@ -46,7 +46,7 @@ function getStatus(s: string) {
   return statusConfig[s.toUpperCase()] ?? { icon: AlertCircle, color: "text-gray-600", bg: "bg-gray-50", border: "border-gray-200", label: s };
 }
 
-const PROGRESS_STEPS = ["PENDING", "CONFIRMED", "SHIPPED", "DELIVERED"];
+const PROGRESS_STEPS = ["PENDING", "PROCESSING", "CONFIRMED", "SHIPPED", "DELIVERED"];
 
 export default function OrderDetailPage() {
   const params = useParams<{ orderNumber: string }>();

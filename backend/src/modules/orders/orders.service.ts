@@ -7,6 +7,23 @@ import { AbandonedCartService } from '../notifications/abandoned-cart.service';
 import { LoyaltyService } from '../notifications/loyalty.service';
 import { CreateOrderDto } from './dto/order.dto';
 
+import { OrderStatus } from '@prisma/client';
+
+const VALID_ORDER_TRANSITIONS: Record<string, string[]> = {
+  PENDING: ['PROCESSING', 'CONFIRMED', 'CANCELLED'],
+  PROCESSING: ['CONFIRMED', 'CANCELLED'],
+  CONFIRMED: ['SHIPPED', 'CANCELLED'],
+  SHIPPED: ['DELIVERED', 'RETURNED'],
+  DELIVERED: ['RETURNED', 'REFUNDED'],
+  CANCELLED: [],
+  RETURNED: ['REFUNDED'],
+  REFUNDED: [],
+};
+
+export function isValidOrderTransition(from: string, to: string): boolean {
+  return VALID_ORDER_TRANSITIONS[from]?.includes(to) ?? false;
+}
+
 interface VariantOption {
   value: string;
   price?: number;
@@ -139,6 +156,7 @@ export class OrdersService {
           quantity: item.quantity,
           price,
           variant: item.variant,
+          gstRate: product.gstRate ?? 18,
         };
       }),
     );
@@ -174,8 +192,14 @@ export class OrdersService {
       }
     }
 
-    const shipping = subtotal > 499 ? 0 : 49;
-    const tax = Math.round((subtotal - discount) * 0.18);
+    const shipping = await this.getShippingRate(subtotal);
+    const discountRatio = subtotal > 0 ? (subtotal - discount) / subtotal : 1;
+    const tax = Math.round(
+      orderItems.reduce((sum, item) => {
+        const lineTotal = item.price * item.quantity * discountRatio;
+        return sum + lineTotal * ((item.gstRate ?? 18) / 100);
+      }, 0),
+    );
     const total = subtotal - discount + shipping + tax;
 
     const orderNumber = `XN-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 999999)).padStart(6, '0')}`;
@@ -217,6 +241,8 @@ export class OrdersService {
       shippingAddressId = newAddress.id;
     }
 
+    const orderItemsForDb = orderItems.map(({ gstRate: _gst, ...rest }) => rest);
+
     const order = await this.prisma.order.create({
       data: {
         orderNumber,
@@ -232,7 +258,7 @@ export class OrdersService {
         couponCode: dto.couponCode,
         estimatedDelivery,
         items: {
-          create: orderItems,
+          create: orderItemsForDb,
         },
       },
       include: { items: true, shippingAddress: true },
@@ -365,20 +391,43 @@ export class OrdersService {
       );
     }
 
-    // Restore stock for each item
+    // Restore stock for each item (product-level + variant-level)
     for (const item of order.items) {
+      const product = await this.prisma.product.findUnique({ where: { id: item.productId }, select: { variants: true, stock: true } });
+      if (!product) continue;
+
       await this.prisma.product.update({
         where: { id: item.productId },
         data: { stock: { increment: item.quantity } },
+      });
+
+      if (item.variant && product.variants && Array.isArray(product.variants)) {
+        const variants = product.variants as VariantGroup[];
+        for (const group of variants) {
+          if (!Array.isArray(group.options)) continue;
+          const opt = group.options.find((o: VariantOption) => o.value === item.variant);
+          if (opt && typeof opt.stock === 'number') {
+            opt.stock += item.quantity;
+          }
+        }
+        await this.prisma.product.update({
+          where: { id: item.productId },
+          data: { variants: variants as any },
+        });
+      }
+    }
+
+    // Restore coupon usage if one was applied
+    if (order.couponCode) {
+      await this.prisma.coupon.updateMany({
+        where: { code: order.couponCode, usedCount: { gt: 0 } },
+        data: { usedCount: { decrement: 1 } },
       });
     }
 
     const updated = await this.prisma.order.update({
       where: { id: order.id },
-      data: {
-        status: 'CANCELLED',
-        ...(reason ? { couponCode: order.couponCode } : {}),
-      },
+      data: { status: 'CANCELLED' },
       include: {
         items: { include: { product: { select: { name: true, images: true } } } },
         shippingAddress: true,
@@ -390,5 +439,14 @@ export class OrdersService {
     );
 
     return updated;
+  }
+
+  private async getShippingRate(subtotal: number): Promise<number> {
+    const row = await this.prisma.siteSettings.findUnique({ where: { id: 1 } });
+    const payload = (row?.payload && typeof row.payload === 'object' ? row.payload : {}) as Record<string, any>;
+    const config = payload.shipping as Record<string, any> | undefined;
+    const freeShippingMin = Number(config?.freeShippingMin ?? 499);
+    const defaultRate = Number(config?.defaultRate ?? 49);
+    return subtotal >= freeShippingMin ? 0 : defaultRate;
   }
 }

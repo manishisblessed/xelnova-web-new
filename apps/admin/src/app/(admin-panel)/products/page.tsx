@@ -31,6 +31,7 @@ interface Product {
   reviewCount: number;
   createdAt: string;
   rejectionReason?: string | null;
+  images?: string[];
   category: { name: string } | null;
   seller: { storeName: string } | null;
 }
@@ -172,9 +173,21 @@ export default function ProductsPage() {
       key: 'name',
       header: 'Product',
       render: (r) => (
-        <div>
-          <span className="font-medium">{r.name}</span>
-          <p className="text-xs text-text-muted mt-0.5">{r.slug}</p>
+        <div className="flex items-center gap-3">
+          <div className="h-10 w-10 rounded-lg bg-surface-muted overflow-hidden shrink-0 border border-border">
+            {r.images?.[0] ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={r.images[0]} alt="" className="h-full w-full object-cover" />
+            ) : (
+              <div className="h-full w-full flex items-center justify-center text-text-muted">
+                <Clock size={14} />
+              </div>
+            )}
+          </div>
+          <div>
+            <span className="font-medium">{r.name}</span>
+            <p className="text-xs text-text-muted mt-0.5">{r.slug}</p>
+          </div>
         </div>
       ),
     },

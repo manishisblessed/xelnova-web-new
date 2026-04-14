@@ -258,10 +258,44 @@ export class AdminService {
   }
 
   async updateOrder(id: string, dto: AdminUpdateOrderDto) {
+    const order = await this.prisma.order.findUnique({
+      where: { id },
+      select: { status: true, userId: true, orderNumber: true, total: true },
+    });
+    if (!order) throw new NotFoundException('Order not found');
+
+    if (dto.status) {
+      const { isValidOrderTransition } = await import('../orders/orders.service');
+      if (!isValidOrderTransition(order.status, dto.status)) {
+        throw new BadRequestException(
+          `Cannot change order status from ${order.status} to ${dto.status}`,
+        );
+      }
+    }
     const data: any = {};
     if (dto.status) data.status = dto.status;
     if (dto.paymentStatus) data.paymentStatus = dto.paymentStatus;
-    return this.prisma.order.update({ where: { id }, data, include: { items: true } });
+    const updated = await this.prisma.order.update({ where: { id }, data, include: { items: true } });
+
+    if (dto.status && dto.status !== order.status) {
+      const uid = order.userId;
+      const oNum = order.orderNumber;
+      const total = Number(order.total) || 0;
+      try {
+        switch (dto.status) {
+          case 'PROCESSING': this.notifications.notifyOrderProcessing(uid, oNum).catch(() => {}); break;
+          case 'CONFIRMED': this.notifications.notifyOrderPacked(uid, oNum).catch(() => {}); break;
+          case 'SHIPPED': this.notifications.notifyOrderShipped(uid, oNum).catch(() => {}); break;
+          case 'DELIVERED': this.notifications.notifyOrderDelivered(uid, oNum).catch(() => {}); break;
+          case 'CANCELLED': this.notifications.notifyOrderCancelled(uid, oNum, total).catch(() => {}); break;
+          case 'REFUNDED': this.notifications.notifyRefundProcessed(uid, oNum, total).catch(() => {}); break;
+        }
+      } catch (err) {
+        this.logger.warn(`Failed to send order status notification: ${err}`);
+      }
+    }
+
+    return updated;
   }
 
   async updateShipment(orderId: string, dto: AdminUpdateShipmentDto) {
@@ -446,7 +480,7 @@ export class AdminService {
     const page = query.page || 1;
     const limit = query.limit || 20;
     const where: Prisma.UserWhereInput = {
-      role: Role.CUSTOMER,
+      role: { not: Role.ADMIN },
     };
 
     if (query.search) {
@@ -455,6 +489,7 @@ export class AdminService {
           OR: [
             { name: { contains: query.search, mode: 'insensitive' } },
             { email: { contains: query.search, mode: 'insensitive' } },
+            { phone: { contains: query.search, mode: 'insensitive' } },
           ],
         },
       ];
@@ -775,11 +810,13 @@ export class AdminService {
     if (query.dateFrom) dateFilter.gte = new Date(query.dateFrom);
     if (query.dateTo) dateFilter.lte = new Date(query.dateTo);
 
+    const orderWhere: Prisma.OrderWhereInput = {
+      status: { notIn: ['CANCELLED', 'REFUNDED'] },
+      ...(Object.keys(dateFilter).length > 0 ? { createdAt: dateFilter } : {}),
+    };
+
     const orders = await this.prisma.order.findMany({
-      where: {
-        status: { notIn: ['CANCELLED', 'REFUNDED'] },
-        ...(Object.keys(dateFilter).length > 0 ? { createdAt: dateFilter } : {}),
-      },
+      where: orderWhere,
       select: { total: true, createdAt: true, discount: true, shipping: true, tax: true },
       orderBy: { createdAt: 'asc' },
     });
@@ -795,10 +832,38 @@ export class AdminService {
       dailyMap.set(day, (dailyMap.get(day) || 0) + o.total);
     });
 
+    // Category breakdown
+    const orderItems = await this.prisma.orderItem.findMany({
+      where: { order: orderWhere },
+      select: { price: true, quantity: true, product: { select: { category: { select: { name: true } }, seller: { select: { storeName: true } } } } },
+    });
+
+    const categoryMap = new Map<string, number>();
+    const sellerMap = new Map<string, number>();
+    orderItems.forEach((item) => {
+      const catName = item.product?.category?.name || 'Uncategorized';
+      const sellerName = item.product?.seller?.storeName || 'Unknown';
+      const lineTotal = item.price * item.quantity;
+      categoryMap.set(catName, (categoryMap.get(catName) || 0) + lineTotal);
+      sellerMap.set(sellerName, (sellerMap.get(sellerName) || 0) + lineTotal);
+    });
+
+    const categoryBreakdown = Array.from(categoryMap.entries())
+      .map(([name, revenue]) => ({ name, revenue }))
+      .sort((a, b) => b.revenue - a.revenue)
+      .slice(0, 10);
+
+    const sellerBreakdown = Array.from(sellerMap.entries())
+      .map(([name, revenue]) => ({ name, revenue }))
+      .sort((a, b) => b.revenue - a.revenue)
+      .slice(0, 10);
+
     return {
       totalRevenue, totalDiscount, totalShipping, totalTax,
       orderCount: orders.length,
       dailyRevenue: Array.from(dailyMap.entries()).map(([date, amount]) => ({ date, amount })),
+      categoryBreakdown,
+      sellerBreakdown,
     };
   }
 

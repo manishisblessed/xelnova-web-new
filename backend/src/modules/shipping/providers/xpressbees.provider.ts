@@ -9,53 +9,77 @@ import {
   ServiceabilityResult,
 } from './courier-provider.interface';
 
+interface XBTokenCache {
+  token: string;
+  expiresAt: number;
+}
+
+/**
+ * XpressBees Ecom integration.
+ *
+ * Two auth modes:
+ *   NEW (token-based): Login with email/password → Bearer token (24h)
+ *       Base: https://shipment.xpressbees.com/api
+ *   OLD (static key): Pass XBKey header with each request
+ *       Custom URLs provided by XB relationship manager
+ *
+ * Config mapping:
+ *   apiKey       → XB Key / Secret Key (static key for OLD auth)
+ *   apiSecret    → Password (for NEW token auth)
+ *   accountId    → Email / Enterprise ID (for NEW token auth login)
+ *   warehouseId  → Pickup Warehouse Name
+ *   metadata     → { authType: "NEW"|"OLD", businessName: string }
+ */
 @Injectable()
 export class XpressBeesProvider implements CourierProvider {
   readonly providerName = 'XpressBees';
   private readonly logger = new Logger(XpressBeesProvider.name);
-  private readonly baseUrl = 'https://xbclientapi.xpressbees.com';
+  private readonly baseUrl = 'https://shipment.xpressbees.com/api';
+  private tokenCache = new Map<string, XBTokenCache>();
 
-  private tokenCache = new Map<string, { token: string; expiresAt: number }>();
-
-  private async getAuthToken(config: SellerCourierConfig): Promise<string> {
-    // If apiSecret is set, use token-based auth
-    if (config.apiSecret) {
-      const cacheKey = config.id;
-      const cached = this.tokenCache.get(cacheKey);
-      if (cached && cached.expiresAt > Date.now()) {
-        return cached.token;
-      }
-
-      const res = await fetch(`${this.baseUrl}/api/users/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: config.accountId,
-          password: config.apiSecret,
-        }),
-      });
-
-      if (!res.ok) {
-        throw new Error('XpressBees authentication failed');
-      }
-
-      const data = await res.json();
-      const token = data.data || data.token;
-      this.tokenCache.set(cacheKey, {
-        token,
-        expiresAt: Date.now() + 23 * 60 * 60 * 1000, // 23 hours
-      });
-      return token;
-    }
-
-    // Static key-based auth
-    return config.apiKey;
+  private isNewAuth(config: SellerCourierConfig): boolean {
+    return !!(config.accountId && config.apiSecret);
   }
 
-  private async headers(
-    config: SellerCourierConfig,
-  ): Promise<Record<string, string>> {
-    if (config.apiSecret) {
+  private async getAuthToken(config: SellerCourierConfig): Promise<string> {
+    const cacheKey = config.id;
+    const cached = this.tokenCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now() + 60_000) {
+      return cached.token;
+    }
+
+    const res = await fetch(`${this.baseUrl}/users/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: config.accountId,
+        password: config.apiSecret,
+      }),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      this.logger.error(`XpressBees login failed: ${res.status} ${errText}`);
+      throw new Error(`XpressBees authentication failed: ${errText}`);
+    }
+
+    const data = await res.json();
+    const token = data.data || data.token || '';
+
+    if (!token) {
+      throw new Error('XpressBees login returned no token');
+    }
+
+    this.tokenCache.set(cacheKey, {
+      token,
+      expiresAt: Date.now() + 23 * 60 * 60 * 1000,
+    });
+
+    return token;
+  }
+
+  private async authHeaders(config: SellerCourierConfig): Promise<Record<string, string>> {
+    if (this.isNewAuth(config)) {
       const token = await this.getAuthToken(config);
       return {
         Authorization: `Bearer ${token}`,
@@ -72,19 +96,21 @@ export class XpressBeesProvider implements CourierProvider {
     config: SellerCourierConfig,
     details: ShipmentDetails,
   ): Promise<CreateShipmentResult> {
-    const hdrs = await this.headers(config);
+    const headers = await this.authHeaders(config);
+    const isCod = details.isCod ?? false;
+    const dims = details.dimensions?.split('x') || [];
 
     const payload = {
       order_number: details.orderNumber,
       shipping_charges: 0,
       discount: 0,
       cod_charges: 0,
-      payment_type: details.isCod ? 'COD' : 'prepaid',
-      order_amount: details.totalAmount,
-      package_weight: ((details.weight || 0.5) * 1000).toString(),
-      package_length: details.dimensions?.split('x')[0] || '10',
-      package_breadth: details.dimensions?.split('x')[1] || '10',
-      package_height: details.dimensions?.split('x')[2] || '10',
+      payment_type: isCod ? 'COD' : 'prepaid',
+      order_amount: details.totalAmount || 0,
+      package_weight: String(Math.round((details.weight || 0.5) * 1000)),
+      package_length: dims[0] || '10',
+      package_breadth: dims[1] || '10',
+      package_height: dims[2] || '10',
       request_auto_pickup: 'Y',
       consignee: {
         name: details.deliveryAddress.fullName,
@@ -112,25 +138,30 @@ export class XpressBeesProvider implements CourierProvider {
       })),
     };
 
-    const res = await fetch(`${this.baseUrl}/api/shipments2`, {
+    const res = await fetch(`${this.baseUrl}/shipments2`, {
       method: 'POST',
-      headers: hdrs,
+      headers,
       body: JSON.stringify(payload),
     });
 
     if (!res.ok) {
       const errText = await res.text();
-      this.logger.error(`XpressBees create shipment failed: ${errText}`);
+      this.logger.error(`XpressBees create shipment failed: ${res.status} ${errText}`);
       throw new Error(`Failed to create XpressBees shipment: ${errText}`);
     }
 
     const data = await res.json();
+
+    if (data.status === 0 || data.error) {
+      throw new Error(`XpressBees rejected: ${data.message || data.error || 'Unknown error'}`);
+    }
+
     const awb = data.data?.awb_number || data.awb_number || '';
 
     return {
       awbNumber: String(awb),
       courierOrderId: data.data?.order_id?.toString() || '',
-      trackingUrl: `https://www.xpressbees.com/shipment/tracking?awb=${awb}`,
+      trackingUrl: `https://shipment.xpressbees.com/tracking?awb=${awb}`,
     };
   }
 
@@ -138,12 +169,11 @@ export class XpressBeesProvider implements CourierProvider {
     awbNumber: string,
     config: SellerCourierConfig,
   ): Promise<TrackingResult> {
-    const hdrs = await this.headers(config);
+    const headers = await this.authHeaders(config);
 
-    const res = await fetch(
-      `${this.baseUrl}/api/shipments2/track/${awbNumber}`,
-      { headers: hdrs },
-    );
+    const res = await fetch(`${this.baseUrl}/shipments2/track/${encodeURIComponent(awbNumber)}`, {
+      headers,
+    });
 
     if (!res.ok) {
       throw new Error('Failed to track XpressBees shipment');
@@ -165,9 +195,10 @@ export class XpressBeesProvider implements CourierProvider {
     }));
 
     return {
-      status: this.mapXpressBeesStatus(tracking.OrderStatus || ''),
+      status: this.mapXBStatus(tracking.OrderStatus || ''),
       statusHistory,
       currentLocation: scans[0]?.Location,
+      estimatedDelivery: tracking.ExpectedDeliveryDate || undefined,
     };
   }
 
@@ -175,17 +206,22 @@ export class XpressBeesProvider implements CourierProvider {
     awbNumber: string,
     config: SellerCourierConfig,
   ): Promise<CancelResult> {
-    const hdrs = await this.headers(config);
+    const headers = await this.authHeaders(config);
 
-    const res = await fetch(`${this.baseUrl}/api/shipments2/cancel`, {
+    const res = await fetch(`${this.baseUrl}/shipments2/cancel`, {
       method: 'POST',
-      headers: hdrs,
+      headers,
       body: JSON.stringify({ awb: awbNumber }),
     });
 
     if (!res.ok) {
       const errText = await res.text();
       return { success: false, message: `Cancel failed: ${errText}` };
+    }
+
+    const data = await res.json();
+    if (data.status === 0) {
+      return { success: false, message: data.message || 'Cancel failed' };
     }
 
     return { success: true, message: 'Shipment cancelled successfully' };
@@ -196,11 +232,11 @@ export class XpressBeesProvider implements CourierProvider {
     deliveryPincode: string,
     config: SellerCourierConfig,
   ): Promise<ServiceabilityResult> {
-    const hdrs = await this.headers(config);
+    const headers = await this.authHeaders(config);
 
     const res = await fetch(
-      `${this.baseUrl}/api/pincode/serviceability?pickup_pincode=${pickupPincode}&delivery_pincode=${deliveryPincode}`,
-      { headers: hdrs },
+      `${this.baseUrl}/pincode/serviceability?pickup_pincode=${pickupPincode}&delivery_pincode=${deliveryPincode}`,
+      { headers },
     );
 
     if (!res.ok) {
@@ -214,19 +250,17 @@ export class XpressBeesProvider implements CourierProvider {
     };
   }
 
-  private mapXpressBeesStatus(status: string): string {
-    const normalized = status.toLowerCase();
-    if (normalized.includes('delivered')) return 'DELIVERED';
-    if (normalized.includes('out for delivery')) return 'OUT_FOR_DELIVERY';
-    if (normalized.includes('in transit') || normalized.includes('intransit'))
-      return 'IN_TRANSIT';
-    if (normalized.includes('picked') || normalized.includes('pickup done'))
-      return 'PICKED_UP';
-    if (normalized.includes('pickup scheduled')) return 'PICKUP_SCHEDULED';
-    if (normalized.includes('manifested') || normalized.includes('booked'))
-      return 'BOOKED';
-    if (normalized.includes('rto')) return 'RTO_INITIATED';
-    if (normalized.includes('cancel')) return 'CANCELLED';
+  private mapXBStatus(status: string): string {
+    const s = status.toLowerCase();
+    if (s.includes('delivered') && !s.includes('out for')) return 'DELIVERED';
+    if (s.includes('out for delivery')) return 'OUT_FOR_DELIVERY';
+    if (s.includes('in transit') || s.includes('intransit')) return 'IN_TRANSIT';
+    if (s.includes('picked') || s.includes('pickup done')) return 'PICKED_UP';
+    if (s.includes('pickup scheduled')) return 'PICKUP_SCHEDULED';
+    if (s.includes('manifested') || s.includes('booked')) return 'BOOKED';
+    if (s.includes('rto delivered')) return 'RTO_DELIVERED';
+    if (s.includes('rto')) return 'RTO_INITIATED';
+    if (s.includes('cancel')) return 'CANCELLED';
     return 'IN_TRANSIT';
   }
 }

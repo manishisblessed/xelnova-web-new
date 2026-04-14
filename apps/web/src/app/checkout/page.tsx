@@ -641,8 +641,8 @@ export default function CheckoutPage() {
               <h2 className="mb-4 text-lg font-bold text-text-primary">Price Details</h2>
               {(() => {
                 const shippingCharge = priceTotal > 499 ? 0 : 49;
-                const tax = Math.round(priceTotal * 0.18);
-                const grandTotal = priceTotal + shippingCharge + tax;
+                const estTax = Math.round(priceTotal * 0.18);
+                const grandTotal = priceTotal + shippingCharge + estTax;
                 return (
               <div className="space-y-3 text-sm">
                 <div className="flex justify-between text-text-secondary">
@@ -663,10 +663,10 @@ export default function CheckoutPage() {
                     <span>{formatCurrency(shippingCharge)}</span>
                   )}
                 </div>
-                {tax > 0 && (
+                {estTax > 0 && (
                   <div className="flex justify-between text-text-secondary">
-                    <span>GST (18%)</span>
-                    <span>{formatCurrency(tax)}</span>
+                    <span>Est. Tax (GST)</span>
+                    <span>{formatCurrency(estTax)}</span>
                   </div>
                 )}
                 {shippingCharge > 0 && priceTotal < 499 && (
@@ -679,6 +679,7 @@ export default function CheckoutPage() {
                   <span>Total Amount</span>
                   <span>{formatCurrency(grandTotal)}</span>
                 </div>
+                <p className="text-xs text-text-muted">Final tax calculated at order confirmation based on product GST rates</p>
                 {savings > 0 && (
                   <p className="rounded-xl bg-success-50 border border-success-200 p-2.5 text-center text-sm font-medium text-success-700">
                     You will save {formatCurrency(savings)}
