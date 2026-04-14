@@ -6,8 +6,8 @@ import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  MapPin, CreditCard, ClipboardCheck, Check, Plus, ChevronRight,
-  ShieldCheck, Truck, Smartphone, Banknote, Building2, ArrowLeft, X, Loader2,
+  MapPin, CreditCard, Check, Plus, ChevronRight,
+  ShieldCheck, Truck, ArrowLeft, X, Loader2,
 } from "lucide-react";
 import { cn } from "@xelnova/utils";
 import { formatCurrency } from "@xelnova/utils";
@@ -25,7 +25,7 @@ function hasAuthCookie(): boolean {
   return /(?:^|;\s*)xelnova-token=/.test(document.cookie);
 }
 
-type Step = "address" | "payment" | "review";
+type Step = "address" | "review";
 
 interface SavedAddress {
   id: string;
@@ -42,8 +42,7 @@ interface SavedAddress {
 
 const STEPS: { id: Step; label: string; icon: React.ElementType }[] = [
   { id: "address", label: "Address", icon: MapPin },
-  { id: "payment", label: "Payment", icon: CreditCard },
-  { id: "review", label: "Review", icon: ClipboardCheck },
+  { id: "review", label: "Review & Pay", icon: CreditCard },
 ];
 
 const EMPTY_FORM = { name: "", phone: "", line1: "", line2: "", city: "", state: "", pincode: "", type: "HOME" };
@@ -57,7 +56,6 @@ export default function CheckoutPage() {
   const [currentStep, setCurrentStep] = useState<Step>("address");
   const [addresses, setAddresses] = useState<SavedAddress[]>([]);
   const [selectedAddress, setSelectedAddress] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState("upi");
   const [showNewAddress, setShowNewAddress] = useState(true);
   const [form, setForm] = useState(EMPTY_FORM);
   const [formErrors, setFormErrors] = useState<Partial<typeof EMPTY_FORM>>({});
@@ -292,7 +290,6 @@ export default function CheckoutPage() {
 
   const canProceed = () => {
     if (currentStep === "address") return !!selectedAddress;
-    if (currentStep === "payment") return !!paymentMethod;
     return !placingOrder;
   };
 
@@ -321,27 +318,25 @@ export default function CheckoutPage() {
           pincode: addr.pincode,
           type: addr.type,
         },
-        paymentMethod,
+        paymentMethod: "razorpay",
       });
 
       if (!order?.id) {
         throw new Error("Order creation failed. Please try again.");
       }
 
-      if (paymentMethod !== "cod") {
-        syncToken();
-        let paymentOrder;
-        try {
-          paymentOrder = await paymentApi.createPaymentOrder(order.id);
-        } catch (payErr: unknown) {
-          const msg = payErr instanceof Error ? payErr.message : "";
-          if (msg.toLowerCase().includes("not configured")) {
-            throw new Error("Payment gateway is not configured. Please try Cash on Delivery or contact support.");
-          }
-          throw new Error(msg || "Failed to initialize payment. Please try again.");
+      syncToken();
+      let paymentOrder;
+      try {
+        paymentOrder = await paymentApi.createPaymentOrder(order.id);
+      } catch (payErr: unknown) {
+        const msg = payErr instanceof Error ? payErr.message : "";
+        if (msg.toLowerCase().includes("not configured")) {
+          throw new Error("Payment gateway is not configured. Please contact support.");
         }
-        await openRazorpay(paymentOrder, order.orderNumber);
+        throw new Error(msg || "Failed to initialize payment. Please try again.");
       }
+      await openRazorpay(paymentOrder, order.orderNumber);
 
       setOrderNumber(order.orderNumber);
       setOrderPlaced(true);
@@ -354,14 +349,12 @@ export default function CheckoutPage() {
   };
 
   const handleNext = () => {
-    if (currentStep === "address") setCurrentStep("payment");
-    else if (currentStep === "payment") setCurrentStep("review");
+    if (currentStep === "address") setCurrentStep("review");
     else placeOrder();
   };
 
   const handleBack = () => {
-    if (currentStep === "payment") setCurrentStep("address");
-    else if (currentStep === "review") setCurrentStep("payment");
+    if (currentStep === "review") setCurrentStep("address");
   };
 
   return (
@@ -524,45 +517,6 @@ export default function CheckoutPage() {
                 </motion.div>
               )}
 
-              {/* ─── PAYMENT STEP ─── */}
-              {currentStep === "payment" && (
-                <motion.div
-                  key="payment"
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -20 }}
-                  className="rounded-2xl border border-border bg-white p-6 shadow-sm"
-                >
-                  <h2 className="mb-5 text-lg font-bold text-text-primary">Payment Method</h2>
-                  <div className="space-y-3">
-                    <PaymentOption id="upi" selected={paymentMethod === "upi"} onSelect={setPaymentMethod} icon={Smartphone} title="UPI" subtitle="Pay using any UPI app">
-                      <div className="mt-3">
-                        <input
-                          placeholder="Enter UPI ID (e.g., name@upi)"
-                          className="w-full rounded-xl border border-border bg-white px-4 py-2.5 text-sm text-text-primary outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30 placeholder:text-text-muted"
-                        />
-                      </div>
-                    </PaymentOption>
-                    <PaymentOption id="card" selected={paymentMethod === "card"} onSelect={setPaymentMethod} icon={CreditCard} title="Credit / Debit Card" subtitle="Visa, Mastercard, RuPay">
-                      <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                        <input placeholder="Card Number" className="rounded-xl border border-border bg-white px-4 py-2.5 text-sm text-text-primary outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30 placeholder:text-text-muted sm:col-span-2" />
-                        <input placeholder="Name on Card" className="rounded-xl border border-border bg-white px-4 py-2.5 text-sm text-text-primary outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30 placeholder:text-text-muted sm:col-span-2" />
-                        <input placeholder="Expiry (MM/YY)" className="rounded-xl border border-border bg-white px-4 py-2.5 text-sm text-text-primary outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30 placeholder:text-text-muted" />
-                        <input placeholder="CVV" type="password" maxLength={4} className="rounded-xl border border-border bg-white px-4 py-2.5 text-sm text-text-primary outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30 placeholder:text-text-muted" />
-                      </div>
-                    </PaymentOption>
-                    <PaymentOption id="cod" selected={paymentMethod === "cod"} onSelect={setPaymentMethod} icon={Banknote} title="Cash on Delivery" subtitle="Pay when you receive" />
-                    <PaymentOption id="netbanking" selected={paymentMethod === "netbanking"} onSelect={setPaymentMethod} icon={Building2} title="Net Banking" subtitle="All major banks">
-                      <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                        {["SBI", "HDFC", "ICICI", "Axis", "Kotak", "PNB", "BOB", "Others"].map((bank) => (
-                          <button key={bank} className="rounded-lg border border-border px-3 py-2 text-sm text-text-secondary hover:border-primary-400 hover:text-primary-600 transition-colors">{bank}</button>
-                        ))}
-                      </div>
-                    </PaymentOption>
-                  </div>
-                </motion.div>
-              )}
-
               {/* ─── REVIEW STEP ─── */}
               {currentStep === "review" && (
                 <motion.div
@@ -592,15 +546,17 @@ export default function CheckoutPage() {
                     })()}
                   </div>
 
-                  {/* Payment summary */}
-                  <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
-                    <div className="flex items-center justify-between mb-3">
-                      <h3 className="text-sm font-bold text-text-primary">Payment Method</h3>
-                      <button onClick={() => setCurrentStep("payment")} className="text-xs font-medium text-primary-600 hover:text-primary-700">Change</button>
+                  {/* Payment info */}
+                  <div className="rounded-2xl border border-primary-200 bg-primary-50 p-5 shadow-sm">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary-100">
+                        <CreditCard size={20} className="text-primary-600" />
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-bold text-text-primary">Secure Payment</h3>
+                        <p className="text-xs text-text-secondary">UPI, Cards, Net Banking, Wallets — choose at checkout</p>
+                      </div>
                     </div>
-                    <p className="text-sm text-text-secondary capitalize">
-                      {paymentMethod === "upi" ? "UPI Payment" : paymentMethod === "cod" ? "Cash on Delivery" : paymentMethod === "card" ? "Credit / Debit Card" : "Net Banking"}
-                    </p>
                   </div>
 
                   {/* Order items */}
@@ -710,9 +666,9 @@ export default function CheckoutPage() {
                   )}
                 >
                   {placingOrder ? (
-                    <><Loader2 size={16} className="animate-spin" /> Placing order…</>
+                    <><Loader2 size={16} className="animate-spin" /> Processing…</>
                   ) : (
-                    <>{currentStep === "review" ? "Place Order" : "Continue"} <ChevronRight size={16} /></>
+                    <>{currentStep === "review" ? "Pay Now" : "Continue"} <ChevronRight size={16} /></>
                   )}
                 </button>
               </div>
@@ -761,32 +717,3 @@ function FormInput({ label, value, error, onChange, placeholder }: {
   );
 }
 
-function PaymentOption({ id, selected, onSelect, icon: Icon, title, subtitle, children }: {
-  id: string;
-  selected: boolean;
-  onSelect: (id: string) => void;
-  icon: React.ElementType;
-  title: string;
-  subtitle: string;
-  children?: React.ReactNode;
-}) {
-  return (
-    <div
-      className={cn(
-        "rounded-xl border-2 p-4 transition-all cursor-pointer",
-        selected ? "border-primary-500 bg-primary-50" : "border-border hover:border-gray-300"
-      )}
-      onClick={() => onSelect(id)}
-    >
-      <div className="flex items-center gap-3">
-        <input type="radio" name="payment" checked={selected} onChange={() => onSelect(id)} className="accent-primary-600" />
-        <Icon size={20} className={selected ? "text-primary-600" : "text-text-muted"} />
-        <div>
-          <p className="text-sm font-semibold text-text-primary">{title}</p>
-          <p className="text-xs text-text-muted">{subtitle}</p>
-        </div>
-      </div>
-      {selected && children}
-    </div>
-  );
-}
