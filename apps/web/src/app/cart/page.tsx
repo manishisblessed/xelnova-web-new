@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { Trash2, Minus, Plus, ShoppingBag, ArrowRight, Tag, ShieldCheck, Truck, Heart } from "lucide-react";
 import { formatCurrency } from "@xelnova/utils";
-import { useAuth } from "@xelnova/api";
+import { useAuth, cartApi } from "@xelnova/api";
 import { useCartStore, type CartItem } from "@/lib/store/cart-store";
 import { useWishlistStore } from "@/lib/store/wishlist-store";
 
@@ -23,8 +23,13 @@ export default function CartPage() {
   const totalItems = useCartStore((s) => s.totalItems);
   const totalSavings = useCartStore((s) => s.totalSavings);
   const toggleWishlist = useWishlistStore((s) => s.toggle);
+  const [shippingConfig, setShippingConfig] = useState<{ freeShippingMin: number; defaultRate: number }>({ freeShippingMin: 499, defaultRate: 49 });
 
   useEffect(() => setMounted(true), []);
+
+  useEffect(() => {
+    cartApi.getShippingConfig().then(setShippingConfig).catch(() => {});
+  }, []);
 
   const handleCheckout = () => {
     if (isAuthenticated) {
@@ -84,7 +89,7 @@ export default function CartPage() {
               <div className="space-y-3 text-sm">
                 <div className="flex justify-between text-text-secondary"><span>Subtotal ({itemCount} items)</span><span className="font-medium text-text-primary">{formatCurrency(priceTotal + savings)}</span></div>
                 {savings > 0 && (<div className="flex justify-between text-success-600"><span className="flex items-center gap-1"><Tag size={14} />Discount</span><span className="font-medium">-{formatCurrency(savings)}</span></div>)}
-                <div className="flex justify-between text-text-secondary"><span>Delivery</span><span className={priceTotal > 499 ? "font-semibold text-success-600" : "font-medium text-text-primary"}>{priceTotal > 499 ? "FREE" : formatCurrency(49)}</span></div>
+                <div className="flex justify-between text-text-secondary"><span>Delivery</span><span className={priceTotal >= shippingConfig.freeShippingMin ? "font-semibold text-success-600" : "font-medium text-text-primary"}>{priceTotal >= shippingConfig.freeShippingMin ? "FREE" : formatCurrency(shippingConfig.defaultRate)}</span></div>
                 <div className="flex justify-between text-text-secondary"><span>Est. Tax (GST)</span><span className="font-medium text-text-primary">Calculated at checkout</span></div>
                 <hr className="border-border-light" />
                 <div className="flex justify-between text-lg font-bold text-text-primary"><span>Subtotal</span><span>{formatCurrency(priceTotal)}</span></div>

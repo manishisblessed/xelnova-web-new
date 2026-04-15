@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { cn } from "@xelnova/utils";
 import { formatCurrency } from "@xelnova/utils";
-import { useAuth, ordersApi, usersApi, paymentApi, setAccessToken } from "@xelnova/api";
+import { useAuth, ordersApi, usersApi, paymentApi, cartApi, setAccessToken } from "@xelnova/api";
 import { useCartStore } from "@/lib/store/cart-store";
 
 declare global {
@@ -68,10 +68,15 @@ export default function CheckoutPage() {
   const totalSavings = useCartStore((s) => s.totalSavings);
   const totalItems = useCartStore((s) => s.totalItems);
   const clearCart = useCartStore((s) => s.clearCart);
+  const [shippingConfig, setShippingConfig] = useState<{ freeShippingMin: number; defaultRate: number }>({ freeShippingMin: 499, defaultRate: 49 });
 
   const razorpayLoaded = useRef(false);
 
   useEffect(() => setMounted(true), []);
+
+  useEffect(() => {
+    cartApi.getShippingConfig().then(setShippingConfig).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (authLoading) return;
@@ -798,9 +803,10 @@ export default function CheckoutPage() {
             <div className="sticky top-28 rounded-2xl border border-border bg-white p-6 shadow-sm">
               <h2 className="mb-4 text-lg font-bold text-text-primary">Price Details</h2>
               {(() => {
-                const shippingCharge = priceTotal > 499 ? 0 : 49;
+                const shippingCharge = priceTotal >= shippingConfig.freeShippingMin ? 0 : shippingConfig.defaultRate;
                 const estTax = Math.round(priceTotal * 0.18);
                 const grandTotal = priceTotal + shippingCharge + estTax;
+                const amountForFreeShipping = shippingConfig.freeShippingMin - priceTotal;
                 return (
               <div className="space-y-3 text-sm">
                 <div className="flex justify-between text-text-secondary">
@@ -827,9 +833,9 @@ export default function CheckoutPage() {
                     <span>{formatCurrency(estTax)}</span>
                   </div>
                 )}
-                {shippingCharge > 0 && priceTotal < 499 && (
+                {shippingCharge > 0 && amountForFreeShipping > 0 && (
                   <p className="text-xs text-text-muted">
-                    Add {formatCurrency(499 - priceTotal)} more for free delivery
+                    Add {formatCurrency(amountForFreeShipping)} more for free delivery
                   </p>
                 )}
                 <hr className="border-border" />

@@ -145,6 +145,7 @@ export interface CartSummary {
   tax: number;
   total: number;
   itemCount: number;
+  freeShippingMin?: number;
 }
 
 export interface Cart {

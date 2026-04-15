@@ -19,6 +19,15 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 export class CartController {
   constructor(private readonly cartService: CartService) {}
 
+  @Get('shipping-config')
+  @ApiOperation({ summary: 'Get shipping configuration (public)' })
+  async getShippingConfig() {
+    return successResponse(
+      await this.cartService.getShippingConfig(),
+      'Shipping config fetched',
+    );
+  }
+
   @Get()
   @Auth()
   @ApiOperation({ summary: 'Get cart contents' })

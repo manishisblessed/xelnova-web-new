@@ -72,12 +72,24 @@ export class CartService {
   }
 
   private async getShippingRate(subtotal: number): Promise<{ shipping: number; freeShippingMin: number }> {
+    const config = await this.getShippingConfig();
+    return { 
+      shipping: subtotal >= config.freeShippingMin ? 0 : config.defaultRate, 
+      freeShippingMin: config.freeShippingMin,
+    };
+  }
+
+  async getShippingConfig(): Promise<{ freeShippingMin: number; defaultRate: number; expressRate: number; codEnabled: boolean; codFee: number }> {
     const row = await this.prisma.siteSettings.findUnique({ where: { id: 1 } });
     const payload = (row?.payload && typeof row.payload === 'object' ? row.payload : {}) as Record<string, any>;
     const config = payload.shipping as Record<string, any> | undefined;
-    const freeShippingMin = Number(config?.freeShippingMin ?? 499);
-    const defaultRate = Number(config?.defaultRate ?? 49);
-    return { shipping: subtotal >= freeShippingMin ? 0 : defaultRate, freeShippingMin };
+    return {
+      freeShippingMin: Number(config?.freeShippingMin ?? 499),
+      defaultRate: Number(config?.defaultRate ?? 49),
+      expressRate: Number(config?.expressRate ?? 99),
+      codEnabled: config?.codEnabled !== false,
+      codFee: Number(config?.codFee ?? 0),
+    };
   }
 
   async addItem(userId: string, dto: AddToCartDto) {

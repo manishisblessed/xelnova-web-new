@@ -1,5 +1,16 @@
 import { api } from './client';
 import type { ApiResponse } from './types';
+import { AxiosError } from 'axios';
+
+function extractErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof AxiosError) {
+    return error.response?.data?.message || error.message || fallback;
+  }
+  if (error instanceof Error) {
+    return error.message || fallback;
+  }
+  return fallback;
+}
 
 export interface WalletBalance {
   balance: number;
@@ -61,9 +72,13 @@ export interface AddMoneyOrder {
 }
 
 export async function createAddMoneyOrder(amount: number): Promise<AddMoneyOrder> {
-  const { data } = await api.post<ApiResponse<AddMoneyOrder>>('/wallet/customer/add-money', { amount });
-  if (!data.success || !data.data) throw new Error(data.message || 'Failed to create order');
-  return data.data;
+  try {
+    const { data } = await api.post<ApiResponse<AddMoneyOrder>>('/wallet/customer/add-money', { amount });
+    if (!data.success || !data.data) throw new Error(data.message || 'Failed to create order');
+    return data.data;
+  } catch (error) {
+    throw new Error(extractErrorMessage(error, 'Failed to create payment order'));
+  }
 }
 
 export async function verifyAddMoney(payload: {
@@ -71,9 +86,13 @@ export async function verifyAddMoney(payload: {
   razorpay_payment_id: string;
   razorpay_signature: string;
 }) {
-  const { data } = await api.post<ApiResponse<unknown>>('/wallet/customer/verify-add-money', payload);
-  if (!data.success) throw new Error(data.message || 'Verification failed');
-  return data.data;
+  try {
+    const { data } = await api.post<ApiResponse<unknown>>('/wallet/customer/verify-add-money', payload);
+    if (!data.success) throw new Error(data.message || 'Verification failed');
+    return data.data;
+  } catch (error) {
+    throw new Error(extractErrorMessage(error, 'Payment verification failed'));
+  }
 }
 
 export async function requestBankTransfer(payload: {
@@ -82,9 +101,13 @@ export async function requestBankTransfer(payload: {
   ifscCode: string;
   accountHolder: string;
 }) {
-  const { data } = await api.post<ApiResponse<unknown>>('/wallet/customer/transfer', payload);
-  if (!data.success) throw new Error(data.message || 'Transfer failed');
-  return data.data;
+  try {
+    const { data } = await api.post<ApiResponse<unknown>>('/wallet/customer/transfer', payload);
+    if (!data.success) throw new Error(data.message || 'Transfer failed');
+    return data.data;
+  } catch (error) {
+    throw new Error(extractErrorMessage(error, 'Transfer failed'));
+  }
 }
 
 export async function processRecharge(payload: {
@@ -93,9 +116,13 @@ export async function processRecharge(payload: {
   operator: string;
   type?: string;
 }) {
-  const { data } = await api.post<ApiResponse<unknown>>('/wallet/customer/recharge', payload);
-  if (!data.success) throw new Error(data.message || 'Recharge failed');
-  return data.data;
+  try {
+    const { data } = await api.post<ApiResponse<unknown>>('/wallet/customer/recharge', payload);
+    if (!data.success) throw new Error(data.message || 'Recharge failed');
+    return data.data;
+  } catch (error) {
+    throw new Error(extractErrorMessage(error, 'Recharge failed'));
+  }
 }
 
 export async function processBillPayment(payload: {
@@ -104,7 +131,11 @@ export async function processBillPayment(payload: {
   consumerNumber: string;
   category?: string;
 }) {
-  const { data } = await api.post<ApiResponse<unknown>>('/wallet/customer/bill-payment', payload);
-  if (!data.success) throw new Error(data.message || 'Bill payment failed');
-  return data.data;
+  try {
+    const { data } = await api.post<ApiResponse<unknown>>('/wallet/customer/bill-payment', payload);
+    if (!data.success) throw new Error(data.message || 'Bill payment failed');
+    return data.data;
+  } catch (error) {
+    throw new Error(extractErrorMessage(error, 'Bill payment failed'));
+  }
 }

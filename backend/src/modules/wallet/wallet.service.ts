@@ -294,22 +294,27 @@ export class WalletService {
     const totalCharge = amount + fee;
     const amountInPaise = Math.round(totalCharge * 100);
 
-    const razorpayOrder = await this.getRazorpay().orders.create({
-      amount: amountInPaise,
-      currency: 'INR',
-      receipt: `wallet-${wallet.id}-${Date.now()}`,
-      notes: { userId, walletId: wallet.id, walletAmount: amount, fee, purpose: 'WALLET_TOPUP' },
-    });
+    try {
+      const razorpayOrder = await this.getRazorpay().orders.create({
+        amount: amountInPaise,
+        currency: 'INR',
+        receipt: `wallet-${wallet.id}-${Date.now()}`,
+        notes: { userId, walletId: wallet.id, walletAmount: amount, fee, purpose: 'WALLET_TOPUP' },
+      });
 
-    return {
-      razorpayOrderId: razorpayOrder.id,
-      amount: totalCharge,
-      walletCredit: amount,
-      convenienceFee: fee,
-      feePercent: CONVENIENCE_FEE_PERCENT,
-      currency: 'INR',
-      keyId: this.config.get('RAZORPAY_KEY_ID'),
-    };
+      return {
+        razorpayOrderId: razorpayOrder.id,
+        amount: totalCharge,
+        walletCredit: amount,
+        convenienceFee: fee,
+        feePercent: CONVENIENCE_FEE_PERCENT,
+        currency: 'INR',
+        keyId: this.config.get('RAZORPAY_KEY_ID'),
+      };
+    } catch (error: any) {
+      const message = error?.error?.description || error?.message || 'Failed to create payment order';
+      throw new HttpException(message, HttpStatus.BAD_GATEWAY);
+    }
   }
 
   async verifyAddMoney(
@@ -324,24 +329,30 @@ export class WalletService {
       throw new HttpException('Invalid payment signature', HttpStatus.BAD_REQUEST);
     }
 
-    const order = await this.getRazorpay().orders.fetch(payload.razorpay_order_id);
-    const notes = order.notes as Record<string, any>;
+    try {
+      const order = await this.getRazorpay().orders.fetch(payload.razorpay_order_id);
+      const notes = order.notes as Record<string, any>;
 
-    if (notes?.userId !== userId || notes?.purpose !== 'WALLET_TOPUP') {
-      throw new HttpException('Payment mismatch', HttpStatus.BAD_REQUEST);
+      if (notes?.userId !== userId || notes?.purpose !== 'WALLET_TOPUP') {
+        throw new HttpException('Payment mismatch', HttpStatus.BAD_REQUEST);
+      }
+
+      const walletAmount = Number(notes.walletAmount);
+      const wallet = await this.getOrCreateWallet(userId, 'CUSTOMER');
+
+      return this.credit(
+        wallet.id,
+        walletAmount,
+        `Added ₹${walletAmount} to wallet (incl. ${CONVENIENCE_FEE_PERCENT}% fee)`,
+        userId,
+        'WALLET_TOPUP',
+        payload.razorpay_payment_id,
+      );
+    } catch (error: any) {
+      if (error instanceof HttpException) throw error;
+      const message = error?.error?.description || error?.message || 'Failed to verify payment';
+      throw new HttpException(message, HttpStatus.BAD_GATEWAY);
     }
-
-    const walletAmount = Number(notes.walletAmount);
-    const wallet = await this.getOrCreateWallet(userId, 'CUSTOMER');
-
-    return this.credit(
-      wallet.id,
-      walletAmount,
-      `Added ₹${walletAmount} to wallet (incl. ${CONVENIENCE_FEE_PERCENT}% fee)`,
-      userId,
-      'WALLET_TOPUP',
-      payload.razorpay_payment_id,
-    );
   }
 
   // ========== Bank Transfer ==========

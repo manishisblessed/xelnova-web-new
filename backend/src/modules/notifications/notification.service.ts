@@ -65,18 +65,23 @@ export class NotificationService {
 
   async getUserNotifications(userId: string, page = 1, limit = 20) {
     const skip = (page - 1) * limit;
-    const [notifications, total, unread] = await Promise.all([
-      this.prisma.notificationLog.findMany({
-        where: { userId },
-        orderBy: { createdAt: 'desc' },
-        skip,
-        take: limit,
-      }),
-      this.prisma.notificationLog.count({ where: { userId } }),
-      this.prisma.notificationLog.count({ where: { userId, read: false } }),
-    ]);
-    this.logger.debug(`[GET_NOTIFICATIONS] userId=${userId} total=${total} unread=${unread} returned=${notifications.length}`);
-    return { notifications, unread, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } };
+    try {
+      const [notifications, total, unread] = await Promise.all([
+        this.prisma.notificationLog.findMany({
+          where: { userId },
+          orderBy: { createdAt: 'desc' },
+          skip,
+          take: limit,
+        }),
+        this.prisma.notificationLog.count({ where: { userId } }),
+        this.prisma.notificationLog.count({ where: { userId, read: false } }),
+      ]);
+      this.logger.debug(`[GET_NOTIFICATIONS] userId=${userId} total=${total} unread=${unread} returned=${notifications.length}`);
+      return { notifications, unread, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } };
+    } catch (error: any) {
+      this.logger.error(`[GET_NOTIFICATIONS] Failed for userId=${userId}: ${error.message}`);
+      return { notifications: [], unread: 0, pagination: { page, limit, total: 0, totalPages: 0 } };
+    }
   }
 
   async markAsRead(notificationId: string, userId: string) {

@@ -1,6 +1,23 @@
 import { api } from './client';
 import type { ApiResponse, Cart } from './types';
 
+export interface ShippingConfig {
+  freeShippingMin: number;
+  defaultRate: number;
+  expressRate: number;
+  codEnabled: boolean;
+  codFee: number;
+}
+
+export async function getShippingConfig(): Promise<ShippingConfig> {
+  try {
+    const { data } = await api.get<ApiResponse<ShippingConfig>>('/cart/shipping-config');
+    return data.data;
+  } catch {
+    return { freeShippingMin: 499, defaultRate: 49, expressRate: 99, codEnabled: true, codFee: 0 };
+  }
+}
+
 export async function getCart(): Promise<Cart> {
   const { data } = await api.get<ApiResponse<Cart>>('/cart');
   return data.data;

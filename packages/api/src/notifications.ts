@@ -1,8 +1,24 @@
 import { api } from './client';
+import { AxiosError } from 'axios';
+
+function extractErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof AxiosError) {
+    return error.response?.data?.message || error.message || fallback;
+  }
+  if (error instanceof Error) {
+    return error.message || fallback;
+  }
+  return fallback;
+}
 
 export async function getNotifications(page = 1, limit = 20) {
-  const { data } = await api.get('/notifications', { params: { page, limit } });
-  return data.data;
+  try {
+    const { data } = await api.get('/notifications', { params: { page, limit } });
+    return data.data;
+  } catch (error) {
+    console.error('[getNotifications]', extractErrorMessage(error, 'Failed to fetch notifications'));
+    return { notifications: [], unread: 0, pagination: { page, limit, total: 0, totalPages: 0 } };
+  }
 }
 
 export async function markAsRead(notificationId: string) {
