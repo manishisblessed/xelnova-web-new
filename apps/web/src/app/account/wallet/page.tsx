@@ -110,7 +110,7 @@ export default function WalletPage() {
       const response = await verificationApi.createCustomerKycUrl();
       setKycData({
         verificationId: response.verificationId,
-        referenceId: response.referenceId,
+        referenceId: String(response.referenceId),
         orderId: response.orderId,
       });
       const width = 600;

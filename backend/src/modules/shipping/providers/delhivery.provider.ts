@@ -50,7 +50,19 @@ export class DelhiveryProvider implements CourierProvider {
   ): Promise<CreateShipmentResult> {
     const base = this.getBaseUrl();
     const clientName = config.accountId || '';
-    const pickupName = config.warehouseId || clientName;
+    const pickupName = config.warehouseId;
+
+    if (!pickupName) {
+      throw new Error(
+        'Delhivery requires a Pickup Location Name. Please update your shipping settings with the exact warehouse name from your Delhivery dashboard (Settings → Warehouses).',
+      );
+    }
+
+    if (!clientName) {
+      throw new Error(
+        'Delhivery requires a Client Name. Please update your shipping settings with your registered business name.',
+      );
+    }
 
     // Step 1: Fetch a waybill (AWB) — Delhivery auto-generates one
     let awb = '';
@@ -139,7 +151,13 @@ export class DelhiveryProvider implements CourierProvider {
     const createData = await createRes.json();
 
     if (!createData.success) {
-      const errMsg = createData.rmk || createData.packages?.[0]?.remarks?.[0] || 'Unknown error';
+      const rawMsg = createData.rmk || createData.packages?.[0]?.remarks?.[0] || 'Unknown error';
+      let errMsg = rawMsg;
+      
+      if (rawMsg.includes('ClientWarehouse matching query does not exist')) {
+        errMsg = `Invalid Pickup Location Name. Please check your Delhivery Settings → Warehouses and enter the exact warehouse name in your shipping settings.`;
+      }
+      
       throw new Error(`Delhivery rejected shipment: ${errMsg}`);
     }
 

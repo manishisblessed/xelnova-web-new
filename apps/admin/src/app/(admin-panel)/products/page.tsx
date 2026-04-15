@@ -172,21 +172,23 @@ export default function ProductsPage() {
     {
       key: 'name',
       header: 'Product',
+      className: 'min-w-[280px] max-w-[320px]',
       render: (r) => (
         <div className="flex items-center gap-3">
-          <div className="h-10 w-10 rounded-lg bg-surface-muted overflow-hidden shrink-0 border border-border">
+          <div className="h-11 w-11 rounded-lg bg-surface-muted overflow-hidden shrink-0 border border-border">
             {r.images?.[0] ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={r.images[0]} alt="" className="h-full w-full object-cover" />
             ) : (
               <div className="h-full w-full flex items-center justify-center text-text-muted">
-                <Clock size={14} />
+                <Clock size={16} />
               </div>
             )}
           </div>
-          <div>
-            <span className="font-medium">{r.name}</span>
-            <p className="text-xs text-text-muted mt-0.5">{r.slug}</p>
+          <div className="min-w-0 flex-1">
+            <p className="font-medium text-text-primary line-clamp-2 leading-tight" title={r.name}>
+              {r.name}
+            </p>
           </div>
         </div>
       ),
@@ -194,61 +196,66 @@ export default function ProductsPage() {
     {
       key: 'category',
       header: 'Category',
-      render: (r) => r.category?.name ?? '—',
+      className: 'whitespace-nowrap',
+      render: (r) => (
+        <span className="text-text-secondary">{r.category?.name ?? '—'}</span>
+      ),
     },
     {
       key: 'seller',
       header: 'Seller',
-      render: (r) => r.seller?.storeName ?? '—',
+      className: 'whitespace-nowrap',
+      render: (r) => (
+        <span className="text-text-secondary">{r.seller?.storeName ?? '—'}</span>
+      ),
     },
     {
       key: 'price',
       header: 'Price',
+      className: 'whitespace-nowrap text-right',
       render: (r) => (
-        <span>
-          ₹{r.price.toLocaleString()}
+        <div className="text-right">
+          <span className="font-medium">₹{r.price.toLocaleString()}</span>
           {r.compareAtPrice != null && r.compareAtPrice > r.price && (
-            <span className="ml-1.5 text-xs text-text-muted line-through">₹{r.compareAtPrice.toLocaleString()}</span>
+            <span className="ml-1 text-xs text-text-muted line-through">₹{r.compareAtPrice.toLocaleString()}</span>
           )}
-        </span>
+        </div>
       ),
     },
     {
       key: 'stock',
       header: 'Stock',
+      className: 'whitespace-nowrap text-center w-[70px]',
       render: (r) => (
-        <span className={r.stock < 10 ? 'text-danger-500 font-medium' : ''}>{r.stock}</span>
+        <span className={`font-medium ${r.stock < 10 ? 'text-danger-500' : 'text-text-primary'}`}>
+          {r.stock}
+        </span>
       ),
     },
     {
       key: 'status',
       header: 'Status',
+      className: 'whitespace-nowrap',
       render: (r) => (
-        <div className="flex flex-col gap-1">
-          <div className="flex items-center gap-1.5">
-            <StatusIcon status={r.status} />
-            <Badge variant={statusBadgeVariant(r.status)}>
-              {r.status.charAt(0) + r.status.slice(1).toLowerCase().replace('_', ' ')}
-            </Badge>
-          </div>
-          {r.status === 'REJECTED' && r.rejectionReason && (
-            <p className="text-xs text-danger-600 max-w-[200px] truncate" title={r.rejectionReason}>
-              {r.rejectionReason}
-            </p>
-          )}
+        <div className="flex items-center gap-1.5">
+          <StatusIcon status={r.status} />
+          <Badge variant={statusBadgeVariant(r.status)}>
+            {r.status.charAt(0) + r.status.slice(1).toLowerCase().replace('_', ' ')}
+          </Badge>
         </div>
       ),
     },
     {
       key: 'isFeatured',
       header: 'Flags',
+      className: 'whitespace-nowrap',
       render: (r) => (
-        <div className="flex flex-wrap gap-1">
+        <div className="flex items-center gap-1">
           {r.isFeatured && <Badge variant="info">Featured</Badge>}
           {r.isTrending && <Badge variant="warning">Trending</Badge>}
           {r.isFlashDeal && <Badge variant="danger">Flash</Badge>}
           {!r.isFeatured && !r.isTrending && !r.isFlashDeal && (
-            <span className="text-text-muted text-xs">—</span>
+            <span className="text-text-muted">—</span>
           )}
         </div>
       ),
@@ -256,10 +263,13 @@ export default function ProductsPage() {
     {
       key: 'rating',
       header: 'Rating',
+      className: 'whitespace-nowrap w-[90px]',
       render: (r) => (
-        <span>
-          {r.rating} ★ <span className="text-text-muted text-xs">({r.reviewCount})</span>
-        </span>
+        <div className="flex items-center gap-1">
+          <span className="font-medium text-amber-500">{r.rating.toFixed(1)}</span>
+          <span className="text-amber-500">★</span>
+          <span className="text-text-muted text-xs">({r.reviewCount})</span>
+        </div>
       ),
     },
   ];
@@ -275,15 +285,16 @@ export default function ProductsPage() {
         filterKey="status"
         filterOptions={[...STATUS_OPTIONS]}
         refreshTrigger={refreshTrigger}
+        actionsClassName="w-[120px] text-right"
         renderActions={(r) => (
-          <div className="flex items-center gap-1">
+          <div className="flex items-center justify-end gap-0.5">
             {r.status === 'PENDING' && (
               <>
                 <button
                   type="button"
                   onClick={() => handleApprove(r)}
                   disabled={approving === r.id}
-                  className="p-1.5 rounded-lg hover:bg-success-50 text-success-600 hover:text-success-700 disabled:opacity-50"
+                  className="p-1.5 rounded-md hover:bg-success-50 text-success-600 hover:text-success-700 disabled:opacity-50 transition-colors"
                   title="Approve"
                 >
                   <CheckCircle size={16} />
@@ -291,7 +302,7 @@ export default function ProductsPage() {
                 <button
                   type="button"
                   onClick={() => openReject(r)}
-                  className="p-1.5 rounded-lg hover:bg-danger-50 text-danger-600 hover:text-danger-700"
+                  className="p-1.5 rounded-md hover:bg-danger-50 text-danger-600 hover:text-danger-700 transition-colors"
                   title="Reject"
                 >
                   <XCircle size={16} />
@@ -301,7 +312,7 @@ export default function ProductsPage() {
             <button
               type="button"
               onClick={() => openEdit(r)}
-              className="p-1.5 rounded-lg hover:bg-surface-muted text-text-muted hover:text-primary-600"
+              className="p-1.5 rounded-md hover:bg-primary-50 text-text-muted hover:text-primary-600 transition-colors"
               title="Edit"
             >
               <Pencil size={15} />
@@ -312,7 +323,7 @@ export default function ProductsPage() {
                 setEditing(r);
                 setDeleteOpen(true);
               }}
-              className="p-1.5 rounded-lg hover:bg-danger-50 text-text-muted hover:text-danger-600"
+              className="p-1.5 rounded-md hover:bg-danger-50 text-text-muted hover:text-danger-600 transition-colors"
               title="Delete"
             >
               <Trash2 size={15} />

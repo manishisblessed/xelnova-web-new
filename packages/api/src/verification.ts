@@ -14,7 +14,7 @@ function extractErrorMessage(error: unknown, fallback: string): string {
 
 export interface KycUrlResponse {
   verificationId: string;
-  referenceId: string;
+  referenceId: string | number;
   orderId: string;
   url: string;
   status: string;

@@ -64,7 +64,7 @@ const PROVIDERS: ProviderDef[] = [
     id: 'DELHIVERY',
     name: 'Delhivery',
     tagline: 'India\'s largest express logistics company',
-    howToConnect: 'Login to Delhivery One → Settings → API Setup → Copy your API Token.',
+    howToConnect: 'Login to Delhivery One → Settings → API Setup → Copy your API Token. Then go to Settings → Warehouses to find your pickup location name.',
     logo: '📦',
     fields: [
       {
@@ -85,9 +85,9 @@ const PROVIDERS: ProviderDef[] = [
       {
         key: 'warehouseId',
         label: 'Pickup Location Name',
-        required: false,
-        placeholder: 'e.g. Main Warehouse',
-        helpText: 'Name of your registered pickup location. Leave empty to use default.',
+        required: true,
+        placeholder: 'e.g. Delhi_Main_Warehouse',
+        helpText: 'Exact name of your registered warehouse from Settings → Warehouses. This is required for shipment booking.',
       },
     ],
     docsUrl: 'https://one.delhivery.com/home',
@@ -570,9 +570,9 @@ export default function ShippingSettingsPage() {
                 <h3 className="text-xs font-semibold text-text-primary">Delhivery</h3>
               </div>
               <ul className="text-[11px] text-text-muted space-y-1 mb-2">
-                <li>• Login → Settings → API Setup</li>
-                <li>• Copy your <strong>API Token</strong></li>
-                <li>• Enter your exact <strong>Client Name</strong></li>
+                <li>• Login → Settings → API Setup → Copy <strong>API Token</strong></li>
+                <li>• Enter your exact <strong>Client Name</strong> (case-sensitive)</li>
+                <li>• Go to Settings → Warehouses → Copy exact <strong>Pickup Location Name</strong></li>
               </ul>
               <a
                 href="https://one.delhivery.com/home"

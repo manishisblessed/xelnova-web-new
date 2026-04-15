@@ -27,6 +27,7 @@ interface AdminListPageProps<T> {
   onAdd?: () => void;
   addLabel?: string;
   renderActions?: (row: T) => ReactNode;
+  actionsClassName?: string;
   children?: ReactNode;
   refreshTrigger?: number;
   /** Extra query string params for `apiGet` (e.g. `isFlashDeal: 'true'`). */
@@ -46,6 +47,7 @@ export function AdminListPage<T extends object>({
   onAdd,
   addLabel = 'Add New',
   renderActions,
+  actionsClassName,
   children,
   refreshTrigger,
   queryParams,
@@ -84,7 +86,7 @@ export function AdminListPage<T extends object>({
   }
 
   const allColumns = renderActions
-    ? [...columns, { key: '_actions', header: 'Actions', render: renderActions }]
+    ? [...columns, { key: '_actions', header: 'Actions', render: renderActions, className: actionsClassName }]
     : columns;
 
   return (

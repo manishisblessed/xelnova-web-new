@@ -2,6 +2,8 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PDFDocument, rgb, StandardFonts, PDFPage, PDFFont } from 'pdf-lib';
 import * as QRCode from 'qrcode';
+import * as fs from 'fs';
+import * as path from 'path';
 
 const A4_WIDTH = 595;
 const A4_HEIGHT = 842;
@@ -501,22 +503,73 @@ export class InvoiceService {
     drawText(sellerName.toUpperCase(), sigBoxX + 10, boxY + 5, { size: 7, bold: true });
     drawText('Authorized Signature', sigBoxX + 10, boxY - 5, { size: 6, color: gray });
 
-    y = boxY - 20;
+    y = boxY - 25;
 
     // ─── Footer ───
     drawText('E. & O.E.', MARGIN, y, { size: 7, color: gray });
 
-    // "Ordered Through Xelnova" branding
-    const footerCenterX = A4_WIDTH / 2;
-    const xelnovaText = 'Ordered Through';
-    const xelnovaTextWidth = font.widthOfTextAtSize(xelnovaText, 10);
+    // "Ordered Through" + Xelnova Logo in center
+    const orderedThroughText = 'Ordered Through';
+    const orderedThroughWidth = font.widthOfTextAtSize(orderedThroughText, 10);
     
-    drawText(xelnovaText, footerCenterX - 50, y, { size: 10 });
-    drawText('Xelnova', footerCenterX + 5, y, { size: 12, bold: true, color: primary });
+    // Calculate center position for the entire footer branding
+    // "Ordered Through" text + space + Logo
+    const logoWidth = 60;
+    const logoHeight = 18;
+    const spacing = 8;
+    const totalBrandingWidth = orderedThroughWidth + spacing + logoWidth;
+    const brandingStartX = (A4_WIDTH - totalBrandingWidth) / 2;
+    
+    // Draw "Ordered Through" text
+    drawText(orderedThroughText, brandingStartX, y, { size: 10 });
+    
+    // Try to embed Xelnova logo
+    let logoEmbedded = false;
+    try {
+      // Try multiple possible logo paths
+      const possibleLogoPaths = [
+        // Backend assets folder (for production builds)
+        path.resolve(__dirname, '../../assets/xelnova-logo.png'),
+        path.resolve(__dirname, '../../../src/assets/xelnova-logo.png'),
+        // Development paths
+        path.resolve(process.cwd(), 'src/assets/xelnova-logo.png'),
+        path.resolve(process.cwd(), 'dist/src/assets/xelnova-logo.png'),
+        // Web app public folder fallback
+        path.resolve(process.cwd(), '../apps/web/public/xelnova-logo.png'),
+        path.resolve(process.cwd(), 'apps/web/public/xelnova-logo.png'),
+      ];
+      
+      for (const logoPath of possibleLogoPaths) {
+        if (fs.existsSync(logoPath)) {
+          const logoBytes = fs.readFileSync(logoPath);
+          const logoImage = await pdf.embedPng(logoBytes);
+          page.drawImage(logoImage, {
+            x: brandingStartX + orderedThroughWidth + spacing,
+            y: y - 4,
+            width: logoWidth,
+            height: logoHeight,
+          });
+          logoEmbedded = true;
+          break;
+        }
+      }
+    } catch {
+      // Logo embedding failed
+    }
+    
+    // Fallback: Draw "Xelnova" text with branding if logo not embedded
+    if (!logoEmbedded) {
+      drawText('Xelnova', brandingStartX + orderedThroughWidth + spacing, y, { 
+        size: 14, 
+        bold: true, 
+        color: primary 
+      });
+    }
 
-    // Seller name on right
-    drawText(sellerName.toUpperCase(), A4_WIDTH - MARGIN - 100, y, { size: 8, bold: true });
-    drawText('Authorized Signature', A4_WIDTH - MARGIN - 100, y - 10, { size: 6, color: gray });
+    // Seller name on right side
+    const sellerNameWidth = fontBold.widthOfTextAtSize(sellerName.toUpperCase(), 8);
+    drawText(sellerName.toUpperCase(), A4_WIDTH - MARGIN - sellerNameWidth, y, { size: 8, bold: true });
+    drawText('Authorized Signature', A4_WIDTH - MARGIN - sellerNameWidth, y - 10, { size: 6, color: gray });
 
     const pdfBytes = await pdf.save();
     return Buffer.from(pdfBytes);
