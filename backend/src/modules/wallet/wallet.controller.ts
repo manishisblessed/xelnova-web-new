@@ -13,6 +13,8 @@ import { WalletService } from './wallet.service';
 import {
   WalletCreditDebitDto,
   PayoutRequestDto,
+  ManualPayoutRequestDto,
+  AdvancePayoutRequestDto,
   AddMoneyDto,
   VerifyAddMoneyDto,
   BankTransferDto,
@@ -149,13 +151,71 @@ export class WalletController {
   @Post('payout')
   @Auth('SELLER')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Request payout to bank account' })
+  @ApiOperation({ summary: 'Request payout to bank account (legacy)' })
   async requestPayout(
     @CurrentUser('id') userId: string,
     @Body() dto: PayoutRequestDto,
   ) {
     const result = await this.walletService.requestPayout(userId, dto.amount, dto.notes);
     return successResponse(result, 'Payout request submitted');
+  }
+
+  @Get('bank-details')
+  @Auth('SELLER')
+  @ApiOperation({ summary: 'Get seller verified bank account details' })
+  async getBankDetails(@CurrentUser('id') userId: string) {
+    const result = await this.walletService.getSellerBankDetails(userId);
+    return successResponse(result, 'Bank details retrieved');
+  }
+
+  @Post('payout/manual')
+  @Auth('SELLER')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Request manual payout to verified bank account' })
+  async requestManualPayout(
+    @CurrentUser('id') userId: string,
+    @Body() dto: ManualPayoutRequestDto,
+  ) {
+    const result = await this.walletService.requestManualPayout(
+      userId,
+      dto.amount,
+      dto.acceptedTerms,
+      dto.notes,
+    );
+    return successResponse(result, 'Manual payout request submitted');
+  }
+
+  @Post('payout/advance')
+  @Auth('SELLER')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Request advance payout (10-50% of available balance)' })
+  async requestAdvancePayout(
+    @CurrentUser('id') userId: string,
+    @Body() dto: AdvancePayoutRequestDto,
+  ) {
+    const result = await this.walletService.requestAdvancePayout(
+      userId,
+      dto.percentage,
+      dto.acceptedTerms,
+      dto.notes,
+    );
+    return successResponse(result, 'Advance payout request submitted');
+  }
+
+  @Get('payouts')
+  @Auth('SELLER')
+  @ApiOperation({ summary: 'Get seller payout history' })
+  async getPayoutHistory(
+    @CurrentUser('id') userId: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const result = await this.walletService.getSellerPayoutHistory(
+      userId,
+      parseInt(page || '1'),
+      parseInt(limit || '20'),
+    );
+    return successResponse(result, 'Payout history retrieved');
   }
 
   // ========== Admin Endpoints ==========

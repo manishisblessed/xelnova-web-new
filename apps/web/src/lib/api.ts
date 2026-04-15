@@ -72,6 +72,7 @@ export function mapProduct(p: ApiProduct): Product {
     seller: {
       name: (p.seller as any)?.storeName || 'Xelnova Seller',
       rating: (p.seller as any)?.rating || 4.5,
+      slug: (p.seller as any)?.slug || undefined,
     },
     variants: normalizeVariants(p.variants),
     specifications: (p.specifications && typeof p.specifications === 'object') ? p.specifications as Record<string, string> : {},
@@ -81,6 +82,18 @@ export function mapProduct(p: ApiProduct): Product {
     isFeatured: p.isFeatured,
     isFlashDeal: p.isFlashDeal,
     flashDealEndsAt: p.flashDealEndsAt ?? undefined,
+    // Amazon-style product information
+    featuresAndSpecs: (p.featuresAndSpecs && typeof p.featuresAndSpecs === 'object') ? p.featuresAndSpecs as Record<string, string> : undefined,
+    materialsAndCare: (p.materialsAndCare && typeof p.materialsAndCare === 'object') ? p.materialsAndCare as Record<string, string> : undefined,
+    itemDetails: (p.itemDetails && typeof p.itemDetails === 'object') ? p.itemDetails as Record<string, string> : undefined,
+    additionalDetails: (p.additionalDetails && typeof p.additionalDetails === 'object') ? p.additionalDetails as Record<string, string> : undefined,
+    productDescription: p.productDescription ?? undefined,
+    safetyInfo: p.safetyInfo ?? undefined,
+    regulatoryInfo: p.regulatoryInfo ?? undefined,
+    warrantyInfo: p.warrantyInfo ?? undefined,
+    deliveredBy: p.deliveredBy ?? 'Xelnova',
+    isReplaceable: p.isReplaceable ?? false,
+    returnWindow: p.returnWindow ?? 7,
   };
 }
 

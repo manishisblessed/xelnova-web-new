@@ -183,6 +183,7 @@ model Address {
   addressLine1 String
   addressLine2 String?
   city         String
+  district     String?
   state        String
   pincode      String
   landmark     String?
@@ -286,16 +287,44 @@ model SellerProfile {
   deliveryCharge1to3Days  Float?
   deliveryCharge3PlusDays Float?
 
+  // Store Customization (Brand Store)
+  heroBannerUrl      String?
+  heroBannerMobile   String?
+  aboutTitle         String?
+  aboutDescription   String?  @db.Text
+  featuredProductIds String[]
+  storeThemeColor    String?  @default("#7c3aed")
+
   products       Product[]
   payouts        Payout[]
   documents      SellerDocument[]
   courierConfigs SellerCourierConfig[]
   shipments      Shipment[]
+  storeBanners   SellerStoreBanner[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@map("seller_profiles")
+}
+
+// Seller Store Banners (for brand store carousel)
+model SellerStoreBanner {
+  id        String        @id @default(cuid())
+  sellerId  String
+  seller    SellerProfile @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  title     String?
+  imageUrl  String
+  mobileUrl String?
+  link      String?
+  sortOrder Int           @default(0)
+  isActive  Boolean       @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([sellerId])
+  @@map("seller_store_banners")
 }
 
 // Seller Documents for verification
@@ -417,27 +446,38 @@ model Product {
   highlights     String[]
   tags           String[]
 
+  // Amazon-style product information sections
+  featuresAndSpecs   Json? // { "Light Source Type": "LED", "Power Source": "Battery", ... }
+  materialsAndCare   Json? // { "Material": "Plastic", "Care Instructions": "Wipe clean", ... }
+  itemDetails        Json? // { "Manufacturer": "XYZ Corp", "Country of Origin": "India", ... }
+  additionalDetails  Json? // { "ASIN": "B0XXX", "Best Sellers Rank": "#1 in Toys", ... }
+  productDescription String? @db.Text // Detailed long-form product description
+  safetyInfo         String? @db.Text // Safety and product resources information
+  regulatoryInfo     String? @db.Text // BIS marking, certifications, etc.
+  warrantyInfo       String? // e.g., "1 Year Manufacturer Warranty"
+  deliveredBy        String? @default("Xelnova") // "Xelnova Delivered" or seller name
+
   isActive        Boolean       @default(false)
   status          ProductStatus @default(PENDING)
   rejectionReason String?
   sku             String?
 
-  metaTitle       String?
-  metaDescription String?
-  hsnCode         String?
-  gstRate         Float?
-  lowStockThreshold Int @default(5)
+  metaTitle         String?
+  metaDescription   String?
+  hsnCode           String?
+  gstRate           Float?
+  lowStockThreshold Int     @default(5)
 
   // Shipping details
-  weight     Float?   // Weight in kg
-  dimensions String?  // Format: LxWxH in cm (e.g., "30x20x15")
+  weight     Float? // Weight in kg
+  dimensions String? // Format: LxWxH in cm (e.g., "30x20x15")
 
   // Return/Cancellation/Replacement policies
-  isCancellable   Boolean @default(true)   // Can be cancelled before shipping
-  isReturnable    Boolean @default(true)   // Can be returned after delivery
-  isReplaceable   Boolean @default(false)  // Can be replaced (exchange)
-  returnWindow    Int     @default(7)      // Return window in days after delivery
-  cancellationWindow Int  @default(0)      // Hours after order placement (0 = until shipped)
+  isCancellable      Boolean @default(true) // Can be cancelled before shipping
+  isReturnable       Boolean @default(true) // Can be returned after delivery
+  isReplaceable      Boolean @default(false) // Can be replaced (exchange)
+  returnWindow       Int     @default(7) // Return window in days after delivery
+  cancellationWindow Int     @default(0) // Hours after order placement (0 = until shipped)
 
   reviews    Review[]
   orderItems OrderItem[]
@@ -529,6 +569,11 @@ model OrderItem {
   quantity     Int
   price        Float
   variant      String?
+  // Tax/Invoice fields
+  hsnCode      String?
+  gstRate      Float?  @default(18)
+  imeiSerialNo String? // For electronics IMEI/Serial numbers
+  sellerId     String? // Seller who fulfilled this item
 
   @@index([orderId])
   @@map("order_items")
@@ -545,14 +590,14 @@ enum ReturnStatus {
 }
 
 model ReturnRequest {
-  id        String       @id @default(cuid())
-  orderId   String
-  order     Order        @relation(fields: [orderId], references: [id])
-  userId    String
-  user      User         @relation(fields: [userId], references: [id])
-  reason    String
-  status    ReturnStatus @default(REQUESTED)
-  adminNote String?
+  id           String       @id @default(cuid())
+  orderId      String
+  order        Order        @relation(fields: [orderId], references: [id])
+  userId       String
+  user         User         @relation(fields: [userId], references: [id])
+  reason       String
+  status       ReturnStatus @default(REQUESTED)
+  adminNote    String?
   refundAmount Float?
 
   reverseAwb             String?
@@ -616,9 +661,9 @@ model Coupon {
   usageLimit     Int?
   usedCount      Int          @default(0)
 
-  scope          String       @default("global")
-  categoryId     String?
-  sellerId       String?
+  scope      String  @default("global")
+  categoryId String?
+  sellerId   String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -992,18 +1037,18 @@ model WalletTransaction {
 }
 
 model BankTransferRequest {
-  id              String             @id @default(cuid())
-  walletId        String
-  userId          String
-  amount          Float
-  accountNumber   String
-  ifscCode        String
-  accountHolder   String
-  status          BankTransferStatus @default(PENDING)
-  transactionRef  String?
-  failureReason   String?
-  processedAt     DateTime?
-  processedBy     String?
+  id             String             @id @default(cuid())
+  walletId       String
+  userId         String
+  amount         Float
+  accountNumber  String
+  ifscCode       String
+  accountHolder  String
+  status         BankTransferStatus @default(PENDING)
+  transactionRef String?
+  failureReason  String?
+  processedAt    DateTime?
+  processedBy    String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1048,7 +1093,7 @@ model Ticket {
   priority     TicketPriority @default(MEDIUM)
 
   customerId       String
-  customer         User           @relation(fields: [customerId], references: [id])
+  customer         User    @relation(fields: [customerId], references: [id])
   orderId          String?
   assignedSellerId String?
   assignedAdminId  String?
@@ -1056,8 +1101,8 @@ model Ticket {
   messages TicketMessage[]
 
   closedAt  DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 
   @@index([customerId])
   @@index([assignedSellerId])
@@ -1066,14 +1111,14 @@ model Ticket {
 }
 
 model TicketMessage {
-  id         String  @id @default(cuid())
-  ticketId   String
-  ticket     Ticket  @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-  senderId   String
-  sender     User    @relation(fields: [senderId], references: [id])
-  senderRole String
-  message    String
-  isInternal Boolean @default(false)
+  id          String  @id @default(cuid())
+  ticketId    String
+  ticket      Ticket  @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  senderId    String
+  sender      User    @relation(fields: [senderId], references: [id])
+  senderRole  String
+  message     String
+  isInternal  Boolean @default(false)
   isForwarded Boolean @default(false)
 
   createdAt DateTime @default(now())
@@ -1102,7 +1147,7 @@ model AbandonedCartReminder {
 // ─── Loyalty & Referral ───
 
 model LoyaltyLedger {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   userId      String
   points      Int
   type        String
@@ -1117,12 +1162,12 @@ model LoyaltyLedger {
 }
 
 model ReferralCode {
-  id          String  @id @default(cuid())
-  userId      String  @unique
-  code        String  @unique
-  totalUses   Int     @default(0)
-  earnedPoints Int    @default(0)
-  isActive    Boolean @default(true)
+  id           String  @id @default(cuid())
+  userId       String  @unique
+  code         String  @unique
+  totalUses    Int     @default(0)
+  earnedPoints Int     @default(0)
+  isActive     Boolean @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1131,11 +1176,11 @@ model ReferralCode {
 }
 
 model ReferralUse {
-  id             String @id @default(cuid())
+  id             String  @id @default(cuid())
   referralCodeId String
   referredUserId String
   orderId        String?
-  pointsAwarded  Int    @default(0)
+  pointsAwarded  Int     @default(0)
 
   createdAt DateTime @default(now())
 
@@ -1154,13 +1199,13 @@ enum FraudFlagStatus {
 }
 
 model FraudFlag {
-  id        String          @id @default(cuid())
-  orderId   String
-  userId    String
-  rules     String[]
-  riskScore Int             @default(0)
-  status    FraudFlagStatus @default(PENDING)
-  adminNote String?
+  id         String          @id @default(cuid())
+  orderId    String
+  userId     String
+  rules      String[]
+  riskScore  Int             @default(0)
+  status     FraudFlagStatus @default(PENDING)
+  adminNote  String?
   reviewedBy String?
   reviewedAt DateTime?
 
@@ -1175,10 +1220,10 @@ model FraudFlag {
 // ─── Push Notification Tokens ───
 
 model PushToken {
-  id       String @id @default(cuid())
+  id       String  @id @default(cuid())
   userId   String
   token    String
-  platform String @default("web")
+  platform String  @default("web")
   isActive Boolean @default(true)
 
   createdAt DateTime @default(now())
@@ -1192,16 +1237,16 @@ model PushToken {
 // ─── Notification Log ───
 
 model NotificationLog {
-  id        String  @id @default(cuid())
-  userId    String
-  channel   String
-  type      String
-  title     String
-  body      String
-  data      Json?
-  sent      Boolean @default(true)
-  read      Boolean @default(false)
-  readAt    DateTime?
+  id      String    @id @default(cuid())
+  userId  String
+  channel String
+  type    String
+  title   String
+  body    String
+  data    Json?
+  sent    Boolean   @default(true)
+  read    Boolean   @default(false)
+  readAt  DateTime?
 
   createdAt DateTime @default(now())
 

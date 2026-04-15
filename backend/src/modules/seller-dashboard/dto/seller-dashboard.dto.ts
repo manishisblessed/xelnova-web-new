@@ -31,6 +31,16 @@ export class CreateProductDto {
   @ApiPropertyOptional({ description: 'Can be replaced/exchanged' }) @IsOptional() @IsBoolean() @Transform(({ value }) => value === 'true' || value === true) isReplaceable?: boolean;
   @ApiPropertyOptional({ description: 'Return window in days after delivery' }) @IsOptional() @IsNumber() @Type(() => Number) returnWindow?: number;
   @ApiPropertyOptional({ description: 'Cancellation window in hours (0 = until shipped)' }) @IsOptional() @IsNumber() @Type(() => Number) cancellationWindow?: number;
+
+  // Amazon-style product information
+  @ApiPropertyOptional({ description: 'Features and specifications as key-value pairs' }) @IsOptional() @Allow() featuresAndSpecs?: any;
+  @ApiPropertyOptional({ description: 'Materials and care instructions as key-value pairs' }) @IsOptional() @Allow() materialsAndCare?: any;
+  @ApiPropertyOptional({ description: 'Item details as key-value pairs' }) @IsOptional() @Allow() itemDetails?: any;
+  @ApiPropertyOptional({ description: 'Additional details as key-value pairs' }) @IsOptional() @Allow() additionalDetails?: any;
+  @ApiPropertyOptional({ description: 'Detailed product description' }) @IsOptional() @IsString() productDescription?: string;
+  @ApiPropertyOptional({ description: 'Safety and product resources information' }) @IsOptional() @IsString() safetyInfo?: string;
+  @ApiPropertyOptional({ description: 'Regulatory information (BIS, certifications)' }) @IsOptional() @IsString() regulatoryInfo?: string;
+  @ApiPropertyOptional({ description: 'Warranty information' }) @IsOptional() @IsString() warrantyInfo?: string;
 }
 
 export class UpdateProductDto {
@@ -64,6 +74,16 @@ export class UpdateProductDto {
   @ApiPropertyOptional({ description: 'Can be replaced/exchanged' }) @IsOptional() @IsBoolean() @Transform(({ value }) => value === 'true' || value === true) isReplaceable?: boolean;
   @ApiPropertyOptional({ description: 'Return window in days after delivery' }) @IsOptional() @IsNumber() @Type(() => Number) returnWindow?: number;
   @ApiPropertyOptional({ description: 'Cancellation window in hours (0 = until shipped)' }) @IsOptional() @IsNumber() @Type(() => Number) cancellationWindow?: number;
+
+  // Amazon-style product information
+  @ApiPropertyOptional({ description: 'Features and specifications as key-value pairs' }) @IsOptional() @Allow() featuresAndSpecs?: any;
+  @ApiPropertyOptional({ description: 'Materials and care instructions as key-value pairs' }) @IsOptional() @Allow() materialsAndCare?: any;
+  @ApiPropertyOptional({ description: 'Item details as key-value pairs' }) @IsOptional() @Allow() itemDetails?: any;
+  @ApiPropertyOptional({ description: 'Additional details as key-value pairs' }) @IsOptional() @Allow() additionalDetails?: any;
+  @ApiPropertyOptional({ description: 'Detailed product description' }) @IsOptional() @IsString() productDescription?: string;
+  @ApiPropertyOptional({ description: 'Safety and product resources information' }) @IsOptional() @IsString() safetyInfo?: string;
+  @ApiPropertyOptional({ description: 'Regulatory information (BIS, certifications)' }) @IsOptional() @IsString() regulatoryInfo?: string;
+  @ApiPropertyOptional({ description: 'Warranty information' }) @IsOptional() @IsString() warrantyInfo?: string;
 }
 
 export class SellerProductQueryDto {

@@ -28,6 +28,8 @@ export interface AuthUser {
   avatar: string | null;
   role: 'CUSTOMER' | 'SELLER' | 'ADMIN';
   authProvider?: AuthProvider;
+  aadhaarVerified?: boolean;
+  aadhaarVerifiedAt?: string | null;
 }
 
 export interface AuthTokens {
@@ -73,6 +75,18 @@ export interface Product {
   createdAt: string;
   updatedAt: string;
   relatedProducts?: Product[];
+  // Amazon-style product information
+  featuresAndSpecs?: Record<string, string> | null;
+  materialsAndCare?: Record<string, string> | null;
+  itemDetails?: Record<string, string> | null;
+  additionalDetails?: Record<string, string> | null;
+  productDescription?: string | null;
+  safetyInfo?: string | null;
+  regulatoryInfo?: string | null;
+  warrantyInfo?: string | null;
+  deliveredBy?: string | null;
+  isReplaceable?: boolean;
+  returnWindow?: number;
 }
 
 // ─── Category ───
@@ -103,6 +117,50 @@ export interface SellerProfile {
   rating: number;
   totalSales: number;
   createdAt: string;
+}
+
+// ─── Seller Store (Brand Store) ───
+
+export interface SellerStoreBanner {
+  id: string;
+  title: string | null;
+  imageUrl: string;
+  mobileUrl: string | null;
+  link: string | null;
+  sortOrder: number;
+  isActive: boolean;
+}
+
+export interface SellerStoreCategory {
+  id: string;
+  name: string;
+  slug: string;
+  image: string | null;
+  productCount: number;
+}
+
+export interface SellerStore extends SellerProfile {
+  heroBannerUrl: string | null;
+  heroBannerMobile: string | null;
+  aboutTitle: string | null;
+  aboutDescription: string | null;
+  storeThemeColor: string | null;
+  storeBanners: SellerStoreBanner[];
+  categories: SellerStoreCategory[];
+  featuredProducts: Product[];
+  productCount: number;
+}
+
+export interface SellerStoreSettings {
+  heroBannerUrl: string | null;
+  heroBannerMobile: string | null;
+  aboutTitle: string | null;
+  aboutDescription: string | null;
+  storeThemeColor: string | null;
+  featuredProductIds: string[];
+  storeBanners: SellerStoreBanner[];
+  availableProducts: { id: string; name: string; images: string[]; price: number }[];
+  storeUrl: string;
 }
 
 // ─── Banner ───
@@ -164,6 +222,14 @@ export interface OrderItem {
   quantity: number;
   price: number;
   variant: string | null;
+  /** HSN code for tax invoice */
+  hsnCode?: string | null;
+  /** GST rate applied to this item */
+  gstRate?: number | null;
+  /** IMEI/Serial number for electronics */
+  imeiSerialNo?: string | null;
+  /** Seller ID who fulfilled this item */
+  sellerId?: string | null;
   /** Present when API includes nested product (e.g. some list/detail responses). */
   product?: { name?: string; images?: string[] };
 }
@@ -197,6 +263,7 @@ export interface Address {
   addressLine1: string;
   addressLine2: string | null;
   city: string;
+  district: string | null;
   state: string;
   pincode: string;
   landmark: string | null;

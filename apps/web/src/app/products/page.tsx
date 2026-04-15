@@ -50,15 +50,30 @@ function ProductsContent() {
     const cat = searchParams.get("category");
     return cat ? cat.split(",") : [];
   });
-  const [selectedBrands, setSelectedBrands] = useState<string[]>([]);
-  const [priceRange, setPriceRange] = useState<{ min: string; max: string }>({
-    min: "",
-    max: "",
+  const [selectedBrands, setSelectedBrands] = useState<string[]>(() => {
+    const brand = searchParams.get("brand");
+    return brand ? brand.split(",") : [];
   });
-  const [minRating, setMinRating] = useState<number>(0);
-  const [minDiscount, setMinDiscount] = useState<number>(0);
-  const [inStockOnly, setInStockOnly] = useState(false);
+  const [priceRange, setPriceRange] = useState<{ min: string; max: string }>(() => ({
+    min: searchParams.get("minPrice") || "",
+    max: searchParams.get("maxPrice") || "",
+  }));
+  const [minRating, setMinRating] = useState<number>(() => {
+    const rating = searchParams.get("minRating");
+    return rating ? parseInt(rating, 10) : 0;
+  });
+  const [minDiscount, setMinDiscount] = useState<number>(() => {
+    const discount = searchParams.get("discount");
+    if (discount === "all") return 1;
+    return discount ? parseInt(discount, 10) : 0;
+  });
+  const [inStockOnly, setInStockOnly] = useState(() => {
+    const availability = searchParams.get("availability");
+    return availability === "in-stock";
+  });
   const [sort, setSort] = useState(searchParams.get("sort") || "relevance");
+  const [deliveryFilter, setDeliveryFilter] = useState(searchParams.get("delivery") || "");
+  const [dealsFilter, setDealsFilter] = useState(searchParams.get("deals") || "");
 
   const { data: productsData, loading } = useProducts({ limit: 100 });
   const allProducts = useMemo(() => productsData?.products || [], [productsData]);
@@ -68,27 +83,46 @@ function ProductsContent() {
   useEffect(() => {
     const cat = searchParams.get("category");
     if (cat) setSelectedCategories(cat.split(","));
+    const brand = searchParams.get("brand");
+    if (brand) setSelectedBrands(brand.split(","));
+    const minPrice = searchParams.get("minPrice");
+    const maxPrice = searchParams.get("maxPrice");
+    if (minPrice || maxPrice) setPriceRange({ min: minPrice || "", max: maxPrice || "" });
+    const rating = searchParams.get("minRating");
+    if (rating) setMinRating(parseInt(rating, 10));
+    const discount = searchParams.get("discount");
+    if (discount) setMinDiscount(discount === "all" ? 1 : parseInt(discount, 10));
+    const availability = searchParams.get("availability");
+    if (availability) setInStockOnly(availability === "in-stock");
     const s = searchParams.get("sort");
     if (s) setSort(s);
+    const delivery = searchParams.get("delivery");
+    if (delivery) setDeliveryFilter(delivery);
+    const deals = searchParams.get("deals");
+    if (deals) setDealsFilter(deals);
   }, [searchParams]);
 
   const filteredProducts = useMemo(() => {
     let result = [...allProducts];
     if (selectedCategories.length > 0) result = result.filter((p) => selectedCategories.includes(p.category));
-    if (selectedBrands.length > 0) result = result.filter((p) => selectedBrands.includes(p.brand));
+    if (selectedBrands.length > 0) result = result.filter((p) => selectedBrands.includes(p.brand) || selectedBrands.some(b => p.brand?.toLowerCase().replace(/\s+/g, '-') === b));
     if (priceRange.min) result = result.filter((p) => p.price >= Number(priceRange.min));
     if (priceRange.max) result = result.filter((p) => p.price <= Number(priceRange.max));
     if (minRating > 0) result = result.filter((p) => p.rating >= minRating);
     if (minDiscount > 0) result = result.filter((p) => p.discount >= minDiscount);
     if (inStockOnly) result = result.filter((p) => p.inStock);
+    if (dealsFilter === 'today' || dealsFilter === 'flash') {
+      result = result.filter((p) => p.isFlashDeal || p.discount >= 20);
+    }
     switch (sort) {
       case "price-asc": result.sort((a, b) => a.price - b.price); break;
       case "price-desc": result.sort((a, b) => b.price - a.price); break;
       case "rating": result.sort((a, b) => b.rating - a.rating); break;
       case "newest": result.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()); break;
+      case "popular": result.sort((a, b) => (b.reviewCount + (b.isFeatured ? 1000 : 0)) - (a.reviewCount + (a.isFeatured ? 1000 : 0))); break;
     }
     return result;
-  }, [allProducts, selectedCategories, selectedBrands, priceRange, minRating, minDiscount, inStockOnly, sort]);
+  }, [allProducts, selectedCategories, selectedBrands, priceRange, minRating, minDiscount, inStockOnly, sort, dealsFilter]);
 
   const toggleCategory = (slug: string) => setSelectedCategories((prev) => prev.includes(slug) ? prev.filter((c) => c !== slug) : [...prev, slug]);
   const toggleBrand = (brand: string) => setSelectedBrands((prev) => prev.includes(brand) ? prev.filter((b) => b !== brand) : [...prev, brand]);
@@ -101,10 +135,12 @@ function ProductsContent() {
     setMinDiscount(0);
     setInStockOnly(false);
     setSort("relevance");
+    setDeliveryFilter("");
+    setDealsFilter("");
     router.push("/products");
   };
 
-  const hasActiveFilters = selectedCategories.length > 0 || selectedBrands.length > 0 || priceRange.min || priceRange.max || minRating > 0 || minDiscount > 0 || inStockOnly;
+  const hasActiveFilters = selectedCategories.length > 0 || selectedBrands.length > 0 || priceRange.min || priceRange.max || minRating > 0 || minDiscount > 0 || inStockOnly || deliveryFilter || dealsFilter;
 
   return (
     <div className="min-h-screen bg-surface-950">
@@ -147,8 +183,10 @@ function ProductsContent() {
             {selectedBrands.map((brand) => (<FilterChip key={brand} onRemove={() => toggleBrand(brand)}>{brand}</FilterChip>))}
             {(priceRange.min || priceRange.max) && (<FilterChip onRemove={() => setPriceRange({ min: "", max: "" })}>₹{priceRange.min || "0"} - ₹{priceRange.max || "∞"}</FilterChip>)}
             {minRating > 0 && (<FilterChip onRemove={() => setMinRating(0)}>{minRating}★ & Up</FilterChip>)}
-            {minDiscount > 0 && (<FilterChip onRemove={() => setMinDiscount(0)}>{minDiscount}% off+</FilterChip>)}
+            {minDiscount > 0 && (<FilterChip onRemove={() => setMinDiscount(0)}>{minDiscount === 1 ? "All Discounts" : `${minDiscount}% off+`}</FilterChip>)}
             {inStockOnly && (<FilterChip onRemove={() => setInStockOnly(false)}>In Stock</FilterChip>)}
+            {deliveryFilter && (<FilterChip onRemove={() => setDeliveryFilter("")}>{deliveryFilter === 'tomorrow' ? 'Get It by Tomorrow' : deliveryFilter === '2days' ? 'Get It in 2 Days' : 'Express Delivery'}</FilterChip>)}
+            {dealsFilter && (<FilterChip onRemove={() => setDealsFilter("")}>{dealsFilter === 'today' ? "Today's Deals" : "Flash Deals"}</FilterChip>)}
             <button onClick={clearAllFilters} className="text-sm font-medium text-gold-400 hover:text-gold-300">Clear All</button>
           </div>
         )}

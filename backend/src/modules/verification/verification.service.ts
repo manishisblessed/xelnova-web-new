@@ -831,4 +831,81 @@ export class VerificationService {
       },
     };
   }
+
+  // ========== Customer Wallet KYC ==========
+
+  async createCustomerKycUrl(userId: string): Promise<DigilockerCreateUrlResult> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, aadhaarVerified: true },
+    });
+
+    if (!user) {
+      throw new HttpException('User not found', HttpStatus.NOT_FOUND);
+    }
+
+    if (user.aadhaarVerified) {
+      throw new HttpException('KYC verification is already completed', HttpStatus.BAD_REQUEST);
+    }
+
+    const orderId = `WALLET_KYC_${userId}_${Date.now()}`;
+    return this.createDigilockerAadhaarUrl(orderId, userId);
+  }
+
+  async verifyCustomerKyc(
+    userId: string,
+    verificationId: string,
+    referenceId: string,
+    orderId: string,
+  ): Promise<{ verified: boolean; message: string }> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, aadhaarVerified: true },
+    });
+
+    if (!user) {
+      throw new HttpException('User not found', HttpStatus.NOT_FOUND);
+    }
+
+    if (user.aadhaarVerified) {
+      return { verified: true, message: 'KYC verification is already completed' };
+    }
+
+    const aadhaarData = await this.getDigilockerDocument(
+      verificationId,
+      referenceId,
+      orderId,
+      'AADHAAR',
+      userId,
+    ) as DigilockerAadhaarResult;
+
+    if (aadhaarData.status !== 'Success' || !aadhaarData.uid) {
+      throw new HttpException('Aadhaar verification failed. Please try again.', HttpStatus.BAD_REQUEST);
+    }
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        aadhaarVerified: true,
+        aadhaarVerifiedAt: new Date(),
+        aadhaarVerifiedData: {
+          name: aadhaarData.name,
+          uid: aadhaarData.uid,
+          dob: aadhaarData.dob,
+          gender: aadhaarData.gender,
+          verifiedAt: new Date().toISOString(),
+          orderId,
+          verificationId,
+        },
+      },
+    });
+
+    await this.logVerification('CUSTOMER_KYC', orderId, 'VERIFIED', {
+      userId,
+      name: aadhaarData.name,
+      uid: aadhaarData.uid,
+    }, userId);
+
+    return { verified: true, message: 'KYC verification completed successfully' };
+  }
 }

@@ -94,6 +94,17 @@ function normalizeProducts(res: unknown): SellerProduct[] {
   return [];
 }
 
+function objectToKeyValueArray(obj: Record<string, string> | null | undefined): { key: string; value: string }[] {
+  if (!obj || typeof obj !== 'object') return [];
+  return Object.entries(obj).map(([key, value]) => ({ key, value: String(value) }));
+}
+
+function keyValueArrayToObject(arr: { key: string; value: string }[]): Record<string, string> | undefined {
+  const filtered = arr.filter((item) => item.key.trim() && item.value.trim());
+  if (filtered.length === 0) return undefined;
+  return Object.fromEntries(filtered.map((item) => [item.key.trim(), item.value.trim()]));
+}
+
 // ─── Image Gallery Component ───
 
 type UploadingImage = {
@@ -407,6 +418,76 @@ function ProductImageGallery({
   );
 }
 
+// ─── Key-Value Editor Component ───
+
+interface KeyValueEditorProps {
+  label: string;
+  description?: string;
+  items: { key: string; value: string }[];
+  onChange: (items: { key: string; value: string }[]) => void;
+}
+
+function KeyValueEditor({ label, description, items, onChange }: KeyValueEditorProps) {
+  const addItem = () => onChange([...items, { key: '', value: '' }]);
+  
+  const updateItem = (index: number, field: 'key' | 'value', newValue: string) => {
+    const updated = items.map((item, i) =>
+      i === index ? { ...item, [field]: newValue } : item
+    );
+    onChange(updated);
+  };
+  
+  const removeItem = (index: number) => {
+    onChange(items.filter((_, i) => i !== index));
+  };
+
+  return (
+    <div className="mt-4 rounded-xl border border-border bg-surface-muted/30 p-3">
+      <div className="flex items-center justify-between mb-2">
+        <div>
+          <p className="text-xs font-medium text-text-primary">{label}</p>
+          {description && <p className="text-[10px] text-text-muted">{description}</p>}
+        </div>
+        <Button type="button" variant="outline" size="sm" onClick={addItem}>
+          <Plus className="h-3 w-3 mr-1" />
+          Add
+        </Button>
+      </div>
+      {items.length === 0 ? (
+        <p className="text-xs text-text-muted py-2">No items added yet. Click &quot;Add&quot; to add entries.</p>
+      ) : (
+        <div className="space-y-2">
+          {items.map((item, index) => (
+            <div key={index} className="flex items-center gap-2">
+              <input
+                type="text"
+                value={item.key}
+                onChange={(e) => updateItem(index, 'key', e.target.value)}
+                placeholder="Key (e.g. Material)"
+                className="flex-1 rounded-lg border border-border bg-surface-raised px-2 py-1.5 text-xs text-text-primary outline-none focus:border-primary-500"
+              />
+              <input
+                type="text"
+                value={item.value}
+                onChange={(e) => updateItem(index, 'value', e.target.value)}
+                placeholder="Value (e.g. Plastic)"
+                className="flex-1 rounded-lg border border-border bg-surface-raised px-2 py-1.5 text-xs text-text-primary outline-none focus:border-primary-500"
+              />
+              <button
+                type="button"
+                onClick={() => removeItem(index)}
+                className="rounded p-1 text-text-muted hover:text-danger-600 hover:bg-danger-50"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main Page ───
 
 export default function SellerInventoryPage() {
@@ -420,6 +501,7 @@ export default function SellerInventoryPage() {
   const [deleteProduct, setDeleteProduct] = useState<SellerProduct | null>(null);
   const [saving, setSaving] = useState(false);
   const [editLoading, setEditLoading] = useState(false);
+  const [togglingHoldId, setTogglingHoldId] = useState<string | null>(null);
 
   const [formName, setFormName] = useState('');
   const [formPrice, setFormPrice] = useState('');
@@ -444,6 +526,16 @@ export default function SellerInventoryPage() {
   const [formIsReplaceable, setFormIsReplaceable] = useState(false);
   const [formReturnWindow, setFormReturnWindow] = useState('7');
   const [formCancellationWindow, setFormCancellationWindow] = useState('0');
+
+  // Amazon-style product information
+  const [formFeaturesAndSpecs, setFormFeaturesAndSpecs] = useState<{ key: string; value: string }[]>([]);
+  const [formMaterialsAndCare, setFormMaterialsAndCare] = useState<{ key: string; value: string }[]>([]);
+  const [formItemDetails, setFormItemDetails] = useState<{ key: string; value: string }[]>([]);
+  const [formAdditionalDetails, setFormAdditionalDetails] = useState<{ key: string; value: string }[]>([]);
+  const [formProductDescription, setFormProductDescription] = useState('');
+  const [formSafetyInfo, setFormSafetyInfo] = useState('');
+  const [formRegulatoryInfo, setFormRegulatoryInfo] = useState('');
+  const [formWarrantyInfo, setFormWarrantyInfo] = useState('');
 
   const loadProducts = useCallback(() => {
     setLoading(true);
@@ -494,6 +586,14 @@ export default function SellerInventoryPage() {
     setFormIsReplaceable(false);
     setFormReturnWindow('7');
     setFormCancellationWindow('0');
+    setFormFeaturesAndSpecs([]);
+    setFormMaterialsAndCare([]);
+    setFormItemDetails([]);
+    setFormAdditionalDetails([]);
+    setFormProductDescription('');
+    setFormSafetyInfo('');
+    setFormRegulatoryInfo('');
+    setFormWarrantyInfo('');
   };
 
   const openCreate = () => {
@@ -535,6 +635,15 @@ export default function SellerInventoryPage() {
         setFormIsReplaceable(full.isReplaceable === true);
         setFormReturnWindow(String(full.returnWindow ?? '7'));
         setFormCancellationWindow(String(full.cancellationWindow ?? '0'));
+        // Amazon-style product information
+        setFormFeaturesAndSpecs(objectToKeyValueArray(full.featuresAndSpecs as Record<string, string> | null));
+        setFormMaterialsAndCare(objectToKeyValueArray(full.materialsAndCare as Record<string, string> | null));
+        setFormItemDetails(objectToKeyValueArray(full.itemDetails as Record<string, string> | null));
+        setFormAdditionalDetails(objectToKeyValueArray(full.additionalDetails as Record<string, string> | null));
+        setFormProductDescription(String(full.productDescription ?? ''));
+        setFormSafetyInfo(String(full.safetyInfo ?? ''));
+        setFormRegulatoryInfo(String(full.regulatoryInfo ?? ''));
+        setFormWarrantyInfo(String(full.warrantyInfo ?? ''));
       })
       .catch((err: Error) => {
         toast.error(err.message || 'Could not load product details');
@@ -751,6 +860,14 @@ export default function SellerInventoryPage() {
         isReplaceable: formIsReplaceable,
         returnWindow: formReturnWindow ? Number(formReturnWindow) : 7,
         cancellationWindow: formCancellationWindow ? Number(formCancellationWindow) : 0,
+        featuresAndSpecs: keyValueArrayToObject(formFeaturesAndSpecs),
+        materialsAndCare: keyValueArrayToObject(formMaterialsAndCare),
+        itemDetails: keyValueArrayToObject(formItemDetails),
+        additionalDetails: keyValueArrayToObject(formAdditionalDetails),
+        productDescription: formProductDescription.trim() || undefined,
+        safetyInfo: formSafetyInfo.trim() || undefined,
+        regulatoryInfo: formRegulatoryInfo.trim() || undefined,
+        warrantyInfo: formWarrantyInfo.trim() || undefined,
       });
       toast.success('Product created and submitted for approval', { 
         description: 'Your product will be reviewed by our team and go live once approved.' 
@@ -802,6 +919,14 @@ export default function SellerInventoryPage() {
         isReplaceable: formIsReplaceable,
         returnWindow: formReturnWindow ? Number(formReturnWindow) : 7,
         cancellationWindow: formCancellationWindow ? Number(formCancellationWindow) : 0,
+        featuresAndSpecs: keyValueArrayToObject(formFeaturesAndSpecs),
+        materialsAndCare: keyValueArrayToObject(formMaterialsAndCare),
+        itemDetails: keyValueArrayToObject(formItemDetails),
+        additionalDetails: keyValueArrayToObject(formAdditionalDetails),
+        productDescription: formProductDescription.trim() || undefined,
+        safetyInfo: formSafetyInfo.trim() || undefined,
+        regulatoryInfo: formRegulatoryInfo.trim() || undefined,
+        warrantyInfo: formWarrantyInfo.trim() || undefined,
       });
       toast.success('Product updated');
       setEditProduct(null);
@@ -835,12 +960,17 @@ export default function SellerInventoryPage() {
       return;
     }
     const newStatus = product.status === 'ON_HOLD' ? 'ACTIVE' : 'ON_HOLD';
+    setTogglingHoldId(product.id);
     try {
       await apiUpdateProduct(product.id, { status: newStatus });
       toast.success(newStatus === 'ON_HOLD' ? 'Product put on hold' : 'Product activated');
-      loadProducts();
+      setProducts((prev) =>
+        prev.map((p) => (p.id === product.id ? { ...p, status: newStatus } : p)),
+      );
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to update status');
+    } finally {
+      setTogglingHoldId(null);
     }
   };
 
@@ -914,28 +1044,38 @@ export default function SellerInventoryPage() {
       key: 'actions',
       header: '',
       className: 'w-[180px]',
-      render: (row) => (
-        <div className="flex gap-1">
-          <Button type="button" variant="outline" size="sm" onClick={() => openEdit(row)} title="Edit">
-            <Pencil className="h-3.5 w-3.5" />
-          </Button>
-          {canToggleHold(row) && (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => toggleHold(row)}
-              title={row.status === 'ON_HOLD' ? 'Activate' : 'Put on hold'}
-              className={row.status === 'ON_HOLD' ? 'border-primary-300 text-primary-600 hover:bg-primary-50' : 'border-warning-300 text-warning-600 hover:bg-warning-50'}
-            >
-              {row.status === 'ON_HOLD' ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}
+      render: (row) => {
+        const isToggling = togglingHoldId === row.id;
+        return (
+          <div className="flex gap-1">
+            <Button type="button" variant="outline" size="sm" onClick={() => openEdit(row)} title="Edit" disabled={isToggling}>
+              <Pencil className="h-3.5 w-3.5" />
             </Button>
-          )}
-          <Button type="button" variant="danger" size="sm" onClick={() => setDeleteProduct(row)} title="Delete">
-            <Trash2 className="h-3.5 w-3.5" />
-          </Button>
-        </div>
-      ),
+            {canToggleHold(row) && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => toggleHold(row)}
+                disabled={isToggling}
+                title={row.status === 'ON_HOLD' ? 'Activate' : 'Put on hold'}
+                className={row.status === 'ON_HOLD' ? 'border-primary-300 text-primary-600 hover:bg-primary-50' : 'border-warning-300 text-warning-600 hover:bg-warning-50'}
+              >
+                {isToggling ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : row.status === 'ON_HOLD' ? (
+                  <Play className="h-3.5 w-3.5" />
+                ) : (
+                  <Pause className="h-3.5 w-3.5" />
+                )}
+              </Button>
+            )}
+            <Button type="button" variant="danger" size="sm" onClick={() => setDeleteProduct(row)} title="Delete" disabled={isToggling}>
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        );
+      },
     },
   ];
 
@@ -1398,6 +1538,87 @@ export default function SellerInventoryPage() {
               <p className="text-[10px] text-text-muted mt-0.5">0 = cancellable until shipped</p>
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* Product Information (Amazon-style sections) */}
+      <div className="border-t border-border pt-4 mt-4">
+        <p className="text-xs font-semibold text-text-primary mb-1">Product Information</p>
+        <p className="text-[10px] text-text-muted mb-4">Add detailed product information similar to Amazon product pages</p>
+        
+        {/* Features & Specs */}
+        <KeyValueEditor
+          label="Features & Specs"
+          description="e.g. Light Source Type: LED, Power Source: Battery"
+          items={formFeaturesAndSpecs}
+          onChange={setFormFeaturesAndSpecs}
+        />
+
+        {/* Materials & Care */}
+        <KeyValueEditor
+          label="Materials & Care"
+          description="e.g. Material: Plastic, Care Instructions: Wipe clean"
+          items={formMaterialsAndCare}
+          onChange={setFormMaterialsAndCare}
+        />
+
+        {/* Item Details */}
+        <KeyValueEditor
+          label="Item Details"
+          description="e.g. Manufacturer: XYZ Corp, Country of Origin: India"
+          items={formItemDetails}
+          onChange={setFormItemDetails}
+        />
+
+        {/* Additional Details */}
+        <KeyValueEditor
+          label="Additional Details"
+          description="e.g. Best Sellers Rank: #1 in Toys, Model Number: ABC123"
+          items={formAdditionalDetails}
+          onChange={setFormAdditionalDetails}
+        />
+
+        {/* Product Description */}
+        <div className="mt-4">
+          <label className="text-xs text-text-muted block mb-1">Product Description</label>
+          <textarea
+            className="w-full min-h-[100px] rounded-xl border border-border bg-surface-raised px-3 py-2 text-sm text-text-primary placeholder:text-text-muted resize-y"
+            placeholder="Detailed description of the product features, benefits, and uses..."
+            value={formProductDescription}
+            onChange={(e) => setFormProductDescription(e.target.value)}
+          />
+        </div>
+
+        {/* Warranty Info */}
+        <div className="mt-4">
+          <label className="text-xs text-text-muted block mb-1">Warranty Information</label>
+          <Input
+            placeholder="e.g. 1 Year Manufacturer Warranty"
+            value={formWarrantyInfo}
+            onChange={(e) => setFormWarrantyInfo(e.target.value)}
+          />
+        </div>
+
+        {/* Safety Info */}
+        <div className="mt-4">
+          <label className="text-xs text-text-muted block mb-1">Safety & Product Resources</label>
+          <textarea
+            className="w-full min-h-[80px] rounded-xl border border-border bg-surface-raised px-3 py-2 text-sm text-text-primary placeholder:text-text-muted resize-y"
+            placeholder="Safety information, warnings, age recommendations..."
+            value={formSafetyInfo}
+            onChange={(e) => setFormSafetyInfo(e.target.value)}
+          />
+        </div>
+
+        {/* Regulatory Info */}
+        <div className="mt-4">
+          <label className="text-xs text-text-muted block mb-1">Regulatory Information</label>
+          <textarea
+            className="w-full min-h-[80px] rounded-xl border border-border bg-surface-raised px-3 py-2 text-sm text-text-primary placeholder:text-text-muted resize-y"
+            placeholder="BIS marking, certifications, compliance information..."
+            value={formRegulatoryInfo}
+            onChange={(e) => setFormRegulatoryInfo(e.target.value)}
+          />
         </div>
       </div>
 

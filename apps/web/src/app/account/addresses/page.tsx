@@ -5,6 +5,8 @@ import { motion } from "framer-motion";
 import { MapPin, Plus, Home, Briefcase, Pencil, Trash2, Loader2 } from "lucide-react";
 import { usersApi, setAccessToken } from "@xelnova/api";
 import type { Address } from "@xelnova/api";
+import { lookupPincode } from "@/lib/store/location-store";
+import { INDIAN_STATES } from "@/lib/indian-states";
 
 type AddressType = "HOME" | "OFFICE" | "OTHER";
 
@@ -64,6 +66,29 @@ export default function AddressesPage() {
   const [deleting, setDeleting] = useState<string | null>(null);
   const [editing, setEditing] = useState<(Omit<LocalAddress, "id"> & { id?: string }) | null>(null);
   const [error, setError] = useState("");
+  const [pincodeLooking, setPincodeLooking] = useState(false);
+
+  const handlePincodeChange = async (value: string) => {
+    if (!editing) return;
+    const cleanPincode = value.replace(/\D/g, "").slice(0, 6);
+    setEditing({ ...editing, pincode: cleanPincode });
+
+    if (/^[1-9][0-9]{5}$/.test(cleanPincode)) {
+      setPincodeLooking(true);
+      try {
+        const data = await lookupPincode(cleanPincode);
+        setEditing((prev) => prev ? {
+          ...prev,
+          city: data.city || prev.city,
+          state: data.state || prev.state,
+        } : prev);
+      } catch {
+        // Pincode lookup failed, user can still enter manually
+      } finally {
+        setPincodeLooking(false);
+      }
+    }
+  };
 
   const fetchAddresses = useCallback(async () => {
     try {
@@ -99,6 +124,7 @@ export default function AddressesPage() {
         addressLine1: editing.line1.trim(),
         addressLine2: editing.line2?.trim() || null,
         city: editing.city.trim(),
+        district: null,
         state: editing.state.trim(),
         pincode: editing.pincode.trim(),
         landmark: null,
@@ -244,6 +270,25 @@ export default function AddressesPage() {
               />
             </div>
             <div>
+              <label className="block text-sm font-medium text-text-secondary mb-1">PIN Code *</label>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={editing.pincode}
+                  onChange={(e) => handlePincodeChange(e.target.value)}
+                  className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm text-text-primary outline-none focus:border-primary-500 transition-colors"
+                  placeholder="400001"
+                  maxLength={6}
+                />
+                {pincodeLooking && (
+                  <div className="absolute right-3 top-2.5">
+                    <Loader2 size={16} className="animate-spin text-primary-600" />
+                  </div>
+                )}
+              </div>
+              <p className="text-[10px] text-text-muted mt-0.5">Enter PIN code to auto-fill city & state</p>
+            </div>
+            <div>
               <label className="block text-sm font-medium text-text-secondary mb-1">City *</label>
               <input
                 type="text"
@@ -255,24 +300,16 @@ export default function AddressesPage() {
             </div>
             <div>
               <label className="block text-sm font-medium text-text-secondary mb-1">State *</label>
-              <input
-                type="text"
+              <select
                 value={editing.state}
                 onChange={(e) => setEditing({ ...editing, state: e.target.value })}
-                className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm text-text-primary outline-none focus:border-primary-500 transition-colors"
-                placeholder="Maharashtra"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-text-secondary mb-1">PIN Code *</label>
-              <input
-                type="text"
-                value={editing.pincode}
-                onChange={(e) => setEditing({ ...editing, pincode: e.target.value.replace(/\D/g, "").slice(0, 6) })}
-                className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm text-text-primary outline-none focus:border-primary-500 transition-colors"
-                placeholder="400001"
-                maxLength={6}
-              />
+                className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm text-text-primary outline-none focus:border-primary-500 transition-colors bg-white"
+              >
+                <option value="">Select State</option>
+                {INDIAN_STATES.map((s) => (
+                  <option key={s.code} value={s.name}>{s.name}</option>
+                ))}
+              </select>
             </div>
           </div>
           <div className="mt-5 flex gap-3">

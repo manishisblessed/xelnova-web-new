@@ -172,6 +172,34 @@ export class VerificationController {
     };
   }
 
+  // ========== Customer Wallet KYC (Aadhaar via Digilocker) ==========
+
+  @Post('customer/kyc/create-url')
+  @Auth()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Create Digilocker URL for customer wallet KYC (Aadhaar verification)' })
+  async createCustomerKycUrl(@CurrentUser('id') userId: string) {
+    const data = await this.verificationService.createCustomerKycUrl(userId);
+    return { success: true, data, message: 'KYC verification URL created' };
+  }
+
+  @Post('customer/kyc/verify')
+  @Auth()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Complete customer wallet KYC after Digilocker verification' })
+  async verifyCustomerKyc(
+    @CurrentUser('id') userId: string,
+    @Body() dto: DigilockerGetDocumentDto,
+  ) {
+    const data = await this.verificationService.verifyCustomerKyc(
+      userId,
+      dto.verificationId,
+      dto.referenceId,
+      dto.orderId,
+    );
+    return { success: true, data, message: 'KYC verification completed successfully' };
+  }
+
   // ========== Digilocker Aadhaar (eKYCHub) ==========
 
   @Post('aadhaar/digilocker/create-url')

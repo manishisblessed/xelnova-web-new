@@ -24,6 +24,8 @@ export * as walletApi from './wallet';
 export * as ticketsApi from './tickets';
 export * as notificationsApi from './notifications';
 export * as wishlistApi from './wishlist';
+export * as verificationApi from './verification';
+export * as storesApi from './stores';
 
 // Hooks
 export { AuthProvider, useAuth } from './hooks/use-auth';

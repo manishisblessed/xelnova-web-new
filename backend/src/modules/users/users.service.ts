@@ -25,6 +25,8 @@ export class UsersService {
         authProvider: true,
         emailVerified: true,
         phoneVerified: true,
+        aadhaarVerified: true,
+        aadhaarVerifiedAt: true,
         createdAt: true,
       },
     });
@@ -109,6 +111,7 @@ export class UsersService {
       addressLine1: string;
       addressLine2?: string;
       city: string;
+      district?: string;
       state: string;
       pincode: string;
       landmark?: string;
@@ -128,6 +131,7 @@ export class UsersService {
         addressLine1: address.addressLine1,
         addressLine2: address.addressLine2,
         city: address.city,
+        district: address.district,
         state: address.state,
         pincode: address.pincode,
         landmark: address.landmark,
@@ -145,6 +149,7 @@ export class UsersService {
       addressLine1?: string;
       addressLine2?: string;
       city?: string;
+      district?: string;
       state?: string;
       pincode?: string;
       landmark?: string;
@@ -161,6 +166,7 @@ export class UsersService {
     if (data.addressLine1 !== undefined) updateData.addressLine1 = data.addressLine1;
     if (data.addressLine2 !== undefined) updateData.addressLine2 = data.addressLine2;
     if (data.city !== undefined) updateData.city = data.city;
+    if (data.district !== undefined) updateData.district = data.district;
     if (data.state !== undefined) updateData.state = data.state;
     if (data.pincode !== undefined) updateData.pincode = data.pincode;
     if (data.landmark !== undefined) updateData.landmark = data.landmark;

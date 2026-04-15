@@ -163,6 +163,8 @@ export class OrdersService {
           price,
           variant: item.variant,
           gstRate: product.gstRate ?? 18,
+          hsnCode: product.hsnCode || null,
+          sellerId: product.sellerId,
         };
       }),
     );
@@ -247,7 +249,17 @@ export class OrdersService {
       shippingAddressId = newAddress.id;
     }
 
-    const orderItemsForDb = orderItems.map(({ gstRate: _gst, ...rest }) => rest);
+    const orderItemsForDb = orderItems.map((item) => ({
+      productId: item.productId,
+      productName: item.productName,
+      productImage: item.productImage,
+      quantity: item.quantity,
+      price: item.price,
+      variant: item.variant,
+      hsnCode: item.hsnCode,
+      gstRate: item.gstRate,
+      sellerId: item.sellerId,
+    }));
 
     const order = await this.prisma.order.create({
       data: {

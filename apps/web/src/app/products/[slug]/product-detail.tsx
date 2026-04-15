@@ -8,6 +8,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Star, Heart, Share2, ShieldCheck, Truck, RotateCcw, ChevronRight,
   Minus, Plus, ThumbsUp, Check, ShoppingCart, Package, Loader2, Ruler, X,
+  RefreshCw, Lock, ChevronDown, ChevronUp, AlertTriangle, FileText, Store,
 } from "lucide-react";
 import { cn } from "@xelnova/utils";
 import { formatCurrency, formatDate } from "@xelnova/utils";
@@ -18,7 +19,7 @@ import { useWishlistStore } from "@/lib/store/wishlist-store";
 import { ProductCard } from "@/components/marketplace/product-card";
 import type { SizeChartRow } from "@/lib/data/products";
 
-type TabId = "description" | "specifications" | "reviews";
+type TabId = "description" | "specifications" | "reviews" | "product-info";
 
 export default function ProductDetail() {
   const params = useParams();
@@ -214,8 +215,13 @@ export default function ProductDetail() {
     });
   };
 
+  const hasProductInfo = product.featuresAndSpecs || product.materialsAndCare || 
+    product.itemDetails || product.additionalDetails || product.productDescription || 
+    product.safetyInfo || product.regulatoryInfo;
+
   const tabs: { id: TabId; label: string }[] = [
     { id: "description", label: "Description" },
+    ...(hasProductInfo ? [{ id: "product-info" as TabId, label: "Product Information" }] : []),
     { id: "specifications", label: "Specifications" },
     { id: "reviews", label: `Reviews (${product.reviewCount.toLocaleString("en-IN")})` },
   ];
@@ -376,11 +382,35 @@ export default function ProductDetail() {
 
               <hr className="border-border" />
 
+              {/* Amazon-style service badges */}
+              <div className="flex flex-wrap gap-4 text-xs text-center">
+                {product.isReplaceable && (
+                  <div className="flex flex-col items-center gap-1.5">
+                    <div className="w-10 h-10 rounded-full bg-primary-50 border border-primary-100 flex items-center justify-center">
+                      <RefreshCw size={18} className="text-primary-600" />
+                    </div>
+                    <span className="text-text-secondary font-medium">{product.returnWindow || 7} Days<br/>Replacement</span>
+                  </div>
+                )}
+                <div className="flex flex-col items-center gap-1.5">
+                  <div className="w-10 h-10 rounded-full bg-primary-50 border border-primary-100 flex items-center justify-center">
+                    <Truck size={18} className="text-primary-600" />
+                  </div>
+                  <span className="text-text-secondary font-medium">{product.deliveredBy || "Xelnova"}<br/>Delivered</span>
+                </div>
+                <div className="flex flex-col items-center gap-1.5">
+                  <div className="w-10 h-10 rounded-full bg-primary-50 border border-primary-100 flex items-center justify-center">
+                    <Lock size={18} className="text-primary-600" />
+                  </div>
+                  <span className="text-text-secondary font-medium">Secure<br/>Transaction</span>
+                </div>
+              </div>
+
               {/* Delivery info */}
               <div className="space-y-3">
                 <div className="flex items-center gap-3 text-sm">
-                  <div className="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center shrink-0">
-                    <Truck size={16} className="text-primary-600" />
+                  <div className="w-8 h-8 rounded-lg bg-success-50 flex items-center justify-center shrink-0">
+                    <Truck size={16} className="text-success-600" />
                   </div>
                   <span>
                     <strong className="text-text-primary">FREE Delivery</strong>{" "}
@@ -391,14 +421,16 @@ export default function ProductDetail() {
                   <div className="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center shrink-0">
                     <RotateCcw size={16} className="text-primary-600" />
                   </div>
-                  <span className="text-text-secondary">7 days easy return policy</span>
+                  <span className="text-text-secondary">{product.returnWindow || 7} days easy return policy</span>
                 </div>
-                <div className="flex items-center gap-3 text-sm">
-                  <div className="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center shrink-0">
-                    <ShieldCheck size={16} className="text-primary-600" />
+                {product.warrantyInfo && (
+                  <div className="flex items-center gap-3 text-sm">
+                    <div className="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center shrink-0">
+                      <ShieldCheck size={16} className="text-primary-600" />
+                    </div>
+                    <span className="text-text-secondary">{product.warrantyInfo}</span>
                   </div>
-                  <span className="text-text-secondary">1 Year Manufacturer Warranty</span>
-                </div>
+                )}
               </div>
 
               {/* Variants */}
@@ -674,6 +706,15 @@ export default function ProductDetail() {
                   <Star size={10} className="fill-accent-400 text-accent-400" />
                   <span>seller rating</span>
                 </div>
+                {product.seller.slug && (
+                  <Link
+                    href={`/stores/${product.seller.slug}`}
+                    className="mt-2 flex items-center justify-center gap-1.5 w-full rounded-lg bg-white border border-border py-2 text-xs font-medium text-primary-600 hover:bg-primary-50 hover:border-primary-200 transition-colors"
+                  >
+                    <Store size={12} />
+                    Visit Store
+                  </Link>
+                )}
               </div>
             </div>
           </div>
@@ -724,6 +765,9 @@ export default function ProductDetail() {
                     <p className="text-sm text-text-muted">No specifications available.</p>
                   )}
                 </motion.div>
+              )}
+              {activeTab === "product-info" && (
+                <ProductInfoTab product={product} />
               )}
               {activeTab === "reviews" && (
                 <ReviewsTab product={product} />
@@ -805,6 +849,151 @@ export default function ProductDetail() {
         )}
       </AnimatePresence>
     </div>
+  );
+}
+
+function CollapsibleSection({ 
+  title, 
+  icon: Icon, 
+  children, 
+  defaultOpen = false 
+}: { 
+  title: string; 
+  icon: React.ElementType; 
+  children: React.ReactNode;
+  defaultOpen?: boolean;
+}) {
+  const [isOpen, setIsOpen] = useState(defaultOpen);
+
+  return (
+    <div className="border border-border rounded-xl overflow-hidden">
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 hover:bg-gray-100 transition-colors"
+      >
+        <div className="flex items-center gap-2">
+          <Icon size={16} className="text-primary-600" />
+          <span className="font-medium text-text-primary text-sm">{title}</span>
+        </div>
+        {isOpen ? (
+          <ChevronUp size={16} className="text-text-muted" />
+        ) : (
+          <ChevronDown size={16} className="text-text-muted" />
+        )}
+      </button>
+      <AnimatePresence initial={false}>
+        {isOpen && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden"
+          >
+            <div className="p-4 bg-white">{children}</div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function KeyValueTable({ data, title }: { data: Record<string, string>; title?: string }) {
+  const entries = Object.entries(data);
+  if (entries.length === 0) return null;
+
+  return (
+    <div>
+      {title && <h4 className="text-sm font-medium text-text-primary mb-2">{title}</h4>}
+      <table className="w-full">
+        <tbody>
+          {entries.map(([key, value], i) => (
+            <tr key={key} className={i % 2 === 0 ? "bg-gray-50" : "bg-white"}>
+              <td className="px-3 py-2 text-sm font-medium text-text-secondary w-1/3">{key}</td>
+              <td className="px-3 py-2 text-sm text-text-primary">{value}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function ProductInfoTab({ product }: { product: any }) {
+  return (
+    <motion.div 
+      key="product-info" 
+      initial={{ opacity: 0, y: 10 }} 
+      animate={{ opacity: 1, y: 0 }} 
+      exit={{ opacity: 0, y: -10 }}
+      className="space-y-4"
+    >
+      {/* Features & Specs */}
+      {product.featuresAndSpecs && Object.keys(product.featuresAndSpecs).length > 0 && (
+        <CollapsibleSection title="Features & Specs" icon={FileText} defaultOpen={true}>
+          <KeyValueTable data={product.featuresAndSpecs} />
+        </CollapsibleSection>
+      )}
+
+      {/* Materials & Care */}
+      {product.materialsAndCare && Object.keys(product.materialsAndCare).length > 0 && (
+        <CollapsibleSection title="Materials & Care" icon={Package}>
+          <KeyValueTable data={product.materialsAndCare} />
+        </CollapsibleSection>
+      )}
+
+      {/* Item Details */}
+      {product.itemDetails && Object.keys(product.itemDetails).length > 0 && (
+        <CollapsibleSection title="Item Details" icon={FileText}>
+          <KeyValueTable data={product.itemDetails} />
+        </CollapsibleSection>
+      )}
+
+      {/* Additional Details */}
+      {product.additionalDetails && Object.keys(product.additionalDetails).length > 0 && (
+        <CollapsibleSection title="Additional Details" icon={FileText}>
+          <KeyValueTable data={product.additionalDetails} />
+        </CollapsibleSection>
+      )}
+
+      {/* Product Description */}
+      {product.productDescription && (
+        <CollapsibleSection title="Product Description" icon={FileText} defaultOpen={true}>
+          <p className="text-sm text-text-secondary whitespace-pre-line leading-relaxed">
+            {product.productDescription}
+          </p>
+        </CollapsibleSection>
+      )}
+
+      {/* Safety & Product Resources */}
+      {product.safetyInfo && (
+        <CollapsibleSection title="Safety & Product Resources" icon={ShieldCheck}>
+          <p className="text-sm text-text-secondary whitespace-pre-line leading-relaxed">
+            {product.safetyInfo}
+          </p>
+        </CollapsibleSection>
+      )}
+
+      {/* Regulatory Information */}
+      {product.regulatoryInfo && (
+        <CollapsibleSection title="Regulatory Information" icon={AlertTriangle}>
+          <p className="text-sm text-text-secondary whitespace-pre-line leading-relaxed">
+            {product.regulatoryInfo}
+          </p>
+        </CollapsibleSection>
+      )}
+
+      {/* Feedback section */}
+      <div className="mt-6 pt-4 border-t border-border">
+        <p className="text-xs text-text-muted">
+          Would you like to{" "}
+          <button className="text-primary-600 hover:text-primary-700 underline">
+            tell us about a lower price
+          </button>
+          ?
+        </p>
+      </div>
+    </motion.div>
   );
 }
 

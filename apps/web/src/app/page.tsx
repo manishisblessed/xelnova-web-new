@@ -11,6 +11,7 @@ import { searchApi, productsApi } from '@xelnova/api';
 import type { Banner } from '@xelnova/api';
 import { HeroCarousel } from '@/components/marketplace/hero-carousel';
 import { CategoryCard } from '@/components/marketplace/category-card';
+import { HomeFilterBar } from '@/components/marketplace/home-filter-bar';
 import { useCategories } from '@/lib/api';
 
 const HomeBelowFold = dynamic(
@@ -56,6 +57,7 @@ export default function HomePage() {
     { icon: Truck, value: 'FREE', label: 'Delivery over ₹499' },
   ]);
   const [sidePromos, setSidePromos] = useState(defaultSidePromos);
+  const [brands, setBrands] = useState<{ id: string; name: string; slug: string }[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -63,7 +65,8 @@ export default function HomePage() {
       searchApi.getPopularSearches(),
       productsApi.getStats(),
       productsApi.getBanners('side'),
-    ]).then(([searchesResult, statsResult, bannersResult]) => {
+      productsApi.getBrands(),
+    ]).then(([searchesResult, statsResult, bannersResult, brandsResult]) => {
       if (cancelled) return;
       if (searchesResult.status === 'fulfilled' && searchesResult.value?.length) {
         setTrendingSearches(searchesResult.value);
@@ -91,12 +94,21 @@ export default function HomePage() {
           })));
         }
       }
+      if (brandsResult.status === 'fulfilled' && brandsResult.value?.length) {
+        setBrands(brandsResult.value.map((b: any) => ({
+          id: b.id,
+          name: b.name,
+          slug: b.slug || b.name.toLowerCase().replace(/\s+/g, '-'),
+        })));
+      }
     });
     return () => { cancelled = true; };
   }, []);
 
   return (
     <div className="min-h-screen mesh-hero">
+      {/* ─── FILTER BAR ─── */}
+      <HomeFilterBar categories={categories || []} brands={brands} />
 
       {/* ─── 1. BENTO HERO GRID ─── */}
       <section className="pt-3 pb-2">

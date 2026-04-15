@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Wallet,
@@ -14,9 +14,11 @@ import {
   Smartphone,
   FileText,
   CheckCircle,
+  ShieldCheck,
+  ExternalLink,
 } from "lucide-react";
 import { formatCurrency } from "@xelnova/utils";
-import { walletApi, setAccessToken } from "@xelnova/api";
+import { walletApi, usersApi, verificationApi, setAccessToken } from "@xelnova/api";
 
 type WalletTransaction = Awaited<ReturnType<typeof walletApi.getCustomerTransactions>>["transactions"][number];
 type Tab = "overview" | "add" | "transfer" | "recharge" | "bills";
@@ -45,15 +47,26 @@ export default function WalletPage() {
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
+  const [kycVerified, setKycVerified] = useState<boolean | null>(null);
+  const [kycLoading, setKycLoading] = useState(false);
+  const [kycData, setKycData] = useState<{
+    verificationId: string;
+    referenceId: string;
+    orderId: string;
+  } | null>(null);
+  const kycPopupRef = useRef<Window | null>(null);
+
   const loadWallet = useCallback(async () => {
     try {
       syncToken();
-      const [bal, txns] = await Promise.all([
+      const [bal, txns, profile] = await Promise.all([
         walletApi.getCustomerBalance(),
         walletApi.getCustomerTransactions(),
+        usersApi.getProfile(),
       ]);
       setBalance(bal.balance);
       setTransactions(txns.transactions);
+      setKycVerified(profile.aadhaarVerified ?? false);
     } catch (e: any) {
       setError(e.message ?? "Failed to load wallet");
     } finally {
@@ -62,6 +75,59 @@ export default function WalletPage() {
   }, []);
 
   useEffect(() => { loadWallet(); }, [loadWallet]);
+
+  useEffect(() => {
+    const handleMessage = async (event: MessageEvent) => {
+      if (event.data?.type === "digilocker-done" && kycData) {
+        setKycLoading(true);
+        setActionError(null);
+        try {
+          await verificationApi.verifyCustomerKyc({
+            verificationId: kycData.verificationId,
+            referenceId: kycData.referenceId,
+            orderId: kycData.orderId,
+            documentType: "AADHAAR",
+          });
+          setKycVerified(true);
+          setActionSuccess("KYC verification completed successfully!");
+          setKycData(null);
+        } catch (e: any) {
+          setActionError(e.message || "KYC verification failed. Please try again.");
+        } finally {
+          setKycLoading(false);
+        }
+      }
+    };
+
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
+  }, [kycData]);
+
+  const handleStartKyc = async () => {
+    setKycLoading(true);
+    setActionError(null);
+    try {
+      const response = await verificationApi.createCustomerKycUrl();
+      setKycData({
+        verificationId: response.verificationId,
+        referenceId: response.referenceId,
+        orderId: response.orderId,
+      });
+      const width = 600;
+      const height = 700;
+      const left = (window.innerWidth - width) / 2 + window.screenX;
+      const top = (window.innerHeight - height) / 2 + window.screenY;
+      kycPopupRef.current = window.open(
+        response.url,
+        "KYC Verification",
+        `width=${width},height=${height},left=${left},top=${top},scrollbars=yes`
+      );
+    } catch (e: any) {
+      setActionError(e.message || "Failed to start KYC verification");
+    } finally {
+      setKycLoading(false);
+    }
+  };
 
   const handleAddMoney = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -300,33 +366,88 @@ export default function WalletPage() {
 
       {activeTab === "add" && (
         <div className="bg-white rounded-2xl border border-border p-6 shadow-card">
-          <h3 className="text-sm font-bold text-text-primary mb-1">Add Money to Wallet</h3>
-          <p className="text-xs text-text-muted mb-5">2% convenience fee applies. Secure payment via Razorpay.</p>
-          <form onSubmit={handleAddMoney} className="space-y-4">
-            <div>
-              <label className="block text-xs font-semibold text-gray-700 mb-1.5">Amount (₹)</label>
-              <input name="amount" type="number" min="10" step="1" required placeholder="Enter amount" className={inputClass} />
-              <p className="text-[11px] text-text-muted mt-1">Min ₹10. 2% fee will be added at checkout.</p>
-            </div>
-            <div className="flex gap-2">
-              {[100, 500, 1000, 2000].map((amt) => (
-                <button
-                  key={amt}
-                  type="button"
-                  onClick={(e) => {
-                    const input = (e.currentTarget.closest("form") as HTMLFormElement)?.elements.namedItem("amount") as HTMLInputElement;
-                    if (input) input.value = String(amt);
-                  }}
-                  className="px-4 py-2 rounded-lg border border-gray-200 text-xs font-semibold text-gray-700 hover:bg-primary-50 hover:border-primary-200 hover:text-primary-700 transition-colors"
-                >
-                  ₹{amt}
+          {kycVerified === false ? (
+            <>
+              <div className="flex items-center gap-3 mb-4">
+                <div className="flex items-center justify-center h-12 w-12 rounded-full bg-amber-50">
+                  <ShieldCheck size={24} className="text-amber-600" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-text-primary">KYC Verification Required</h3>
+                  <p className="text-xs text-text-muted">Complete Aadhaar verification to add money to your wallet</p>
+                </div>
+              </div>
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-5">
+                <p className="text-sm text-amber-800 mb-2">
+                  As per RBI guidelines, KYC verification is mandatory for wallet transactions.
+                </p>
+                <ul className="text-xs text-amber-700 space-y-1">
+                  <li className="flex items-start gap-2">
+                    <CheckCircle size={14} className="text-amber-600 mt-0.5 flex-shrink-0" />
+                    Quick verification via Digilocker (takes 2-3 minutes)
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <CheckCircle size={14} className="text-amber-600 mt-0.5 flex-shrink-0" />
+                    Your Aadhaar data is securely verified by the government
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <CheckCircle size={14} className="text-amber-600 mt-0.5 flex-shrink-0" />
+                    One-time verification for lifetime wallet access
+                  </li>
+                </ul>
+              </div>
+              <button
+                onClick={handleStartKyc}
+                disabled={kycLoading}
+                className={`${btnClass} flex items-center justify-center gap-2`}
+              >
+                {kycLoading ? (
+                  <Loader2 size={16} className="animate-spin" />
+                ) : (
+                  <>
+                    <ShieldCheck size={16} />
+                    Verify Aadhaar via Digilocker
+                    <ExternalLink size={14} />
+                  </>
+                )}
+              </button>
+              {kycData && (
+                <p className="text-xs text-text-muted mt-3 text-center">
+                  A popup window has opened for verification. Please complete the process there.
+                </p>
+              )}
+            </>
+          ) : (
+            <>
+              <h3 className="text-sm font-bold text-text-primary mb-1">Add Money to Wallet</h3>
+              <p className="text-xs text-text-muted mb-5">2% convenience fee applies. Secure payment via Razorpay.</p>
+              <form onSubmit={handleAddMoney} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1.5">Amount (₹)</label>
+                  <input name="amount" type="number" min="10" step="1" required placeholder="Enter amount" className={inputClass} />
+                  <p className="text-[11px] text-text-muted mt-1">Min ₹10. 2% fee will be added at checkout.</p>
+                </div>
+                <div className="flex gap-2">
+                  {[100, 500, 1000, 2000].map((amt) => (
+                    <button
+                      key={amt}
+                      type="button"
+                      onClick={(e) => {
+                        const input = (e.currentTarget.closest("form") as HTMLFormElement)?.elements.namedItem("amount") as HTMLInputElement;
+                        if (input) input.value = String(amt);
+                      }}
+                      className="px-4 py-2 rounded-lg border border-gray-200 text-xs font-semibold text-gray-700 hover:bg-primary-50 hover:border-primary-200 hover:text-primary-700 transition-colors"
+                    >
+                      ₹{amt}
+                    </button>
+                  ))}
+                </div>
+                <button type="submit" disabled={actionLoading} className={btnClass}>
+                  {actionLoading ? <Loader2 size={16} className="animate-spin mx-auto" /> : "Proceed to Pay"}
                 </button>
-              ))}
-            </div>
-            <button type="submit" disabled={actionLoading} className={btnClass}>
-              {actionLoading ? <Loader2 size={16} className="animate-spin mx-auto" /> : "Proceed to Pay"}
-            </button>
-          </form>
+              </form>
+            </>
+          )}
         </div>
       )}
 

@@ -344,6 +344,87 @@ export async function apiRequestPayout(amount: number, notes?: string) {
   return handleResponse(res);
 }
 
+export interface BankDetails {
+  id: string;
+  bankAccountName: string | null;
+  bankAccountNumber: string | null;
+  bankIfscCode: string | null;
+  bankVerified: boolean;
+  bankVerifiedAt: string | null;
+  bankVerifiedName: string | null;
+  bankName: string | null;
+  bankBranch: string | null;
+}
+
+export async function apiGetBankDetails(): Promise<BankDetails> {
+  const res = await fetch(`${API_URL}/wallet/bank-details`, { headers: authHeaders() });
+  return handleResponse<BankDetails>(res);
+}
+
+export interface PayoutResponse {
+  success: boolean;
+  message: string;
+  payout: {
+    id: string;
+    amount: number;
+    status: string;
+    isAdvance: boolean;
+    requestedAt: string;
+  };
+  newBalance: number;
+  bankDetails: {
+    accountNumber: string;
+    bankName: string | null;
+    accountHolder: string | null;
+  };
+}
+
+export async function apiRequestManualPayout(
+  amount: number,
+  acceptedTerms: boolean,
+  notes?: string,
+): Promise<PayoutResponse> {
+  const res = await fetch(`${API_URL}/wallet/payout/manual`, {
+    method: 'POST',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ amount, acceptedTerms, notes }),
+  });
+  return handleResponse<PayoutResponse>(res);
+}
+
+export async function apiRequestAdvancePayout(
+  percentage: number,
+  acceptedTerms: boolean,
+  notes?: string,
+): Promise<PayoutResponse & { percentage: number; amount: number }> {
+  const res = await fetch(`${API_URL}/wallet/payout/advance`, {
+    method: 'POST',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ percentage, acceptedTerms, notes }),
+  });
+  return handleResponse<PayoutResponse & { percentage: number; amount: number }>(res);
+}
+
+export interface PayoutHistoryItem {
+  id: string;
+  amount: number;
+  status: string;
+  method: string;
+  note: string | null;
+  isAdvance: boolean;
+  requestedAt: string;
+  paidAt: string | null;
+}
+
+export async function apiGetPayoutHistory(page = 1, limit = 20) {
+  const params = new URLSearchParams({ page: page.toString(), limit: limit.toString() });
+  const res = await fetch(`${API_URL}/wallet/payouts?${params}`, { headers: authHeaders() });
+  return handleResponse<{
+    payouts: PayoutHistoryItem[];
+    pagination: { page: number; limit: number; total: number; totalPages: number };
+  }>(res);
+}
+
 // ─── Tickets ───
 
 export async function apiGetSellerTickets() {
@@ -465,4 +546,108 @@ export interface ShippingRates {
 export async function apiGetShippingRates(): Promise<ShippingRates> {
   const res = await fetch(`${API_URL}/products/shipping-rates`);
   return handleResponse<ShippingRates>(res);
+}
+
+// ─── Store Settings (Brand Store) ───
+
+export interface SellerStoreBanner {
+  id: string;
+  title: string | null;
+  imageUrl: string;
+  mobileUrl: string | null;
+  link: string | null;
+  sortOrder: number;
+  isActive: boolean;
+}
+
+export interface StoreSettings {
+  heroBannerUrl: string | null;
+  heroBannerMobile: string | null;
+  aboutTitle: string | null;
+  aboutDescription: string | null;
+  storeThemeColor: string | null;
+  featuredProductIds: string[];
+  storeBanners: SellerStoreBanner[];
+  availableProducts: { id: string; name: string; images: string[]; price: number }[];
+  storeUrl: string;
+}
+
+export async function apiGetStoreSettings(): Promise<StoreSettings> {
+  const res = await fetch(`${API_URL}/seller/store`, { headers: authHeaders() });
+  return handleResponse<StoreSettings>(res);
+}
+
+export async function apiUpdateStoreSettings(data: {
+  heroBannerUrl?: string;
+  heroBannerMobile?: string;
+  aboutTitle?: string;
+  aboutDescription?: string;
+  storeThemeColor?: string;
+}): Promise<void> {
+  const res = await fetch(`${API_URL}/seller/store`, {
+    method: 'PATCH',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  return handleResponse(res);
+}
+
+export async function apiUpdateFeaturedProducts(productIds: string[]): Promise<void> {
+  const res = await fetch(`${API_URL}/seller/store/featured-products`, {
+    method: 'PUT',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ productIds }),
+  });
+  return handleResponse(res);
+}
+
+export async function apiCreateStoreBanner(data: {
+  title?: string;
+  imageUrl: string;
+  mobileUrl?: string;
+  link?: string;
+  sortOrder?: number;
+}): Promise<SellerStoreBanner> {
+  const res = await fetch(`${API_URL}/seller/store/banners`, {
+    method: 'POST',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  return handleResponse<SellerStoreBanner>(res);
+}
+
+export async function apiUpdateStoreBanner(
+  id: string,
+  data: {
+    title?: string;
+    imageUrl?: string;
+    mobileUrl?: string;
+    link?: string;
+    sortOrder?: number;
+    isActive?: boolean;
+  },
+): Promise<SellerStoreBanner> {
+  const res = await fetch(`${API_URL}/seller/store/banners/${id}`, {
+    method: 'PATCH',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  return handleResponse<SellerStoreBanner>(res);
+}
+
+export async function apiDeleteStoreBanner(id: string): Promise<void> {
+  const res = await fetch(`${API_URL}/seller/store/banners/${id}`, {
+    method: 'DELETE',
+    headers: authHeaders(),
+  });
+  return handleResponse(res);
+}
+
+export async function apiReorderStoreBanners(bannerIds: string[]): Promise<SellerStoreBanner[]> {
+  const res = await fetch(`${API_URL}/seller/store/banners/reorder`, {
+    method: 'PUT',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ bannerIds }),
+  });
+  return handleResponse<SellerStoreBanner[]>(res);
 }

@@ -34,6 +34,36 @@ export class PayoutRequestDto {
   notes?: string;
 }
 
+export class ManualPayoutRequestDto {
+  @ApiProperty({ description: 'Amount to withdraw (full available balance or custom amount)' })
+  @IsNumber()
+  @Min(1)
+  amount: number;
+
+  @ApiProperty({ description: 'User must accept terms and conditions' })
+  acceptedTerms: boolean;
+
+  @ApiPropertyOptional({ description: 'Notes for the payout request' })
+  @IsString()
+  @IsOptional()
+  notes?: string;
+}
+
+export class AdvancePayoutRequestDto {
+  @ApiProperty({ description: 'Percentage of available balance to withdraw (10-50%)' })
+  @IsNumber()
+  @Min(10)
+  percentage: number;
+
+  @ApiProperty({ description: 'User must accept terms and conditions' })
+  acceptedTerms: boolean;
+
+  @ApiPropertyOptional({ description: 'Notes for the payout request' })
+  @IsString()
+  @IsOptional()
+  notes?: string;
+}
+
 export class AddMoneyDto {
   @ApiProperty({ description: 'Amount to add (2% convenience fee will be charged)' })
   @IsNumber()

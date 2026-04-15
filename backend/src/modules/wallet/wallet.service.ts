@@ -206,6 +206,251 @@ export class WalletService {
     };
   }
 
+  async getSellerBankDetails(userId: string) {
+    const seller = await this.prisma.sellerProfile.findUnique({
+      where: { userId },
+      select: {
+        id: true,
+        bankAccountName: true,
+        bankAccountNumber: true,
+        bankIfscCode: true,
+        bankVerified: true,
+        bankVerifiedAt: true,
+        bankVerifiedName: true,
+        bankName: true,
+        bankBranch: true,
+      },
+    });
+
+    if (!seller) {
+      throw new HttpException('Seller profile not found', HttpStatus.NOT_FOUND);
+    }
+
+    return seller;
+  }
+
+  async requestManualPayout(
+    userId: string,
+    amount: number,
+    acceptedTerms: boolean,
+    notes?: string,
+  ) {
+    if (!acceptedTerms) {
+      throw new HttpException('You must accept the terms and conditions', HttpStatus.BAD_REQUEST);
+    }
+
+    const seller = await this.prisma.sellerProfile.findUnique({
+      where: { userId },
+      select: {
+        id: true,
+        bankAccountNumber: true,
+        bankIfscCode: true,
+        bankVerified: true,
+        bankVerifiedName: true,
+        bankName: true,
+      },
+    });
+
+    if (!seller) {
+      throw new HttpException('Seller profile not found', HttpStatus.NOT_FOUND);
+    }
+
+    if (!seller.bankVerified || !seller.bankAccountNumber || !seller.bankIfscCode) {
+      throw new HttpException(
+        'Bank account not verified. Please verify your bank account before requesting payout.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const wallet = await this.prisma.wallet.findUnique({
+      where: { ownerId_ownerType: { ownerId: userId, ownerType: 'SELLER' } },
+    });
+
+    if (!wallet) {
+      throw new HttpException('Wallet not found', HttpStatus.NOT_FOUND);
+    }
+
+    if (wallet.balance < amount) {
+      throw new HttpException('Insufficient balance', HttpStatus.BAD_REQUEST);
+    }
+
+    if (amount < 100) {
+      throw new HttpException('Minimum payout amount is ₹100', HttpStatus.BAD_REQUEST);
+    }
+
+    const newBalance = wallet.balance - amount;
+
+    const [updatedWallet, transaction, payout] = await this.prisma.$transaction([
+      this.prisma.wallet.update({
+        where: { id: wallet.id },
+        data: { balance: newBalance },
+      }),
+      this.prisma.walletTransaction.create({
+        data: {
+          walletId: wallet.id,
+          type: 'DEBIT',
+          amount,
+          balanceAfter: newBalance,
+          description: `Manual payout to ${seller.bankName || 'bank'} (A/C: ***${seller.bankAccountNumber.slice(-4)})`,
+          referenceType: 'PAYOUT',
+          createdBy: userId,
+        },
+      }),
+      this.prisma.payout.create({
+        data: {
+          sellerId: seller.id,
+          amount,
+          status: 'PENDING',
+          method: 'bank_transfer',
+          note: notes || `Manual payout request`,
+          isAdvance: false,
+        },
+      }),
+    ]);
+
+    return {
+      success: true,
+      message: 'Payout request submitted successfully. Amount will be transferred to your bank account within 72 hours.',
+      payout,
+      transaction,
+      newBalance: updatedWallet.balance,
+      bankDetails: {
+        accountNumber: `***${seller.bankAccountNumber.slice(-4)}`,
+        bankName: seller.bankName,
+        accountHolder: seller.bankVerifiedName,
+      },
+    };
+  }
+
+  async requestAdvancePayout(
+    userId: string,
+    percentage: number,
+    acceptedTerms: boolean,
+    notes?: string,
+  ) {
+    if (!acceptedTerms) {
+      throw new HttpException('You must accept the terms and conditions', HttpStatus.BAD_REQUEST);
+    }
+
+    if (percentage < 10 || percentage > 50) {
+      throw new HttpException('Advance payout percentage must be between 10% and 50%', HttpStatus.BAD_REQUEST);
+    }
+
+    const seller = await this.prisma.sellerProfile.findUnique({
+      where: { userId },
+      select: {
+        id: true,
+        bankAccountNumber: true,
+        bankIfscCode: true,
+        bankVerified: true,
+        bankVerifiedName: true,
+        bankName: true,
+      },
+    });
+
+    if (!seller) {
+      throw new HttpException('Seller profile not found', HttpStatus.NOT_FOUND);
+    }
+
+    if (!seller.bankVerified || !seller.bankAccountNumber || !seller.bankIfscCode) {
+      throw new HttpException(
+        'Bank account not verified. Please verify your bank account before requesting payout.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const wallet = await this.prisma.wallet.findUnique({
+      where: { ownerId_ownerType: { ownerId: userId, ownerType: 'SELLER' } },
+    });
+
+    if (!wallet) {
+      throw new HttpException('Wallet not found', HttpStatus.NOT_FOUND);
+    }
+
+    const amount = Math.floor((wallet.balance * percentage) / 100);
+
+    if (amount < 100) {
+      throw new HttpException('Calculated payout amount is less than minimum ₹100', HttpStatus.BAD_REQUEST);
+    }
+
+    if (wallet.balance < amount) {
+      throw new HttpException('Insufficient balance', HttpStatus.BAD_REQUEST);
+    }
+
+    const newBalance = wallet.balance - amount;
+
+    const [updatedWallet, transaction, payout] = await this.prisma.$transaction([
+      this.prisma.wallet.update({
+        where: { id: wallet.id },
+        data: { balance: newBalance },
+      }),
+      this.prisma.walletTransaction.create({
+        data: {
+          walletId: wallet.id,
+          type: 'DEBIT',
+          amount,
+          balanceAfter: newBalance,
+          description: `Advance payout (${percentage}%) to ${seller.bankName || 'bank'} (A/C: ***${seller.bankAccountNumber.slice(-4)})`,
+          referenceType: 'PAYOUT',
+          createdBy: userId,
+        },
+      }),
+      this.prisma.payout.create({
+        data: {
+          sellerId: seller.id,
+          amount,
+          status: 'PENDING',
+          method: 'bank_transfer',
+          note: notes || `Advance payout request (${percentage}%)`,
+          isAdvance: true,
+        },
+      }),
+    ]);
+
+    return {
+      success: true,
+      message: `Advance payout of ₹${amount.toLocaleString('en-IN')} (${percentage}%) submitted successfully. Amount will be transferred to your bank account within 72 hours.`,
+      payout,
+      transaction,
+      newBalance: updatedWallet.balance,
+      percentage,
+      amount,
+      bankDetails: {
+        accountNumber: `***${seller.bankAccountNumber.slice(-4)}`,
+        bankName: seller.bankName,
+        accountHolder: seller.bankVerifiedName,
+      },
+    };
+  }
+
+  async getSellerPayoutHistory(userId: string, page = 1, limit = 20) {
+    const seller = await this.prisma.sellerProfile.findUnique({
+      where: { userId },
+      select: { id: true },
+    });
+
+    if (!seller) {
+      throw new HttpException('Seller profile not found', HttpStatus.NOT_FOUND);
+    }
+
+    const skip = (page - 1) * limit;
+
+    const [payouts, total] = await Promise.all([
+      this.prisma.payout.findMany({
+        where: { sellerId: seller.id },
+        orderBy: { requestedAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.payout.count({ where: { sellerId: seller.id } }),
+    ]);
+
+    return {
+      payouts,
+      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    };
+  }
+
   async getAllWallets(page = 1, limit = 20) {
     // Ensure every verified seller has a wallet row
     const sellers = await this.prisma.sellerProfile.findMany({
@@ -287,6 +532,22 @@ export class WalletService {
   async createAddMoneyOrder(userId: string, amount: number) {
     if (amount < 10) {
       throw new HttpException('Minimum add money amount is ₹10', HttpStatus.BAD_REQUEST);
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { aadhaarVerified: true },
+    });
+
+    if (!user) {
+      throw new HttpException('User not found', HttpStatus.NOT_FOUND);
+    }
+
+    if (!user.aadhaarVerified) {
+      throw new HttpException(
+        'KYC verification required. Please complete Aadhaar verification before adding money to your wallet.',
+        HttpStatus.FORBIDDEN,
+      );
     }
 
     const wallet = await this.getOrCreateWallet(userId, 'CUSTOMER');

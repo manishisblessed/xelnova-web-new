@@ -13,6 +13,8 @@ import { cn } from "@xelnova/utils";
 import { formatCurrency } from "@xelnova/utils";
 import { useAuth, ordersApi, usersApi, paymentApi, cartApi, setAccessToken } from "@xelnova/api";
 import { useCartStore } from "@/lib/store/cart-store";
+import { lookupPincode } from "@/lib/store/location-store";
+import { INDIAN_STATES } from "@/lib/indian-states";
 
 declare global {
   interface Window {
@@ -63,6 +65,7 @@ export default function CheckoutPage() {
   const [orderNumber, setOrderNumber] = useState("");
   const [placingOrder, setPlacingOrder] = useState(false);
   const [orderError, setOrderError] = useState("");
+  const [pincodeLooking, setPincodeLooking] = useState(false);
   const items = useCartStore((s) => s.items);
   const totalPrice = useCartStore((s) => s.totalPrice);
   const totalSavings = useCartStore((s) => s.totalSavings);
@@ -429,9 +432,30 @@ export default function CheckoutPage() {
   const savings = totalSavings();
   const itemCount = totalItems();
 
-  const updateField = (field: string, value: string) => {
+  const updateField = async (field: string, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
     setFormErrors((prev) => ({ ...prev, [field]: undefined }));
+
+    // Auto-fill city and state when valid pincode is entered
+    if (field === "pincode") {
+      const cleanPincode = value.replace(/\D/g, "");
+      if (/^[1-9][0-9]{5}$/.test(cleanPincode)) {
+        setPincodeLooking(true);
+        try {
+          const data = await lookupPincode(cleanPincode);
+          setForm((prev) => ({
+            ...prev,
+            city: data.city || prev.city,
+            state: data.state || prev.state,
+          }));
+          setFormErrors((prev) => ({ ...prev, city: undefined, state: undefined, pincode: undefined }));
+        } catch {
+          // Pincode lookup failed, user can still enter manually
+        } finally {
+          setPincodeLooking(false);
+        }
+      }
+    }
   };
 
   const validateForm = () => {
@@ -475,6 +499,7 @@ export default function CheckoutPage() {
         addressLine1: localAddr.line1,
         addressLine2: localAddr.line2 || null,
         city: localAddr.city,
+        district: null,
         state: localAddr.state,
         pincode: localAddr.pincode,
         landmark: null,
@@ -691,9 +716,33 @@ export default function CheckoutPage() {
                             <div className="sm:col-span-2">
                               <FormInput label="Address Line 2 (Optional)" value={form.line2} onChange={(v) => updateField("line2", v)} placeholder="Landmark, Area" />
                             </div>
+                            <div className="relative">
+                              <FormInput label="PIN Code" value={form.pincode} error={formErrors.pincode} onChange={(v) => updateField("pincode", v.replace(/\D/g, "").slice(0, 6))} placeholder="400001" />
+                              {pincodeLooking && (
+                                <div className="absolute right-3 top-7">
+                                  <Loader2 size={16} className="animate-spin text-primary-600" />
+                                </div>
+                              )}
+                              <p className="text-[10px] text-text-muted mt-0.5">Enter PIN code to auto-fill city & state</p>
+                            </div>
                             <FormInput label="City" value={form.city} error={formErrors.city} onChange={(v) => updateField("city", v)} placeholder="Mumbai" />
-                            <FormInput label="State" value={form.state} error={formErrors.state} onChange={(v) => updateField("state", v)} placeholder="Maharashtra" />
-                            <FormInput label="PIN Code" value={form.pincode} error={formErrors.pincode} onChange={(v) => updateField("pincode", v)} placeholder="400001" />
+                            <div>
+                              <label className="block text-xs font-medium text-text-secondary mb-1">State</label>
+                              <select
+                                value={form.state}
+                                onChange={(e) => updateField("state", e.target.value)}
+                                className={cn(
+                                  "w-full rounded-xl border px-3 py-2.5 text-sm outline-none transition-colors bg-white",
+                                  formErrors.state ? "border-danger-500" : "border-gray-200 focus:border-primary-500"
+                                )}
+                              >
+                                <option value="">Select State</option>
+                                {INDIAN_STATES.map((s) => (
+                                  <option key={s.code} value={s.name}>{s.name}</option>
+                                ))}
+                              </select>
+                              {formErrors.state && <p className="mt-1 text-xs text-danger-600">{formErrors.state}</p>}
+                            </div>
                             <div className="flex items-end gap-4 pb-1">
                               {[{ label: "Home", value: "HOME" }, { label: "Office", value: "OFFICE" }, { label: "Other", value: "OTHER" }].map((t) => (
                                 <label key={t.value} className="flex items-center gap-2 text-sm text-text-secondary cursor-pointer">

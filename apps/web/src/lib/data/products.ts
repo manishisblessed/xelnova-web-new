@@ -54,7 +54,7 @@ export interface Product {
   boughtLastMonth: number;
   inStock: boolean;
   stockCount: number;
-  seller: { name: string; rating: number };
+  seller: { name: string; rating: number; slug?: string };
   variants: ProductVariant[];
   specifications: Record<string, string>;
   reviews: ProductReview[];
@@ -63,4 +63,16 @@ export interface Product {
   isFeatured?: boolean;
   isFlashDeal?: boolean;
   flashDealEndsAt?: string;
+  // Amazon-style product information
+  featuresAndSpecs?: Record<string, string>;
+  materialsAndCare?: Record<string, string>;
+  itemDetails?: Record<string, string>;
+  additionalDetails?: Record<string, string>;
+  productDescription?: string;
+  safetyInfo?: string;
+  regulatoryInfo?: string;
+  warrantyInfo?: string;
+  deliveredBy?: string;
+  isReplaceable?: boolean;
+  returnWindow?: number;
 }
