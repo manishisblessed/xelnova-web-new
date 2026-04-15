@@ -45,7 +45,7 @@ export class ReturnsService {
       );
     }
 
-    return this.prisma.returnRequest.create({
+    const created = await this.prisma.returnRequest.create({
       data: {
         orderId: order.id,
         userId,
@@ -58,6 +58,20 @@ export class ReturnsService {
         },
       },
     });
+
+    this.notificationService
+      .notifyAllAdmins({
+        type: 'ADMIN_RETURN_REQUESTED',
+        title: 'New return request',
+        body: `Return requested for order #${created.order.orderNumber}.`,
+        data: {
+          returnRequestId: created.id,
+          orderNumber: created.order.orderNumber,
+        },
+      })
+      .catch(() => {});
+
+    return created;
   }
 
   async findAllForUser(userId: string) {

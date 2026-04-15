@@ -231,7 +231,7 @@ export interface OrderItem {
   /** Seller ID who fulfilled this item */
   sellerId?: string | null;
   /** Present when API includes nested product (e.g. some list/detail responses). */
-  product?: { name?: string; images?: string[] };
+  product?: { name?: string; slug?: string; images?: string[] };
 }
 
 export interface Order {

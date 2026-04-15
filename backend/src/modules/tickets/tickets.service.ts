@@ -72,9 +72,18 @@ export class TicketsService {
       this.logger.warn(`Failed to notify admin: ${e.message}`),
     );
 
-    this.notificationService.notifyTicketCreated(customerId, ticket.ticketNumber).catch((err) =>
+    this.notificationService.notifyTicketCreated(customerId, ticket.ticketNumber, ticket.id).catch((err) =>
       this.logger.warn(`Failed to notify customer ticket created: ${err.message}`),
     );
+
+    this.notificationService
+      .notifyAllAdmins({
+        type: 'ADMIN_SUPPORT_TICKET',
+        title: 'New support ticket',
+        body: `#${ticket.ticketNumber}: ${subject}`,
+        data: { ticketId: ticket.id, ticketNumber: ticket.ticketNumber, subject },
+      })
+      .catch((err) => this.logger.warn(`Failed to notify admins of ticket: ${err.message}`));
 
     return ticket;
   }
@@ -113,7 +122,7 @@ export class TicketsService {
   async customerReply(ticketId: string, customerId: string, message: string) {
     const ticket = await this.prisma.ticket.findUnique({
       where: { id: ticketId },
-      select: { id: true, customerId: true, status: true },
+      select: { id: true, customerId: true, status: true, ticketNumber: true, subject: true },
     });
     if (!ticket || ticket.customerId !== customerId) {
       throw new NotFoundException('Ticket not found');
@@ -134,6 +143,15 @@ export class TicketsService {
         data: { status: 'OPEN', updatedAt: new Date() },
       }),
     ]);
+
+    this.notificationService
+      .notifyAllAdmins({
+        type: 'ADMIN_TICKET_CUSTOMER_REPLY',
+        title: 'Customer replied on ticket',
+        body: `Ticket #${ticket.ticketNumber}: new message from customer.`,
+        data: { ticketId: ticket.id, ticketNumber: ticket.ticketNumber },
+      })
+      .catch((err) => this.logger.warn(`Failed to notify admins of ticket reply: ${err.message}`));
 
     return msg;
   }
@@ -165,13 +183,44 @@ export class TicketsService {
     };
   }
 
+  /** Sellers that may receive this ticket (from linked order line items). */
+  async getForwardSellersForTicket(ticket: {
+    orderId: string | null;
+  }): Promise<{ userId: string; storeName: string }[]> {
+    if (!ticket.orderId) return [];
+
+    const items = await this.prisma.orderItem.findMany({
+      where: { orderId: ticket.orderId },
+      select: { sellerId: true },
+    });
+    const profileIds = [
+      ...new Set(items.map((i) => i.sellerId).filter((id): id is string => !!id)),
+    ];
+    if (profileIds.length === 0) return [];
+
+    const profiles = await this.prisma.sellerProfile.findMany({
+      where: { id: { in: profileIds }, userId: { not: null } },
+      select: { userId: true, storeName: true },
+    });
+
+    const map = new Map<string, string>();
+    for (const p of profiles) {
+      if (p.userId) map.set(p.userId, p.storeName);
+    }
+
+    return [...map.entries()]
+      .map(([userId, storeName]) => ({ userId, storeName }))
+      .sort((a, b) => a.storeName.localeCompare(b.storeName));
+  }
+
   async getTicketDetail(ticketId: string) {
     const ticket = await this.prisma.ticket.findUnique({
       where: { id: ticketId },
       include: TICKET_INCLUDE,
     });
     if (!ticket) throw new NotFoundException('Ticket not found');
-    return ticket;
+    const forwardSellers = await this.getForwardSellersForTicket(ticket);
+    return { ...ticket, forwardSellers };
   }
 
   async adminReply(
@@ -212,7 +261,7 @@ export class TicketsService {
         this.logger.warn(`Failed to notify customer: ${e.message}`),
       );
       const admin = await this.prisma.user.findUnique({ where: { id: adminId }, select: { name: true } });
-      this.notificationService.notifyTicketReply(ticket.customerId, ticket.ticketNumber, admin?.name || 'Support').catch((err) =>
+      this.notificationService.notifyTicketReply(ticket.customerId, ticket.ticketNumber, admin?.name || 'Support', ticketId).catch((err) =>
         this.logger.warn(`Failed to notify ticket reply: ${err.message}`),
       );
     }
@@ -220,12 +269,28 @@ export class TicketsService {
     return msg;
   }
 
-  async forwardToSeller(ticketId: string, sellerId: string, adminId: string, note?: string) {
+  async forwardToSeller(ticketId: string, adminId: string, sellerId?: string, note?: string) {
     const ticket = await this.prisma.ticket.findUnique({ where: { id: ticketId } });
     if (!ticket) throw new NotFoundException('Ticket not found');
 
+    const allowed = await this.getForwardSellersForTicket(ticket);
+    let resolved = sellerId;
+    if (!resolved) {
+      if (allowed.length === 0) {
+        throw new BadRequestException(
+          'No seller is linked to this ticket. The customer must have attached an order when opening the ticket.',
+        );
+      }
+      if (allowed.length > 1) {
+        throw new BadRequestException('Multiple sellers are on this order. Choose which seller to forward to.');
+      }
+      resolved = allowed[0].userId;
+    } else if (!allowed.some((s) => s.userId === resolved)) {
+      throw new BadRequestException('That seller is not associated with this ticket order.');
+    }
+
     const seller = await this.prisma.sellerProfile.findFirst({
-      where: { userId: sellerId },
+      where: { userId: resolved },
       select: { userId: true },
     });
     if (!seller) throw new BadRequestException('Seller not found');
@@ -233,7 +298,7 @@ export class TicketsService {
     const updates: unknown[] = [
       this.prisma.ticket.update({
         where: { id: ticketId },
-        data: { assignedSellerId: sellerId, assignedAdminId: adminId, updatedAt: new Date() },
+        data: { assignedSellerId: resolved, assignedAdminId: adminId, updatedAt: new Date() },
       }),
     ];
 
@@ -253,7 +318,7 @@ export class TicketsService {
 
     await this.prisma.$transaction(updates as any);
 
-    this.notificationService.notifyTicketForwarded(sellerId, ticket.ticketNumber).catch((err) =>
+    this.notificationService.notifyTicketForwarded(resolved, ticket.ticketNumber, ticketId).catch((err) =>
       this.logger.warn(`Failed to notify ticket forwarded: ${err.message}`),
     );
 
@@ -271,11 +336,11 @@ export class TicketsService {
       include: TICKET_INCLUDE,
     });
 
-    this.notificationService.notifyTicketUpdate(ticket.customerId, ticket.ticketNumber, status).catch((err) =>
+    this.notificationService.notifyTicketUpdate(ticket.customerId, ticket.ticketNumber, status, ticket.id).catch((err) =>
       this.logger.warn(`Failed to notify ticket update: ${err.message}`),
     );
 
-    return ticket;
+    return this.getTicketDetail(ticketId);
   }
 
   // ─── Seller ───

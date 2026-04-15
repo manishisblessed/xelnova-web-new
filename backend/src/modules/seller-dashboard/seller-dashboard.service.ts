@@ -12,6 +12,8 @@ import {
   UpdateSellerProfileDto,
   RevenueQueryDto,
   SettlementQueryDto,
+  CreateSellerCouponDto,
+  UpdateSellerCouponDto,
 } from './dto/seller-dashboard.dto';
 import { Prisma, ProductStatus } from '@prisma/client';
 
@@ -566,9 +568,20 @@ export class SellerDashboardService {
 
   // ─── Bulk Upload ───
 
+  private parseBool(val: string | undefined, fallback: boolean): boolean {
+    if (!val) return fallback;
+    const lower = val.trim().toLowerCase();
+    return lower === 'true' || lower === 'yes' || lower === '1';
+  }
+
+  private parseJsonField(val: string | undefined): any {
+    if (!val) return null;
+    try { return JSON.parse(val); } catch { return null; }
+  }
+
   async bulkUploadProducts(userId: string, rows: Record<string, string>[]) {
     const seller = await this.getSellerProfile(userId);
-    const results: { row: number; status: 'ok' | 'error'; message?: string; productId?: string }[] = [];
+    const results: { row: number; status: 'ok' | 'error'; message?: string; productId?: string; sku?: string }[] = [];
 
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
@@ -587,7 +600,9 @@ export class SellerDashboardService {
         const baseSlug = this.slugify(r.name);
         const slugCount = await this.prisma.product.count({ where: { slug: { startsWith: baseSlug } } });
         const slug = slugCount > 0 ? `${baseSlug}-${slugCount + 1}` : baseSlug;
-        const sku = r.sku || await this.generateSku(seller.id, r.categoryId);
+
+        // Always auto-generate SKU for bulk uploads
+        const sku = await this.generateSku(seller.id, r.categoryId);
 
         const product = await this.prisma.product.create({
           data: {
@@ -610,10 +625,32 @@ export class SellerDashboardService {
             hsnCode: r.hsnCode || null,
             gstRate: r.gstRate ? parseFloat(r.gstRate) : null,
             lowStockThreshold: r.lowStockThreshold ? parseInt(r.lowStockThreshold) : 5,
+
+            // Shipping details
+            weight: r.weight ? parseFloat(r.weight) : null,
+            dimensions: r.dimensions || null,
+
+            // Return/Cancellation/Replacement policies
+            isCancellable: this.parseBool(r.isCancellable, true),
+            isReturnable: this.parseBool(r.isReturnable, true),
+            isReplaceable: this.parseBool(r.isReplaceable, false),
+            returnWindow: r.returnWindow ? parseInt(r.returnWindow) : 7,
+            cancellationWindow: r.cancellationWindow ? parseInt(r.cancellationWindow) : 0,
+
+            // Amazon-style product information
+            featuresAndSpecs: this.parseJsonField(r.featuresAndSpecs),
+            materialsAndCare: this.parseJsonField(r.materialsAndCare),
+            itemDetails: this.parseJsonField(r.itemDetails),
+            additionalDetails: this.parseJsonField(r.additionalDetails),
+            productDescription: r.productDescription || null,
+            safetyInfo: r.safetyInfo || null,
+            regulatoryInfo: r.regulatoryInfo || null,
+            warrantyInfo: r.warrantyInfo || null,
+
             status: 'PENDING',
           },
         });
-        results.push({ row: i + 1, status: 'ok', productId: product.id });
+        results.push({ row: i + 1, status: 'ok', productId: product.id, sku });
       } catch (err: any) {
         results.push({ row: i + 1, status: 'error', message: err.message?.slice(0, 200) });
       }
@@ -771,6 +808,66 @@ export class SellerDashboardService {
     lines.push('');
     lines.push(`,,,,,Total,${report.totals.gross.toFixed(2)},,${report.totals.commission.toFixed(2)},${report.totals.net.toFixed(2)},,`);
     return [header, ...lines].join('\n');
+  }
+
+  // ─── Seller Coupons ───
+
+  async getSellerCoupons(userId: string) {
+    const seller = await this.getSellerProfile(userId);
+    return this.prisma.coupon.findMany({
+      where: { sellerId: seller.id },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async createSellerCoupon(userId: string, dto: CreateSellerCouponDto) {
+    const seller = await this.getSellerProfile(userId);
+    const code = dto.code.toUpperCase().replace(/\s+/g, '');
+
+    const existing = await this.prisma.coupon.findUnique({ where: { code } });
+    if (existing) throw new BadRequestException(`Coupon code "${code}" already exists`);
+
+    const scope = dto.scope === 'cart' ? 'global' : 'seller';
+
+    return this.prisma.coupon.create({
+      data: {
+        code,
+        description: dto.description,
+        discountType: dto.discountType as any,
+        discountValue: dto.discountValue,
+        minOrderAmount: dto.minOrderAmount || 0,
+        maxDiscount: dto.maxDiscount,
+        validUntil: dto.validUntil ? new Date(dto.validUntil) : undefined,
+        usageLimit: dto.usageLimit,
+        scope,
+        sellerId: seller.id,
+      },
+    });
+  }
+
+  async updateSellerCoupon(userId: string, couponId: string, dto: UpdateSellerCouponDto) {
+    const seller = await this.getSellerProfile(userId);
+    const coupon = await this.prisma.coupon.findUnique({ where: { id: couponId } });
+    if (!coupon) throw new NotFoundException('Coupon not found');
+    if (coupon.sellerId !== seller.id) throw new ForbiddenException('Not your coupon');
+
+    const data: any = { ...dto };
+    if (dto.code) data.code = dto.code.toUpperCase().replace(/\s+/g, '');
+    if (dto.validUntil) data.validUntil = new Date(dto.validUntil);
+    if (dto.scope === 'cart') { data.scope = 'global'; }
+    else if (dto.scope === 'seller') { data.scope = 'seller'; }
+
+    return this.prisma.coupon.update({ where: { id: couponId }, data });
+  }
+
+  async deleteSellerCoupon(userId: string, couponId: string) {
+    const seller = await this.getSellerProfile(userId);
+    const coupon = await this.prisma.coupon.findUnique({ where: { id: couponId } });
+    if (!coupon) throw new NotFoundException('Coupon not found');
+    if (coupon.sellerId !== seller.id) throw new ForbiddenException('Not your coupon');
+
+    await this.prisma.coupon.delete({ where: { id: couponId } });
+    return { deleted: true };
   }
 
   // ─── Sales Analytics (enhanced) ───

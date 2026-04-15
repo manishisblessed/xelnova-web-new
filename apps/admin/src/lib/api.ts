@@ -156,11 +156,14 @@ export async function apiReplyTicket(id: string, message: string, isInternal = f
   return handleResponse(res);
 }
 
-export async function apiForwardTicket(id: string, sellerId: string, note?: string) {
+export async function apiForwardTicket(
+  id: string,
+  body: { sellerId?: string; note?: string },
+) {
   const res = await fetch(`${API_URL}/tickets/admin/${id}/forward`, {
     method: 'POST',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sellerId, note }),
+    body: JSON.stringify(body),
   });
   return handleResponse(res);
 }
@@ -225,6 +228,98 @@ export async function apiGetRefundReport(params?: Record<string, string>) {
   const q = params ? `?${new URLSearchParams(params)}` : '';
   const res = await fetch(`${API_URL}/admin/reports/refunds${q}`, { headers: authHeaders() });
   return handleResponse(res);
+}
+
+// ─── Refund CSV ───
+
+export async function apiDownloadRefundCsv(params?: Record<string, string>) {
+  const q = params ? `?${new URLSearchParams(params)}` : '';
+  const res = await fetch(`${API_URL}/admin/reports/refunds/csv${q}`, { headers: authHeaders() });
+  if (!res.ok) throw new Error('Failed to download CSV');
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'refund-report.csv';
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+
+// ─── Sales Report ───
+
+export async function apiGetSalesReport(params?: Record<string, string>) {
+  const q = params ? `?${new URLSearchParams(params)}` : '';
+  const res = await fetch(`${API_URL}/admin/reports/sales${q}`, { headers: authHeaders() });
+  return handleResponse(res);
+}
+
+export async function apiDownloadSalesCsv(params?: Record<string, string>) {
+  const q = params ? `?${new URLSearchParams(params)}` : '';
+  const res = await fetch(`${API_URL}/admin/reports/sales/csv${q}`, { headers: authHeaders() });
+  if (!res.ok) throw new Error('Failed to download CSV');
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'sales-report.csv';
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+
+// ─── Inventory Report ───
+
+export async function apiGetInventoryReport() {
+  const res = await fetch(`${API_URL}/admin/reports/inventory`, { headers: authHeaders() });
+  return handleResponse(res);
+}
+
+export async function apiDownloadInventoryCsv() {
+  const res = await fetch(`${API_URL}/admin/reports/inventory/csv`, { headers: authHeaders() });
+  if (!res.ok) throw new Error('Failed to download CSV');
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'inventory-report.csv';
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+
+// ─── Seller Performance Report ───
+
+export async function apiGetSellerPerformanceReport(params?: Record<string, string>) {
+  const q = params ? `?${new URLSearchParams(params)}` : '';
+  const res = await fetch(`${API_URL}/admin/reports/sellers${q}`, { headers: authHeaders() });
+  return handleResponse(res);
+}
+
+export async function apiDownloadSellerPerformanceCsv(params?: Record<string, string>) {
+  const q = params ? `?${new URLSearchParams(params)}` : '';
+  const res = await fetch(`${API_URL}/admin/reports/sellers/csv${q}`, { headers: authHeaders() });
+  if (!res.ok) throw new Error('Failed to download CSV');
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'seller-performance-report.csv';
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+
+// ─── Coupon Usage Report ───
+
+export async function apiGetCouponUsageReport(params?: Record<string, string>) {
+  const q = params ? `?${new URLSearchParams(params)}` : '';
+  const res = await fetch(`${API_URL}/admin/reports/coupons${q}`, { headers: authHeaders() });
+  return handleResponse(res);
+}
+
+export async function apiDownloadCouponUsageCsv(params?: Record<string, string>) {
+  const q = params ? `?${new URLSearchParams(params)}` : '';
+  const res = await fetch(`${API_URL}/admin/reports/coupons/csv${q}`, { headers: authHeaders() });
+  if (!res.ok) throw new Error('Failed to download CSV');
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'coupon-usage-report.csv';
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
 }
 
 // ─── Duplicates & Pricing ───

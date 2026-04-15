@@ -81,7 +81,7 @@ const NAV_SECTIONS: NavSection[] = [
       { href: '/payouts', label: 'Payouts', icon: Wallet },
       { href: '/advance-payouts', label: 'Advance Payouts', icon: CreditCard },
       { href: '/wallets', label: 'Wallets', icon: Wallet },
-      { href: '/reports', label: 'GST/TDS Reports', icon: FileSpreadsheet },
+      { href: '/reports', label: 'All Reports', icon: FileSpreadsheet },
     ],
   },
   {

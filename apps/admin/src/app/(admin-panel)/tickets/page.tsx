@@ -17,6 +17,7 @@ import {
   Forward,
   Lock,
   Eye,
+  FileText,
 } from 'lucide-react';
 import {
   apiGetTickets,
@@ -36,6 +37,11 @@ interface TicketMsg {
   sender?: { id: string; name: string; avatar: string | null; role: string };
 }
 
+interface ForwardSellerOption {
+  userId: string;
+  storeName: string;
+}
+
 interface Ticket {
   id: string;
   ticketNumber: string;
@@ -51,6 +57,8 @@ interface Ticket {
   updatedAt: string;
   customer?: { id: string; name: string; email?: string };
   messages?: TicketMsg[];
+  /** Sellers derived from the linked order; used for forward (no manual seller id). */
+  forwardSellers?: ForwardSellerOption[];
 }
 
 const statusConfig: Record<string, { icon: React.ElementType; color: string; bg: string; label: string }> = {
@@ -77,6 +85,59 @@ function roleIcon(role: string) {
   return <User size={14} className="text-text-muted" />;
 }
 
+/** Shown when replying to the customer (visible to customer & seller). */
+const CUSTOMER_REPLY_TEMPLATES: { id: string; label: string; body: string }[] = [
+  {
+    id: 'received',
+    label: 'Acknowledgment — we received your message',
+    body:
+      'Thank you for contacting us. We have received your message and our team is reviewing it. We will get back to you shortly with an update.',
+  },
+  {
+    id: 'order-check',
+    label: 'Order — checking status',
+    body:
+      'We are checking the status of your order with our fulfillment team and will share an update with you as soon as possible. We appreciate your patience.',
+  },
+  {
+    id: 'delay',
+    label: 'Apology — delay',
+    body:
+      'We apologize for the inconvenience and the delay. We are actively working to resolve this and will keep you informed. Thank you for your understanding.',
+  },
+  {
+    id: 'tracking',
+    label: 'Shipping — tracking / dispatch',
+    body:
+      'Your order is being processed for shipment. You will receive tracking or dispatch details by email and in your account once it is handed to the courier.',
+  },
+  {
+    id: 'resolved',
+    label: 'Closing — issue addressed',
+    body:
+      'We believe this matter is now addressed. If you have any further questions or need additional help, please reply to this ticket and we will be happy to assist.',
+  },
+];
+
+/** Shown for internal notes only (admin team). */
+const INTERNAL_REPLY_TEMPLATES: { id: string; label: string; body: string }[] = [
+  {
+    id: 'escalate',
+    label: 'Internal — escalated',
+    body: 'Escalated to the relevant team for follow-up.',
+  },
+  {
+    id: 'awaiting',
+    label: 'Internal — awaiting customer',
+    body: 'Awaiting further information from the customer.',
+  },
+  {
+    id: 'forwarded-seller',
+    label: 'Internal — coordinated with seller',
+    body: 'Coordinated with the seller; monitoring resolution.',
+  },
+];
+
 export default function AdminTicketsPage() {
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [loading, setLoading] = useState(true);
@@ -88,9 +149,12 @@ export default function AdminTicketsPage() {
   const [reply, setReply] = useState('');
   const [isInternal, setIsInternal] = useState(false);
   const [sending, setSending] = useState(false);
+  /** Remount template select after pick so the same option can be chosen again */
+  const [templateSelectKey, setTemplateSelectKey] = useState(0);
 
   const [showForward, setShowForward] = useState(false);
-  const [forwardSellerId, setForwardSellerId] = useState('');
+  /** Selected seller user id when multiple sellers exist on the order */
+  const [forwardPickUserId, setForwardPickUserId] = useState('');
   const [forwardNote, setForwardNote] = useState('');
   const [forwarding, setForwarding] = useState(false);
 
@@ -142,13 +206,21 @@ export default function AdminTicketsPage() {
   };
 
   const handleForward = async () => {
-    if (!forwardSellerId.trim() || !selected) return;
+    if (!selected) return;
+    const options = selected.forwardSellers || [];
+    const sellerId =
+      options.length === 1 ? options[0].userId : forwardPickUserId.trim();
+    if (!sellerId) return;
     setForwarding(true);
     try {
-      const updated: any = await apiForwardTicket(selected.id, forwardSellerId, forwardNote || undefined);
+      const payload: { sellerId?: string; note?: string } = {
+        note: forwardNote.trim() || undefined,
+      };
+      if (options.length > 1) payload.sellerId = sellerId;
+      const updated: any = await apiForwardTicket(selected.id, payload);
       setSelected(updated);
       setShowForward(false);
-      setForwardSellerId('');
+      setForwardPickUserId('');
       setForwardNote('');
     } catch (e: any) {
       alert(e.message || 'Failed to forward ticket');
@@ -173,6 +245,10 @@ export default function AdminTicketsPage() {
     const st = getStatus(selected.status);
     const StatusIcon = st.icon;
     const pr = priorityConfig[selected.priority] || priorityConfig.MEDIUM;
+    const forwardOptions = selected.forwardSellers ?? [];
+    const canSubmitForward =
+      forwardOptions.length === 1
+      || (forwardOptions.length > 1 && forwardPickUserId.trim().length > 0);
 
     return (
       <div className="p-6 flex flex-col h-[calc(100vh-32px)] min-h-[500px]">
@@ -191,7 +267,11 @@ export default function AdminTicketsPage() {
                 #{selected.ticketNumber} · {selected.customer?.name} ({selected.customer?.email})
               </p>
               {selected.assignedSellerId && (
-                <p className="text-xs text-emerald-600 mt-0.5">Assigned to seller: {selected.assignedSellerId}</p>
+                <p className="text-xs text-emerald-600 mt-0.5">
+                  Assigned to seller:{' '}
+                  {selected.forwardSellers?.find((s) => s.userId === selected.assignedSellerId)?.storeName
+                    ?? selected.assignedSellerId}
+                </p>
               )}
             </div>
             <div className="flex items-center gap-2 flex-wrap">
@@ -211,12 +291,19 @@ export default function AdminTicketsPage() {
                 <option value="RESOLVED">Resolved</option>
                 <option value="CLOSED">Closed</option>
               </select>
-              <button
-                onClick={() => setShowForward(true)}
-                className="inline-flex items-center gap-1 rounded-lg border border-border px-3 py-1 text-xs font-medium text-text-primary hover:bg-gray-50 transition-colors"
-              >
-                <Forward size={13} /> Forward to Seller
-              </button>
+              {forwardOptions.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setForwardPickUserId(forwardOptions.length > 1 ? forwardOptions[0]?.userId ?? '' : '');
+                    setForwardNote('');
+                    setShowForward(true);
+                  }}
+                  className="inline-flex items-center gap-1 rounded-lg border border-border px-3 py-1 text-xs font-medium text-text-primary hover:bg-gray-50 transition-colors"
+                >
+                  <Forward size={13} /> Forward to Seller
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -274,7 +361,7 @@ export default function AdminTicketsPage() {
         {/* Reply box */}
         {selected.status !== 'CLOSED' && (
           <div className="shrink-0 space-y-2">
-            <div className="flex items-center gap-3">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <label className="flex items-center gap-1.5 text-xs font-medium text-text-secondary cursor-pointer">
                 <input
                   type="checkbox"
@@ -284,21 +371,52 @@ export default function AdminTicketsPage() {
                 />
                 <Eye size={13} /> Internal note (not visible to customer/seller)
               </label>
+              <div className="flex items-center gap-2 min-w-0">
+                <FileText size={14} className="shrink-0 text-text-muted hidden sm:block" aria-hidden />
+                <select
+                  key={`${templateSelectKey}-${isInternal ? 'int' : 'ext'}`}
+                  aria-label={isInternal ? 'Insert internal note template' : 'Insert reply template for customer'}
+                  defaultValue=""
+                  onChange={(e) => {
+                    const id = e.target.value;
+                    if (!id) return;
+                    const list = isInternal ? INTERNAL_REPLY_TEMPLATES : CUSTOMER_REPLY_TEMPLATES;
+                    const t = list.find((x) => x.id === id);
+                    if (t) setReply(t.body);
+                    setTemplateSelectKey((k) => k + 1);
+                  }}
+                  className="min-w-0 flex-1 sm:max-w-xs rounded-lg border border-border bg-white px-2.5 py-1.5 text-xs font-medium text-text-primary focus:outline-none focus:ring-2 focus:ring-primary-500"
+                >
+                  <option value="">Quick template…</option>
+                  {(isInternal ? INTERNAL_REPLY_TEMPLATES : CUSTOMER_REPLY_TEMPLATES).map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
-            <div className="flex gap-2">
-              <input
+            <div className="flex gap-2 items-end">
+              <textarea
                 value={reply}
                 onChange={(e) => setReply(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void handleReply(); } }}
-                placeholder={isInternal ? 'Add internal note…' : 'Reply to customer…'}
-                className={`flex-1 rounded-xl border px-4 py-3 text-sm placeholder:text-text-muted focus:outline-none focus:ring-2 focus:border-transparent ${
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                    e.preventDefault();
+                    void handleReply();
+                  }
+                }}
+                placeholder={isInternal ? 'Add internal note…' : 'Reply to customer… (Ctrl+Enter to send)'}
+                rows={3}
+                className={`flex-1 rounded-xl border px-4 py-3 text-sm placeholder:text-text-muted focus:outline-none focus:ring-2 focus:border-transparent resize-y min-h-[2.75rem] ${
                   isInternal ? 'border-amber-300 bg-amber-50 focus:ring-amber-400' : 'border-border focus:ring-primary-500'
                 }`}
               />
               <button
+                type="button"
                 onClick={() => void handleReply()}
                 disabled={sending || !reply.trim()}
-                className={`flex items-center justify-center rounded-xl px-4 text-white transition-colors disabled:opacity-50 ${
+                className={`shrink-0 flex items-center justify-center rounded-xl px-4 py-3 text-white transition-colors disabled:opacity-50 self-stretch min-h-[2.75rem] ${
                   isInternal ? 'bg-amber-600 hover:bg-amber-700' : 'bg-primary-600 hover:bg-primary-700'
                 }`}
               >
@@ -320,13 +438,38 @@ export default function AdminTicketsPage() {
                 <Forward size={18} /> Forward to Seller
               </h3>
               <div>
-                <label className="block text-sm font-medium text-text-primary mb-1">Seller User ID *</label>
-                <input
-                  value={forwardSellerId}
-                  onChange={(e) => setForwardSellerId(e.target.value)}
-                  placeholder="Enter seller's user ID"
-                  className="w-full rounded-xl border border-border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
-                />
+                <p className="text-sm text-text-secondary mb-2">
+                  {forwardOptions.length > 1
+                    ? 'This order has more than one seller. Choose who should handle this ticket.'
+                    : 'Seller is taken from the order linked to this ticket (no seller ID needed).'}
+                </p>
+                {forwardOptions.length === 1 && (
+                  <div className="rounded-xl border border-border bg-gray-50 px-3 py-2.5 text-sm">
+                    <span className="text-text-muted">Forwarding to </span>
+                    <span className="font-semibold text-text-primary">
+                      {forwardOptions[0].storeName}
+                    </span>
+                  </div>
+                )}
+                {forwardOptions.length > 1 && (
+                  <div>
+                    <label className="block text-sm font-medium text-text-primary mb-1">
+                      Seller on this order
+                    </label>
+                    <select
+                      value={forwardPickUserId}
+                      onChange={(e) => setForwardPickUserId(e.target.value)}
+                      className="w-full rounded-xl border border-border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white"
+                    >
+                      <option value="">Select seller…</option>
+                      {forwardOptions.map((s) => (
+                        <option key={s.userId} value={s.userId}>
+                          {s.storeName}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
               <div>
                 <label className="block text-sm font-medium text-text-primary mb-1">Note (optional)</label>
@@ -340,14 +483,16 @@ export default function AdminTicketsPage() {
               </div>
               <div className="flex gap-3 pt-2">
                 <button
+                  type="button"
                   onClick={() => setShowForward(false)}
                   className="flex-1 rounded-xl border border-border px-4 py-2.5 text-sm font-semibold hover:bg-gray-50"
                 >
                   Cancel
                 </button>
                 <button
+                  type="button"
                   onClick={() => void handleForward()}
-                  disabled={forwarding || !forwardSellerId.trim()}
+                  disabled={forwarding || !canSubmitForward}
                   className="flex-1 rounded-xl bg-primary-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-primary-700 disabled:opacity-50 flex items-center justify-center gap-2"
                 >
                   {forwarding ? <Loader2 size={14} className="animate-spin" /> : null}

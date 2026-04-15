@@ -58,7 +58,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
             onBlur={handleBlur}
             placeholder={label && floated ? props.placeholder : label ? " " : props.placeholder}
             className={cn(
-              "peer w-full rounded-xl border bg-surface-raised px-4 py-3 text-sm text-text-primary outline-none transition-all duration-200",
+              "peer w-full rounded-xl border bg-surface px-4 py-3 text-sm text-text-primary outline-none transition-all duration-200",
               label && !floated && "placeholder-transparent",
               "border-border focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30",
               "disabled:opacity-50 disabled:cursor-not-allowed",
@@ -76,7 +76,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
               className={cn(
                 "absolute text-text-muted transition-all duration-200 pointer-events-none overflow-hidden text-ellipsis whitespace-nowrap",
                 floated
-                  ? "top-0 -translate-y-1/2 text-xs bg-surface-raised px-1.5"
+                  ? "top-0 -translate-y-1/2 text-xs bg-surface px-1.5 rounded"
                   : "top-1/2 -translate-y-1/2 text-sm",
                 floated ? (icon ? "left-10" : "left-3") : (icon ? "left-11" : "left-4"),
                 floated

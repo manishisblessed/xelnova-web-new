@@ -707,6 +707,15 @@ export class SellerOnboardingService {
       },
     });
 
+    this.notificationService
+      .notifyAllAdmins({
+        type: 'ADMIN_SELLER_ONBOARDING_REVIEW',
+        title: 'Seller application submitted',
+        body: `${seller.storeName} submitted their application for review.`,
+        data: { sellerId, storeName: seller.storeName },
+      })
+      .catch(() => {});
+
     return {
       success: true,
       message: 'Application submitted for review',

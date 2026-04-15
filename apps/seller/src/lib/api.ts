@@ -488,6 +488,49 @@ export async function apiGetSellerBrands() {
   return handleResponse(res);
 }
 
+// ─── Seller Coupons ───
+
+export async function apiGetSellerCoupons() {
+  const res = await fetch(`${API_URL}/seller/coupons`, { headers: authHeaders() });
+  return handleResponse(res);
+}
+
+export async function apiCreateSellerCoupon(body: {
+  code: string;
+  description?: string;
+  discountType: string;
+  discountValue: number;
+  minOrderAmount?: number;
+  maxDiscount?: number;
+  validUntil?: string;
+  usageLimit?: number;
+  scope?: string;
+}) {
+  const res = await fetch(`${API_URL}/seller/coupons`, {
+    method: 'POST',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return handleResponse(res);
+}
+
+export async function apiUpdateSellerCoupon(id: string, body: Record<string, unknown>) {
+  const res = await fetch(`${API_URL}/seller/coupons/${id}`, {
+    method: 'PATCH',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return handleResponse(res);
+}
+
+export async function apiDeleteSellerCoupon(id: string) {
+  const res = await fetch(`${API_URL}/seller/coupons/${id}`, {
+    method: 'DELETE',
+    headers: authHeaders(),
+  });
+  return handleResponse(res);
+}
+
 // ─── Settlement Reports ───
 
 export async function apiGetSettlement(params?: Record<string, string>) {

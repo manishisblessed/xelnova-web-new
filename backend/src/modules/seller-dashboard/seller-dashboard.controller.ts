@@ -14,6 +14,8 @@ import {
   RevenueQueryDto,
   ProposeBrandDto,
   SettlementQueryDto,
+  CreateSellerCouponDto,
+  UpdateSellerCouponDto,
 } from './dto/seller-dashboard.dto';
 import { successResponse, paginatedResponse, errorResponse } from '../../common/helpers/response.helper';
 
@@ -139,6 +141,36 @@ export class SellerDashboardController {
   @ApiOperation({ summary: 'Get brands proposed by this seller' })
   async getSellerBrands(@CurrentUser('id') userId: string) {
     return successResponse(await this.service.getSellerBrands(userId), 'Brands fetched');
+  }
+
+  // ─── Seller Coupons ───
+
+  @Get('coupons')
+  @ApiOperation({ summary: 'List seller coupons' })
+  async getCoupons(@CurrentUser('id') userId: string) {
+    return successResponse(await this.service.getSellerCoupons(userId), 'Coupons fetched');
+  }
+
+  @Post('coupons')
+  @ApiOperation({ summary: 'Create a coupon for your products or cart-level discount' })
+  async createCoupon(@CurrentUser('id') userId: string, @Body() dto: CreateSellerCouponDto) {
+    return successResponse(await this.service.createSellerCoupon(userId, dto), 'Coupon created');
+  }
+
+  @Patch('coupons/:id')
+  @ApiOperation({ summary: 'Update a seller coupon' })
+  async updateCoupon(
+    @CurrentUser('id') userId: string,
+    @Param('id') id: string,
+    @Body() dto: UpdateSellerCouponDto,
+  ) {
+    return successResponse(await this.service.updateSellerCoupon(userId, id, dto), 'Coupon updated');
+  }
+
+  @Delete('coupons/:id')
+  @ApiOperation({ summary: 'Delete a seller coupon' })
+  async deleteCoupon(@CurrentUser('id') userId: string, @Param('id') id: string) {
+    return successResponse(await this.service.deleteSellerCoupon(userId, id), 'Coupon deleted');
   }
 
   // ─── Settlement Reports ───

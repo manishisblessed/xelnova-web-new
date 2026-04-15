@@ -556,10 +556,14 @@ export class WalletService {
     const amountInPaise = Math.round(totalCharge * 100);
 
     try {
+      const shortId = wallet.id.slice(-8);
+      const timestamp = Date.now().toString(36);
+      const receipt = `wlt_${shortId}_${timestamp}`;
+      
       const razorpayOrder = await this.getRazorpay().orders.create({
         amount: amountInPaise,
         currency: 'INR',
-        receipt: `wallet-${wallet.id}-${Date.now()}`,
+        receipt,
         notes: { userId, walletId: wallet.id, walletAmount: amount, fee, purpose: 'WALLET_TOPUP' },
       });
 

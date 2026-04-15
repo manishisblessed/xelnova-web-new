@@ -98,6 +98,37 @@ export class NotificationService {
     });
   }
 
+  /**
+   * Fan-out an in-app notification to every user with role ADMIN (dashboard bell).
+   */
+  async notifyAllAdmins(params: {
+    type: string;
+    title: string;
+    body: string;
+    data?: Record<string, unknown>;
+  }): Promise<void> {
+    try {
+      const admins = await this.prisma.user.findMany({
+        where: { role: 'ADMIN' },
+        select: { id: true },
+      });
+      if (admins.length === 0) return;
+
+      const rows = admins.map((a) => ({
+        userId: a.id,
+        channel: 'admin_in_app',
+        type: params.type,
+        title: params.title,
+        body: params.body,
+        ...(params.data !== undefined ? { data: params.data as object } : {}),
+      }));
+
+      await this.prisma.notificationLog.createMany({ data: rows });
+    } catch (err: any) {
+      this.logger.warn(`notifyAllAdmins failed: ${err?.message ?? err}`);
+    }
+  }
+
   // ─── Order Event Notifications ───
 
   /**
@@ -128,6 +159,13 @@ export class NotificationService {
         this.logger.warn(`SMS failed for order placed ${orderNumber}: ${err.message}`),
       );
     }
+
+    this.notifyAllAdmins({
+      type: 'ADMIN_NEW_ORDER',
+      title: 'New order',
+      body: `Order #${orderNumber} placed for ₹${total.toFixed(0)}.`,
+      data: { orderNumber },
+    }).catch(() => {});
   }
 
   /**
@@ -231,6 +269,13 @@ export class NotificationService {
         this.logger.warn(`Email failed for order shipped ${orderNumber}: ${err.message}`),
       );
     }
+
+    this.notifyAllAdmins({
+      type: 'ADMIN_ORDER_SHIPPED',
+      title: 'Order shipped',
+      body: `Order #${orderNumber} has been marked as shipped.`,
+      data: { orderNumber, courier, trackingUrl },
+    }).catch(() => {});
   }
 
   /**
@@ -267,6 +312,13 @@ export class NotificationService {
         this.logger.warn(`Email failed for order delivered ${orderNumber}: ${err.message}`),
       );
     }
+
+    this.notifyAllAdmins({
+      type: 'ADMIN_ORDER_DELIVERED',
+      title: 'Order delivered',
+      body: `Order #${orderNumber} was delivered.`,
+      data: { orderNumber },
+    }).catch(() => {});
   }
 
   /**
@@ -307,6 +359,13 @@ export class NotificationService {
         this.logger.warn(`SMS failed for order cancelled ${orderNumber}: ${err.message}`),
       );
     }
+
+    this.notifyAllAdmins({
+      type: 'ADMIN_ORDER_CANCELLED',
+      title: 'Order cancelled',
+      body: `Order #${orderNumber} cancelled. Refund ₹${refundAmount.toFixed(0)}.`,
+      data: { orderNumber, refundAmount },
+    }).catch(() => {});
   }
 
   /**
@@ -392,6 +451,13 @@ export class NotificationService {
         this.logger.warn(`SMS failed for refund ${orderNumber}: ${err.message}`),
       );
     }
+
+    this.notifyAllAdmins({
+      type: 'ADMIN_REFUND_PROCESSED',
+      title: 'Refund processed',
+      body: `₹${amount.toFixed(0)} refunded for order #${orderNumber}.`,
+      data: { orderNumber, amount },
+    }).catch(() => {});
   }
 
   // ─── Return Notifications ───
@@ -626,6 +692,13 @@ export class NotificationService {
         this.logger.warn(`SMS failed for payment success ${orderNumber}: ${err.message}`),
       );
     }
+
+    this.notifyAllAdmins({
+      type: 'ADMIN_PAYMENT_SUCCESS',
+      title: 'Payment received',
+      body: `₹${amount.toFixed(0)} payment for order #${orderNumber}.`,
+      data: { orderNumber, amount },
+    }).catch(() => {});
   }
 
   /**
@@ -654,6 +727,13 @@ export class NotificationService {
         this.logger.warn(`SMS failed for payment failed ${orderNumber}: ${err.message}`),
       );
     }
+
+    this.notifyAllAdmins({
+      type: 'ADMIN_PAYMENT_FAILED',
+      title: 'Payment failed',
+      body: `Payment failed for order #${orderNumber}.`,
+      data: { orderNumber, orderId },
+    }).catch(() => {});
   }
 
   // ─── Seller Notifications ───
@@ -806,7 +886,7 @@ export class NotificationService {
    * Notify user when ticket is created
    * Channels: In-app, Email, SMS (when approved)
    */
-  async notifyTicketCreated(userId: string, ticketNumber: string) {
+  async notifyTicketCreated(userId: string, ticketNumber: string, ticketId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: { phone: true, email: true, name: true },
@@ -819,7 +899,7 @@ export class NotificationService {
       type: 'TICKET_CREATED',
       title: 'Ticket Created',
       body: `Your support ticket #${ticketNumber} has been created. We'll respond within 24 hours.`,
-      data: { ticketNumber },
+      data: { ticketNumber, ticketId },
     });
 
     // Email
@@ -841,7 +921,7 @@ export class NotificationService {
    * Notify user when ticket status is updated
    * Channels: In-app, Email (on resolved), SMS (on resolved, when approved)
    */
-  async notifyTicketUpdate(userId: string, ticketNumber: string, status: string) {
+  async notifyTicketUpdate(userId: string, ticketNumber: string, status: string, ticketId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: { phone: true, email: true, name: true },
@@ -854,7 +934,7 @@ export class NotificationService {
       type: 'TICKET_UPDATE',
       title: 'Support Ticket Update',
       body: `Your ticket #${ticketNumber} status has been updated to ${status}.`,
-      data: { ticketNumber, status },
+      data: { ticketNumber, status, ticketId },
     });
 
     if (status === 'RESOLVED') {
@@ -878,7 +958,7 @@ export class NotificationService {
    * Notify user when there's a reply on their ticket
    * Channels: In-app, Email, SMS (when approved)
    */
-  async notifyTicketReply(userId: string, ticketNumber: string, senderName: string) {
+  async notifyTicketReply(userId: string, ticketNumber: string, senderName: string, ticketId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: { phone: true, email: true, name: true },
@@ -891,7 +971,7 @@ export class NotificationService {
       type: 'TICKET_REPLY',
       title: 'New Reply on Ticket',
       body: `${senderName} replied to your ticket #${ticketNumber}.`,
-      data: { ticketNumber },
+      data: { ticketNumber, ticketId },
     });
 
     // Email
@@ -909,14 +989,14 @@ export class NotificationService {
     }
   }
 
-  async notifyTicketForwarded(sellerId: string, ticketNumber: string) {
+  async notifyTicketForwarded(sellerId: string, ticketNumber: string, ticketId: string) {
     await this.logNotification({
       userId: sellerId,
       channel: 'in_app',
       type: 'TICKET_ASSIGNED',
       title: 'Ticket Assigned',
       body: `A support ticket #${ticketNumber} has been assigned to you. Please review and respond.`,
-      data: { ticketNumber },
+      data: { ticketNumber, ticketId },
     });
   }
 

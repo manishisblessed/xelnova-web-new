@@ -131,6 +131,34 @@ export class ProposeBrandDto {
   @ApiPropertyOptional() @IsOptional() @IsString() logo?: string;
 }
 
+// ─── Seller Coupon Management ───
+
+export class CreateSellerCouponDto {
+  @ApiProperty() @IsString() code: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() description?: string;
+  @ApiProperty({ enum: ['PERCENTAGE', 'FLAT'] }) @IsString() discountType: string;
+  @ApiProperty() @IsNumber() @Min(0) @Type(() => Number) discountValue: number;
+  @ApiPropertyOptional() @IsOptional() @IsNumber() @Type(() => Number) minOrderAmount?: number;
+  @ApiPropertyOptional() @IsOptional() @IsNumber() @Type(() => Number) maxDiscount?: number;
+  @ApiPropertyOptional() @IsOptional() @IsString() validUntil?: string;
+  @ApiPropertyOptional() @IsOptional() @IsNumber() @Type(() => Number) usageLimit?: number;
+  @ApiPropertyOptional({ enum: ['seller', 'cart'], description: 'seller = applies to this seller\'s products only, cart = applies to entire cart' })
+  @IsOptional() @IsString() scope?: string;
+}
+
+export class UpdateSellerCouponDto {
+  @ApiPropertyOptional() @IsOptional() @IsString() code?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() description?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() discountType?: string;
+  @ApiPropertyOptional() @IsOptional() @IsNumber() @Type(() => Number) discountValue?: number;
+  @ApiPropertyOptional() @IsOptional() @IsNumber() @Type(() => Number) minOrderAmount?: number;
+  @ApiPropertyOptional() @IsOptional() @IsNumber() @Type(() => Number) maxDiscount?: number;
+  @ApiPropertyOptional() @IsOptional() @IsString() validUntil?: string;
+  @ApiPropertyOptional() @IsOptional() @IsNumber() @Type(() => Number) usageLimit?: number;
+  @ApiPropertyOptional() @IsOptional() @IsBoolean() @Transform(({ value }) => value === 'true' || value === true) isActive?: boolean;
+  @ApiPropertyOptional({ enum: ['seller', 'cart'] }) @IsOptional() @IsString() scope?: string;
+}
+
 export class SettlementQueryDto {
   @ApiPropertyOptional() @IsOptional() @IsString() dateFrom?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() dateTo?: string;

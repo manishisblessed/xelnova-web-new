@@ -107,7 +107,7 @@ export class OrdersService {
     return this.prisma.order.findMany({
       where: { userId },
       include: {
-        items: { include: { product: { select: { name: true, images: true } } } },
+        items: { include: { product: { select: { name: true, slug: true, images: true } } } },
         shippingAddress: true,
       },
       orderBy: { createdAt: 'desc' },
@@ -118,7 +118,7 @@ export class OrdersService {
     const order = await this.prisma.order.findUnique({
       where: { orderNumber },
       include: {
-        items: { include: { product: { select: { name: true, images: true } } } },
+        items: { include: { product: { select: { name: true, slug: true, images: true } } } },
         shippingAddress: true,
       },
     });
@@ -516,7 +516,7 @@ export class OrdersService {
         paymentStatus: refundResult?.success ? 'REFUNDED' : order.paymentStatus,
       },
       include: {
-        items: { include: { product: { select: { name: true, images: true } } } },
+        items: { include: { product: { select: { name: true, slug: true, images: true } } } },
         shippingAddress: true,
       },
     });

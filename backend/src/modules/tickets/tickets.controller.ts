@@ -132,7 +132,7 @@ export class TicketsController {
     @Body() dto: ForwardTicketDto,
   ) {
     return successResponse(
-      await this.ticketsService.forwardToSeller(id, dto.sellerId, adminId, dto.note),
+      await this.ticketsService.forwardToSeller(id, adminId, dto.sellerId, dto.note),
       'Ticket forwarded to seller',
     );
   }

@@ -27,9 +27,13 @@ export class ReplyTicketDto {
 }
 
 export class ForwardTicketDto {
-  @ApiProperty({ description: 'Seller profile userId to forward to' })
+  @ApiPropertyOptional({
+    description:
+      'Seller user id to forward to. Omit when exactly one seller is linked to the ticket order (auto).',
+  })
+  @IsOptional()
   @IsString()
-  sellerId: string;
+  sellerId?: string;
 
   @ApiPropertyOptional({ description: 'Optional note when forwarding' })
   @IsOptional()

@@ -12,7 +12,7 @@ import { useCartStore } from '@/lib/store/cart-store';
 import { useWishlistStore } from '@/lib/store/wishlist-store';
 import { useLocationStore, autoDetectLocation } from '@/lib/store/location-store';
 import { useCategories } from '@/lib/api';
-import { useAuth, searchApi } from '@xelnova/api';
+import { useAuth, searchApi, getAccessToken, setAccessToken, notificationsApi } from '@xelnova/api';
 import { LocationModal } from '@/components/location-modal';
 
 type AutocompleteResult = {
@@ -91,28 +91,32 @@ export function Header() {
   useEffect(() => setMounted(true), []);
 
   useEffect(() => {
-    if (!isAuthenticated) return;
+    if (!isAuthenticated || authLoading) return;
     let cancelled = false;
-    const fetchCount = () => {
-      const raw = typeof window !== 'undefined'
-        ? document.cookie.match(/(?:^|;\s*)xelnova-token=([^;]*)/)?.[1]
-        : undefined;
-      if (!raw) return;
-      const token = decodeURIComponent(raw);
-      fetch('/api/v1/notifications?limit=1', {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-        .then(r => {
-          if (!r.ok) { console.warn(`[Header] notification fetch failed: ${r.status}`); return null; }
-          return r.json();
-        })
-        .then(d => { if (!cancelled && d?.success) setUnreadNotifications(d.data?.unread ?? 0); })
-        .catch(err => console.warn('[Header] notification fetch error:', err));
+    const fetchUnread = async () => {
+      // Keep in sync with account pages: cookie may be missing after refresh-in-memory,
+      // but getAccessToken() is updated by AuthProvider refresh.
+      if (typeof document !== 'undefined') {
+        const m = document.cookie.match(/(?:^|;\s*)xelnova-token=([^;]*)/);
+        if (m) setAccessToken(decodeURIComponent(m[1]));
+      }
+      if (!getAccessToken()) return;
+      try {
+        const res = (await notificationsApi.getNotifications(1, 1)) as {
+          unread?: number;
+        };
+        if (!cancelled) setUnreadNotifications(res?.unread ?? 0);
+      } catch (e) {
+        console.warn('[Header] notification fetch error:', e);
+      }
     };
-    fetchCount();
-    const interval = setInterval(fetchCount, 30000);
-    return () => { cancelled = true; clearInterval(interval); };
-  }, [isAuthenticated]);
+    void fetchUnread();
+    const interval = setInterval(() => void fetchUnread(), 30000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [isAuthenticated, authLoading]);
 
   useEffect(() => {
     setAvatarLoadFailed(false);

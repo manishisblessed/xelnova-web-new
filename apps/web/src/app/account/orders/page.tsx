@@ -27,7 +27,7 @@ function syncTokenFromCookie() {
 }
 
 type ItemRow = OrderItem & {
-  product?: { name?: string; images?: string[] };
+  product?: { name?: string; slug?: string; images?: string[] };
 };
 
 function itemName(item: ItemRow) {
@@ -36,6 +36,10 @@ function itemName(item: ItemRow) {
 
 function itemImage(item: ItemRow) {
   return item.product?.images?.[0] ?? item.productImage;
+}
+
+function itemSlug(item: ItemRow) {
+  return item.product?.slug;
 }
 
 const statusConfig: Record<string, { icon: React.ElementType; color: string; bg: string; label: string }> = {
@@ -141,9 +145,13 @@ export default function OrdersPage() {
                   {(order.items as ItemRow[]).map((item, idx) => {
                     const img = itemImage(item);
                     const name = itemName(item);
-                    return (
-                      <div key={item.id ?? idx} className="flex items-center gap-3">
-                        <div className="h-12 w-12 rounded-lg bg-surface-muted border border-border-light overflow-hidden flex items-center justify-center flex-shrink-0">
+                    const slug = itemSlug(item);
+                    const cls = `flex items-center gap-3 ${slug ? "group cursor-pointer" : ""}`;
+                    const hoverBorder = slug ? "group-hover:border-primary-300 transition-colors" : "";
+                    const hoverText = slug ? "group-hover:text-primary-600 transition-colors" : "";
+                    const content = (
+                      <>
+                        <div className={`h-12 w-12 rounded-lg bg-surface-muted border border-border-light overflow-hidden flex items-center justify-center flex-shrink-0 ${hoverBorder}`}>
                           {img ? (
                             <Image src={img} alt={name} width={48} height={48} className="h-full w-full object-cover" />
                           ) : (
@@ -151,10 +159,15 @@ export default function OrdersPage() {
                           )}
                         </div>
                         <div className="min-w-0">
-                          <p className="text-sm font-medium text-text-primary truncate">{name}</p>
+                          <p className={`text-sm font-medium text-text-primary truncate ${hoverText}`}>{name}</p>
                           <p className="text-xs text-text-secondary">Qty: {item.quantity}</p>
                         </div>
-                      </div>
+                      </>
+                    );
+                    return slug ? (
+                      <Link key={item.id ?? idx} href={`/products/${slug}`} className={cls}>{content}</Link>
+                    ) : (
+                      <div key={item.id ?? idx} className={cls}>{content}</div>
                     );
                   })}
                 </div>

@@ -4,7 +4,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { LayoutDashboard, Package, Store, CreditCard, LogOut, User, Truck, Wallet, MessageSquare, Upload, AlertTriangle, Tag, FileText, BarChart3, Palette } from 'lucide-react';
+import { LayoutDashboard, Package, Store, CreditCard, LogOut, User, Truck, Wallet, MessageSquare, Upload, AlertTriangle, Tag, FileText, BarChart3, Palette, Ticket } from 'lucide-react';
 import { cn } from '@xelnova/utils';
 import { useDashboardAuth } from '@/lib/auth-context';
 
@@ -16,6 +16,7 @@ const NAV = [
   { href: '/bulk-upload', label: 'Bulk Upload', icon: Upload },
   { href: '/inventory-alerts', label: 'Stock Alerts', icon: AlertTriangle },
   { href: '/brands', label: 'Brands', icon: Tag },
+  { href: '/coupons', label: 'Coupons', icon: Ticket },
   { href: '/payouts', label: 'Payouts', icon: CreditCard },
   { href: '/settlement', label: 'Settlement', icon: FileText },
   { href: '/analytics', label: 'Analytics', icon: BarChart3 },

@@ -63,13 +63,13 @@ export function Modal({
             exit={{ opacity: 0, scale: 0.95, y: 10 }}
             transition={{ duration: 0.2, ease: "easeOut" }}
             className={cn(
-              "relative w-full rounded-2xl border border-border bg-surface p-6 shadow-xl",
+              "relative w-full rounded-2xl border border-border bg-surface shadow-xl max-h-[90vh] flex flex-col",
               sizeStyles[size],
               className
             )}
           >
             {title && (
-              <div className="mb-4 flex items-center justify-between">
+              <div className="flex items-center justify-between p-6 pb-4 border-b border-border shrink-0">
                 <h2 className="text-lg font-semibold text-text-primary">{title}</h2>
                 <button
                   onClick={onClose}
@@ -82,12 +82,14 @@ export function Modal({
             {!title && (
               <button
                 onClick={onClose}
-                className="absolute right-4 top-4 rounded-lg p-1.5 text-text-muted transition-colors hover:bg-surface-muted hover:text-text-primary"
+                className="absolute right-4 top-4 rounded-lg p-1.5 text-text-muted transition-colors hover:bg-surface-muted hover:text-text-primary z-10"
               >
                 <X size={18} />
               </button>
             )}
-            {children}
+            <div className={cn("overflow-y-auto flex-1", title ? "p-6 pt-4" : "p-6")}>
+              {children}
+            </div>
           </motion.div>
         </div>
       )}

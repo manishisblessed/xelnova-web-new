@@ -28,6 +28,14 @@ export class LabelGeneratorService {
   async generateShippingLabel(orderId: string, sellerId: string): Promise<Buffer> {
     const seller = await this.prisma.sellerProfile.findFirst({
       where: { userId: sellerId },
+      select: {
+        id: true,
+        storeName: true,
+        location: true,
+        gstNumber: true,
+        signatureUrl: true,
+        signatureData: true,
+      },
     });
     if (!seller) throw new NotFoundException('Seller profile not found');
 
@@ -226,12 +234,49 @@ export class LabelGeneratorService {
     if (settings.showSellerSignature) {
       const sigY = y + LINE_HEIGHT * 2;
       drawText('SIGNATURE:', colMid + 8, sigY, { size: 9, font: helveticaBold });
-      page.drawLine({
-        start: { x: colMid + 8, y: sigY - LINE_HEIGHT * 2.5 },
-        end: { x: right, y: sigY - LINE_HEIGHT * 2.5 },
-        thickness: 0.5,
-        color: rgb(0.5, 0.5, 0.5),
-      });
+
+      // Seller signature is mandatory during onboarding, so it should always exist
+      const signatureSource = seller.signatureUrl || seller.signatureData;
+
+      if (signatureSource) {
+        try {
+          let signatureBytes: Uint8Array;
+
+          if (seller.signatureData && seller.signatureData.startsWith('data:')) {
+            const base64Data = seller.signatureData.split(',')[1];
+            signatureBytes = Uint8Array.from(Buffer.from(base64Data, 'base64'));
+          } else if (seller.signatureUrl) {
+            const sigRes = await fetch(seller.signatureUrl);
+            signatureBytes = new Uint8Array(await sigRes.arrayBuffer());
+          }
+
+          if (signatureBytes!) {
+            const isPng =
+              signatureSource.includes('.png') ||
+              signatureSource.includes('image/png') ||
+              signatureSource.includes('f_png');
+            const signatureImage = isPng
+              ? await pdf.embedPng(signatureBytes)
+              : await pdf.embedJpg(signatureBytes);
+
+            const maxSigWidth = right - colMid - 16;
+            const maxSigHeight = LINE_HEIGHT * 2.2;
+            const sigScale = Math.min(maxSigWidth / signatureImage.width, maxSigHeight / signatureImage.height, 1);
+            const sigDims = { width: signatureImage.width * sigScale, height: signatureImage.height * sigScale };
+
+            page.drawImage(signatureImage, {
+              x: colMid + 8,
+              y: sigY - LINE_HEIGHT - sigDims.height + 4,
+              width: sigDims.width,
+              height: sigDims.height,
+            });
+          }
+        } catch (err) {
+          // Signature failed to load - log but don't break the label
+          console.warn(`Failed to embed seller signature for seller ${seller.id}:`, err);
+        }
+      }
+
       drawText('Authorised Signatory', colMid + 8, sigY - LINE_HEIGHT * 3.2, { size: 6, color: rgb(0.5, 0.5, 0.5) });
     }
 

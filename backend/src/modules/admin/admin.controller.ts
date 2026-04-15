@@ -467,6 +467,74 @@ export class AdminController {
     return successResponse(await this.reports.getRefundReport({ dateFrom, dateTo }), 'Refund report fetched');
   }
 
+  @Get('reports/refunds/csv')
+  @ApiOperation({ summary: 'Download refund report as CSV' })
+  async getRefundCsv(@Query('dateFrom') dateFrom?: string, @Query('dateTo') dateTo?: string, @Res() res?: Response) {
+    const csv = await this.reports.getRefundReportCsv({ dateFrom, dateTo });
+    res!.set({ 'Content-Type': 'text/csv', 'Content-Disposition': 'attachment; filename="refund-report.csv"' });
+    res!.send(csv);
+  }
+
+  // ─── Sales Report ───
+  @Get('reports/sales')
+  @ApiOperation({ summary: 'Get sales report' })
+  async getSalesReport(@Query('dateFrom') dateFrom?: string, @Query('dateTo') dateTo?: string) {
+    return successResponse(await this.reports.getSalesReport({ dateFrom, dateTo }), 'Sales report fetched');
+  }
+
+  @Get('reports/sales/csv')
+  @ApiOperation({ summary: 'Download sales report as CSV' })
+  async getSalesCsv(@Query('dateFrom') dateFrom?: string, @Query('dateTo') dateTo?: string, @Res() res?: Response) {
+    const csv = await this.reports.getSalesReportCsv({ dateFrom, dateTo });
+    res!.set({ 'Content-Type': 'text/csv', 'Content-Disposition': 'attachment; filename="sales-report.csv"' });
+    res!.send(csv);
+  }
+
+  // ─── Inventory Report ───
+  @Get('reports/inventory')
+  @ApiOperation({ summary: 'Get inventory report' })
+  async getInventoryReport() {
+    return successResponse(await this.reports.getInventoryReport(), 'Inventory report fetched');
+  }
+
+  @Get('reports/inventory/csv')
+  @ApiOperation({ summary: 'Download inventory report as CSV' })
+  async getInventoryCsv(@Res() res?: Response) {
+    const csv = await this.reports.getInventoryReportCsv();
+    res!.set({ 'Content-Type': 'text/csv', 'Content-Disposition': 'attachment; filename="inventory-report.csv"' });
+    res!.send(csv);
+  }
+
+  // ─── Seller Performance Report ───
+  @Get('reports/sellers')
+  @ApiOperation({ summary: 'Get seller performance report' })
+  async getSellerPerformanceReport(@Query('dateFrom') dateFrom?: string, @Query('dateTo') dateTo?: string) {
+    return successResponse(await this.reports.getSellerPerformanceReport({ dateFrom, dateTo }), 'Seller performance report fetched');
+  }
+
+  @Get('reports/sellers/csv')
+  @ApiOperation({ summary: 'Download seller performance report as CSV' })
+  async getSellerPerformanceCsv(@Query('dateFrom') dateFrom?: string, @Query('dateTo') dateTo?: string, @Res() res?: Response) {
+    const csv = await this.reports.getSellerPerformanceReportCsv({ dateFrom, dateTo });
+    res!.set({ 'Content-Type': 'text/csv', 'Content-Disposition': 'attachment; filename="seller-performance-report.csv"' });
+    res!.send(csv);
+  }
+
+  // ─── Coupon Usage Report ───
+  @Get('reports/coupons')
+  @ApiOperation({ summary: 'Get coupon usage report' })
+  async getCouponUsageReport(@Query('dateFrom') dateFrom?: string, @Query('dateTo') dateTo?: string) {
+    return successResponse(await this.reports.getCouponUsageReport({ dateFrom, dateTo }), 'Coupon usage report fetched');
+  }
+
+  @Get('reports/coupons/csv')
+  @ApiOperation({ summary: 'Download coupon usage report as CSV' })
+  async getCouponUsageCsv(@Query('dateFrom') dateFrom?: string, @Query('dateTo') dateTo?: string, @Res() res?: Response) {
+    const csv = await this.reports.getCouponUsageReportCsv({ dateFrom, dateTo });
+    res!.set({ 'Content-Type': 'text/csv', 'Content-Disposition': 'attachment; filename="coupon-usage-report.csv"' });
+    res!.send(csv);
+  }
+
   // ─── Duplicate Listings ───
   @Get('duplicates')
   @ApiOperation({ summary: 'Scan for duplicate product listings' })

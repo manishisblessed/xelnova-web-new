@@ -21,7 +21,7 @@ function syncToken() {
   if (m) setAccessToken(decodeURIComponent(m[1]));
 }
 
-type ItemRow = OrderItem & { product?: { name?: string; images?: string[] } };
+type ItemRow = OrderItem & { product?: { name?: string; slug?: string; images?: string[] } };
 
 function itemName(item: ItemRow) {
   return item.product?.name ?? item.productName;
@@ -29,6 +29,10 @@ function itemName(item: ItemRow) {
 
 function itemImage(item: ItemRow) {
   return item.product?.images?.[0] ?? item.productImage;
+}
+
+function itemSlug(item: ItemRow) {
+  return item.product?.slug;
 }
 
 const statusConfig: Record<string, { icon: React.ElementType; color: string; bg: string; border: string; label: string }> = {
@@ -164,7 +168,7 @@ export default function OrderDetailPage() {
         id: item.productId,
         productId: item.productId,
         name: itemName(item),
-        slug: "",
+        slug: itemSlug(item) || "",
         price: item.price,
         comparePrice: 0,
         image: itemImage(item) || "",
@@ -306,17 +310,32 @@ export default function OrderDetailPage() {
               {(order.items as ItemRow[]).map((item, i) => {
                 const img = itemImage(item);
                 const name = itemName(item);
+                const slug = itemSlug(item);
                 return (
                   <div key={item.id ?? i} className="flex gap-3 items-center rounded-xl border border-border p-3">
-                    <div className="h-16 w-16 rounded-lg bg-gray-50 border border-border overflow-hidden shrink-0 flex items-center justify-center">
-                      {img ? (
-                        <Image src={img} alt={name} width={64} height={64} className="h-full w-full object-cover" />
-                      ) : (
-                        <Package size={22} className="text-gray-300" />
-                      )}
-                    </div>
+                    {slug ? (
+                      <Link href={`/products/${slug}`} className="h-16 w-16 rounded-lg bg-gray-50 border border-border overflow-hidden shrink-0 flex items-center justify-center hover:border-primary-300 transition-colors">
+                        {img ? (
+                          <Image src={img} alt={name} width={64} height={64} className="h-full w-full object-cover" />
+                        ) : (
+                          <Package size={22} className="text-gray-300" />
+                        )}
+                      </Link>
+                    ) : (
+                      <div className="h-16 w-16 rounded-lg bg-gray-50 border border-border overflow-hidden shrink-0 flex items-center justify-center">
+                        {img ? (
+                          <Image src={img} alt={name} width={64} height={64} className="h-full w-full object-cover" />
+                        ) : (
+                          <Package size={22} className="text-gray-300" />
+                        )}
+                      </div>
+                    )}
                     <div className="flex-1 min-w-0">
-                      <p className="font-medium text-text-primary text-sm truncate">{name}</p>
+                      {slug ? (
+                        <Link href={`/products/${slug}`} className="font-medium text-text-primary text-sm truncate block hover:text-primary-600 transition-colors">{name}</Link>
+                      ) : (
+                        <p className="font-medium text-text-primary text-sm truncate">{name}</p>
+                      )}
                       <p className="text-xs text-text-muted mt-0.5">Qty: {item.quantity} × {formatCurrency(item.price)}</p>
                       {item.variant && <p className="text-xs text-text-muted">Variant: {item.variant}</p>}
                     </div>

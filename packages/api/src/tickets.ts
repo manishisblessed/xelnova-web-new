@@ -28,6 +28,8 @@ export interface Ticket {
   updatedAt: string;
   customer?: { id: string; name: string; email?: string; avatar?: string | null };
   messages?: TicketMessage[];
+  /** Admin: sellers derived from linked order line items (forward target). */
+  forwardSellers?: { userId: string; storeName: string }[];
 }
 
 // ─── Customer ───
