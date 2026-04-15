@@ -602,6 +602,13 @@ export class NotificationService {
         this.logger.warn(`SMS failed for wallet credit: ${err.message}`),
       );
     }
+
+    this.notifyAllAdmins({
+      type: 'ADMIN_WALLET_CREDITED',
+      title: 'Wallet credited',
+      body: `₹${amount.toFixed(0)} added to ${user?.name || 'a customer'} wallet${reason ? ` (${reason})` : ''}.`,
+      data: { userId, amount, newBalance, reason },
+    }).catch(() => {});
   }
 
   /**
@@ -630,6 +637,13 @@ export class NotificationService {
         this.logger.warn(`SMS failed for wallet debit: ${err.message}`),
       );
     }
+
+    this.notifyAllAdmins({
+      type: 'ADMIN_WALLET_DEBITED',
+      title: 'Wallet debited',
+      body: `₹${amount.toFixed(0)} debited (${purpose}) for user ${userId}.`,
+      data: { userId, amount, purpose, newBalance },
+    }).catch(() => {});
   }
 
   // ─── Account Notifications ───

@@ -432,7 +432,7 @@ export function HomeBelowFold() {
               <Link
                 key={collection.title}
                 href={collection.href}
-                className={`group shine-effect relative overflow-hidden rounded-3xl bg-gradient-to-br ${collection.gradient} p-7 min-h-[160px] flex flex-col justify-end shadow-lg shadow-black/10 hover:shadow-2xl hover:shadow-black/15 hover:-translate-y-2 hover:scale-[1.02] transition-all duration-400`}
+                className={`group shine-effect relative overflow-hidden rounded-3xl bg-gradient-to-br ${collection.gradient} p-7 min-h-[160px] flex flex-col justify-between shadow-lg shadow-black/10 hover:shadow-2xl hover:shadow-black/15 hover:-translate-y-2 hover:scale-[1.02] transition-all duration-400`}
               >
                 {/* Animated background shapes */}
                 <div className="absolute inset-0 overflow-hidden">
@@ -442,7 +442,7 @@ export function HomeBelowFold() {
                 </div>
                 
                 {/* Collection icon */}
-                <div className="absolute top-4 left-4 text-3xl opacity-80 group-hover:scale-125 group-hover:opacity-100 transition-all duration-300">
+                <div className="relative text-3xl opacity-80 group-hover:scale-110 group-hover:opacity-100 transition-all duration-300 w-fit">
                   {collection.icon}
                 </div>
                 
