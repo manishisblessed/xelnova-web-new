@@ -33,6 +33,7 @@ import {
   ShoppingBag,
   ShieldAlert,
   Flag,
+  Star,
 } from 'lucide-react';
 import { cn } from '@xelnova/utils';
 import { useDashboardAuth } from '@/lib/auth-context';
@@ -55,6 +56,7 @@ const NAV_SECTIONS: NavSection[] = [
     title: 'Ecommerce',
     items: [
       { href: '/products', label: 'Products', icon: Package },
+      { href: '/reviews', label: 'Reviews', icon: Star },
       { href: '/categories', label: 'Categories', icon: FolderTree },
       { href: '/brands', label: 'Brands', icon: Tag },
       { href: '/banners', label: 'Banners', icon: ImageIcon },

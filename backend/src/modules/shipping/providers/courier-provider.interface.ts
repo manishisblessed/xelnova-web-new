@@ -41,6 +41,13 @@ export interface CreateShipmentResult {
   labelUrl?: string;
   estimatedDelivery?: Date;
   charges?: number;
+  /** When the courier should collect from seller (Xelnova / integrated flows). */
+  pickupScheduledAt?: Date;
+  /**
+   * Human-readable carrier line for the seller dashboard, e.g. "Xelnova · Delhivery Express".
+   * If set, persisted as Shipment.courierProvider.
+   */
+  displayCourierLine?: string;
 }
 
 export interface TrackingResult {

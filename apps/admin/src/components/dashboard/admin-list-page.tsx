@@ -86,7 +86,15 @@ export function AdminListPage<T extends object>({
   }
 
   const allColumns = renderActions
-    ? [...columns, { key: '_actions', header: 'Actions', render: renderActions, className: actionsClassName }]
+    ? [
+        ...columns,
+        {
+          key: '_actions',
+          header: 'Actions',
+          render: renderActions,
+          className: actionsClassName ?? 'w-28 min-w-[7rem] text-right whitespace-nowrap',
+        },
+      ]
     : columns;
 
   return (

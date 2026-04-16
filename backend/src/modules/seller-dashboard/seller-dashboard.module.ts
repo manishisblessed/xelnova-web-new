@@ -4,9 +4,10 @@ import { SellerDashboardService } from './seller-dashboard.service';
 import { WalletModule } from '../wallet/wallet.module';
 import { PaymentModule } from '../payment/payment.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { AdminModule } from '../admin/admin.module';
 
 @Module({
-  imports: [WalletModule, PaymentModule, NotificationsModule],
+  imports: [WalletModule, PaymentModule, NotificationsModule, AdminModule],
   controllers: [SellerDashboardController],
   providers: [SellerDashboardService],
 })

@@ -1,4 +1,5 @@
 import { publicApiBase } from '@/lib/public-api-base';
+import type { ProductAttributePresetsBundle } from '@/lib/product-attribute-presets';
 
 const API_URL = publicApiBase();
 
@@ -85,6 +86,11 @@ export async function apiDashboard() {
 }
 
 // ─── Products ───
+
+export async function apiGetProductAttributePresets(): Promise<ProductAttributePresetsBundle> {
+  const res = await fetch(`${API_URL}/seller/product-attribute-presets`, { headers: authHeaders() });
+  return handleResponse(res);
+}
 
 export async function apiGetProducts(params?: Record<string, string>) {
   const query = new URLSearchParams({ limit: '100', ...params });

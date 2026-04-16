@@ -78,6 +78,8 @@ interface ShipmentData {
   shipmentStatus: string;
   courierOrderId: string | null;
   labelUrl: string | null;
+  /** Expected pickup from seller (ISO), set for Xelnova / integrated bookings */
+  pickupDate?: string | null;
   weight: number | null;
   dimensions: string | null;
   courierCharges: number | null;
@@ -512,10 +514,10 @@ function OrderDetail({
   }, [order.id]);
 
   useEffect(() => {
-    if (['SHIPPED', 'DELIVERED'].includes(order.status) && !shipment) {
+    if (['SHIPPED', 'DELIVERED'].includes(order.status)) {
       loadShipment();
     }
-  }, [order.status, loadShipment, shipment]);
+  }, [order.id, order.status, loadShipment]);
 
   const handleLiveTrack = async () => {
     setTrackingLoading(true);
@@ -748,6 +750,8 @@ function OrderDetail({
             onCancelShipment={handleCancelShipment}
             onUpdateAwb={() => { setAwbNumber(shipment.awbNumber || ''); setAwbCarrier(shipment.courierProvider || ''); setAwbModal(true); }}
             onUpdateStatus={() => setSelfShipStatusModal(true)}
+            onDownloadLabel={handleDownloadLabel}
+            labelDownloading={labelDownloading}
             copyText={copyText}
           />
         )}
@@ -933,6 +937,31 @@ function OrderDetail({
 
 // ─── Shipment Info Panel ───
 
+function parseCarrierDisplay(courierProvider: string | null): { network: string; partner?: string } {
+  if (!courierProvider?.trim()) return { network: '—' };
+  const parts = courierProvider.split('·').map((s) => s.trim()).filter(Boolean);
+  if (parts.length >= 2) {
+    return { network: parts[0], partner: parts.slice(1).join(' · ') };
+  }
+  return { network: courierProvider.trim() };
+}
+
+function formatPickup(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
+}
+
 function ShipmentInfoPanel({
   shipment,
   trackingData,
@@ -941,6 +970,8 @@ function ShipmentInfoPanel({
   onCancelShipment,
   onUpdateAwb,
   onUpdateStatus,
+  onDownloadLabel,
+  labelDownloading,
   copyText,
 }: {
   shipment: ShipmentData;
@@ -950,11 +981,16 @@ function ShipmentInfoPanel({
   onCancelShipment: () => void;
   onUpdateAwb: () => void;
   onUpdateStatus: () => void;
+  onDownloadLabel: () => void;
+  labelDownloading: boolean;
   copyText: (text: string, label: string) => void;
 }) {
   const isSelfShip = shipment.shippingMode === 'SELF_SHIP';
+  const isXelnova = shipment.shippingMode === 'XELNOVA_COURIER';
   const canCancel = !['DELIVERED', 'RTO_DELIVERED', 'CANCELLED'].includes(shipment.shipmentStatus);
   const history = trackingData?.statusHistory || shipment.statusHistory || [];
+  const carrier = parseCarrierDisplay(shipment.courierProvider);
+  const pickupLabel = formatPickup(shipment.pickupDate ?? null);
 
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.07 }}
@@ -976,10 +1012,10 @@ function ShipmentInfoPanel({
               </Button>
             </>
           )}
-          {!isSelfShip && shipment.shippingMode !== 'XELNOVA_COURIER' && (
+          {!isSelfShip && (
             <Button size="sm" variant="outline" onClick={onLiveTrack} disabled={trackingLoading}>
               {trackingLoading ? <Loader2 size={12} className="animate-spin" /> : <Navigation size={12} />}
-              Live Track
+              Refresh tracking
             </Button>
           )}
           {canCancel && (
@@ -987,15 +1023,43 @@ function ShipmentInfoPanel({
               <X size={12} /> Cancel
             </Button>
           )}
+          <Button
+            size="sm"
+            variant="outline"
+            className="border-purple-300 bg-purple-50 text-purple-800 hover:bg-purple-100"
+            onClick={onDownloadLabel}
+            disabled={labelDownloading}
+          >
+            {labelDownloading ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+            Shipping label (PDF)
+          </Button>
         </div>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
         <div>
-          <p className="text-text-muted text-xs">Shipping Mode</p>
+          <p className="text-text-muted text-xs">Shipping mode</p>
           <p className="font-medium text-text-primary">
-            {shipment.shippingMode === 'SELF_SHIP' ? 'Self Ship' : shipment.courierProvider || shipment.shippingMode}
+            {shipment.shippingMode === 'SELF_SHIP'
+              ? 'Self Ship'
+              : isXelnova
+                ? 'Xelnova Courier (integrated)'
+                : shipment.shippingMode.replace(/_/g, ' ')}
           </p>
+        </div>
+        <div className="md:col-span-1">
+          <p className="text-text-muted text-xs">Carrier &amp; partner</p>
+          <p className="font-medium text-text-primary leading-snug">{carrier.network}</p>
+          {carrier.partner && (
+            <p className="text-xs text-text-secondary mt-0.5">
+              Last-mile: <span className="font-medium text-text-primary">{carrier.partner}</span>
+            </p>
+          )}
+          {isXelnova && (
+            <p className="text-[10px] text-text-muted mt-1 max-w-[220px]">
+              Booked on Xelnova; delivery is completed by the partner shown above (configurable by admin).
+            </p>
+          )}
         </div>
         <div>
           <p className="text-text-muted text-xs">Status</p>
@@ -1034,8 +1098,21 @@ function ShipmentInfoPanel({
         )}
       </div>
 
+      {pickupLabel && (
+        <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50/80 px-4 py-3">
+          <p className="text-xs font-bold text-emerald-900 flex items-center gap-2">
+            <Calendar size={14} />
+            Pickup schedule
+          </p>
+          <p className="text-sm font-semibold text-emerald-950 mt-1">{pickupLabel} (IST)</p>
+          <p className="text-[11px] text-emerald-800/90 mt-1">
+            Keep the packed shipment ready before this time. The rider may contact you on your registered phone.
+          </p>
+        </div>
+      )}
+
       {/* Action links */}
-      <div className="flex items-center gap-3 mt-4 pt-3 border-t border-border">
+      <div className="flex flex-wrap items-center gap-3 mt-4 pt-3 border-t border-border">
         {shipment.trackingUrl && (
           <a href={shipment.trackingUrl} target="_blank" rel="noopener noreferrer"
             className="flex items-center gap-1 text-xs text-primary-600 hover:underline"
@@ -1047,7 +1124,7 @@ function ShipmentInfoPanel({
           <a href={shipment.labelUrl} target="_blank" rel="noopener noreferrer"
             className="flex items-center gap-1 text-xs text-primary-600 hover:underline"
           >
-            <Download size={11} /> Download Label
+            <Download size={11} /> Courier label (partner)
           </a>
         )}
       </div>

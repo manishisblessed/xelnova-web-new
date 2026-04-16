@@ -12,6 +12,7 @@ export interface CartItem {
   quantity: number;
   variant?: string;
   seller: string;
+  gstRate?: number | null;
 }
 
 type NewCartItem = Omit<CartItem, "quantity">;

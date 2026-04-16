@@ -61,6 +61,35 @@ export function calculateDiscount(
   return Math.round(((comparePrice - price) / comparePrice) * 100);
 }
 
+/** Default GST % when product has no rate (matches cart fallback). */
+export const DEFAULT_GST_PERCENT = 18;
+
+/**
+ * Selling price including GST, matching cart tax: taxable + round(taxable × GST%).
+ * Use for consumer-facing prices; cart/checkout still use pre-GST `price` from the API.
+ */
+export function priceInclusiveOfGst(
+  exclusive: number,
+  gstRatePercent?: number | null
+): number {
+  if (exclusive <= 0) return 0;
+  const r = gstRatePercent ?? DEFAULT_GST_PERCENT;
+  return exclusive + Math.round((exclusive * r) / 100);
+}
+
+/**
+ * Reverse of {@link priceInclusiveOfGst} — for seller-entered inclusive prices stored as taxable value in DB.
+ * Rounds to whole rupees to match cart tax rounding.
+ */
+export function priceExclusiveFromInclusive(
+  inclusive: number,
+  gstRatePercent?: number | null
+): number {
+  if (inclusive <= 0) return 0;
+  const r = gstRatePercent ?? DEFAULT_GST_PERCENT;
+  return Math.round(inclusive / (1 + r / 100));
+}
+
 export function slugify(text: string): string {
   return text
     .toLowerCase()

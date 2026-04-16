@@ -15,6 +15,8 @@ interface ActionModalProps {
   submitVariant?: 'primary' | 'danger';
   loading?: boolean;
   wide?: boolean;
+  /** Wider modal (e.g. product preview with gallery); implies a large max-width. */
+  extraWide?: boolean;
   /** When true, primary submit stays visible but is not clickable */
   submitDisabled?: boolean;
   /** Shown as native tooltip when submit is disabled */
@@ -31,6 +33,7 @@ export function ActionModal({
   submitVariant = 'primary',
   loading,
   wide,
+  extraWide,
   submitDisabled,
   submitDisabledReason,
 }: ActionModalProps) {
@@ -52,7 +55,9 @@ export function ActionModal({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 10 }}
             transition={{ duration: 0.2 }}
-            className={`bg-surface rounded-2xl border border-border shadow-elevated w-full ${wide ? 'max-w-2xl' : 'max-w-lg'} max-h-[85vh] flex flex-col`}
+            className={`bg-surface rounded-2xl border border-border shadow-elevated w-full ${
+              extraWide ? 'max-w-4xl' : wide ? 'max-w-2xl' : 'max-w-lg'
+            } max-h-[90vh] flex flex-col`}
           >
             <div className="flex items-center justify-between px-6 py-4 border-b border-border">
               <h2 className="text-base font-semibold text-text-primary font-display">{title}</h2>

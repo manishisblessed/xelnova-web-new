@@ -28,6 +28,7 @@ export class AuthController {
     customer: process.env.FRONTEND_URL || 'http://localhost:3000',
     seller: process.env.SELLER_URL || 'http://localhost:3003',
     admin: process.env.ADMIN_URL || 'http://localhost:3002',
+    business: process.env.BUSINESS_URL || 'http://localhost:3004',
   };
 
   private getClientIp(req: Request): string {
@@ -204,27 +205,9 @@ export class AuthController {
     @Headers('user-agent') userAgent: string,
   ) {
     const ipAddress = this.getClientIp(req);
-    
-    const { OAuth2Client } = await import('google-auth-library');
-    const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
-    
-    try {
-      const ticket = await client.verifyIdToken({
-        idToken: dto.idToken,
-        audience: process.env.GOOGLE_CLIENT_ID,
-      });
-      
-      const payload = ticket.getPayload();
-      if (!payload || !payload.email) {
-        throw new UnauthorizedException('Invalid token payload');
-      }
 
-      const googleUser = {
-        googleId: payload.sub || '',
-        email: payload.email,
-        name: payload.name || payload.email.split('@')[0],
-        avatar: payload.picture,
-      };
+    try {
+      const googleUser = await this.authService.verifyGoogleIdToken(dto.idToken);
 
       let role: Role = 'CUSTOMER';
       if (dto.role === 'seller') role = 'SELLER';

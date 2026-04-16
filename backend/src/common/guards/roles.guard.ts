@@ -82,6 +82,8 @@ export class RolesGuard implements CanActivate {
         return ['ADMIN', 'SELLER', 'CUSTOMER'];
       case 'SELLER':
         return ['SELLER', 'CUSTOMER'];
+      case 'BUSINESS':
+        return ['BUSINESS'];
       case 'CUSTOMER':
       default:
         return ['CUSTOMER'];

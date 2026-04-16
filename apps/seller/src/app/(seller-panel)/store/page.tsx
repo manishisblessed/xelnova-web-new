@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   Store,
@@ -32,6 +32,7 @@ import {
   type SellerStoreBanner,
 } from '@/lib/api';
 import { formatCurrency } from '@xelnova/utils';
+import { resolveStorefrontPreviewUrl } from '@/lib/storefront-url';
 
 export default function StoreSettingsPage() {
   const [loading, setLoading] = useState(true);
@@ -219,6 +220,11 @@ export default function StoreSettingsPage() {
       !searchQuery || p.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  const previewUrl = useMemo(
+    () => resolveStorefrontPreviewUrl(settings?.storeUrl),
+    [settings?.storeUrl],
+  );
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
@@ -235,9 +241,9 @@ export default function StoreSettingsPage() {
       />
 
       <div className="flex items-center justify-end gap-3 -mt-4 mb-6">
-        {settings?.storeUrl && (
+        {previewUrl && (
           <a
-            href={settings.storeUrl}
+            href={previewUrl}
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-text-secondary hover:text-primary-600 border border-border rounded-lg hover:border-primary-300 transition-colors"

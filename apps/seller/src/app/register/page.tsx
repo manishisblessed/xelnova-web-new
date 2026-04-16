@@ -443,6 +443,8 @@ export default function RegisterPage() {
       if (res.ok && data.success) {
         setOtpState({ sent: true, verified: false, loading: false, expiresIn: data.data?.expiresIn });
         setCooldown(60);
+        if (type === 'EMAIL') setEmailOtpInput('');
+        else setPhoneOtpInput('');
         if (data.data?.devOtp) alert(`[Dev Mode] Your OTP is: ${data.data.devOtp}`);
       } else {
         setOtpState(prev => ({ ...prev, loading: false, error: data.message || `Failed to send OTP (${res.status})` }));
@@ -453,13 +455,20 @@ export default function RegisterPage() {
     }
   };
 
-  const verifyOtp = async (type: 'EMAIL' | 'PHONE') => {
+  const verifyOtp = async (type: 'EMAIL' | 'PHONE', otpOverride?: string) => {
     const identifier = type === 'EMAIL' ? formData.email : formData.phone;
-    const otp = type === 'EMAIL' ? emailOtpInput : phoneOtpInput;
+    const raw = otpOverride ?? (type === 'EMAIL' ? emailOtpInput : phoneOtpInput);
+    const otp = raw.replace(/\D/g, '').slice(0, 6);
     const setOtpState = type === 'EMAIL' ? setEmailOtp : setPhoneOtp;
+    const current = type === 'EMAIL' ? emailOtp : phoneOtp;
 
-    if (!otp || otp.length !== 6) {
-      setOtpState(prev => ({ ...prev, error: 'Enter 6-digit OTP' }));
+    if (current.verified) return;
+    if (current.loading) return;
+
+    if (otp.length !== 6) {
+      if (otpOverride === undefined) {
+        setOtpState(prev => ({ ...prev, error: 'Enter 6-digit OTP' }));
+      }
       return;
     }
 
@@ -1343,15 +1352,17 @@ export default function RegisterPage() {
                               <button type="button" onClick={() => { setEmailOtp({ sent: false, verified: false, loading: false }); setEmailOtpInput(''); setEmailCooldown(0); }}
                                 className="ml-auto text-primary-600 hover:text-primary-700 font-medium whitespace-nowrap">Change</button>
                             </div>
-                            <div className="flex gap-2">
-                              <input type="text" value={emailOtpInput} onChange={(e) => {
+                            <div className="flex gap-2 items-center">
+                              <input type="text" inputMode="numeric" autoComplete="one-time-code" value={emailOtpInput} onChange={(e) => {
                                 const val = e.target.value.replace(/\D/g, '').slice(0, 6);
                                 setEmailOtpInput(val);
-                                if (val.length === 6) setTimeout(() => verifyOtp('EMAIL'), 100);
+                                setEmailOtp(prev => ({ ...prev, error: undefined }));
+                                if (val.length === 6) void verifyOtp('EMAIL', val);
                               }}
-                                placeholder="Enter 6-digit OTP" className="flex-1 min-w-0 px-3.5 py-2.5 rounded-lg border border-gray-200 bg-white text-sm text-center font-mono tracking-[0.3em] placeholder:tracking-normal placeholder:font-sans focus:border-primary-400 focus:ring-2 focus:ring-primary-500/10 outline-none transition-all"
+                                placeholder="Enter 6-digit OTP" disabled={emailOtp.loading}
+                                className="flex-1 min-w-0 px-3.5 py-2.5 rounded-lg border border-gray-200 bg-white text-sm text-center font-mono tracking-[0.3em] placeholder:tracking-normal placeholder:font-sans focus:border-primary-400 focus:ring-2 focus:ring-primary-500/10 outline-none transition-all disabled:opacity-60"
                                 maxLength={6} autoFocus />
-                              <Button type="button" onClick={() => verifyOtp('EMAIL')} loading={emailOtp.loading} size="sm" className="shrink-0">Verify</Button>
+                              {emailOtp.loading && <Loader2 size={20} className="shrink-0 animate-spin text-primary-600" aria-label="Verifying" />}
                             </div>
                             <button type="button" onClick={() => sendOtp('EMAIL')} disabled={emailCooldown > 0}
                               className="text-xs font-medium text-gray-400 hover:text-gray-600 disabled:text-gray-300 transition-colors">
@@ -1394,15 +1405,17 @@ export default function RegisterPage() {
                               <button type="button" onClick={() => { setPhoneOtp({ sent: false, verified: false, loading: false }); setPhoneOtpInput(''); setPhoneCooldown(0); }}
                                 className="ml-auto text-primary-600 hover:text-primary-700 font-medium whitespace-nowrap">Change</button>
                             </div>
-                            <div className="flex gap-2">
-                              <input type="text" value={phoneOtpInput} onChange={(e) => {
+                            <div className="flex gap-2 items-center">
+                              <input type="text" inputMode="numeric" autoComplete="one-time-code" value={phoneOtpInput} onChange={(e) => {
                                 const val = e.target.value.replace(/\D/g, '').slice(0, 6);
                                 setPhoneOtpInput(val);
-                                if (val.length === 6) setTimeout(() => verifyOtp('PHONE'), 100);
+                                setPhoneOtp(prev => ({ ...prev, error: undefined }));
+                                if (val.length === 6) void verifyOtp('PHONE', val);
                               }}
-                                placeholder="Enter 6-digit OTP" className="flex-1 min-w-0 px-3.5 py-2.5 rounded-lg border border-gray-200 bg-white text-sm text-center font-mono tracking-[0.3em] placeholder:tracking-normal placeholder:font-sans focus:border-primary-400 focus:ring-2 focus:ring-primary-500/10 outline-none transition-all"
+                                placeholder="Enter 6-digit OTP" disabled={phoneOtp.loading}
+                                className="flex-1 min-w-0 px-3.5 py-2.5 rounded-lg border border-gray-200 bg-white text-sm text-center font-mono tracking-[0.3em] placeholder:tracking-normal placeholder:font-sans focus:border-primary-400 focus:ring-2 focus:ring-primary-500/10 outline-none transition-all disabled:opacity-60"
                                 maxLength={6} autoFocus />
-                              <Button type="button" onClick={() => verifyOtp('PHONE')} loading={phoneOtp.loading} size="sm" className="shrink-0">Verify</Button>
+                              {phoneOtp.loading && <Loader2 size={20} className="shrink-0 animate-spin text-primary-600" aria-label="Verifying" />}
                             </div>
                             <button type="button" onClick={() => sendOtp('PHONE')} disabled={phoneCooldown > 0}
                               className="text-xs font-medium text-gray-400 hover:text-gray-600 disabled:text-gray-300 transition-colors">
@@ -1482,7 +1495,13 @@ export default function RegisterPage() {
                       {/* Aadhaar (Digilocker) */}
                       <div className="mb-6 p-4 rounded-xl border border-gray-200 bg-gray-50/50">
                         <h3 className="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-2"><Fingerprint size={16} className="text-primary-600" /> Aadhaar KYC Verification</h3>
-                        <p className="text-xs text-gray-500 mb-3">Verify your Aadhaar via Digilocker — a secure government portal. No need to enter your Aadhaar number manually.</p>
+                        <p className="text-xs text-gray-500 mb-2">Verify your Aadhaar via Digilocker — a secure government portal. No need to enter your Aadhaar number manually.</p>
+                        {aadhaar.status !== 'verified' && (
+                          <div className="mb-3 flex gap-2 rounded-lg border border-gray-200 bg-white/70 px-3 py-2 text-xs text-gray-600 leading-relaxed">
+                            <AlertCircle size={14} className="shrink-0 text-gray-400 mt-0.5" aria-hidden />
+                            <span>You’ll finish this on the official DigiLocker site. If the consent screen names a verification partner, that’s normal for regulated KYC—your details are still verified through DigiLocker.</span>
+                          </div>
+                        )}
                         {aadhaar.status === 'verified' && aadhaar.verifiedData ? (
                           <div className="p-3 rounded-lg bg-green-50 border border-green-200 text-sm">
                             <div className="flex items-center gap-2 mb-1"><CheckCircle size={14} className="text-green-600" /><span className="font-medium text-green-800">Aadhaar Verified via Digilocker</span></div>

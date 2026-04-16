@@ -1,9 +1,18 @@
 'use client';
 
-import { createContext, useContext, useState, useEffect, useCallback, ReactNode, createElement } from 'react';
+import {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useCallback,
+  ReactNode,
+  createElement,
+} from 'react';
 import type { AuthUser } from '../types';
 import * as authApi from '../auth';
 import { setAccessToken } from '../client';
+import { configureApiAuthStorage } from '../auth-storage';
 
 interface AuthContextType {
   user: AuthUser | null;
@@ -16,26 +25,52 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
-export function AuthProvider({ children, requiredRole }: { children: ReactNode; requiredRole?: string }) {
+export type AuthProviderVariant = 'retail' | 'business';
+
+export function AuthProvider({
+  children,
+  authStoragePrefix,
+  variant = 'retail',
+}: {
+  children: ReactNode;
+  /** e.g. `business` → keys `business:xelnova-refresh-token` */
+  authStoragePrefix?: string;
+  variant?: AuthProviderVariant;
+}) {
+  configureApiAuthStorage({ keyPrefix: authStoragePrefix });
+
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    configureApiAuthStorage({ keyPrefix: authStoragePrefix });
+  }, [authStoragePrefix]);
 
   useEffect(() => {
     let cancelled = false;
     const stored = authApi.getStoredUser();
     if (stored) {
+      if (variant === 'business' && stored.role !== 'BUSINESS') {
+        authApi.logout().catch(() => {});
+        if (!cancelled) {
+          setUser(null);
+          setLoading(false);
+        }
+        return () => {
+          cancelled = true;
+        };
+      }
       setUser(stored);
-      // Also sync the access token from cookie if available
       if (typeof document !== 'undefined') {
         const m = document.cookie.match(/(?:^|;\s*)xelnova-token=([^;]*)/);
         if (m) setAccessToken(decodeURIComponent(m[1]));
       }
-      authApi.refreshTokens()
+      authApi
+        .refreshTokens()
         .then((tokens) => {
           if (!cancelled) setAccessToken(tokens.accessToken);
         })
         .catch(() => {
-          // Don't clear user if we have a valid cookie — token refresh may just be temporarily unavailable
           if (typeof document !== 'undefined') {
             const hasCookie = /(?:^|;\s*)xelnova-token=/.test(document.cookie);
             if (hasCookie) return;
@@ -45,22 +80,42 @@ export function AuthProvider({ children, requiredRole }: { children: ReactNode; 
             authApi.logout();
           }
         })
-        .finally(() => { if (!cancelled) setLoading(false); });
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
     } else {
       setLoading(false);
     }
-    return () => { cancelled = true; };
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+  }, [variant]);
 
-  const login = useCallback(async (email: string, password: string) => {
-    const result = await authApi.login(email, password);
-    setUser(result.user);
-  }, []);
+  const login = useCallback(
+    async (email: string, password: string) => {
+      const result =
+        variant === 'business'
+          ? await authApi.loginBusiness(email, password)
+          : await authApi.login(email, password);
+      if (variant === 'business' && result.user.role !== 'BUSINESS') {
+        await authApi.logout();
+        throw new Error('Not a business account');
+      }
+      setUser(result.user);
+    },
+    [variant],
+  );
 
-  const register = useCallback(async (name: string, email: string, password: string, phone?: string) => {
-    const result = await authApi.register(name, email, password, phone);
-    setUser(result.user);
-  }, []);
+  const register = useCallback(
+    async (name: string, email: string, password: string, phone?: string) => {
+      if (variant === 'business') {
+        throw new Error('Use registerBusiness on the business registration page');
+      }
+      const result = await authApi.register(name, email, password, phone);
+      setUser(result.user);
+    },
+    [variant],
+  );
 
   const logoutFn = useCallback(async () => {
     await authApi.logout();

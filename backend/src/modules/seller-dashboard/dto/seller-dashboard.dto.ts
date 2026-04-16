@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsNumber, IsBoolean, IsArray, Min, IsEnum, Allow } from 'class-validator';
+import { IsString, IsOptional, IsNumber, IsBoolean, IsArray, Min, IsEnum, Allow, IsNotEmpty } from 'class-validator';
 import { ApiPropertyOptional, ApiProperty } from '@nestjs/swagger';
 import { Type, Transform } from 'class-transformer';
 
@@ -9,7 +9,7 @@ export class CreateProductDto {
   @ApiProperty() @IsNumber() @Min(0) @Type(() => Number) price: number;
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Type(() => Number) compareAtPrice?: number;
   @ApiProperty() @IsString() categoryId: string;
-  @ApiPropertyOptional() @IsOptional() @IsString() brand?: string;
+  @ApiProperty() @IsString() @IsNotEmpty() brand: string;
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Type(() => Number) stock?: number;
   @ApiPropertyOptional() @IsOptional() @IsArray() @IsString({ each: true }) images?: string[];
   @ApiPropertyOptional() @IsOptional() @IsArray() @IsString({ each: true }) highlights?: string[];
@@ -19,8 +19,10 @@ export class CreateProductDto {
   @ApiPropertyOptional() @IsOptional() @IsString() sku?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() metaTitle?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() metaDescription?: string;
-  @ApiPropertyOptional() @IsOptional() @IsString() hsnCode?: string;
-  @ApiPropertyOptional() @IsOptional() @IsNumber() @Type(() => Number) gstRate?: number;
+  @ApiProperty() @IsString() @IsNotEmpty() hsnCode: string;
+  @ApiProperty() @IsNumber() @Type(() => Number) gstRate: number;
+  @ApiPropertyOptional({ description: 'Seller uploaded brand authorization certificate URL' })
+  @IsOptional() @IsString() brandAuthorizationCertificate?: string;
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Type(() => Number) lowStockThreshold?: number;
   @ApiPropertyOptional({ description: 'Weight in kg' }) @IsOptional() @IsNumber() @Type(() => Number) weight?: number;
   @ApiPropertyOptional({ description: 'Dimensions in LxWxH cm format (e.g., 30x20x15)' }) @IsOptional() @IsString() dimensions?: string;
@@ -50,7 +52,7 @@ export class UpdateProductDto {
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Type(() => Number) price?: number;
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Type(() => Number) compareAtPrice?: number;
   @ApiPropertyOptional() @IsOptional() @IsString() categoryId?: string;
-  @ApiPropertyOptional() @IsOptional() @IsString() brand?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() @IsNotEmpty() brand?: string;
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Type(() => Number) stock?: number;
   @ApiPropertyOptional() @IsOptional() @IsArray() @IsString({ each: true }) images?: string[];
   @ApiPropertyOptional() @IsOptional() @IsArray() @IsString({ each: true }) highlights?: string[];
@@ -62,8 +64,10 @@ export class UpdateProductDto {
   @ApiPropertyOptional() @IsOptional() @IsString() sku?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() metaTitle?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() metaDescription?: string;
-  @ApiPropertyOptional() @IsOptional() @IsString() hsnCode?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() @IsNotEmpty() hsnCode?: string;
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Type(() => Number) gstRate?: number;
+  @ApiPropertyOptional({ description: 'Seller uploaded brand authorization certificate URL' })
+  @IsOptional() @IsString() brandAuthorizationCertificate?: string;
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Type(() => Number) lowStockThreshold?: number;
   @ApiPropertyOptional({ description: 'Weight in kg' }) @IsOptional() @IsNumber() @Type(() => Number) weight?: number;
   @ApiPropertyOptional({ description: 'Dimensions in LxWxH cm format (e.g., 30x20x15)' }) @IsOptional() @IsString() dimensions?: string;

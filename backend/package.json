@@ -16,6 +16,7 @@
     "db:reset": "npx prisma migrate reset"
   },
   "dependencies": {
+    "@xelnova/utils": "*",
     "@neondatabase/serverless": "^1.0.2",
     "@nestjs/common": "^11.0.0",
     "@nestjs/config": "^4.0.0",

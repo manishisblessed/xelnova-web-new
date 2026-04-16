@@ -6,7 +6,6 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { motion } from 'framer-motion';
 import {
-  Mail,
   ArrowRight,
   TrendingUp,
   Package,
@@ -14,7 +13,6 @@ import {
   BarChart3,
   CheckCircle,
   Loader2,
-  Shield,
 } from 'lucide-react';
 import { DashboardAuthProvider, useDashboardAuth } from '@/lib/auth-context';
 import { publicApiBase } from '@/lib/public-api-base';
@@ -54,14 +52,9 @@ function LoginFormInner() {
   const [phone, setPhone] = useState('');
   const [otpSent, setOtpSent] = useState(false);
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
-  const [needsName, setNeedsName] = useState(false);
-  const [fullName, setFullName] = useState('');
-  const [regEmail, setRegEmail] = useState('');
-
   // Shared state
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
-  const [googleClicked, setGoogleClicked] = useState(false);
   const [error, setError] = useState('');
   const { setUser } = useDashboardAuth();
   const searchParams = useSearchParams();
@@ -111,12 +104,16 @@ function LoginFormInner() {
   const googleCallbackRef = useRef<(response: { credential: string }) => Promise<void>>(null!);
 
   const handleGoogleCallback = useCallback(async (response: { credential: string }) => {
-    setGoogleClicked(false);
+    if (!response?.credential) {
+      setError('Google did not return a sign-in token. Please try again.');
+      return;
+    }
+
     setGoogleLoading(true);
     setError('');
 
     const abortController = new AbortController();
-    const timeoutId = setTimeout(() => abortController.abort(), 30_000);
+    const timeoutId = setTimeout(() => abortController.abort(), 45_000);
 
     try {
       const res = await fetch(`${API_BASE}/auth/google/token`, {
@@ -125,8 +122,6 @@ function LoginFormInner() {
         body: JSON.stringify({ idToken: response.credential, role: 'seller' }),
         signal: abortController.signal,
       });
-
-      clearTimeout(timeoutId);
 
       const raw = await res.text();
       let data: {
@@ -168,14 +163,15 @@ function LoginFormInner() {
         setError(msg || 'Google sign-in failed');
       }
     } catch (err) {
-      clearTimeout(timeoutId);
       if (err instanceof DOMException && err.name === 'AbortError') {
         setError('Sign-in request timed out. Please check your connection and try again.');
       } else {
         setError(err instanceof Error ? err.message : 'Failed to sign in with Google');
       }
+    } finally {
+      clearTimeout(timeoutId);
+      setGoogleLoading(false);
     }
-    setGoogleLoading(false);
   }, [createSessionAndRedirect]);
 
   googleCallbackRef.current = handleGoogleCallback;
@@ -227,42 +223,6 @@ function LoginFormInner() {
 
     return () => {};
   }, [initializeGoogleSignIn]);
-
-  useEffect(() => {
-    let clickTimeout: ReturnType<typeof setTimeout> | null = null;
-
-    const handleBlur = () => {
-      const googleBtn = document.getElementById('google-signin-button-seller');
-      if (googleBtn && document.activeElement?.tagName === 'IFRAME' && googleBtn.contains(document.activeElement)) {
-        setGoogleClicked(true);
-        if (clickTimeout) clearTimeout(clickTimeout);
-        clickTimeout = setTimeout(() => {
-          setGoogleClicked((prev) => {
-            if (prev) return false;
-            return prev;
-          });
-        }, 120_000);
-      }
-    };
-
-    const handleFocus = () => {
-      setTimeout(() => {
-        setGoogleClicked((prev) => {
-          if (prev) return false;
-          return prev;
-        });
-      }, 5000);
-    };
-
-    window.addEventListener('blur', handleBlur);
-    window.addEventListener('focus', handleFocus);
-
-    return () => {
-      window.removeEventListener('blur', handleBlur);
-      window.removeEventListener('focus', handleFocus);
-      if (clickTimeout) clearTimeout(clickTimeout);
-    };
-  }, []);
 
   // ─── Phone OTP Login ───
 
@@ -317,56 +277,12 @@ function LoginFormInner() {
       if (!res.ok) throw new Error(data.message || 'Invalid OTP');
 
       const result = data.data;
-      if (result.isNewUser) {
-        setNeedsName(true);
-      } else {
-        await createSessionAndRedirect(result.accessToken, result.user, result.hasSellerProfile);
+      if (!result.accessToken || !result.user) {
+        throw new Error('Could not sign you in. Please try again.');
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Invalid OTP');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const isValidEmail = (val: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val);
-
-  const handleCompleteRegistration = async () => {
-    const trimmedName = fullName.trim();
-    const trimmedEmail = regEmail.trim().toLowerCase();
-
-    if (!trimmedName || trimmedName.length < 2) {
-      setError('Please enter your full name (at least 2 characters)');
-      return;
-    }
-    if (!trimmedEmail || !isValidEmail(trimmedEmail)) {
-      setError('Please enter a valid email address');
-      return;
-    }
-
-    setLoading(true);
-    setError('');
-    try {
-      const res = await fetch(`${API_BASE}/auth/complete-phone-registration`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: `+91${phone}`, name: trimmedName, email: trimmedEmail }),
-      });
-      const raw = await res.text();
-      let data: any = {};
-      try { data = raw ? JSON.parse(raw) : {}; } catch {
-        throw new Error(
-          res.status >= 500
-            ? 'Server error — please try again in a moment.'
-            : `Unexpected response (HTTP ${res.status})`,
-        );
-      }
-      if (!res.ok) throw new Error(data.message || 'Registration failed');
-
-      const result = data.data;
       await createSessionAndRedirect(result.accessToken, result.user, result.hasSellerProfile);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Registration failed');
+      setError(err instanceof Error ? err.message : 'Invalid OTP');
     } finally {
       setLoading(false);
     }
@@ -417,59 +333,6 @@ function LoginFormInner() {
   // ─── Render ───
 
   const renderPhoneForm = () => {
-    if (needsName) {
-      return (
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="space-y-5"
-        >
-          <div className="text-center">
-            <div className="mx-auto w-14 h-14 rounded-full bg-primary-100 flex items-center justify-center mb-3">
-              <Shield size={24} className="text-primary-600" />
-            </div>
-            <p className="text-sm text-gray-600">
-              Phone <span className="font-medium text-gray-800">+91 {phone}</span> verified! Complete your profile to continue.
-            </p>
-          </div>
-          <div>
-            <label htmlFor="reg-name" className="block text-sm font-medium text-gray-700 mb-2">Full Name</label>
-            <input
-              id="reg-name"
-              type="text"
-              autoFocus
-              value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
-              placeholder="e.g. Rahul Sharma"
-              className="w-full px-4 py-3.5 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none transition-all text-gray-900 placeholder:text-gray-400"
-            />
-          </div>
-          <div>
-            <label htmlFor="reg-email" className="block text-sm font-medium text-gray-700 mb-2">Email Address</label>
-            <div className="relative">
-              <Mail size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
-              <input
-                id="reg-email"
-                type="email"
-                value={regEmail}
-                onChange={(e) => setRegEmail(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && fullName.trim() && regEmail.trim() && handleCompleteRegistration()}
-                placeholder="you@example.com"
-                className="w-full pl-11 pr-4 py-3.5 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none transition-all text-gray-900 placeholder:text-gray-400"
-              />
-            </div>
-          </div>
-          <button
-            onClick={handleCompleteRegistration}
-            disabled={fullName.trim().length < 2 || !isValidEmail(regEmail.trim()) || loading}
-            className="w-full flex items-center justify-center gap-2 rounded-xl bg-primary-500 py-3.5 text-sm font-semibold text-white hover:bg-primary-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-primary-500/25"
-          >
-            {loading ? <Loader2 size={16} className="animate-spin" /> : <>Create Account & Sign In <ArrowRight size={16} /></>}
-          </button>
-        </motion.div>
-      );
-    }
-
     if (!otpSent) {
       return (
         <div className="space-y-5">
@@ -659,12 +522,8 @@ function LoginFormInner() {
 
           <div className="bg-white rounded-3xl shadow-xl border border-gray-100 p-8">
             <div className="text-center mb-6">
-              <h2 className="text-2xl font-bold text-gray-900 font-display">
-                {needsName ? 'Create your account' : 'Welcome back'}
-              </h2>
-              <p className="text-gray-500 mt-2">
-                {needsName ? 'Fill in your details to get started' : 'Sign in to your seller dashboard'}
-              </p>
+              <h2 className="text-2xl font-bold text-gray-900 font-display">Welcome back</h2>
+              <p className="text-gray-500 mt-2">Sign in to your seller dashboard</p>
             </div>
 
             {renderPhoneForm()}
@@ -679,7 +538,7 @@ function LoginFormInner() {
               </motion.div>
             )}
 
-            {!needsName && (
+            {!otpSent && (
               <>
                 {/* Divider */}
                 <div className="relative my-6">
@@ -707,18 +566,11 @@ function LoginFormInner() {
                       Web client authorized JavaScript origins.
                     </p>
                   ) : (
-                    <div className="relative">
+                    <div className="space-y-2">
                       <div id="google-signin-button-seller" className="flex justify-center" />
-                      {googleClicked && (
-                        <motion.div
-                          initial={{ opacity: 0 }}
-                          animate={{ opacity: 1 }}
-                          className="mt-3 flex items-center justify-center gap-2 text-sm text-gray-500"
-                        >
-                          <Loader2 size={16} className="animate-spin" />
-                          <span>Waiting for Google sign-in...</span>
-                        </motion.div>
-                      )}
+                      <p className="text-center text-[11px] text-gray-400 max-w-[320px] mx-auto leading-snug">
+                        After you pick an account, sign-in continues here — stay on this page.
+                      </p>
                     </div>
                   )}
                 </div>

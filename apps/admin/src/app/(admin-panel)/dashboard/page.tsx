@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { motion } from 'framer-motion';
-import { DollarSign, ShoppingCart, Users, Store, Package, Clock } from 'lucide-react';
+import { DollarSign, ShoppingCart, Users, Store, Package, Clock, Star } from 'lucide-react';
 import { DashboardHeader } from '@/components/dashboard/dashboard-header';
 import { StatCard } from '@/components/dashboard/stat-card';
 import { DataTable, type Column } from '@/components/dashboard/data-table';
@@ -22,6 +23,7 @@ interface DashboardData {
   monthRevenue: number;
   activeSellers: number;
   pendingProducts: number;
+  pendingReviews: number;
   recentOrders: Array<{
     id: string;
     orderNumber: string;
@@ -86,7 +88,7 @@ export default function DashboardPage() {
           <StatCard loading={loading} label="Sellers" value={data ? `${data.activeSellers} / ${data.totalSellers}` : '—'} icon={Store} />
         </motion.div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
           <div className="rounded-2xl border border-border bg-surface p-5 shadow-card">
             <div className="flex items-center gap-3 mb-1">
               <Package size={18} className="text-text-muted" />
@@ -94,7 +96,9 @@ export default function DashboardPage() {
             </div>
             <p className="text-2xl font-bold text-text-primary">{loading ? '—' : data?.totalProducts}</p>
             {!loading && data && data.pendingProducts > 0 && (
-              <p className="text-xs text-accent-600 mt-1">{data.pendingProducts} pending review</p>
+              <Link href="/products?status=PENDING" className="text-xs text-accent-600 mt-1 inline-block hover:underline">
+                {data.pendingProducts} pending review
+              </Link>
             )}
           </div>
           <div className="rounded-2xl border border-border bg-surface p-5 shadow-card">
@@ -103,6 +107,23 @@ export default function DashboardPage() {
               <span className="text-sm text-text-muted">Pending Orders</span>
             </div>
             <p className="text-2xl font-bold text-text-primary">{loading ? '—' : data?.pendingOrders}</p>
+            {!loading && (data?.pendingOrders ?? 0) > 0 && (
+              <Link href="/orders?status=PENDING" className="text-xs text-accent-600 mt-1 inline-block hover:underline">
+                View pending orders
+              </Link>
+            )}
+          </div>
+          <div className="rounded-2xl border border-border bg-surface p-5 shadow-card">
+            <div className="flex items-center gap-3 mb-1">
+              <Star size={18} className="text-text-muted" />
+              <span className="text-sm text-text-muted">Pending Reviews</span>
+            </div>
+            <p className="text-2xl font-bold text-text-primary">{loading ? '—' : data?.pendingReviews ?? 0}</p>
+            {!loading && (data?.pendingReviews ?? 0) > 0 && (
+              <Link href="/reviews" className="text-xs text-accent-600 mt-1 inline-block hover:underline">
+                Review pending
+              </Link>
+            )}
           </div>
           <div className="rounded-2xl border border-border bg-surface p-5 shadow-card">
             <div className="flex items-center gap-3 mb-1">

@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { SellerCourierConfig } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import {
@@ -15,7 +16,26 @@ export class XelnovaCourierProvider implements CourierProvider {
   readonly providerName = 'Xelnova Courier';
   private readonly logger = new Logger(XelnovaCourierProvider.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly config: ConfigService,
+  ) {}
+
+  /** Next pickup window: following business day ~2 PM (India-style cut-off). */
+  private computePickupAt(): Date {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    while (d.getDay() === 0 || d.getDay() === 6) {
+      d.setDate(d.getDate() + 1);
+    }
+    d.setHours(14, 0, 0, 0);
+    return d;
+  }
+
+  /** Used when Xelnova booking is fulfilled via Delhivery (pickup hint for sellers). */
+  getNextPickupDate(): Date {
+    return this.computePickupAt();
+  }
 
   async createShipment(
     _config: SellerCourierConfig | null,
@@ -24,13 +44,21 @@ export class XelnovaCourierProvider implements CourierProvider {
     // Xelnova Courier: auto-generate AWB with XC prefix
     const awbNumber = `XC${Date.now()}${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
 
+    const pickupScheduledAt = this.computePickupAt();
+    const lastMile =
+      this.config.get<string>('XELNOVA_LAST_MILE_PARTNER')?.trim() ||
+      'Delhivery Express';
+    const displayCourierLine = `${this.providerName} · ${lastMile}`;
+
     this.logger.log(
-      `Xelnova Courier shipment created for order ${details.orderNumber}, AWB: ${awbNumber}`,
+      `Xelnova Courier shipment created for order ${details.orderNumber}, AWB: ${awbNumber}, pickup: ${pickupScheduledAt.toISOString()}, partner: ${lastMile}`,
     );
 
     return {
       awbNumber,
       courierOrderId: `XN-${details.orderNumber}`,
+      pickupScheduledAt,
+      displayCourierLine,
     };
   }
 

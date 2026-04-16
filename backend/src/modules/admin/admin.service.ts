@@ -20,6 +20,12 @@ import {
   AdminAuditContext,
   AdminUpdateShipmentDto,
 } from './dto/admin.dto';
+import {
+  DEFAULT_PRODUCT_ATTRIBUTE_PRESETS,
+  type ProductAttributePresetSection,
+} from './default-product-attribute-presets';
+import { ShippingService } from '../shipping/shipping.service';
+import { DEFAULT_PLATFORM_LOGISTICS } from '../../common/platform-logistics';
 
 @Injectable()
 export class AdminService {
@@ -29,6 +35,7 @@ export class AdminService {
     private readonly prisma: PrismaService,
     private readonly logging: LoggingService,
     private readonly notifications: NotificationService,
+    private readonly shipping: ShippingService,
   ) {}
 
   private slugify(text: string): string {
@@ -90,7 +97,7 @@ export class AdminService {
     const [
       totalProducts, totalOrders, totalCustomers, totalSellers,
       monthOrders, lastMonthOrders, pendingOrders,
-      totalRevenue, monthRevenue, activeSellers, pendingProducts,
+      totalRevenue, monthRevenue, activeSellers, pendingProducts, pendingReviews,
     ] = await Promise.all([
       this.prisma.product.count(),
       this.prisma.order.count(),
@@ -103,6 +110,7 @@ export class AdminService {
       this.prisma.order.aggregate({ _sum: { total: true }, where: { createdAt: { gte: monthStart }, status: { notIn: ['CANCELLED', 'REFUNDED'] } } }),
       this.prisma.sellerProfile.count({ where: { verified: true } }),
       this.prisma.product.count({ where: { status: 'PENDING' } }),
+      this.prisma.review.count({ where: { approved: false } }),
     ]);
 
     const recentOrders = await this.prisma.order.findMany({
@@ -121,7 +129,7 @@ export class AdminService {
       monthOrders, lastMonthOrders, pendingOrders,
       totalRevenue: totalRevenue._sum.total || 0,
       monthRevenue: monthRevenue._sum.total || 0,
-      activeSellers, pendingProducts,
+      activeSellers, pendingProducts, pendingReviews,
       recentOrders, recentActivity,
     };
   }
@@ -159,6 +167,21 @@ export class AdminService {
     ]);
 
     return { items, total, page, limit };
+  }
+
+  /** Full product row for admin review (approval UI, duplicates, etc.). */
+  async getProductById(id: string) {
+    const product = await this.prisma.product.findUnique({
+      where: { id },
+      include: {
+        category: { select: { id: true, name: true } },
+        seller: { select: { storeName: true, email: true, phone: true } },
+      },
+    });
+    if (!product) {
+      throw new HttpException('Product not found', HttpStatus.NOT_FOUND);
+    }
+    return product;
   }
 
   async updateProduct(id: string, dto: AdminUpdateProductDto) {
@@ -977,7 +1000,48 @@ export class AdminService {
       ],
       baseCurrency: 'INR',
     },
+    /** Marketplace-wide defaults applied to every product; sellers cannot override. */
+    returnPolicy: {
+      isCancellable: true,
+      isReturnable: true,
+      isReplaceable: false,
+      returnWindow: 7,
+      cancellationWindow: 0,
+    },
+    productAttributePresets: DEFAULT_PRODUCT_ATTRIBUTE_PRESETS,
+    platformLogistics: { ...DEFAULT_PLATFORM_LOGISTICS },
   };
+
+  private mergeProductAttributePresetSection(
+    def: ProductAttributePresetSection,
+    stored: unknown,
+  ): ProductAttributePresetSection {
+    if (!stored || typeof stored !== 'object') return { ...def, valuesByKey: { ...def.valuesByKey } };
+    const o = stored as Partial<ProductAttributePresetSection>;
+    const keys = Array.isArray(o.keys) && o.keys.length > 0 ? o.keys.map(String) : [...def.keys];
+    const defaultValues =
+      Array.isArray(o.defaultValues) && o.defaultValues.length > 0
+        ? o.defaultValues.map(String)
+        : [...def.defaultValues];
+    const valuesByKey: Record<string, string[]> = { ...def.valuesByKey };
+    if (o.valuesByKey && typeof o.valuesByKey === 'object') {
+      for (const [k, arr] of Object.entries(o.valuesByKey)) {
+        if (Array.isArray(arr) && arr.length > 0) valuesByKey[k] = arr.map(String);
+      }
+    }
+    return { id: def.id, keys, defaultValues, valuesByKey };
+  }
+
+  private mergeProductAttributePresets(stored: unknown) {
+    const d = DEFAULT_PRODUCT_ATTRIBUTE_PRESETS;
+    const s = stored && typeof stored === 'object' ? (stored as Record<string, unknown>) : {};
+    return {
+      featuresSpecs: this.mergeProductAttributePresetSection(d.featuresSpecs, s.featuresSpecs),
+      materialsCare: this.mergeProductAttributePresetSection(d.materialsCare, s.materialsCare),
+      itemDetails: this.mergeProductAttributePresetSection(d.itemDetails, s.itemDetails),
+      additionalDetails: this.mergeProductAttributePresetSection(d.additionalDetails, s.additionalDetails),
+    };
+  }
 
   private mergeSiteSettings(stored: unknown) {
     const s = stored && typeof stored === 'object' ? (stored as Record<string, unknown>) : {};
@@ -989,16 +1053,66 @@ export class AdminService {
       notifications: { ...this.defaultSiteSettings.notifications, ...(s.notifications as Record<string, unknown>) },
       shippingLabel: { ...this.defaultSiteSettings.shippingLabel, ...(s.shippingLabel as Record<string, unknown>) },
       shippingRates: { ...this.defaultSiteSettings.shippingRates, ...(s.shippingRates as Record<string, unknown>) },
+      returnPolicy: {
+        ...this.defaultSiteSettings.returnPolicy,
+        ...(s.returnPolicy as Record<string, unknown>),
+      },
+      productAttributePresets: this.mergeProductAttributePresets(s.productAttributePresets),
+      platformLogistics: (() => {
+        const pl =
+          s.platformLogistics && typeof s.platformLogistics === 'object'
+            ? (s.platformLogistics as Record<string, unknown>)
+            : {};
+        const d = pl.delhivery && typeof pl.delhivery === 'object' ? (pl.delhivery as Record<string, unknown>) : {};
+        return {
+          ...this.defaultSiteSettings.platformLogistics,
+          ...pl,
+          delhivery: {
+            ...this.defaultSiteSettings.platformLogistics.delhivery,
+            ...d,
+          },
+        };
+      })(),
     };
   }
 
   async getSiteSettings() {
     const row = await this.prisma.siteSettings.findUnique({ where: { id: 1 } });
-    return this.mergeSiteSettings(row?.payload);
+    const merged = this.mergeSiteSettings(row?.payload);
+    return {
+      ...merged,
+      platformLogistics: this.shipping.sanitizePlatformLogisticsForResponse(merged.platformLogistics),
+    };
+  }
+
+  /** Values copied onto every product at create/update; sellers cannot override. */
+  async getMarketplaceReturnPolicy() {
+    const s = (await this.getSiteSettings()) as {
+      returnPolicy: {
+        isCancellable?: boolean;
+        isReturnable?: boolean;
+        isReplaceable?: boolean;
+        returnWindow?: number;
+        cancellationWindow?: number;
+      };
+    };
+    const rp = s.returnPolicy ?? this.defaultSiteSettings.returnPolicy;
+    return {
+      isCancellable: rp.isCancellable !== false,
+      isReturnable: rp.isReturnable !== false,
+      isReplaceable: !!rp.isReplaceable,
+      returnWindow:
+        typeof rp.returnWindow === 'number' && !Number.isNaN(rp.returnWindow) ? rp.returnWindow : 7,
+      cancellationWindow:
+        typeof rp.cancellationWindow === 'number' && !Number.isNaN(rp.cancellationWindow)
+          ? rp.cancellationWindow
+          : 0,
+    };
   }
 
   async updateSiteSettings(dto: AdminSiteSettingsDto, audit?: AdminAuditContext) {
-    const current = await this.getSiteSettings();
+    const row = await this.prisma.siteSettings.findUnique({ where: { id: 1 } });
+    const current = this.mergeSiteSettings(row?.payload);
     const merged = {
       general: dto.general !== undefined ? { ...current.general, ...dto.general } : current.general,
       tax: dto.tax !== undefined ? { ...current.tax, ...dto.tax } : current.tax,
@@ -1007,17 +1121,61 @@ export class AdminService {
       notifications: dto.notifications !== undefined ? { ...current.notifications, ...dto.notifications } : current.notifications,
       shippingLabel: dto.shippingLabel !== undefined ? { ...current.shippingLabel, ...dto.shippingLabel } : current.shippingLabel,
       shippingRates: dto.shippingRates !== undefined ? { ...current.shippingRates, ...dto.shippingRates } : current.shippingRates,
+      returnPolicy:
+        dto.returnPolicy !== undefined ? { ...current.returnPolicy, ...dto.returnPolicy } : current.returnPolicy,
+      productAttributePresets:
+        dto.productAttributePresets !== undefined
+          ? this.mergeProductAttributePresets(dto.productAttributePresets)
+          : current.productAttributePresets,
+      platformLogistics:
+        dto.platformLogistics !== undefined
+          ? this.shipping.preparePlatformLogisticsSave(current.platformLogistics, dto.platformLogistics as any)
+          : current.platformLogistics,
     };
+    const payloadJson = merged as unknown as Prisma.InputJsonValue;
     await this.prisma.siteSettings.upsert({
       where: { id: 1 },
-      create: { id: 1, payload: merged as Prisma.InputJsonValue },
-      update: { payload: merged as Prisma.InputJsonValue },
+      create: { id: 1, payload: payloadJson },
+      update: { payload: payloadJson },
     });
 
+    if (dto.returnPolicy !== undefined) {
+      const rp = merged.returnPolicy as {
+        isCancellable?: boolean;
+        isReturnable?: boolean;
+        isReplaceable?: boolean;
+        returnWindow?: number;
+        cancellationWindow?: number;
+      };
+      await this.prisma.product.updateMany({
+        data: {
+          isCancellable: rp.isCancellable !== false,
+          isReturnable: rp.isReturnable !== false,
+          isReplaceable: !!rp.isReplaceable,
+          returnWindow: typeof rp.returnWindow === 'number' && !Number.isNaN(rp.returnWindow) ? rp.returnWindow : 7,
+          cancellationWindow:
+            typeof rp.cancellationWindow === 'number' && !Number.isNaN(rp.cancellationWindow)
+              ? rp.cancellationWindow
+              : 0,
+        },
+      });
+    }
+
     if (audit) {
-      const sections = (['general', 'tax', 'shipping', 'payment', 'notifications', 'shippingLabel', 'shippingRates'] as const).filter(
-        (k) => dto[k] !== undefined,
-      );
+      const sections = (
+        [
+          'general',
+          'tax',
+          'shipping',
+          'payment',
+          'notifications',
+          'shippingLabel',
+          'shippingRates',
+          'returnPolicy',
+          'productAttributePresets',
+          'platformLogistics',
+        ] as const
+      ).filter((k) => dto[k] !== undefined);
       await this.logging.logAdminAudit({
         adminId: audit.adminId,
         adminRole: audit.adminRole,
@@ -1031,6 +1189,9 @@ export class AdminService {
       });
     }
 
-    return merged;
+    return {
+      ...merged,
+      platformLogistics: this.shipping.sanitizePlatformLogisticsForResponse(merged.platformLogistics),
+    };
   }
 }

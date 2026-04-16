@@ -26,7 +26,7 @@ export interface AuthUser {
   email: string;
   phone: string | null;
   avatar: string | null;
-  role: 'CUSTOMER' | 'SELLER' | 'ADMIN';
+  role: 'CUSTOMER' | 'SELLER' | 'ADMIN' | 'BUSINESS';
   authProvider?: AuthProvider;
   aadhaarVerified?: boolean;
   aadhaarVerifiedAt?: string | null;
@@ -42,6 +42,26 @@ export interface LoginResponse {
   accessToken: string;
   refreshToken: string;
   hasSellerProfile?: boolean;
+}
+
+export type OrganizationMemberRole = 'ORG_ADMIN' | 'BUYER' | 'APPROVER';
+
+export interface OrganizationSummary {
+  id: string;
+  name: string;
+  legalName: string | null;
+  gstin: string | null;
+  updatedAt: string;
+  myRole: OrganizationMemberRole;
+}
+
+export interface BusinessRegisterResponse extends LoginResponse {
+  organization: {
+    id: string;
+    name: string;
+    legalName: string | null;
+    gstin: string | null;
+  };
 }
 
 // ─── Product ───
@@ -74,6 +94,8 @@ export interface Product {
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
+  /** GST % for this SKU; cart adds tax on top of `price`. Consumer UI shows inclusive amount. */
+  gstRate?: number | null;
   relatedProducts?: Product[];
   // Amazon-style product information
   featuresAndSpecs?: Record<string, string> | null;

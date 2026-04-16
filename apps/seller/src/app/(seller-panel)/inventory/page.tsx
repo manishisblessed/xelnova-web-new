@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { motion, AnimatePresence, Reorder } from 'framer-motion';
+import { motion, AnimatePresence, Reorder, useDragControls } from 'framer-motion';
 import { ImagePlus, Pencil, Plus, Trash2, X, Crown, Loader2, Layers, GripVertical, Upload, Camera, Ruler, Image as ImageIcon, Pause, Play } from 'lucide-react';
 import { toast } from 'sonner';
 import { DashboardHeader } from '@/components/dashboard/dashboard-header';
@@ -11,6 +11,7 @@ import {
   apiCreateProduct,
   apiDeleteProduct,
   apiGetProduct,
+  apiGetProductAttributePresets,
   apiGetProducts,
   apiUpdateProduct,
   apiUploadImage,
@@ -18,6 +19,7 @@ import {
 import { useSellerProfile } from '@/lib/seller-profile-context';
 import { VerificationBanner } from '@/components/dashboard/verification-banner';
 import { publicApiBase } from '@/lib/public-api-base';
+import { resolveStorefrontPreviewUrl } from '@/lib/storefront-url';
 import {
   formRowsToVariantGroups,
   makeImageId,
@@ -33,9 +35,63 @@ import {
   type FormVariantValue,
   type ProductImage,
   type SizeChartColumn,
+  type VariantGroupJson,
 } from '@/lib/product-variants';
+import {
+  BUNDLED_PRODUCT_ATTRIBUTE_PRESETS,
+  CUSTOM_ATTRIBUTE_PENDING,
+  getValueOptionsForKey,
+  type AttributePreset,
+  type ProductAttributePresetsBundle,
+} from '@/lib/product-attribute-presets';
+import {
+  DEFAULT_GST_PERCENT,
+  priceExclusiveFromInclusive,
+  priceInclusiveOfGst,
+} from '@xelnova/utils';
 
 const API_URL = publicApiBase();
+
+function gstPercentForForm(gstField: string): number {
+  const n = gstField.trim() ? Number(gstField) : DEFAULT_GST_PERCENT;
+  return Number.isFinite(n) && n >= 0 ? n : DEFAULT_GST_PERCENT;
+}
+
+function inclusiveCompareAtFromForm(formCompare: string, gstSave: number): number | undefined {
+  if (!formCompare.trim()) return undefined;
+  const n = Number(formCompare);
+  if (Number.isNaN(n) || n < 0) return NaN;
+  return priceExclusiveFromInclusive(n, gstSave);
+}
+
+function variantRowsToInclusiveDisplay(rows: FormVariantRow[], gstRate: number): FormVariantRow[] {
+  return rows.map((r) => ({
+    ...r,
+    values: r.values.map((v) => ({
+      ...v,
+      price:
+        v.price.trim() !== ''
+          ? String(priceInclusiveOfGst(Number(v.price), gstRate))
+          : '',
+      compareAtPrice:
+        v.compareAtPrice.trim() !== ''
+          ? String(priceInclusiveOfGst(Number(v.compareAtPrice), gstRate))
+          : '',
+    })),
+  }));
+}
+
+function variantPayloadToExclusive(groups: VariantGroupJson[], gstRate: number): VariantGroupJson[] {
+  return groups.map((g) => ({
+    ...g,
+    options: g.options.map((o) => ({
+      ...o,
+      price: o.price != null ? priceExclusiveFromInclusive(o.price, gstRate) : o.price,
+      compareAtPrice:
+        o.compareAtPrice != null ? priceExclusiveFromInclusive(o.compareAtPrice, gstRate) : o.compareAtPrice,
+    })),
+  }));
+}
 
 interface CategoryNode {
   id: string;
@@ -100,9 +156,25 @@ function objectToKeyValueArray(obj: Record<string, string> | null | undefined): 
 }
 
 function keyValueArrayToObject(arr: { key: string; value: string }[]): Record<string, string> | undefined {
-  const filtered = arr.filter((item) => item.key.trim() && item.value.trim());
+  const filtered = arr.filter(
+    (item) =>
+      item.key.trim() &&
+      item.key.trim() !== CUSTOM_ATTRIBUTE_PENDING &&
+      item.value.trim(),
+  );
   if (filtered.length === 0) return undefined;
   return Object.fromEntries(filtered.map((item) => [item.key.trim(), item.value.trim()]));
+}
+
+function splitMetaKeywords(raw: string): string[] {
+  return Array.from(
+    new Set(
+      raw
+        .split(/[,+]/)
+        .map((k) => k.trim())
+        .filter(Boolean),
+    ),
+  );
 }
 
 // ─── Image Gallery Component ───
@@ -113,6 +185,102 @@ type UploadingImage = {
   preview: string;
   progress: 'uploading' | 'done' | 'error';
 };
+
+function GalleryThumbnailItem({
+  img,
+  index,
+  previewIdx,
+  onSelectPreview,
+  onRemove,
+  onPromoteToMain,
+}: {
+  img: ProductImage;
+  index: number;
+  previewIdx: number;
+  onSelectPreview: (i: number) => void;
+  onRemove: (id: string) => void;
+  onPromoteToMain: (i: number) => void;
+}) {
+  const dragControls = useDragControls();
+
+  return (
+    <Reorder.Item
+      value={img}
+      dragListener={false}
+      dragControls={dragControls}
+      className="relative shrink-0 list-none"
+      whileDrag={{ scale: 1.08, zIndex: 20, boxShadow: '0 8px 32px rgba(0,0,0,0.18)' }}
+    >
+      <div
+        className={`group relative h-[72px] w-[72px] overflow-hidden rounded-xl border-2 transition-all duration-150 ${
+          previewIdx === index
+            ? 'border-primary-500 ring-2 ring-primary-500/20'
+            : 'border-border hover:border-gray-300'
+        }`}
+      >
+        {/* Draggable + click-to-preview (not a <button> — buttons block Reorder drag) */}
+        <div
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              onSelectPreview(index);
+            }
+          }}
+          onPointerDown={(e) => dragControls.start(e)}
+          onClick={() => onSelectPreview(index)}
+          className="block h-full w-full cursor-grab touch-none active:cursor-grabbing select-none outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-1"
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={img.url} alt="" draggable={false} className="h-full w-full object-cover pointer-events-none" />
+        </div>
+
+        {index === 0 && (
+          <div className="absolute top-0.5 left-0.5 flex h-5 w-5 items-center justify-center rounded-md bg-amber-500 text-white shadow pointer-events-none">
+            <Crown className="h-2.5 w-2.5" />
+          </div>
+        )}
+
+        {index > 0 && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onPromoteToMain(index);
+            }}
+            onPointerDown={(e) => e.stopPropagation()}
+            className="absolute left-0.5 top-0.5 flex h-5 w-5 items-center justify-center rounded-md bg-white/90 text-amber-600 shadow opacity-0 group-hover:opacity-100 transition-opacity hover:bg-amber-500 hover:text-white z-10"
+            title="Set as main image"
+          >
+            <Crown className="h-2.5 w-2.5" />
+          </button>
+        )}
+
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onRemove(img.id);
+          }}
+          onPointerDown={(e) => e.stopPropagation()}
+          className="absolute right-0.5 top-0.5 flex h-5 w-5 items-center justify-center rounded-md bg-black/60 text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600 z-10"
+          aria-label="Remove image"
+        >
+          <X className="h-2.5 w-2.5" />
+        </button>
+
+        <div className="absolute bottom-0 inset-x-0 flex justify-center pb-0.5 opacity-0 group-hover:opacity-60 transition-opacity pointer-events-none">
+          <GripVertical className="h-3 w-3 text-white drop-shadow" />
+        </div>
+
+        <div className="absolute bottom-0.5 right-0.5 flex h-4 min-w-[16px] items-center justify-center rounded bg-black/50 px-0.5 text-[9px] font-bold text-white tabular-nums pointer-events-none">
+          {index + 1}
+        </div>
+      </div>
+    </Reorder.Item>
+  );
+}
 
 function ProductImageGallery({
   images,
@@ -203,6 +371,15 @@ function ProductImageGallery({
     setPreviewIdx(0);
   };
 
+  const handleReorder = (newOrder: ProductImage[]) => {
+    const curId = images[previewIdx]?.id;
+    onImagesChange(newOrder);
+    if (curId !== undefined) {
+      const ni = newOrder.findIndex((x) => x.id === curId);
+      if (ni >= 0) setPreviewIdx(ni);
+    }
+  };
+
   const previewImage = images[previewIdx] || images[0];
 
   return (
@@ -276,71 +453,19 @@ function ProductImageGallery({
           <Reorder.Group
             axis="x"
             values={images}
-            onReorder={onImagesChange}
+            onReorder={handleReorder}
             className="flex gap-2 overflow-x-auto pb-1 pt-1 scrollbar-thin"
           >
             {images.map((img, i) => (
-              <Reorder.Item
+              <GalleryThumbnailItem
                 key={img.id}
-                value={img}
-                className="relative shrink-0"
-                whileDrag={{ scale: 1.08, zIndex: 20, boxShadow: '0 8px 32px rgba(0,0,0,0.18)' }}
-              >
-                <div
-                  className={`group relative h-[72px] w-[72px] overflow-hidden rounded-xl border-2 cursor-grab active:cursor-grabbing transition-all duration-150 ${
-                    previewIdx === i
-                      ? 'border-primary-500 ring-2 ring-primary-500/20'
-                      : 'border-border hover:border-gray-300'
-                  }`}
-                >
-                  <button
-                    type="button"
-                    onClick={() => setPreviewIdx(i)}
-                    className="block h-full w-full"
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={img.url} alt="" className="h-full w-full object-cover" />
-                  </button>
-
-                  {/* Main badge */}
-                  {i === 0 && (
-                    <div className="absolute top-0.5 left-0.5 flex h-5 w-5 items-center justify-center rounded-md bg-amber-500 text-white shadow">
-                      <Crown className="h-2.5 w-2.5" />
-                    </div>
-                  )}
-
-                  {/* Promote to main (hover) */}
-                  {i > 0 && (
-                    <button
-                      type="button"
-                      onClick={(e) => { e.stopPropagation(); promoteToMain(i); }}
-                      className="absolute left-0.5 top-0.5 flex h-5 w-5 items-center justify-center rounded-md bg-white/90 text-amber-600 shadow opacity-0 group-hover:opacity-100 transition-opacity hover:bg-amber-500 hover:text-white"
-                      title="Set as main image"
-                    >
-                      <Crown className="h-2.5 w-2.5" />
-                    </button>
-                  )}
-
-                  {/* Remove */}
-                  <button
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); removeImage(img.id); }}
-                    className="absolute right-0.5 top-0.5 flex h-5 w-5 items-center justify-center rounded-md bg-black/60 text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600"
-                  >
-                    <X className="h-2.5 w-2.5" />
-                  </button>
-
-                  {/* Drag handle */}
-                  <div className="absolute bottom-0 inset-x-0 flex justify-center pb-0.5 opacity-0 group-hover:opacity-60 transition-opacity pointer-events-none">
-                    <GripVertical className="h-3 w-3 text-white drop-shadow" />
-                  </div>
-
-                  {/* Position number */}
-                  <div className="absolute bottom-0.5 right-0.5 flex h-4 min-w-[16px] items-center justify-center rounded bg-black/50 px-0.5 text-[9px] font-bold text-white tabular-nums">
-                    {i + 1}
-                  </div>
-                </div>
-              </Reorder.Item>
+                img={img}
+                index={i}
+                previewIdx={previewIdx}
+                onSelectPreview={setPreviewIdx}
+                onRemove={removeImage}
+                onPromoteToMain={promoteToMain}
+              />
             ))}
 
             {/* Upload queue (non-draggable) */}
@@ -418,25 +543,26 @@ function ProductImageGallery({
   );
 }
 
-// ─── Key-Value Editor Component ───
+// ─── Preset Key-Value Editor (dropdowns, not free-text) ───
 
-interface KeyValueEditorProps {
+const OTHER_KEY_TOKEN = '__other_key__';
+const OTHER_VALUE_TOKEN = '__other_value__';
+
+interface PresetKeyValueEditorProps {
   label: string;
   description?: string;
+  preset: AttributePreset;
   items: { key: string; value: string }[];
   onChange: (items: { key: string; value: string }[]) => void;
 }
 
-function KeyValueEditor({ label, description, items, onChange }: KeyValueEditorProps) {
+function PresetKeyValueEditor({ label, description, preset, items, onChange }: PresetKeyValueEditorProps) {
   const addItem = () => onChange([...items, { key: '', value: '' }]);
-  
-  const updateItem = (index: number, field: 'key' | 'value', newValue: string) => {
-    const updated = items.map((item, i) =>
-      i === index ? { ...item, [field]: newValue } : item
-    );
-    onChange(updated);
+
+  const setRow = (index: number, next: { key: string; value: string }) => {
+    onChange(items.map((item, i) => (i === index ? next : item)));
   };
-  
+
   const removeItem = (index: number) => {
     onChange(items.filter((_, i) => i !== index));
   };
@@ -456,32 +582,120 @@ function KeyValueEditor({ label, description, items, onChange }: KeyValueEditorP
       {items.length === 0 ? (
         <p className="text-xs text-text-muted py-2">No items added yet. Click &quot;Add&quot; to add entries.</p>
       ) : (
-        <div className="space-y-2">
-          {items.map((item, index) => (
-            <div key={index} className="flex items-center gap-2">
-              <input
-                type="text"
-                value={item.key}
-                onChange={(e) => updateItem(index, 'key', e.target.value)}
-                placeholder="Key (e.g. Material)"
-                className="flex-1 rounded-lg border border-border bg-surface-raised px-2 py-1.5 text-xs text-text-primary outline-none focus:border-primary-500"
-              />
-              <input
-                type="text"
-                value={item.value}
-                onChange={(e) => updateItem(index, 'value', e.target.value)}
-                placeholder="Value (e.g. Plastic)"
-                className="flex-1 rounded-lg border border-border bg-surface-raised px-2 py-1.5 text-xs text-text-primary outline-none focus:border-primary-500"
-              />
-              <button
-                type="button"
-                onClick={() => removeItem(index)}
-                className="rounded p-1 text-text-muted hover:text-danger-600 hover:bg-danger-50"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          ))}
+        <div className="space-y-3">
+          {items.map((item, index) => {
+            const keyIsPreset = Boolean(item.key && preset.keys.includes(item.key));
+            const keyIsPendingCustom = item.key === CUSTOM_ATTRIBUTE_PENDING;
+            const keySelectValue = keyIsPreset
+              ? item.key
+              : item.key && !keyIsPendingCustom
+                ? OTHER_KEY_TOKEN
+                : keyIsPendingCustom
+                  ? OTHER_KEY_TOKEN
+                  : '';
+
+            const valueOpts =
+              item.key && item.key !== CUSTOM_ATTRIBUTE_PENDING ? getValueOptionsForKey(preset, item.key) : [];
+            const valueIsListed = Boolean(item.value && valueOpts.includes(item.value));
+            const valueSelectValue = valueIsListed ? item.value : item.value ? OTHER_VALUE_TOKEN : '';
+            const showKeyCustom = Boolean(keySelectValue === OTHER_KEY_TOKEN);
+            const showValueCustom =
+              Boolean(item.key && item.key !== CUSTOM_ATTRIBUTE_PENDING) &&
+              (valueSelectValue === OTHER_VALUE_TOKEN || Boolean(item.value && !valueIsListed));
+
+            return (
+              <div key={index} className="flex flex-col sm:flex-row sm:items-start gap-2">
+                <div className="flex-1 min-w-0 space-y-1">
+                  <label className="text-[10px] text-text-muted">Attribute</label>
+                  <select
+                    value={keySelectValue}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (v === '') {
+                        setRow(index, { key: '', value: '' });
+                        return;
+                      }
+                      if (v === OTHER_KEY_TOKEN) {
+                        setRow(index, { key: CUSTOM_ATTRIBUTE_PENDING, value: '' });
+                        return;
+                      }
+                      const opts = getValueOptionsForKey(preset, v);
+                      setRow(index, { key: v, value: opts[0] ?? '' });
+                    }}
+                    className="w-full rounded-lg border border-border bg-surface-raised px-2 py-1.5 text-xs text-text-primary outline-none focus:border-primary-500"
+                  >
+                    <option value="">Select attribute…</option>
+                    {preset.keys.map((k) => (
+                      <option key={k} value={k}>
+                        {k}
+                      </option>
+                    ))}
+                    <option value={OTHER_KEY_TOKEN}>Custom attribute…</option>
+                  </select>
+                  {showKeyCustom && (
+                    <input
+                      type="text"
+                      value={keyIsPendingCustom ? '' : item.key}
+                      onChange={(e) => {
+                        const k = e.target.value.trim();
+                        setRow(index, { key: k || CUSTOM_ATTRIBUTE_PENDING, value: '' });
+                      }}
+                      placeholder="Type attribute name"
+                      className="w-full rounded-lg border border-dashed border-primary-300 bg-surface-raised px-2 py-1.5 text-xs text-text-primary outline-none focus:border-primary-500"
+                    />
+                  )}
+                </div>
+                <div className="flex-1 min-w-0 space-y-1">
+                  <label className="text-[10px] text-text-muted">Value</label>
+                  {!item.key || item.key === CUSTOM_ATTRIBUTE_PENDING ? (
+                    <p className="text-[10px] text-text-muted py-1.5">
+                      {item.key === CUSTOM_ATTRIBUTE_PENDING ? 'Name your custom attribute above, then pick a value' : 'Choose an attribute first'}
+                    </p>
+                  ) : (
+                    <>
+                      <select
+                        value={valueSelectValue}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          if (v === '' || v === OTHER_VALUE_TOKEN) {
+                            setRow(index, { ...item, value: '' });
+                            return;
+                          }
+                          setRow(index, { ...item, value: v });
+                        }}
+                        className="w-full rounded-lg border border-border bg-surface-raised px-2 py-1.5 text-xs text-text-primary outline-none focus:border-primary-500"
+                      >
+                        <option value="">Select value…</option>
+                        {valueOpts.map((v) => (
+                          <option key={v} value={v}>
+                            {v}
+                          </option>
+                        ))}
+                        <option value={OTHER_VALUE_TOKEN}>Custom value…</option>
+                      </select>
+                      {showValueCustom && (
+                        <input
+                          type="text"
+                          value={item.value}
+                          onChange={(e) => setRow(index, { ...item, value: e.target.value })}
+                          placeholder="Type value"
+                          className="w-full rounded-lg border border-dashed border-primary-300 bg-surface-raised px-2 py-1.5 text-xs text-text-primary outline-none focus:border-primary-500"
+                        />
+                      )}
+                    </>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => removeItem(index)}
+                  className="rounded p-1.5 text-text-muted hover:text-danger-600 hover:bg-danger-50 self-end sm:self-center shrink-0"
+                  aria-label="Remove row"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
@@ -504,6 +718,7 @@ export default function SellerInventoryPage() {
   const [togglingHoldId, setTogglingHoldId] = useState<string | null>(null);
 
   const [formName, setFormName] = useState('');
+  const [formBrand, setFormBrand] = useState('');
   const [formPrice, setFormPrice] = useState('');
   const [formCompare, setFormCompare] = useState('');
   const [formStock, setFormStock] = useState('');
@@ -513,19 +728,16 @@ export default function SellerInventoryPage() {
   const [formVariantRows, setFormVariantRows] = useState<FormVariantRow[]>([]);
   const [uploading, setUploading] = useState(false);
   const [formMetaTitle, setFormMetaTitle] = useState('');
+  const [formMetaKeywords, setFormMetaKeywords] = useState<string[]>([]);
+  const [metaKeywordInput, setMetaKeywordInput] = useState('');
   const [formMetaDesc, setFormMetaDesc] = useState('');
   const [formHsnCode, setFormHsnCode] = useState('');
   const [formGstRate, setFormGstRate] = useState('');
+  const [formBrandCertificate, setFormBrandCertificate] = useState('');
+  const [uploadingBrandCertificate, setUploadingBrandCertificate] = useState(false);
   const [formLowStock, setFormLowStock] = useState('5');
   const [formWeight, setFormWeight] = useState('');
   const [formDimensions, setFormDimensions] = useState('');
-  
-  // Return/Cancellation/Replacement policy
-  const [formIsCancellable, setFormIsCancellable] = useState(true);
-  const [formIsReturnable, setFormIsReturnable] = useState(true);
-  const [formIsReplaceable, setFormIsReplaceable] = useState(false);
-  const [formReturnWindow, setFormReturnWindow] = useState('7');
-  const [formCancellationWindow, setFormCancellationWindow] = useState('0');
 
   // Amazon-style product information
   const [formFeaturesAndSpecs, setFormFeaturesAndSpecs] = useState<{ key: string; value: string }[]>([]);
@@ -536,6 +748,14 @@ export default function SellerInventoryPage() {
   const [formSafetyInfo, setFormSafetyInfo] = useState('');
   const [formRegulatoryInfo, setFormRegulatoryInfo] = useState('');
   const [formWarrantyInfo, setFormWarrantyInfo] = useState('');
+  const brandCertificateInputRef = useRef<HTMLInputElement>(null);
+
+  const [fetchedAttrPresets, setFetchedAttrPresets] = useState<ProductAttributePresetsBundle | null>(null);
+  useEffect(() => {
+    apiGetProductAttributePresets()
+      .then(setFetchedAttrPresets)
+      .catch(() => setFetchedAttrPresets(null));
+  }, []);
 
   const loadProducts = useCallback(() => {
     setLoading(true);
@@ -567,6 +787,7 @@ export default function SellerInventoryPage() {
 
   const resetForm = () => {
     setFormName('');
+    setFormBrand('');
     setFormPrice('');
     setFormCompare('');
     setFormStock('');
@@ -575,17 +796,15 @@ export default function SellerInventoryPage() {
     setFormImages([]);
     setFormVariantRows([]);
     setFormMetaTitle('');
+    setFormMetaKeywords([]);
+    setMetaKeywordInput('');
     setFormMetaDesc('');
     setFormHsnCode('');
     setFormGstRate('');
+    setFormBrandCertificate('');
     setFormLowStock('5');
     setFormWeight('');
     setFormDimensions('');
-    setFormIsCancellable(true);
-    setFormIsReturnable(true);
-    setFormIsReplaceable(false);
-    setFormReturnWindow('7');
-    setFormCancellationWindow('0');
     setFormFeaturesAndSpecs([]);
     setFormMaterialsAndCare([]);
     setFormItemDetails([]);
@@ -604,42 +823,50 @@ export default function SellerInventoryPage() {
   const openEdit = (p: SellerProduct) => {
     setEditProduct(p);
     setFormName(p.name);
-    setFormPrice(String(p.price));
-    setFormCompare(p.compareAtPrice != null ? String(p.compareAtPrice) : '');
+    setFormBrand('');
+    setFormPrice('');
+    setFormCompare('');
     setFormStock(String(p.stock));
     setFormCategoryId('');
     setFormShort('');
     setFormImages(urlsToProductImages(p.images));
-    setFormVariantRows(variantGroupsToFormRows(p.variants));
+    setFormVariantRows([]);
     setEditLoading(true);
     apiGetProduct(p.id)
       .then((fullUnknown) => {
         const full = fullUnknown as Record<string, unknown>;
         setFormName(String(full.name ?? p.name));
-        setFormPrice(String(full.price ?? p.price));
-        setFormCompare(full.compareAtPrice != null ? String(full.compareAtPrice) : '');
+        setFormGstRate(full.gstRate != null ? String(full.gstRate) : '');
+        const gstNum = gstPercentForForm(full.gstRate != null ? String(full.gstRate) : '');
+        const basePrice = Number(full.price ?? p.price);
+        const baseCompare = full.compareAtPrice != null ? Number(full.compareAtPrice) : null;
+        setFormPrice(String(priceInclusiveOfGst(basePrice, gstNum)));
+        setFormCompare(baseCompare != null ? String(priceInclusiveOfGst(baseCompare, gstNum)) : '');
         setFormStock(String(full.stock ?? p.stock));
         setFormCategoryId(String(full.categoryId ?? ''));
         setFormShort(String(full.shortDescription ?? ''));
         setFormImages(urlsToProductImages(full.images as string[] | undefined));
-        setFormVariantRows(variantGroupsToFormRows(full.variants));
+        setFormVariantRows(
+          variantRowsToInclusiveDisplay(variantGroupsToFormRows(full.variants), gstNum),
+        );
         setFormMetaTitle(String(full.metaTitle ?? ''));
+        setFormMetaKeywords(splitMetaKeywords(String(full.metaTitle ?? '')));
         setFormMetaDesc(String(full.metaDescription ?? ''));
         setFormHsnCode(String(full.hsnCode ?? ''));
-        setFormGstRate(full.gstRate != null ? String(full.gstRate) : '');
+        setFormBrand(String(full.brand ?? ''));
         setFormLowStock(String(full.lowStockThreshold ?? '5'));
         setFormWeight(full.weight != null ? String(full.weight) : '');
         setFormDimensions(String(full.dimensions ?? ''));
-        setFormIsCancellable(full.isCancellable === true);
-        setFormIsReturnable(full.isReturnable !== false);
-        setFormIsReplaceable(full.isReplaceable === true);
-        setFormReturnWindow(String(full.returnWindow ?? '7'));
-        setFormCancellationWindow(String(full.cancellationWindow ?? '0'));
         // Amazon-style product information
         setFormFeaturesAndSpecs(objectToKeyValueArray(full.featuresAndSpecs as Record<string, string> | null));
         setFormMaterialsAndCare(objectToKeyValueArray(full.materialsAndCare as Record<string, string> | null));
         setFormItemDetails(objectToKeyValueArray(full.itemDetails as Record<string, string> | null));
-        setFormAdditionalDetails(objectToKeyValueArray(full.additionalDetails as Record<string, string> | null));
+        const additionalDetails = (full.additionalDetails as Record<string, string> | null) ?? null;
+        const certUrl = additionalDetails?.['Brand Authorization Certificate'];
+        setFormBrandCertificate(typeof certUrl === 'string' ? certUrl : '');
+        const additionalWithoutCert = additionalDetails ? { ...additionalDetails } : null;
+        if (additionalWithoutCert) delete additionalWithoutCert['Brand Authorization Certificate'];
+        setFormAdditionalDetails(objectToKeyValueArray(additionalWithoutCert));
         setFormProductDescription(String(full.productDescription ?? ''));
         setFormSafetyInfo(String(full.safetyInfo ?? ''));
         setFormRegulatoryInfo(String(full.regulatoryInfo ?? ''));
@@ -824,42 +1051,105 @@ export default function SellerInventoryPage() {
     );
   };
 
+  const addMetaKeyword = (rawKeyword: string) => {
+    const keyword = rawKeyword.trim();
+    if (!keyword) return;
+    setFormMetaKeywords((prev) => (prev.includes(keyword) ? prev : [...prev, keyword]));
+    setMetaKeywordInput('');
+  };
+
+  const removeMetaKeyword = (keyword: string) => {
+    setFormMetaKeywords((prev) => prev.filter((k) => k !== keyword));
+  };
+
+  const uploadBrandCertificate = async (file: File | null) => {
+    if (!file) return;
+    setUploadingBrandCertificate(true);
+    try {
+      const { url } = await apiUploadImage(file);
+      setFormBrandCertificate(url);
+      toast.success('Brand authorization certificate uploaded');
+    } catch {
+      toast.error('Failed to upload certificate. Please try again.');
+    } finally {
+      setUploadingBrandCertificate(false);
+    }
+  };
+
   const submitCreate = async () => {
-    const price = Number(formPrice);
+    const priceIncl = Number(formPrice);
     const stock = Number(formStock);
     if (!formName.trim() || !formCategoryId) {
       toast.error('Name and category are required');
       return;
     }
-    if (Number.isNaN(price) || price < 0) {
-      toast.error('Enter a valid price');
+    if (!formBrand.trim()) {
+      toast.error('Brand name is required');
+      return;
+    }
+    if (!formBrandCertificate.trim()) {
+      toast.error('Brand authorization certificate is required');
+      return;
+    }
+    if (!formHsnCode.trim()) {
+      toast.error('HSN code is required');
+      return;
+    }
+    if (!formGstRate.trim()) {
+      toast.error('GST rate is required');
+      return;
+    }
+    if (Number.isNaN(priceIncl) || priceIncl < 0) {
+      toast.error('Enter a valid price (inclusive of GST)');
+      return;
+    }
+    const gstSave = gstPercentForForm(formGstRate);
+    if (Number.isNaN(Number(formGstRate)) || Number(formGstRate) < 0) {
+      toast.error('Enter a valid GST rate');
+      return;
+    }
+    const hasProductInfo =
+      Boolean(keyValueArrayToObject(formFeaturesAndSpecs)) ||
+      Boolean(keyValueArrayToObject(formMaterialsAndCare)) ||
+      Boolean(keyValueArrayToObject(formItemDetails)) ||
+      Boolean(keyValueArrayToObject(formAdditionalDetails)) ||
+      Boolean(formProductDescription.trim());
+    if (!hasProductInfo) {
+      toast.error('Add product information before submitting');
+      return;
+    }
+    const price = priceExclusiveFromInclusive(priceIncl, gstSave);
+    const compareAtPrice = inclusiveCompareAtFromForm(formCompare, gstSave);
+    if (compareAtPrice !== undefined && Number.isNaN(compareAtPrice)) {
+      toast.error('Enter a valid compare-at price (inclusive of GST)');
       return;
     }
     const imgs = productImagesToUrls(formImages);
-    const variantPayload = formRowsToVariantGroups(formVariantRows);
+    let variantPayload = formRowsToVariantGroups(formVariantRows);
+    variantPayload = variantPayloadToExclusive(variantPayload, gstSave);
+    const metaTitleValue = formMetaKeywords.length
+      ? formMetaKeywords.join(' + ')
+      : formMetaTitle.trim();
     setSaving(true);
     try {
       await apiCreateProduct({
         name: formName.trim(),
+        brand: formBrand.trim(),
         price,
         categoryId: formCategoryId,
         stock: Number.isNaN(stock) ? 0 : stock,
-        compareAtPrice: formCompare ? Number(formCompare) : undefined,
+        compareAtPrice,
         shortDescription: formShort.trim() || undefined,
         images: imgs.length ? imgs : undefined,
         variants: variantPayload.length ? variantPayload : undefined,
-        metaTitle: formMetaTitle.trim() || undefined,
+        metaTitle: metaTitleValue || undefined,
         metaDescription: formMetaDesc.trim() || undefined,
-        hsnCode: formHsnCode.trim() || undefined,
-        gstRate: formGstRate ? Number(formGstRate) : undefined,
+        hsnCode: formHsnCode.trim(),
+        gstRate: Number(formGstRate),
+        brandAuthorizationCertificate: formBrandCertificate.trim(),
         lowStockThreshold: formLowStock ? Number(formLowStock) : undefined,
         weight: formWeight ? Number(formWeight) : undefined,
         dimensions: formDimensions.trim() || undefined,
-        isCancellable: formIsCancellable,
-        isReturnable: formIsReturnable,
-        isReplaceable: formIsReplaceable,
-        returnWindow: formReturnWindow ? Number(formReturnWindow) : 7,
-        cancellationWindow: formCancellationWindow ? Number(formCancellationWindow) : 0,
         featuresAndSpecs: keyValueArrayToObject(formFeaturesAndSpecs),
         materialsAndCare: keyValueArrayToObject(formMaterialsAndCare),
         itemDetails: keyValueArrayToObject(formItemDetails),
@@ -884,41 +1174,79 @@ export default function SellerInventoryPage() {
 
   const submitEdit = async () => {
     if (!editProduct) return;
-    const price = Number(formPrice);
+    const priceIncl = Number(formPrice);
     const stock = Number(formStock);
     if (!formName.trim()) {
       toast.error('Name is required');
       return;
     }
-    if (Number.isNaN(price) || price < 0) {
-      toast.error('Enter a valid price');
+    if (!formBrand.trim()) {
+      toast.error('Brand name is required');
+      return;
+    }
+    if (!formBrandCertificate.trim()) {
+      toast.error('Brand authorization certificate is required');
+      return;
+    }
+    if (!formHsnCode.trim()) {
+      toast.error('HSN code is required');
+      return;
+    }
+    if (!formGstRate.trim()) {
+      toast.error('GST rate is required');
+      return;
+    }
+    if (Number.isNaN(priceIncl) || priceIncl < 0) {
+      toast.error('Enter a valid price (inclusive of GST)');
+      return;
+    }
+    const gstSave = gstPercentForForm(formGstRate);
+    if (Number.isNaN(Number(formGstRate)) || Number(formGstRate) < 0) {
+      toast.error('Enter a valid GST rate');
+      return;
+    }
+    const hasProductInfo =
+      Boolean(keyValueArrayToObject(formFeaturesAndSpecs)) ||
+      Boolean(keyValueArrayToObject(formMaterialsAndCare)) ||
+      Boolean(keyValueArrayToObject(formItemDetails)) ||
+      Boolean(keyValueArrayToObject(formAdditionalDetails)) ||
+      Boolean(formProductDescription.trim());
+    if (!hasProductInfo) {
+      toast.error('Add product information before saving');
+      return;
+    }
+    const price = priceExclusiveFromInclusive(priceIncl, gstSave);
+    const compareAtPrice = inclusiveCompareAtFromForm(formCompare, gstSave);
+    if (compareAtPrice !== undefined && Number.isNaN(compareAtPrice)) {
+      toast.error('Enter a valid compare-at price (inclusive of GST)');
       return;
     }
     const imgs = productImagesToUrls(formImages);
-    const variantPayload = formRowsToVariantGroups(formVariantRows);
+    let variantPayload = formRowsToVariantGroups(formVariantRows);
+    variantPayload = variantPayloadToExclusive(variantPayload, gstSave);
+    const metaTitleValue = formMetaKeywords.length
+      ? formMetaKeywords.join(' + ')
+      : formMetaTitle.trim();
     setSaving(true);
     try {
       await apiUpdateProduct(editProduct.id, {
         name: formName.trim(),
+        brand: formBrand.trim(),
         price,
         stock: Number.isNaN(stock) ? 0 : stock,
-        compareAtPrice: formCompare ? Number(formCompare) : undefined,
+        compareAtPrice,
         shortDescription: formShort.trim() || undefined,
         images: imgs,
         variants: variantPayload.length ? variantPayload : [],
         ...(formCategoryId ? { categoryId: formCategoryId } : {}),
-        metaTitle: formMetaTitle.trim() || undefined,
+        metaTitle: metaTitleValue || undefined,
         metaDescription: formMetaDesc.trim() || undefined,
-        hsnCode: formHsnCode.trim() || undefined,
-        gstRate: formGstRate ? Number(formGstRate) : undefined,
+        hsnCode: formHsnCode.trim(),
+        gstRate: Number(formGstRate),
+        brandAuthorizationCertificate: formBrandCertificate.trim(),
         lowStockThreshold: formLowStock ? Number(formLowStock) : undefined,
         weight: formWeight ? Number(formWeight) : undefined,
         dimensions: formDimensions.trim() || undefined,
-        isCancellable: formIsCancellable,
-        isReturnable: formIsReturnable,
-        isReplaceable: formIsReplaceable,
-        returnWindow: formReturnWindow ? Number(formReturnWindow) : 7,
-        cancellationWindow: formCancellationWindow ? Number(formCancellationWindow) : 0,
         featuresAndSpecs: keyValueArrayToObject(formFeaturesAndSpecs),
         materialsAndCare: keyValueArrayToObject(formMaterialsAndCare),
         itemDetails: keyValueArrayToObject(formItemDetails),
@@ -982,17 +1310,36 @@ export default function SellerInventoryPage() {
     {
       key: 'name',
       header: 'Product',
-      render: (row) => (
-        <div className="flex items-center gap-3">
-          <div className="h-10 w-10 rounded-lg bg-surface-muted overflow-hidden shrink-0">
-            {row.images?.[0] ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={row.images[0]} alt="" className="h-full w-full object-cover" />
-            ) : null}
+      render: (row) => {
+        const slug = row.slug?.trim();
+        const productUrl = slug ? resolveStorefrontPreviewUrl(`/products/${encodeURIComponent(slug)}`) : null;
+        return (
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="h-10 w-10 rounded-lg bg-surface-muted overflow-hidden shrink-0">
+              {row.images?.[0] ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={row.images[0]} alt="" className="h-full w-full object-cover" />
+              ) : null}
+            </div>
+            <div className="min-w-0">
+              {productUrl ? (
+                <a
+                  href={productUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-medium text-primary-600 hover:text-primary-700 hover:underline line-clamp-2 text-left"
+                  title="View on marketplace (opens in new tab)"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {row.name}
+                </a>
+              ) : (
+                <span className="font-medium line-clamp-2">{row.name}</span>
+              )}
+            </div>
           </div>
-          <span className="font-medium">{row.name}</span>
-        </div>
-      ),
+        );
+      },
     },
     {
       key: 'price',
@@ -1079,6 +1426,8 @@ export default function SellerInventoryPage() {
     },
   ];
 
+  const attributePresets = fetchedAttrPresets ?? BUNDLED_PRODUCT_ATTRIBUTE_PRESETS;
+
   const formFields = (
     <div className="space-y-5 relative">
       {editProduct && editLoading && (
@@ -1089,9 +1438,57 @@ export default function SellerInventoryPage() {
       )}
 
       <Input label="Name" value={formName} onChange={(e) => setFormName(e.target.value)} />
+      <Input label="Brand name *" value={formBrand} onChange={(e) => setFormBrand(e.target.value)} />
+      <div>
+        <label className="text-xs text-text-muted block mb-1">GST rate (%) *</label>
+        <Input
+          type="number"
+          min={0}
+          placeholder={`Default ${DEFAULT_GST_PERCENT}`}
+          value={formGstRate}
+          onChange={(e) => setFormGstRate(e.target.value)}
+        />
+        <p className="text-[11px] text-text-muted mt-1">
+          Used with the prices below: enter amounts <span className="font-medium text-text-primary">inclusive of GST</span>
+          ; we store the pre-tax amount for records.
+        </p>
+      </div>
+      <div className="rounded-xl border border-border bg-surface-muted/30 p-3">
+        <label className="text-xs text-text-muted block mb-1">Brand authorization certificate *</label>
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            placeholder="Certificate URL"
+            value={formBrandCertificate}
+            onChange={(e) => setFormBrandCertificate(e.target.value)}
+          />
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => brandCertificateInputRef.current?.click()}
+            disabled={uploadingBrandCertificate}
+          >
+            {uploadingBrandCertificate ? 'Uploading…' : 'Upload'}
+          </Button>
+          <input
+            ref={brandCertificateInputRef}
+            type="file"
+            accept="image/*"
+            className="sr-only"
+            onChange={(e) => {
+              const file = e.target.files?.[0] ?? null;
+              void uploadBrandCertificate(file);
+              e.target.value = '';
+            }}
+          />
+        </div>
+        <p className="text-[11px] text-text-muted mt-1">
+          Upload a clear certificate image proving authorization for this brand.
+        </p>
+      </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Input
-          label="Price (₹)"
+          label="Price (₹), incl. GST"
           type="number"
           min={0}
           step="0.01"
@@ -1099,7 +1496,7 @@ export default function SellerInventoryPage() {
           onChange={(e) => setFormPrice(e.target.value)}
         />
         <Input
-          label="Compare at (₹)"
+          label="Compare at (₹), incl. GST"
           type="number"
           min={0}
           step="0.01"
@@ -1121,7 +1518,8 @@ export default function SellerInventoryPage() {
           <div>
             <p className="text-xs font-semibold text-text-primary">Variants</p>
             <p className="text-[11px] text-text-muted mt-0.5">
-              Each option value can have its own price, stock, and SKU. Leave blank to use the product defaults.
+              Each option can set its own selling price and MRP — they override the product price above when filled; leave blank to use the base price and stock for that option.
+              Option prices and compare values are inclusive of GST, same as above.
             </p>
           </div>
           <Button type="button" variant="outline" size="sm" onClick={addVariantRow}>
@@ -1191,9 +1589,13 @@ export default function SellerInventoryPage() {
                       <tr className="text-left text-text-muted border-b border-border">
                         <th className="pb-1.5 pr-2 font-medium min-w-[110px]">Label</th>
                         {row.kind === 'color' && <th className="pb-1.5 pr-2 font-medium w-[80px]">Hex</th>}
-                        <th className="pb-1.5 pr-2 font-medium min-w-[170px]" title="1 main + up to 4 supporting images">Images</th>
-                        <th className="pb-1.5 pr-2 font-medium w-[90px]">Price (₹)</th>
-                        <th className="pb-1.5 pr-2 font-medium w-[90px]">Compare</th>
+                        <th className="pb-1.5 pr-2 font-medium min-w-[300px]" title="1 main + up to 4 supporting images">Images</th>
+                        <th className="pb-1.5 pr-2 font-medium w-[100px]" title="Inclusive of GST">
+                          Price (₹)
+                        </th>
+                        <th className="pb-1.5 pr-2 font-medium w-[100px]" title="Inclusive of GST">
+                          Compare (₹)
+                        </th>
                         <th className="pb-1.5 pr-2 font-medium w-[70px]">Stock</th>
                         <th className="pb-1.5 pr-2 font-medium w-[90px]">SKU</th>
                         <th className="pb-1.5 w-8" />
@@ -1202,7 +1604,7 @@ export default function SellerInventoryPage() {
                     <tbody>
                       {row.values.map((val) => (
                         <tr key={val.id} className="border-b border-border/50 last:border-0">
-                          <td className="py-1.5 pr-2">
+                          <td className="py-2 pr-2 align-top">
                             <input
                               type="text"
                               value={val.label}
@@ -1212,7 +1614,7 @@ export default function SellerInventoryPage() {
                             />
                           </td>
                           {row.kind === 'color' && (
-                            <td className="py-1.5 pr-2">
+                            <td className="py-2 pr-2 align-top">
                               <div className="flex items-center gap-1">
                                 {val.hex.trim() && (
                                   <span
@@ -1230,34 +1632,34 @@ export default function SellerInventoryPage() {
                               </div>
                             </td>
                           )}
-                          <td className="py-1.5 pr-2">
-                            <div className="flex items-center gap-1 flex-wrap">
+                          <td className="py-2 pr-2 align-top">
+                            <div className="flex items-start gap-2 flex-wrap">
                               {val.images.map((img, imgIdx) => (
-                                <div key={imgIdx} className={`relative group/vi h-8 w-8 shrink-0 rounded overflow-hidden border ${imgIdx === 0 ? 'border-primary-400 ring-1 ring-primary-200' : 'border-border'}`}>
+                                <div key={imgIdx} className={`relative group/vi h-16 w-16 shrink-0 rounded-lg overflow-hidden border shadow-sm ${imgIdx === 0 ? 'border-primary-400 ring-2 ring-primary-200' : 'border-border'}`}>
                                   {/* eslint-disable-next-line @next/next/no-img-element */}
                                   <img src={img} alt="" className="h-full w-full object-cover" />
-                                  <div className="absolute inset-0 flex items-center justify-center gap-0.5 bg-black/50 opacity-0 group-hover/vi:opacity-100 transition-opacity">
+                                  <div className="absolute inset-0 flex items-center justify-center gap-1 bg-black/50 opacity-0 group-hover/vi:opacity-100 transition-opacity">
                                     {imgIdx !== 0 && (
-                                      <button type="button" onClick={() => promoteVariantImage(row.id, val.id, imgIdx)} className="text-white" title="Set as main">
-                                        <Crown className="h-2.5 w-2.5" />
+                                      <button type="button" onClick={() => promoteVariantImage(row.id, val.id, imgIdx)} className="rounded p-0.5 text-white hover:bg-white/20" title="Set as main">
+                                        <Crown className="h-4 w-4" />
                                       </button>
                                     )}
-                                    <button type="button" onClick={() => removeVariantImage(row.id, val.id, imgIdx)} className="text-white">
-                                      <X className="h-2.5 w-2.5" />
+                                    <button type="button" onClick={() => removeVariantImage(row.id, val.id, imgIdx)} className="rounded p-0.5 text-white hover:bg-white/20" title="Remove">
+                                      <X className="h-4 w-4" />
                                     </button>
                                   </div>
-                                  {imgIdx === 0 && <span className="absolute top-0 left-0 bg-primary-500 text-[6px] text-white px-0.5 leading-tight rounded-br">M</span>}
+                                  {imgIdx === 0 && <span className="absolute top-0.5 left-0.5 bg-primary-500 text-[9px] font-bold text-white px-1 py-0.5 leading-none rounded shadow-sm">M</span>}
                                 </div>
                               ))}
                               {val.images.length < MAX_VARIANT_IMAGES && (
-                                <label className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded border-2 border-dashed border-border text-text-muted hover:border-primary-400 hover:text-primary-500 transition-colors" title={`Add images (${val.images.length}/${MAX_VARIANT_IMAGES})`}>
-                                  <ImageIcon className="h-3.5 w-3.5" />
+                                <label className="flex h-16 w-16 shrink-0 cursor-pointer items-center justify-center rounded-lg border-2 border-dashed border-border bg-surface-muted/40 text-text-muted hover:border-primary-400 hover:text-primary-500 hover:bg-primary-50/50 transition-colors" title={`Add images (${val.images.length}/${MAX_VARIANT_IMAGES})`}>
+                                  <ImageIcon className="h-6 w-6" />
                                   <input type="file" accept="image/*" multiple className="sr-only" onChange={(e) => { const fl = e.target.files; if (fl && fl.length > 0) handleVariantImageUpload(row.id, val.id, fl); e.target.value = ''; }} />
                                 </label>
                               )}
                             </div>
                           </td>
-                          <td className="py-1.5 pr-2">
+                          <td className="py-2 pr-2 align-top">
                             <input
                               type="text"
                               inputMode="decimal"
@@ -1267,7 +1669,7 @@ export default function SellerInventoryPage() {
                               className="w-full rounded-lg border border-border bg-surface-raised px-2 py-1.5 text-xs text-text-primary outline-none focus:border-primary-500"
                             />
                           </td>
-                          <td className="py-1.5 pr-2">
+                          <td className="py-2 pr-2 align-top">
                             <input
                               type="text"
                               inputMode="decimal"
@@ -1277,7 +1679,7 @@ export default function SellerInventoryPage() {
                               className="w-full rounded-lg border border-border bg-surface-raised px-2 py-1.5 text-xs text-text-primary outline-none focus:border-primary-500"
                             />
                           </td>
-                          <td className="py-1.5 pr-2">
+                          <td className="py-2 pr-2 align-top">
                             <input
                               type="text"
                               inputMode="numeric"
@@ -1287,7 +1689,7 @@ export default function SellerInventoryPage() {
                               className="w-full rounded-lg border border-border bg-surface-raised px-2 py-1.5 text-xs text-text-primary outline-none focus:border-primary-500"
                             />
                           </td>
-                          <td className="py-1.5 pr-2">
+                          <td className="py-2 pr-2 align-top">
                             <input
                               type="text"
                               value={val.sku}
@@ -1296,7 +1698,7 @@ export default function SellerInventoryPage() {
                               className="w-full rounded-lg border border-border bg-surface-raised px-2 py-1.5 text-xs text-text-primary outline-none focus:border-primary-500"
                             />
                           </td>
-                          <td className="py-1.5">
+                          <td className="py-2 align-top">
                             <button
                               type="button"
                               onClick={() => removeVariantValue(row.id, val.id)}
@@ -1479,101 +1881,43 @@ export default function SellerInventoryPage() {
         </div>
       </div>
 
-      {/* Return/Cancellation Policy */}
-      <div className="border-t border-border pt-4 mt-4">
-        <p className="text-xs font-semibold text-text-primary mb-3">Return & Cancellation Policy</p>
-        <div className="space-y-3">
-          <div className="flex flex-wrap gap-4">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={formIsCancellable}
-                onChange={(e) => setFormIsCancellable(e.target.checked)}
-                className="w-4 h-4 rounded border-border text-primary-600 focus:ring-primary-500"
-              />
-              <span className="text-xs text-text-primary">Cancellable</span>
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={formIsReturnable}
-                onChange={(e) => setFormIsReturnable(e.target.checked)}
-                className="w-4 h-4 rounded border-border text-primary-600 focus:ring-primary-500"
-              />
-              <span className="text-xs text-text-primary">Returnable</span>
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={formIsReplaceable}
-                onChange={(e) => setFormIsReplaceable(e.target.checked)}
-                className="w-4 h-4 rounded border-border text-primary-600 focus:ring-primary-500"
-              />
-              <span className="text-xs text-text-primary">Replaceable</span>
-            </label>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs text-text-muted block mb-1">Return Window (days)</label>
-              <Input
-                type="number"
-                min="0"
-                placeholder="7"
-                value={formReturnWindow}
-                onChange={(e) => setFormReturnWindow(e.target.value)}
-                disabled={!formIsReturnable}
-              />
-              <p className="text-[10px] text-text-muted mt-0.5">Days after delivery for returns</p>
-            </div>
-            <div>
-              <label className="text-xs text-text-muted block mb-1">Cancellation Window (hours)</label>
-              <Input
-                type="number"
-                min="0"
-                placeholder="0"
-                value={formCancellationWindow}
-                onChange={(e) => setFormCancellationWindow(e.target.value)}
-                disabled={!formIsCancellable}
-              />
-              <p className="text-[10px] text-text-muted mt-0.5">0 = cancellable until shipped</p>
-            </div>
-          </div>
-        </div>
-      </div>
-
       {/* Product Information (Amazon-style sections) */}
       <div className="border-t border-border pt-4 mt-4">
-        <p className="text-xs font-semibold text-text-primary mb-1">Product Information</p>
-        <p className="text-[10px] text-text-muted mb-4">Add detailed product information similar to Amazon product pages</p>
+        <p className="text-xs font-semibold text-text-primary mb-1">Product Information *</p>
+        <p className="text-[10px] text-text-muted mb-4">Add at least one section below. Presets are provided and can be customized by sellers.</p>
         
         {/* Features & Specs */}
-        <KeyValueEditor
+        <PresetKeyValueEditor
           label="Features & Specs"
-          description="e.g. Light Source Type: LED, Power Source: Battery"
+          description="Choose predefined attributes and values (custom options available where needed)."
+          preset={attributePresets.featuresSpecs}
           items={formFeaturesAndSpecs}
           onChange={setFormFeaturesAndSpecs}
         />
 
         {/* Materials & Care */}
-        <KeyValueEditor
+        <PresetKeyValueEditor
           label="Materials & Care"
-          description="e.g. Material: Plastic, Care Instructions: Wipe clean"
+          description="Choose predefined material and care options (custom values where needed)."
+          preset={attributePresets.materialsCare}
           items={formMaterialsAndCare}
           onChange={setFormMaterialsAndCare}
         />
 
         {/* Item Details */}
-        <KeyValueEditor
+        <PresetKeyValueEditor
           label="Item Details"
-          description="e.g. Manufacturer: XYZ Corp, Country of Origin: India"
+          description="Manufacturer, origin, and identification fields from predefined lists."
+          preset={attributePresets.itemDetails}
           items={formItemDetails}
           onChange={setFormItemDetails}
         />
 
         {/* Additional Details */}
-        <KeyValueEditor
+        <PresetKeyValueEditor
           label="Additional Details"
-          description="e.g. Best Sellers Rank: #1 in Toys, Model Number: ABC123"
+          description="Rankings, compatibility, audience, and more — pick from lists or add custom values."
+          preset={attributePresets.additionalDetails}
           items={formAdditionalDetails}
           onChange={setFormAdditionalDetails}
         />
@@ -1626,21 +1970,60 @@ export default function SellerInventoryPage() {
       <div className="border-t border-border pt-4 mt-4">
         <p className="text-xs font-semibold text-text-primary mb-3">SEO & Tax</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
-            <label className="text-xs text-text-muted block mb-1">Meta Title</label>
-            <Input placeholder="SEO title (optional)" value={formMetaTitle} onChange={(e) => setFormMetaTitle(e.target.value)} />
+          <div className="sm:col-span-2">
+            <label className="text-xs text-text-muted block mb-1">Meta title keywords</label>
+            <div className="flex gap-2">
+              <Input
+                placeholder="Type keyword and click +"
+                value={metaKeywordInput}
+                onChange={(e) => setMetaKeywordInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    addMetaKeyword(metaKeywordInput);
+                  }
+                }}
+              />
+              <Button type="button" variant="outline" size="sm" onClick={() => addMetaKeyword(metaKeywordInput)}>
+                <Plus className="h-3 w-3 mr-1" />
+                Add
+              </Button>
+            </div>
+            {formMetaKeywords.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {formMetaKeywords.map((keyword) => (
+                  <span
+                    key={keyword}
+                    className="inline-flex items-center gap-1 rounded-full border border-primary-200 bg-primary-50 px-2 py-0.5 text-[11px] text-primary-700"
+                  >
+                    {keyword}
+                    <button
+                      type="button"
+                      onClick={() => removeMetaKeyword(keyword)}
+                      className="text-primary-600 hover:text-danger-600"
+                      aria-label={`Remove ${keyword}`}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+            {formMetaKeywords.length === 0 && (
+              <Input
+                placeholder="Fallback meta title"
+                value={formMetaTitle}
+                onChange={(e) => setFormMetaTitle(e.target.value)}
+              />
+            )}
           </div>
           <div>
-            <label className="text-xs text-text-muted block mb-1">HSN Code</label>
+            <label className="text-xs text-text-muted block mb-1">HSN Code *</label>
             <Input placeholder="e.g. 6109" value={formHsnCode} onChange={(e) => setFormHsnCode(e.target.value)} />
           </div>
           <div className="sm:col-span-2">
             <label className="text-xs text-text-muted block mb-1">Meta Description</label>
             <Input placeholder="SEO description (optional)" value={formMetaDesc} onChange={(e) => setFormMetaDesc(e.target.value)} />
-          </div>
-          <div>
-            <label className="text-xs text-text-muted block mb-1">GST Rate (%)</label>
-            <Input type="number" placeholder="e.g. 18" value={formGstRate} onChange={(e) => setFormGstRate(e.target.value)} />
           </div>
           <div>
             <label className="text-xs text-text-muted block mb-1">Low Stock Threshold</label>
@@ -1698,10 +2081,10 @@ export default function SellerInventoryPage() {
       >
         {formFields}
         <div className="flex justify-end gap-2 mt-6">
-          <Button type="button" variant="outline" onClick={() => setCreateOpen(false)} disabled={saving || uploading}>
+          <Button type="button" variant="outline" onClick={() => setCreateOpen(false)} disabled={saving || uploading || uploadingBrandCertificate}>
             Cancel
           </Button>
-          <Button type="button" onClick={submitCreate} disabled={saving || uploading}>
+          <Button type="button" onClick={submitCreate} disabled={saving || uploading || uploadingBrandCertificate}>
             {saving ? 'Saving…' : 'Create'}
           </Button>
         </div>
@@ -1716,10 +2099,10 @@ export default function SellerInventoryPage() {
       >
         {formFields}
         <div className="flex justify-end gap-2 mt-6">
-          <Button type="button" variant="outline" onClick={() => setEditProduct(null)} disabled={saving || uploading}>
+          <Button type="button" variant="outline" onClick={() => setEditProduct(null)} disabled={saving || uploading || uploadingBrandCertificate}>
             Cancel
           </Button>
-          <Button type="button" onClick={submitEdit} disabled={saving || uploading || editLoading}>
+          <Button type="button" onClick={submitEdit} disabled={saving || uploading || editLoading || uploadingBrandCertificate}>
             {saving ? 'Saving…' : 'Save changes'}
           </Button>
         </div>

@@ -16,6 +16,9 @@ import {
   UpdateSellerCouponDto,
 } from './dto/seller-dashboard.dto';
 import { Prisma, ProductStatus } from '@prisma/client';
+import { AdminService } from '../admin/admin.service';
+import type { ProductAttributePresetsPayload } from '../admin/default-product-attribute-presets';
+import { DEFAULT_GST_PERCENT, priceExclusiveFromInclusive } from '@xelnova/utils';
 
 /**
  * Validate the `variants` JSON payload from the seller.
@@ -58,6 +61,11 @@ function sanitizeVariants(raw: unknown): unknown {
   return raw;
 }
 
+function hasAtLeastOneEntry(raw: unknown): boolean {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false;
+  return Object.values(raw as Record<string, unknown>).some((v) => String(v ?? '').trim().length > 0);
+}
+
 @Injectable()
 export class SellerDashboardService {
   private readonly logger = new Logger(SellerDashboardService.name);
@@ -68,12 +76,19 @@ export class SellerDashboardService {
     private readonly walletService: WalletService,
     private readonly paymentService: PaymentService,
     private readonly notificationService: NotificationService,
+    private readonly adminService: AdminService,
   ) {}
 
   private async getSellerProfile(userId: string) {
     const profile = await this.prisma.sellerProfile.findUnique({ where: { userId } });
     if (!profile) throw new NotFoundException('Seller profile not found');
     return profile;
+  }
+
+  /** Merged site settings presets (same for all sellers). */
+  async getProductAttributePresets(): Promise<ProductAttributePresetsPayload> {
+    const s = (await this.adminService.getSiteSettings()) as { productAttributePresets: ProductAttributePresetsPayload };
+    return s.productAttributePresets;
   }
 
   /** Used to gate the seller panel when the user has SELLER role but no onboarding row yet. */
@@ -205,8 +220,38 @@ export class SellerDashboardService {
     const existing = await this.prisma.product.count({ where: { slug: { startsWith: baseSlug } } });
     const slug = existing > 0 ? `${baseSlug}-${existing + 1}` : baseSlug;
     const variants = sanitizeVariants(dto.variants);
+    if (!dto.brand?.trim()) {
+      throw new BadRequestException('Brand is required');
+    }
+    if (!dto.hsnCode?.trim()) {
+      throw new BadRequestException('HSN code is required');
+    }
+    if (dto.gstRate == null || Number.isNaN(Number(dto.gstRate))) {
+      throw new BadRequestException('GST rate is required');
+    }
+    const hasProductInfo =
+      hasAtLeastOneEntry(dto.featuresAndSpecs) ||
+      hasAtLeastOneEntry(dto.materialsAndCare) ||
+      hasAtLeastOneEntry(dto.itemDetails) ||
+      hasAtLeastOneEntry(dto.additionalDetails) ||
+      Boolean(dto.productDescription?.trim());
+    if (!hasProductInfo) {
+      throw new BadRequestException('Add at least one product information section');
+    }
+    if (!dto.brandAuthorizationCertificate?.trim()) {
+      throw new BadRequestException('Brand authorization certificate is required');
+    }
+    const additionalDetailsBase =
+      dto.additionalDetails && typeof dto.additionalDetails === 'object' && !Array.isArray(dto.additionalDetails)
+        ? { ...(dto.additionalDetails as Record<string, unknown>) }
+        : {};
+    const additionalDetails = {
+      ...additionalDetailsBase,
+      'Brand Authorization Certificate': dto.brandAuthorizationCertificate.trim(),
+    } as unknown as Prisma.InputJsonValue;
 
     const sku = dto.sku || await this.generateSku(seller.id, dto.categoryId);
+    const returnPolicy = await this.adminService.getMarketplaceReturnPolicy();
 
     return this.prisma.product.create({
       data: {
@@ -233,15 +278,11 @@ export class SellerDashboardService {
         lowStockThreshold: dto.lowStockThreshold ?? 5,
         weight: dto.weight,
         dimensions: dto.dimensions,
-        isCancellable: dto.isCancellable ?? true,
-        isReturnable: dto.isReturnable ?? true,
-        isReplaceable: dto.isReplaceable ?? false,
-        returnWindow: dto.returnWindow ?? 7,
-        cancellationWindow: dto.cancellationWindow ?? 0,
+        ...returnPolicy,
         featuresAndSpecs: dto.featuresAndSpecs,
         materialsAndCare: dto.materialsAndCare,
         itemDetails: dto.itemDetails,
-        additionalDetails: dto.additionalDetails,
+        additionalDetails,
         productDescription: dto.productDescription,
         safetyInfo: dto.safetyInfo,
         regulatoryInfo: dto.regulatoryInfo,
@@ -270,6 +311,41 @@ export class SellerDashboardService {
     }
 
     const data: any = { ...dto };
+    if (dto.brand !== undefined && !dto.brand.trim()) {
+      throw new BadRequestException('Brand cannot be empty');
+    }
+    if (dto.hsnCode !== undefined && !dto.hsnCode.trim()) {
+      throw new BadRequestException('HSN code cannot be empty');
+    }
+    if (dto.brandAuthorizationCertificate !== undefined) {
+      const certUrl = dto.brandAuthorizationCertificate.trim();
+      if (!certUrl) {
+        throw new BadRequestException('Brand authorization certificate cannot be empty');
+      }
+      const existingAdditional =
+        product.additionalDetails && typeof product.additionalDetails === 'object' && !Array.isArray(product.additionalDetails)
+          ? { ...(product.additionalDetails as Record<string, unknown>) }
+          : {};
+      const incomingAdditional =
+        dto.additionalDetails && typeof dto.additionalDetails === 'object' && !Array.isArray(dto.additionalDetails)
+          ? { ...(dto.additionalDetails as Record<string, unknown>) }
+          : {};
+      data.additionalDetails = {
+        ...existingAdditional,
+        ...incomingAdditional,
+        'Brand Authorization Certificate': certUrl,
+      };
+    }
+    delete data.isCancellable;
+    delete data.isReturnable;
+    delete data.isReplaceable;
+    delete data.returnWindow;
+    delete data.cancellationWindow;
+    delete data.brandAuthorizationCertificate;
+
+    const returnPolicy = await this.adminService.getMarketplaceReturnPolicy();
+    Object.assign(data, returnPolicy);
+
     if (dto.name) data.slug = this.slugify(dto.name) + '-' + Date.now().toString(36);
 
     return this.prisma.product.update({
@@ -568,19 +644,21 @@ export class SellerDashboardService {
 
   // ─── Bulk Upload ───
 
-  private parseBool(val: string | undefined, fallback: boolean): boolean {
-    if (!val) return fallback;
-    const lower = val.trim().toLowerCase();
-    return lower === 'true' || lower === 'yes' || lower === '1';
-  }
-
   private parseJsonField(val: string | undefined): any {
     if (!val) return null;
     try { return JSON.parse(val); } catch { return null; }
   }
 
+  /** CSV `price` / `compareAtPrice` are GST-inclusive; aligns with seller inventory form. */
+  private gstPercentForBulkRow(gstField: string | undefined): number {
+    if (!gstField?.trim()) return DEFAULT_GST_PERCENT;
+    const n = parseFloat(gstField);
+    return Number.isFinite(n) && n >= 0 ? n : DEFAULT_GST_PERCENT;
+  }
+
   async bulkUploadProducts(userId: string, rows: Record<string, string>[]) {
     const seller = await this.getSellerProfile(userId);
+    const returnPolicy = await this.adminService.getMarketplaceReturnPolicy();
     const results: { row: number; status: 'ok' | 'error'; message?: string; productId?: string; sku?: string }[] = [];
 
     for (let i = 0; i < rows.length; i++) {
@@ -591,10 +669,23 @@ export class SellerDashboardService {
           continue;
         }
 
-        const price = parseFloat(r.price);
-        if (isNaN(price) || price < 0) {
+        const priceIncl = parseFloat(r.price);
+        if (isNaN(priceIncl) || priceIncl < 0) {
           results.push({ row: i + 1, status: 'error', message: 'Invalid price' });
           continue;
+        }
+
+        const gstSave = this.gstPercentForBulkRow(r.gstRate);
+        const price = priceExclusiveFromInclusive(priceIncl, gstSave);
+
+        let compareAtPrice: number | null = null;
+        if (r.compareAtPrice != null && String(r.compareAtPrice).trim() !== '') {
+          const compareIncl = parseFloat(String(r.compareAtPrice));
+          if (isNaN(compareIncl) || compareIncl < 0) {
+            results.push({ row: i + 1, status: 'error', message: 'Invalid compareAtPrice' });
+            continue;
+          }
+          compareAtPrice = priceExclusiveFromInclusive(compareIncl, gstSave);
         }
 
         const baseSlug = this.slugify(r.name);
@@ -611,7 +702,7 @@ export class SellerDashboardService {
             shortDescription: r.shortDescription || null,
             description: r.description || null,
             price,
-            compareAtPrice: r.compareAtPrice ? parseFloat(r.compareAtPrice) : null,
+            compareAtPrice,
             categoryId: r.categoryId,
             brand: r.brand || null,
             sellerId: seller.id,
@@ -630,12 +721,8 @@ export class SellerDashboardService {
             weight: r.weight ? parseFloat(r.weight) : null,
             dimensions: r.dimensions || null,
 
-            // Return/Cancellation/Replacement policies
-            isCancellable: this.parseBool(r.isCancellable, true),
-            isReturnable: this.parseBool(r.isReturnable, true),
-            isReplaceable: this.parseBool(r.isReplaceable, false),
-            returnWindow: r.returnWindow ? parseInt(r.returnWindow) : 7,
-            cancellationWindow: r.cancellationWindow ? parseInt(r.cancellationWindow) : 0,
+            // Return/cancel policy — marketplace admin only (CSV columns ignored)
+            ...returnPolicy,
 
             // Amazon-style product information
             featuresAndSpecs: this.parseJsonField(r.featuresAndSpecs),

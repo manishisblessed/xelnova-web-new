@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
@@ -11,7 +11,7 @@ import {
   RefreshCw, Lock, ChevronDown, ChevronUp, AlertTriangle, FileText, Store,
 } from "lucide-react";
 import { cn } from "@xelnova/utils";
-import { formatCurrency, formatDate } from "@xelnova/utils";
+import { formatCurrency, formatDate, priceInclusiveOfGst } from "@xelnova/utils";
 import { useProductBySlug } from "@/lib/api";
 import { reviewsApi, setAccessToken } from "@xelnova/api";
 import { useCartStore } from "@/lib/store/cart-store";
@@ -37,6 +37,20 @@ export default function ProductDetail() {
   const [sizeChartModal, setSizeChartModal] = useState<{ label: string; rows: SizeChartRow[] } | null>(null);
   const [variantGallery, setVariantGallery] = useState<string[] | null>(null);
   const [hoverPreviewImage, setHoverPreviewImage] = useState<string | null>(null);
+
+  /** Pre-select the first SKU per group so PDP/cart use per-option prices instead of only the base price. */
+  useEffect(() => {
+    if (!product?.variants?.length) {
+      setSelectedVariants({});
+      return;
+    }
+    const next: Record<string, string> = {};
+    for (const v of product.variants) {
+      const first = v.options?.[0];
+      if (first) next[v.type] = first.value;
+    }
+    setSelectedVariants(next);
+  }, [product?.id]);
 
   const setItemQuantity = useCartStore((s) => s.setItemQuantity);
   const getItemQuantity = useCartStore((s) => s.getItemQuantity);
@@ -130,9 +144,14 @@ export default function ProductDetail() {
     return found ? min : product.stockCount;
   })();
 
-  const effectiveDiscount = effectiveComparePrice > effectivePrice
-    ? Math.round(((effectiveComparePrice - effectivePrice) / effectiveComparePrice) * 100)
-    : 0;
+  const gstRate = product.gstRate ?? null;
+  const displayPriceIncl = (exclusive: number) => priceInclusiveOfGst(exclusive, gstRate);
+  const salePriceIncl = displayPriceIncl(effectivePrice);
+  const mrpIncl = displayPriceIncl(effectiveComparePrice);
+  const effectiveDiscount =
+    mrpIncl > salePriceIncl && mrpIncl > 0
+      ? Math.round(((mrpIncl - salePriceIncl) / mrpIncl) * 100)
+      : 0;
   const effectiveInStock = effectiveStock > 0;
 
   const handleVariantSelect = (type: string, value: string, opt?: { images?: string[] }) => {
@@ -178,6 +197,7 @@ export default function ProductDetail() {
     image: selectedVariantImage || product.images[0] || "",
     variant: variantString || undefined,
     seller: product.seller.name,
+    gstRate: product.gstRate ?? null,
   } : null;
 
   const handleAddToCart = () => {
@@ -370,14 +390,14 @@ export default function ProductDetail() {
                 {effectiveDiscount > 0 && (
                   <div className="mb-1 flex items-center gap-2">
                     <span className="text-sm text-danger-600 font-semibold">-{effectiveDiscount}%</span>
-                    <span className="text-sm text-text-muted line-through">M.R.P.: {formatCurrency(effectiveComparePrice)}</span>
+                    <span className="text-sm text-text-muted line-through">M.R.P.: {formatCurrency(mrpIncl)}</span>
                   </div>
                 )}
                 <div className="flex items-baseline gap-1">
                   <span className="text-sm text-text-muted">₹</span>
-                  <span className="text-3xl font-extrabold text-text-primary">{effectivePrice.toLocaleString("en-IN")}</span>
+                  <span className="text-3xl font-extrabold text-text-primary">{salePriceIncl.toLocaleString("en-IN")}</span>
                 </div>
-                <p className="mt-1 text-xs text-text-muted">+ GST as applicable</p>
+                <p className="mt-1 text-xs text-primary-600/90">Inclusive of all taxes</p>
               </div>
 
               <hr className="border-border" />
@@ -510,10 +530,14 @@ export default function ProductDetail() {
                                   {opt.label}
                                 </p>
                                 {opt.price != null && (
-                                  <p className="text-[10px] text-text-muted">₹{opt.price.toLocaleString("en-IN")}</p>
+                                  <p className="text-[10px] text-text-muted">
+                                    ₹{displayPriceIncl(opt.price).toLocaleString("en-IN")}
+                                  </p>
                                 )}
                                 {opt.compareAtPrice != null && opt.price != null && opt.compareAtPrice > opt.price && (
-                                  <p className="text-[9px] text-text-muted line-through">₹{opt.compareAtPrice.toLocaleString("en-IN")}</p>
+                                  <p className="text-[9px] text-text-muted line-through">
+                                    ₹{displayPriceIncl(opt.compareAtPrice).toLocaleString("en-IN")}
+                                  </p>
                                 )}
                               </div>
                               {opt.stock === 0 && (
@@ -596,11 +620,11 @@ export default function ProductDetail() {
               <div>
                 <div className="flex items-baseline gap-1">
                   <span className="text-sm text-text-muted">₹</span>
-                  <span className="text-2xl font-extrabold text-text-primary">{effectivePrice.toLocaleString("en-IN")}</span>
+                  <span className="text-2xl font-extrabold text-text-primary">{salePriceIncl.toLocaleString("en-IN")}</span>
                 </div>
                 {effectiveDiscount > 0 && (
                   <p className="text-xs text-text-muted mt-0.5">
-                    M.R.P.: <span className="line-through">{formatCurrency(effectiveComparePrice)}</span>{" "}
+                    M.R.P.: <span className="line-through">{formatCurrency(mrpIncl)}</span>{" "}
                     <span className="text-danger-600 font-semibold">({effectiveDiscount}% off)</span>
                   </p>
                 )}
@@ -700,7 +724,13 @@ export default function ProductDetail() {
               {/* Seller info */}
               <div className="rounded-xl bg-gray-50 p-3.5 border border-border">
                 <p className="text-xs text-text-muted">Sold by</p>
-                <p className="text-sm font-semibold text-primary-700 mt-0.5">{product.seller.name}</p>
+                {product.seller.slug ? (
+                  <Link href={`/stores/${product.seller.slug}`} className="text-sm font-semibold text-primary-700 mt-0.5 inline-block hover:underline">
+                    {product.seller.name}
+                  </Link>
+                ) : (
+                  <p className="text-sm font-semibold text-primary-700 mt-0.5">{product.seller.name}</p>
+                )}
                 <div className="mt-1 flex items-center gap-1 text-xs text-text-muted">
                   <span className="font-medium text-text-primary">{product.seller.rating}</span>
                   <Star size={10} className="fill-accent-400 text-accent-400" />
@@ -743,9 +773,11 @@ export default function ProductDetail() {
             <AnimatePresence mode="wait">
               {activeTab === "description" && (
                 <motion.div key="desc" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
-                  <p className="leading-relaxed text-text-secondary whitespace-pre-line">
-                    {product.description || "No description available for this product."}
-                  </p>
+                  {product.description ? (
+                    <BulletText text={product.description} />
+                  ) : (
+                    <p className="leading-relaxed text-text-secondary">No description available for this product.</p>
+                  )}
                 </motion.div>
               )}
               {activeTab === "specifications" && (
@@ -919,6 +951,21 @@ function KeyValueTable({ data, title }: { data: Record<string, string>; title?: 
   );
 }
 
+function BulletText({ text }: { text: string }) {
+  const bullets = text
+    .split('\n')
+    .map((line) => line.replace(/^[\s*-]+/, '').trim())
+    .filter(Boolean);
+  if (bullets.length === 0) return null;
+  return (
+    <ul className="list-disc space-y-1 pl-5 text-sm text-text-secondary leading-relaxed">
+      {bullets.map((line, index) => (
+        <li key={`${index}-${line}`}>{line}</li>
+      ))}
+    </ul>
+  );
+}
+
 function ProductInfoTab({ product }: { product: any }) {
   return (
     <motion.div 
@@ -959,9 +1006,7 @@ function ProductInfoTab({ product }: { product: any }) {
       {/* Product Description */}
       {product.productDescription && (
         <CollapsibleSection title="Product Description" icon={FileText} defaultOpen={true}>
-          <p className="text-sm text-text-secondary whitespace-pre-line leading-relaxed">
-            {product.productDescription}
-          </p>
+          <BulletText text={product.productDescription} />
         </CollapsibleSection>
       )}
 

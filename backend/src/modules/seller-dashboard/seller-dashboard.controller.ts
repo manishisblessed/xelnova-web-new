@@ -46,6 +46,12 @@ export class SellerDashboardController {
     return paginatedResponse(items, total, page, limit, 'Products fetched');
   }
 
+  @Get('product-attribute-presets')
+  @ApiOperation({ summary: 'Admin-defined key/value presets for product information sections' })
+  async getProductAttributePresets() {
+    return successResponse(await this.service.getProductAttributePresets(), 'Product attribute presets fetched');
+  }
+
   @Post('products')
   @ApiOperation({ summary: 'Create a new product' })
   async createProduct(@CurrentUser('id') userId: string, @Body() dto: CreateProductDto) {

@@ -8,6 +8,7 @@ import { LoyaltyService } from '../notifications/loyalty.service';
 import { WalletService } from '../wallet/wallet.service';
 import { PaymentService } from '../payment/payment.service';
 import { CreateOrderDto } from './dto/order.dto';
+import { resolveVariantPrice } from '../../common/helpers/variant-price';
 
 import { OrderStatus } from '@prisma/client';
 
@@ -39,23 +40,6 @@ interface VariantGroup {
   type: string;
   options: VariantOption[];
   [key: string]: unknown;
-}
-
-/**
- * Given a product's `variants` JSON and a dash-separated variant string from the
- * client (e.g. "red-l"), resolve the effective price. Returns `undefined` when no
- * option-level price override exists.
- */
-function resolveVariantPrice(variants: unknown, variantStr: string | undefined): number | undefined {
-  if (!variantStr || !Array.isArray(variants)) return undefined;
-  const parts = new Set(variantStr.split('-'));
-  for (const group of variants as VariantGroup[]) {
-    if (!Array.isArray(group?.options)) continue;
-    for (const opt of group.options) {
-      if (parts.has(opt.value) && typeof opt.price === 'number') return opt.price;
-    }
-  }
-  return undefined;
 }
 
 /**
@@ -261,26 +245,107 @@ export class OrdersService {
       sellerId: item.sellerId,
     }));
 
-    const order = await this.prisma.order.create({
-      data: {
-        orderNumber,
-        userId,
-        subtotal,
-        discount,
-        shipping,
-        tax,
-        total,
-        status: 'PROCESSING',
-        paymentMethod: dto.paymentMethod,
-        shippingAddressId,
-        couponCode: dto.couponCode,
-        estimatedDelivery,
-        items: {
-          create: orderItemsForDb,
+    const payMethod = (dto.paymentMethod || 'razorpay').toLowerCase();
+
+    let order;
+
+    if (payMethod === 'wallet') {
+      await this.walletService.getOrCreateWallet(userId, 'CUSTOMER');
+      order = await this.prisma.$transaction(async (tx) => {
+        const wallet = await tx.wallet.findUnique({
+          where: { ownerId_ownerType: { ownerId: userId, ownerType: 'CUSTOMER' } },
+        });
+        if (!wallet || wallet.balance < total) {
+          throw new BadRequestException(
+            `Insufficient wallet balance. Available: ₹${(wallet?.balance ?? 0).toFixed(2)}, required: ₹${total.toFixed(2)}`,
+          );
+        }
+        const newBal = wallet.balance - total;
+        await tx.wallet.update({
+          where: { id: wallet.id },
+          data: { balance: newBal },
+        });
+        const ord = await tx.order.create({
+          data: {
+            orderNumber,
+            userId,
+            subtotal,
+            discount,
+            shipping,
+            tax,
+            total,
+            status: 'CONFIRMED',
+            paymentMethod: 'WALLET',
+            paymentStatus: 'PAID',
+            shippingAddressId,
+            couponCode: dto.couponCode,
+            estimatedDelivery,
+            items: {
+              create: orderItemsForDb,
+            },
+          },
+          include: { items: true, shippingAddress: true },
+        });
+        await tx.walletTransaction.create({
+          data: {
+            walletId: wallet.id,
+            type: 'DEBIT',
+            amount: total,
+            balanceAfter: newBal,
+            description: `Order payment ${orderNumber}`,
+            referenceType: 'MANUAL',
+            referenceId: ord.id,
+            createdBy: userId,
+          },
+        });
+        return ord;
+      });
+    } else if (payMethod === 'cod') {
+      order = await this.prisma.order.create({
+        data: {
+          orderNumber,
+          userId,
+          subtotal,
+          discount,
+          shipping,
+          tax,
+          total,
+          status: 'CONFIRMED',
+          paymentMethod: 'COD',
+          paymentStatus: 'PENDING',
+          shippingAddressId,
+          couponCode: dto.couponCode,
+          estimatedDelivery,
+          items: {
+            create: orderItemsForDb,
+          },
         },
-      },
-      include: { items: true, shippingAddress: true },
-    });
+        include: { items: true, shippingAddress: true },
+      });
+    } else {
+      // Card / UPI / Netbanking via Razorpay — unpaid until gateway confirms payment
+      order = await this.prisma.order.create({
+        data: {
+          orderNumber,
+          userId,
+          subtotal,
+          discount,
+          shipping,
+          tax,
+          total,
+          status: 'PROCESSING',
+          paymentMethod: dto.paymentMethod,
+          paymentStatus: 'PENDING',
+          shippingAddressId,
+          couponCode: dto.couponCode,
+          estimatedDelivery,
+          items: {
+            create: orderItemsForDb,
+          },
+        },
+        include: { items: true, shippingAddress: true },
+      });
+    }
 
     // Decrement stock on products and variant options
     for (const upd of productUpdates) {
@@ -317,32 +382,61 @@ export class OrdersService {
     // Mark abandoned cart reminder as converted (fire-and-forget)
     this.abandonedCartService.markConverted(userId).catch(() => {});
 
-    // Send order confirmation email (fire-and-forget)
+    // Customer confirmation email, seller "new order", fraud, loyalty:
+    // — run immediately for wallet (already paid) and COD (order placed without online payment)
+    // — for Razorpay/online, defer until payment is verified in PaymentService.verifyPayment
+    const confirmNow = payMethod === 'wallet' || payMethod === 'cod';
+    if (confirmNow) {
+      this.dispatchOrderPlacedSideEffects(userId, order);
+    }
+
+    return order;
+  }
+
+  /**
+   * After Razorpay (or other online) payment is captured: send order emails, notify sellers, etc.
+   * Idempotent with verifyPayment: skipped for wallet/COD and safe if payment already PAID from a retry.
+   */
+  async finalizeOnlineOrderAfterPayment(orderId: string): Promise<void> {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: { items: true },
+    });
+    if (!order || order.paymentStatus !== 'PAID') return;
+    const pm = (order.paymentMethod || '').toLowerCase();
+    if (pm === 'wallet' || pm === 'cod') return;
+
+    this.dispatchOrderPlacedSideEffects(order.userId, order);
+  }
+
+  private dispatchOrderPlacedSideEffects(
+    userId: string,
+    order: {
+      id: string;
+      orderNumber: string;
+      total: number;
+      items: { productName: string; quantity: number; price: number; productId: string }[];
+    },
+  ) {
     this.sendOrderConfirmationEmail(userId, order).catch((err) =>
       this.logger.warn(`Failed to send order confirmation email: ${err.message}`),
     );
 
-    // In-app notification + SMS for customer (fire-and-forget)
     this.notificationService.notifyOrderPlaced(userId, order.orderNumber, order.total).catch((err) =>
       this.logger.warn(`Failed to send order-placed notification: ${err.message}`),
     );
 
-    // Notify sellers about new order (fire-and-forget)
     this.notifySellerNewOrder(order).catch((err) =>
       this.logger.warn(`Failed to notify sellers for order ${order.orderNumber}: ${err.message}`),
     );
 
-    // Fraud detection (fire-and-forget)
     this.fraudService.evaluateOrder(order.id).catch((err) =>
       this.logger.warn(`Fraud evaluation failed for order ${order.id}: ${err.message}`),
     );
 
-    // Earn loyalty points (fire-and-forget)
     this.loyaltyService.earnFromOrder(userId, order.total, order.id).catch((err) =>
       this.logger.warn(`Loyalty earn failed for order ${order.id}: ${err.message}`),
     );
-
-    return order;
   }
 
   private async sendOrderConfirmationEmail(

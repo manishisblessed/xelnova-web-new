@@ -100,6 +100,12 @@ export async function apiDelete(section: string, id: string): Promise<void> {
   await handleResponse(res);
 }
 
+/** Full product payload (descriptions, images, variants, specs) for admin review. */
+export async function apiGetAdminProduct<T = unknown>(id: string): Promise<T> {
+  const res = await fetch(`${API_URL}/admin/products/${id}`, { headers: authHeaders() });
+  return handleResponse<T>(res);
+}
+
 export async function apiPost<T = unknown>(path: string, body: Record<string, unknown>): Promise<T> {
   const res = await fetch(`${API_URL}/admin/${path}`, {
     method: 'POST',
@@ -417,5 +423,35 @@ export async function apiReviewFraudFlag(flagId: string, body: { status: 'CLEARE
 
 export async function apiAssessCodRisk(userId: string, amount: number) {
   const res = await fetch(`${API_URL}/cod/risk/${userId}?amount=${amount}`, { headers: authHeaders() });
+  return handleResponse(res);
+}
+
+// ─── Reviews ───
+
+export async function apiGetReviews(params?: Record<string, string>) {
+  const query = new URLSearchParams({ limit: '50', ...params });
+  const res = await fetch(`${API_URL}/admin/reviews?${query}`, { headers: authHeaders() });
+  return handleResponse(res);
+}
+
+export async function apiGetPendingReviews(params?: Record<string, string>) {
+  const query = new URLSearchParams({ limit: '50', ...params });
+  const res = await fetch(`${API_URL}/admin/reviews/pending?${query}`, { headers: authHeaders() });
+  return handleResponse(res);
+}
+
+export async function apiApproveReview(id: string) {
+  const res = await fetch(`${API_URL}/admin/reviews/${id}/approve`, {
+    method: 'POST',
+    headers: authHeaders(),
+  });
+  return handleResponse(res);
+}
+
+export async function apiRejectReview(id: string) {
+  const res = await fetch(`${API_URL}/admin/reviews/${id}/reject`, {
+    method: 'POST',
+    headers: authHeaders(),
+  });
   return handleResponse(res);
 }

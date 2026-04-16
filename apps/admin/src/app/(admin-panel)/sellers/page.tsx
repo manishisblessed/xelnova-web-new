@@ -116,13 +116,59 @@ export default function SellersPage() {
   };
 
   const columns: Column<Seller>[] = [
-    { key: 'storeName', header: 'Store', render: (r) => <span className="font-medium">{r.storeName}</span> },
-    { key: 'user', header: 'Owner', render: (r) => r.user?.name ?? '—' },
-    { key: 'email', header: 'Email', render: (r) => r.email ?? r.user?.email ?? '—' },
-    { key: 'phone', header: 'Phone', render: (r) => r.phone ?? r.user?.phone ?? '—' },
+    {
+      key: 'storeName',
+      header: 'Store',
+      className: 'min-w-[10rem] max-w-[13rem]',
+      render: (r) => (
+        <span className="block truncate font-medium" title={r.storeName}>
+          {r.storeName}
+        </span>
+      ),
+    },
+    {
+      key: 'user',
+      header: 'Owner',
+      className: 'min-w-[7.5rem] max-w-[11rem]',
+      render: (r) => {
+        const name = r.user?.name ?? '—';
+        return (
+          <span className="block truncate" title={name}>
+            {name}
+          </span>
+        );
+      },
+    },
+    {
+      key: 'email',
+      header: 'Email',
+      className: 'min-w-[11rem] max-w-[15rem]',
+      render: (r) => {
+        const email = r.email ?? r.user?.email ?? '—';
+        return (
+          <span className="block truncate" title={email}>
+            {email}
+          </span>
+        );
+      },
+    },
+    {
+      key: 'phone',
+      header: 'Phone',
+      className: 'min-w-[8rem] max-w-[10rem] whitespace-nowrap',
+      render: (r) => {
+        const phone = r.phone ?? r.user?.phone ?? '—';
+        return (
+          <span className="block truncate" title={phone}>
+            {phone}
+          </span>
+        );
+      },
+    },
     {
       key: 'account',
       header: 'Account',
+      className: 'whitespace-nowrap w-28',
       render: (r) =>
         r.user?.isBanned ? (
           <Badge variant="danger">Suspended</Badge>
@@ -130,16 +176,19 @@ export default function SellersPage() {
           <Badge variant="success">Active</Badge>
         ),
     },
-    { key: '_count', header: 'Products', render: (r) => r._count.products },
-    { key: 'totalSales', header: 'Sales', render: (r) => `₹${r.totalSales.toLocaleString()}` },
-    { key: 'commissionRate', header: 'Comm %', render: (r) => `${r.commissionRate}%` },
+    { key: '_count', header: 'Products', className: 'whitespace-nowrap text-right tabular-nums w-16', render: (r) => r._count.products },
+    { key: 'totalSales', header: 'Sales', className: 'whitespace-nowrap tabular-nums min-w-[6rem]', render: (r) => `₹${r.totalSales.toLocaleString()}` },
+    { key: 'commissionRate', header: 'Comm %', className: 'whitespace-nowrap text-right tabular-nums w-16', render: (r) => `${r.commissionRate}%` },
     {
       key: 'verified',
       header: 'Verified',
-      render: (r) => <Badge variant={r.verified ? 'success' : 'default'}>{r.verified ? 'Verified' : 'Unverified'}</Badge>,
+      className: 'whitespace-nowrap w-[7.5rem]',
+      render: (r) => (
+        <Badge variant={r.verified ? 'success' : 'default'}>{r.verified ? 'Verified' : 'Unverified'}</Badge>
+      ),
     },
-    { key: 'rating', header: 'Rating', render: (r) => `${r.rating.toFixed(1)} ★` },
-    { key: 'createdAt', header: 'Joined', render: (r) => new Date(r.createdAt).toLocaleDateString() },
+    { key: 'rating', header: 'Rating', className: 'whitespace-nowrap tabular-nums w-14 text-right', render: (r) => `${r.rating.toFixed(1)} ★` },
+    { key: 'createdAt', header: 'Joined', className: 'whitespace-nowrap min-w-[6.5rem]', render: (r) => new Date(r.createdAt).toLocaleDateString() },
   ];
 
   return (

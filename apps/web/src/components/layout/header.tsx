@@ -14,6 +14,7 @@ import { useLocationStore, autoDetectLocation } from '@/lib/store/location-store
 import { useCategories } from '@/lib/api';
 import { useAuth, searchApi, getAccessToken, setAccessToken, notificationsApi } from '@xelnova/api';
 import { LocationModal } from '@/components/location-modal';
+import { priceInclusiveOfGst } from '@xelnova/utils';
 
 type AutocompleteResult = {
   products: { type: 'product'; text: string; slug: string; image: string; price: number }[];
@@ -230,7 +231,7 @@ export function Header() {
                   )}
                   <span className="flex-1 text-left truncate text-text-primary">{p.text}</span>
                   <span className="text-xs font-semibold text-text-muted shrink-0">
-                    ₹{p.price.toLocaleString('en-IN')}
+                    ₹{priceInclusiveOfGst(p.price, null).toLocaleString('en-IN')}
                   </span>
                 </button>
               ))}

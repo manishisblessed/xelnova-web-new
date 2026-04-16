@@ -1,6 +1,19 @@
 import axios, { AxiosInstance, InternalAxiosRequestConfig } from 'axios';
+import { AUTH_STORAGE_KEYS } from './auth-storage';
+import { getTokenPersistence } from './token-persistence';
 
 let accessToken: string | null = null;
+
+/** Override API base URL (e.g. Expo `EXPO_PUBLIC_API_URL` + `/api/v1`). */
+let configuredBaseURL: string | null = null;
+
+export function getApiBaseURL(): string {
+  return (
+    configuredBaseURL ||
+    (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_API_URL) ||
+    '/api/v1'
+  );
+}
 
 export function setAccessToken(token: string | null) {
   accessToken = token;
@@ -12,7 +25,11 @@ export function getAccessToken(): string | null {
 
 export function createApiClient(baseURL?: string): AxiosInstance {
   const client = axios.create({
-    baseURL: baseURL || process.env.NEXT_PUBLIC_API_URL || '/api/v1',
+    baseURL:
+      baseURL ||
+      configuredBaseURL ||
+      (typeof process !== 'undefined' ? process.env.NEXT_PUBLIC_API_URL : undefined) ||
+      '/api/v1',
     headers: { 'Content-Type': 'application/json' },
     timeout: 15000,
   });
@@ -34,9 +51,12 @@ export function createApiClient(baseURL?: string): AxiosInstance {
         originalRequest._retry = true;
 
         try {
-          const refreshToken = typeof window !== 'undefined'
-            ? localStorage.getItem('xelnova-refresh-token')
-            : null;
+          const tp = getTokenPersistence();
+          const refreshToken = tp
+            ? await tp.getRefreshToken()
+            : typeof window !== 'undefined'
+              ? localStorage.getItem(AUTH_STORAGE_KEYS.refreshToken())
+              : null;
 
           if (refreshToken) {
             const response = await axios.post(
@@ -48,8 +68,14 @@ export function createApiClient(baseURL?: string): AxiosInstance {
               response.data.data;
 
             setAccessToken(newAccessToken);
-            if (typeof window !== 'undefined') {
-              localStorage.setItem('xelnova-refresh-token', newRefreshToken);
+            if (tp) {
+              const userJson = await tp.getUserJson();
+              const user = userJson
+                ? (JSON.parse(userJson) as import('./types').AuthUser)
+                : ({ email: '' } as import('./types').AuthUser);
+              await tp.setTokens(newAccessToken, newRefreshToken, user);
+            } else if (typeof window !== 'undefined') {
+              localStorage.setItem(AUTH_STORAGE_KEYS.refreshToken(), newRefreshToken);
             }
 
             originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
@@ -57,9 +83,12 @@ export function createApiClient(baseURL?: string): AxiosInstance {
           }
         } catch {
           setAccessToken(null);
-          if (typeof window !== 'undefined') {
-            localStorage.removeItem('xelnova-refresh-token');
-            localStorage.removeItem('xelnova-user');
+          const tp = getTokenPersistence();
+          if (tp) {
+            await tp.clear().catch(() => {});
+          } else if (typeof window !== 'undefined') {
+            localStorage.removeItem(AUTH_STORAGE_KEYS.refreshToken());
+            localStorage.removeItem(AUTH_STORAGE_KEYS.user());
           }
         }
       }
@@ -72,3 +101,11 @@ export function createApiClient(baseURL?: string): AxiosInstance {
 }
 
 export const api = createApiClient();
+
+export function setApiBaseURL(url: string | null) {
+  configuredBaseURL = url?.trim() || null;
+  api.defaults.baseURL =
+    configuredBaseURL ||
+    (typeof process !== 'undefined' ? process.env.NEXT_PUBLIC_API_URL : undefined) ||
+    '/api/v1';
+}

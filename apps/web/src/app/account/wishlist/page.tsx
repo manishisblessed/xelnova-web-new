@@ -8,7 +8,7 @@ import { Heart, Loader2, ShoppingCart, Trash2, AlertCircle } from "lucide-react"
 import { useWishlistStore } from "@/lib/store/wishlist-store";
 import { useCartStore } from "@/lib/store/cart-store";
 import { wishlistApi, setAccessToken } from "@xelnova/api";
-import { formatCurrency } from "@xelnova/utils";
+import { formatCurrency, priceInclusiveOfGst } from "@xelnova/utils";
 
 function syncToken() {
   if (typeof document === "undefined") return;
@@ -107,7 +107,10 @@ export default function WishlistPage() {
         </div>
       ) : (
         <div className="space-y-3">
-          {products.map((product: any, i: number) => (
+          {products.map((product: any, i: number) => {
+            const wishPriceIncl = priceInclusiveOfGst(product.price, product.gstRate);
+            const wishCompareIncl = priceInclusiveOfGst(product.compareAtPrice ?? product.price, product.gstRate);
+            return (
             <motion.div
               key={product.id}
               initial={{ opacity: 0, y: 12 }}
@@ -128,9 +131,9 @@ export default function WishlistPage() {
                 </Link>
                 {product.brand && <p className="text-xs text-text-muted mt-0.5">{product.brand}</p>}
                 <div className="mt-1 flex items-baseline gap-2">
-                  <span className="text-sm font-bold text-text-primary">{formatCurrency(product.price)}</span>
-                  {product.compareAtPrice > product.price && (
-                    <span className="text-xs text-text-muted line-through">{formatCurrency(product.compareAtPrice)}</span>
+                  <span className="text-sm font-bold text-text-primary">{formatCurrency(wishPriceIncl)}</span>
+                  {wishCompareIncl > wishPriceIncl && (
+                    <span className="text-xs text-text-muted line-through">{formatCurrency(wishCompareIncl)}</span>
                   )}
                 </div>
                 <p className={`text-xs mt-0.5 ${product.stock > 0 ? "text-success-600" : "text-danger-600"}`}>
@@ -154,7 +157,8 @@ export default function WishlistPage() {
                 </button>
               </div>
             </motion.div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

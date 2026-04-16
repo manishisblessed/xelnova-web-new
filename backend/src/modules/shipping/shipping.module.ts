@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
 import { ShippingController, ShippingRateController } from './shipping.controller';
 import { ShippingWebhookController } from './shipping-webhook.controller';
 import { ShippingService } from './shipping.service';
@@ -11,7 +12,7 @@ import { XelnovaCourierProvider } from './providers/xelnova-courier.provider';
 import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
-  imports: [NotificationsModule],
+  imports: [ConfigModule, NotificationsModule],
   controllers: [ShippingController, ShippingRateController, ShippingWebhookController],
   providers: [
     ShippingService,

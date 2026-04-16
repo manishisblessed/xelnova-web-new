@@ -4,6 +4,7 @@ import {
   ConflictException,
   BadRequestException,
   NotFoundException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
@@ -13,12 +14,17 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { sendFortiusOtpSms } from '../../common/helpers/fortius-sms.helper';
 import { EmailService } from '../email/email.service';
 import { RegisterDto } from './dto/auth.dto';
+import type { BusinessRegisterDto } from '../business/dto/business.dto';
 import { LoggingService } from '../logging/logging.service';
-import { Role } from '@prisma/client';
+import { Prisma, Role } from '@prisma/client';
+import { OAuth2Client } from 'google-auth-library';
 
 @Injectable()
 export class AuthService {
   private static readonly MAX_OTP_ATTEMPTS = 5;
+
+  /** Reused across requests — avoids constructing OAuth2Client + cold dynamic import per login. */
+  private googleOAuthClient: OAuth2Client | null = null;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -250,8 +256,42 @@ export class AuthService {
       }
     }
 
+    let createdNewPhoneUser = false;
+
     if (!user) {
-      return { isNewUser: true, phone };
+      /** Placeholder email so we can satisfy DB constraints; user may add a real email in profile or at checkout. */
+      const syntheticEmail = this.syntheticEmailForPhoneLogin(phone);
+      const tempPassword = await bcrypt.hash(Math.random().toString(36).slice(-12), 10);
+      try {
+        user = await this.prisma.user.create({
+          data: {
+            name: 'Customer',
+            email: syntheticEmail,
+            phone,
+            password: tempPassword,
+            avatar: null,
+            role: 'CUSTOMER',
+            phoneVerified: true,
+            authProvider: 'PHONE',
+          },
+        });
+        createdNewPhoneUser = true;
+      } catch (err: unknown) {
+        const unique =
+          err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002';
+        if (!unique) throw err;
+        user = await this.prisma.user.findFirst({
+          where: { phone: { in: phoneVariants } },
+        });
+        if (!user) {
+          user = await this.prisma.user.findUnique({ where: { email: syntheticEmail } });
+        }
+        if (!user) throw err;
+      }
+    }
+
+    if (!user) {
+      throw new BadRequestException('Could not sign you in. Please try again.');
     }
 
     if (user.isBanned) {
@@ -272,7 +312,7 @@ export class AuthService {
     const hasSellerProfile = await this.userHasSellerProfile(user.id);
 
     return {
-      isNewUser: false,
+      isNewUser: createdNewPhoneUser,
       user: {
         id: user.id,
         name: user.name,
@@ -421,6 +461,31 @@ export class AuthService {
     }
   }
 
+  /** Verify Google ID token (Sign-In with Google credential JWT). */
+  async verifyGoogleIdToken(idToken: string) {
+    const clientId = this.configService.get<string>('GOOGLE_CLIENT_ID');
+    if (!clientId) {
+      throw new UnauthorizedException('Google sign-in is not configured on the server');
+    }
+    if (!this.googleOAuthClient) {
+      this.googleOAuthClient = new OAuth2Client(clientId);
+    }
+    const ticket = await this.googleOAuthClient.verifyIdToken({
+      idToken,
+      audience: clientId,
+    });
+    const payload = ticket.getPayload();
+    if (!payload || !payload.email) {
+      throw new UnauthorizedException('Invalid token payload');
+    }
+    return {
+      googleId: payload.sub || '',
+      email: payload.email,
+      name: payload.name || payload.email.split('@')[0],
+      avatar: payload.picture,
+    };
+  }
+
   async googleLogin(googleUser: {
     googleId: string;
     email: string;
@@ -496,8 +561,14 @@ export class AuthService {
       throw new UnauthorizedException('Your account has been suspended');
     }
 
-    const tokens = await this.generateTokens(user.id, user.email, user.role);
-    await this.saveRefreshToken(user.id, tokens.refreshToken);
+    const [tokens, hasSellerProfile] = await Promise.all([
+      (async () => {
+        const t = await this.generateTokens(user.id, user.email, user.role);
+        await this.saveRefreshToken(user.id, t.refreshToken);
+        return t;
+      })(),
+      this.userHasSellerProfile(user.id),
+    ]);
 
     await this.loggingService.logActivity({
       type: 'AUTH',
@@ -515,8 +586,6 @@ export class AuthService {
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + 7);
     await this.loggingService.createUserSession(user.id, tokens.accessToken, ipAddress || '', userAgent || '', expiresAt);
-
-    const hasSellerProfile = await this.userHasSellerProfile(user.id);
 
     return {
       user: {
@@ -586,6 +655,12 @@ export class AuthService {
    * Given a phone string like "+919090702705" or "9090702705", returns all
    * plausible stored variants so lookups succeed regardless of format.
    */
+  /** Unique placeholder inbox for phone-only signup (users can replace via profile later). */
+  private syntheticEmailForPhoneLogin(phone: string): string {
+    const digits = phone.replace(/\D/g, '').slice(-10) || phone.replace(/\D/g, '');
+    return `${digits}@phone.user.xelnova.in`;
+  }
+
   private getPhoneVariants(phone: string): string[] {
     const digits = phone.replace(/\D/g, '');
     const variants = new Set<string>();
@@ -619,6 +694,91 @@ export class AuthService {
     ]);
 
     return { accessToken, refreshToken };
+  }
+
+  /**
+   * Creates a `BUSINESS` platform user, an organization, and an `ORG_ADMIN` membership in one transaction.
+   */
+  async registerBusinessAccount(
+    dto: BusinessRegisterDto,
+    ipAddress?: string,
+    userAgent?: string,
+  ) {
+    dto.email = dto.email.trim().toLowerCase();
+    dto.name = dto.name.trim();
+
+    const existing = await this.prisma.user.findUnique({
+      where: { email: dto.email },
+    });
+    if (existing) {
+      throw new ConflictException('User with this email already exists');
+    }
+
+    const hashedPassword = await bcrypt.hash(dto.password, 10);
+
+    const { user, organization } = await this.prisma.$transaction(async (tx) => {
+      const u = await tx.user.create({
+        data: {
+          name: dto.name,
+          email: dto.email,
+          phone: null,
+          password: hashedPassword,
+          avatar: null,
+          role: 'BUSINESS',
+          authProvider: 'EMAIL',
+        },
+      });
+      const org = await tx.organization.create({
+        data: {
+          name: dto.organizationName.trim(),
+          legalName: dto.legalName?.trim() || null,
+          gstin: dto.gstin?.trim() ? dto.gstin.trim().toUpperCase() : null,
+        },
+      });
+      await tx.organizationMember.create({
+        data: {
+          userId: u.id,
+          organizationId: org.id,
+          role: 'ORG_ADMIN',
+        },
+      });
+      return { user: u, organization: org };
+    });
+
+    const tokens = await this.generateTokens(user.id, user.email, user.role);
+    await this.saveRefreshToken(user.id, tokens.refreshToken);
+
+    await this.loggingService.logUserRegistration(user.id, user.role, ipAddress || '', userAgent || '');
+
+    return {
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        avatar: user.avatar,
+        role: user.role,
+        authProvider: 'EMAIL' as const,
+      },
+      organization: {
+        id: organization.id,
+        name: organization.name,
+        legalName: organization.legalName,
+        gstin: organization.gstin,
+      },
+      ...tokens,
+    };
+  }
+
+  /** Same as `login`, but only succeeds for users with platform role `BUSINESS`. */
+  async loginBusiness(email: string, password: string, ipAddress?: string, userAgent?: string) {
+    const result = await this.login(email, password, ipAddress, userAgent);
+    if (result.user.role !== 'BUSINESS') {
+      throw new ForbiddenException(
+        'This account is not a business buyer. Sign in on the retail storefront, or create a Xelnova Business account.',
+      );
+    }
+    return result;
   }
 
   private async saveRefreshToken(userId: string, token: string) {

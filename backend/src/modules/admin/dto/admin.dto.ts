@@ -212,6 +212,24 @@ export class AdminSiteSettingsDto {
   @ApiPropertyOptional()
   @Allow()
   shippingRates?: Record<string, unknown>;
+
+  @ApiPropertyOptional({ description: 'Marketplace-wide return/cancel policy (applies to all products)' })
+  @Allow()
+  returnPolicy?: Record<string, unknown>;
+
+  @ApiPropertyOptional({
+    description:
+      'Preset keys and value lists for seller product info sections (Features & Specs, Materials & Care, etc.)',
+  })
+  @Allow()
+  productAttributePresets?: Record<string, unknown>;
+
+  @ApiPropertyOptional({
+    description:
+      'Platform courier defaults (Xelnova→Delhivery Live token, client name, warehouse). Token saved encrypted.',
+  })
+  @Allow()
+  platformLogistics?: Record<string, unknown>;
 }
 
 /** Passed from admin HTTP handlers for audit logging (Performance → Recent Activity). */

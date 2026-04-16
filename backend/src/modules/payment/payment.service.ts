@@ -1,7 +1,8 @@
-import { Injectable, BadRequestException, NotFoundException, Logger } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException, Logger, Inject, forwardRef } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationService } from '../notifications/notification.service';
+import { OrdersService } from '../orders/orders.service';
 import Razorpay from 'razorpay';
 import * as crypto from 'crypto';
 
@@ -15,6 +16,8 @@ export class PaymentService {
     private readonly config: ConfigService,
     private readonly prisma: PrismaService,
     private readonly notificationService: NotificationService,
+    @Inject(forwardRef(() => OrdersService))
+    private readonly ordersService: OrdersService,
   ) {
     const keyId = this.config.get('RAZORPAY_KEY_ID') || '';
     const keySecret = this.config.get('RAZORPAY_KEY_SECRET') || '';
@@ -117,9 +120,14 @@ export class PaymentService {
 
     const order = await this.prisma.order.findFirst({
       where: { paymentId: payload.razorpay_order_id },
+      include: { items: true },
     });
 
     if (!order) throw new NotFoundException('Order not found for this payment');
+
+    if (order.paymentStatus === 'PAID') {
+      return { verified: true, orderId: order.id };
+    }
 
     await this.prisma.order.update({
       where: { id: order.id },
@@ -134,6 +142,8 @@ export class PaymentService {
     this.notificationService
       .notifyPaymentSuccessful(order.userId, order.orderNumber, Number(order.total))
       .catch((err) => this.logger.warn(`Payment success notification failed: ${err.message}`));
+
+    await this.ordersService.finalizeOnlineOrderAfterPayment(order.id);
 
     return { verified: true, orderId: order.id };
   }
@@ -153,19 +163,33 @@ export class PaymentService {
     const payment = body.payload?.payment?.entity;
 
     if (event === 'payment.captured' && payment) {
-      const order = await this.prisma.order.findFirst({
+      let order = await this.prisma.order.findFirst({
         where: { paymentId: payment.order_id },
       });
+      if (!order && payment.notes && typeof payment.notes === 'object' && 'orderId' in payment.notes) {
+        const oid = (payment.notes as { orderId?: string }).orderId;
+        if (oid) {
+          order = await this.prisma.order.findUnique({ where: { id: oid } });
+        }
+      }
       if (order) {
+        if (order.paymentStatus === 'PAID') {
+          return { received: true };
+        }
         await this.prisma.order.update({
           where: { id: order.id },
-          data: { paymentStatus: 'PAID', status: 'CONFIRMED' },
+          data: {
+            paymentStatus: 'PAID',
+            status: 'CONFIRMED',
+            paymentId: payment.id,
+          },
         });
 
-        // Send payment success notification
         this.notificationService
           .notifyPaymentSuccessful(order.userId, order.orderNumber, Number(order.total))
           .catch((err) => this.logger.warn(`Payment webhook notification failed: ${err.message}`));
+
+        await this.ordersService.finalizeOnlineOrderAfterPayment(order.id);
       }
     }
 

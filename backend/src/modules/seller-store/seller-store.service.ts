@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   UpdateStoreSettingsDto,
@@ -10,7 +11,19 @@ import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class SellerStoreService {
-  constructor(private readonly prisma: PrismaService) {}
+  /** Customer-facing web app origin (not seller/admin subdomains). */
+  private readonly storefrontOrigin: string;
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly config: ConfigService,
+  ) {
+    const raw =
+      this.config.get<string>('APP_URL') ||
+      this.config.get<string>('FRONTEND_URL') ||
+      'http://localhost:3000';
+    this.storefrontOrigin = raw.replace(/\/$/, '');
+  }
 
   // ─── Public Methods (for buyers) ───
 
@@ -289,7 +302,7 @@ export class SellerStoreService {
       featuredProductIds: seller.featuredProductIds,
       storeBanners: seller.storeBanners,
       availableProducts: seller.products,
-      storeUrl: `/stores/${seller.slug}`,
+      storeUrl: `${this.storefrontOrigin}/stores/${seller.slug}`,
     };
   }
 

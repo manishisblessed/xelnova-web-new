@@ -21,11 +21,11 @@ export function DataTable<T>({ columns, data, keyExtractor, loading, emptyMessag
   if (loading) {
     return (
       <div className="overflow-x-auto">
-        <table className="w-full text-sm table-fixed">
+        <table className="w-full min-w-[1024px] text-sm table-auto border-collapse">
           <thead>
             <tr className="border-b border-border bg-surface-muted/30">
               {columns.map((col) => (
-                <th key={col.key} className={`text-left py-3 px-4 font-semibold text-text-muted text-xs uppercase tracking-wider ${col.className || ''}`}>{col.header}</th>
+                <th key={col.key} className={`text-left align-middle py-3 px-4 font-semibold text-text-muted text-xs uppercase tracking-wider ${col.className || ''}`}>{col.header}</th>
               ))}
             </tr>
           </thead>
@@ -33,7 +33,7 @@ export function DataTable<T>({ columns, data, keyExtractor, loading, emptyMessag
             {[1, 2, 3, 4, 5].map((i) => (
               <tr key={i}>
                 {columns.map((col) => (
-                  <td key={col.key} className={`py-3 px-4 ${col.className || ''}`}>
+                  <td key={col.key} className={`align-middle py-3 px-4 ${col.className || ''}`}>
                     <div className="h-4 w-3/4 max-w-[120px] rounded bg-surface-muted animate-pulse" />
                   </td>
                 ))}
@@ -47,22 +47,25 @@ export function DataTable<T>({ columns, data, keyExtractor, loading, emptyMessag
   if (!data.length) return <div className="py-12 text-center text-text-muted text-sm">{emptyMessage}</div>;
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-sm table-fixed">
+      <table className="w-full min-w-[1024px] text-sm table-auto border-collapse">
         <thead>
           <tr className="border-b border-border bg-surface-muted/30">
             {columns.map((col) => (
-              <th key={col.key} className={`text-left py-3 px-4 font-semibold text-text-muted text-xs uppercase tracking-wider ${col.className || ''}`}>{col.header}</th>
+              <th key={col.key} className={`text-left align-middle py-3 px-4 font-semibold text-text-muted text-xs uppercase tracking-wider ${col.className || ''}`}>{col.header}</th>
             ))}
           </tr>
         </thead>
         <tbody className="divide-y divide-border-light">
           {data.map((row) => (
             <tr key={keyExtractor(row)} className="hover:bg-surface-muted/40 transition-colors">
-              {columns.map((col) => (
-                <td key={col.key} className={`py-3 px-4 text-text-primary ${col.className || ''}`}>
-                  {col.render ? col.render(row) : (row as Record<string, unknown>)[col.key] as ReactNode}
-                </td>
-              ))}
+              {columns.map((col) => {
+                const content = col.render ? col.render(row) : (row as Record<string, unknown>)[col.key] as ReactNode;
+                return (
+                  <td key={col.key} className={`align-middle py-3 px-4 text-text-primary ${col.className || ''}`}>
+                    <div className="min-w-0 max-w-full">{content}</div>
+                  </td>
+                );
+              })}
             </tr>
           ))}
         </tbody>

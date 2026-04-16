@@ -17,6 +17,7 @@ import { SectionHeader } from '@/components/marketplace/section-header';
 import { CategoryImageOrIcon } from '@/components/marketplace/category-image-or-icon';
 import { BrandTile } from '@/components/marketplace/brand-tile';
 import { useProducts, useFlashDeals, useCategories } from '@/lib/api';
+import { priceInclusiveOfGst } from '@xelnova/utils';
 
 const trustFeatures = [
   { icon: Truck, title: 'Free Delivery', desc: 'On orders over ₹499' },
@@ -87,6 +88,12 @@ export function HomeBelowFold() {
   const bestSellers = allProducts.filter((p) => p.rating >= 4.5).sort((a, b) => b.reviewCount - a.reviewCount).slice(0, 8);
   const recommended = allProducts.filter((p) => p.rating >= 4.0).slice(0, 8);
   const dealProduct = allProducts.find((p) => p.discount >= 30 && p.rating >= 4.5) || allProducts[0];
+  const dealPriceIncl = dealProduct
+    ? priceInclusiveOfGst(dealProduct.price, dealProduct.gstRate)
+    : 0;
+  const dealCompareIncl = dealProduct
+    ? priceInclusiveOfGst(dealProduct.comparePrice, dealProduct.gstRate)
+    : 0;
   const dealEndAt = (() => {
     if (dealProduct?.flashDealEndsAt) return dealProduct.flashDealEndsAt;
     const eod = new Date();
@@ -278,10 +285,10 @@ export function HomeBelowFold() {
                     ].filter(Boolean).join(' · ')}
                   </p>
                   <div className="flex items-baseline gap-3 mb-5">
-                    <span className="text-3xl font-extrabold text-text-primary">₹{dealProduct.price.toLocaleString('en-IN')}</span>
-                    {dealProduct.comparePrice > dealProduct.price && (
+                    <span className="text-3xl font-extrabold text-text-primary">₹{dealPriceIncl.toLocaleString('en-IN')}</span>
+                    {dealCompareIncl > dealPriceIncl && (
                       <>
-                        <span className="text-lg text-text-muted line-through">₹{dealProduct.comparePrice.toLocaleString('en-IN')}</span>
+                        <span className="text-lg text-text-muted line-through">₹{dealCompareIncl.toLocaleString('en-IN')}</span>
                         <span className="bg-primary-100 text-primary-700 px-2 py-0.5 rounded-lg text-sm font-bold">{dealProduct.discount}% OFF</span>
                       </>
                     )}

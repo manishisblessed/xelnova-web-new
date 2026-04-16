@@ -11,18 +11,17 @@ const TEMPLATE_HEADERS = [
   'compareAtPrice', 'brand', 'stock', 'images', 'highlights',
   'tags', 'metaTitle', 'metaDescription', 'hsnCode', 'gstRate', 'lowStockThreshold',
   'weight', 'dimensions',
-  'isCancellable', 'isReturnable', 'isReplaceable', 'returnWindow', 'cancellationWindow',
   'productDescription', 'warrantyInfo', 'safetyInfo', 'regulatoryInfo',
   'featuresAndSpecs', 'materialsAndCare', 'itemDetails', 'additionalDetails',
 ];
 
 const FIELD_DESCRIPTIONS: Record<string, string> = {
   name: 'Product name (required)',
-  price: 'Selling price in INR (required)',
+  price: 'Selling price in INR, inclusive of GST (required)',
   categoryId: 'Category ID (required)',
   shortDescription: 'Brief product summary',
   description: 'Full product description',
-  compareAtPrice: 'MRP / compare-at price',
+  compareAtPrice: 'MRP / compare-at price in INR, inclusive of GST',
   brand: 'Brand name',
   stock: 'Available stock quantity',
   images: 'Image URLs separated by |',
@@ -31,15 +30,10 @@ const FIELD_DESCRIPTIONS: Record<string, string> = {
   metaTitle: 'SEO title',
   metaDescription: 'SEO description',
   hsnCode: 'HSN/SAC code for GST',
-  gstRate: 'GST rate (e.g. 18)',
+  gstRate: 'GST % for this row — used with price columns (defaults to 18 if empty)',
   lowStockThreshold: 'Low stock alert threshold',
   weight: 'Weight in kg',
   dimensions: 'LxWxH in cm (e.g. 30x20x15)',
-  isCancellable: 'true/false — can be cancelled',
-  isReturnable: 'true/false — can be returned',
-  isReplaceable: 'true/false — can be replaced',
-  returnWindow: 'Return window in days (default 7)',
-  cancellationWindow: 'Cancel window in hours (0=until shipped)',
   productDescription: 'Detailed product description',
   warrantyInfo: 'Warranty details',
   safetyInfo: 'Safety information',
@@ -126,7 +120,6 @@ export default function BulkUploadPage() {
         'https://img1.jpg|https://img2.jpg', 'Feature 1|Feature 2', 'tag1|tag2',
         'SEO Title', 'SEO Description', '1234', '18', '5',
         '0.5', '30x20x15',
-        'true', 'true', 'false', '7', '0',
         'Detailed product description here', '1 Year Manufacturer Warranty', '', '',
         '', '', '', '',
       ].join(',') + '\n';
@@ -168,7 +161,7 @@ export default function BulkUploadPage() {
               ))}
             </div>
             <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
-              <strong>Notes:</strong> Only <code>name</code>, <code>price</code>, and <code>categoryId</code> are required. SKU is auto-generated for every product. Use pipe (<code>|</code>) for multi-value fields. JSON fields use <code>{`{"key":"value"}`}</code> format.
+              <strong>Notes:</strong> Only <code>name</code>, <code>price</code>, and <code>categoryId</code> are required. <strong>price</strong> and <strong>compareAtPrice</strong> must be the amounts customers see — <strong>inclusive of GST</strong> (same as the inventory form). Set <code>gstRate</code> per row when it is not 18%; if omitted, 18% is used for the conversion to stored amounts. SKU is auto-generated for every product. Use pipe (<code>|</code>) for multi-value fields. JSON fields use <code>{`{"key":"value"}`}</code> format. Return/cancellation policy is not per-row — it is configured by admin for the whole marketplace.
             </div>
           </motion.div>
         )}
@@ -177,7 +170,7 @@ export default function BulkUploadPage() {
           <div className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center hover:border-violet-400 transition-colors cursor-pointer" onClick={() => fileRef.current?.click()}>
             <FileSpreadsheet size={40} className="mx-auto mb-3 text-gray-400" />
             <p className="text-sm font-medium text-gray-700 mb-1">Click to select a CSV file</p>
-            <p className="text-xs text-gray-500">Supports all product fields including shipping, policies, and Amazon-style info sections</p>
+            <p className="text-xs text-gray-500">Supports shipping and Amazon-style info sections. Return and cancellation rules are set by the marketplace admin for all products.</p>
             <input ref={fileRef} type="file" accept=".csv" onChange={handleFile} className="hidden" />
           </div>
 

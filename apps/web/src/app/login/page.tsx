@@ -6,7 +6,6 @@ import Image from 'next/image';
 import { useSearchParams } from 'next/navigation';
 import { motion } from 'framer-motion';
 import {
-  Mail,
   ArrowRight,
   ShoppingBag,
   Truck,
@@ -52,10 +51,6 @@ function LoginPageContent() {
   const [googleLoading, setGoogleLoading] = useState(false);
   const [googleClicked, setGoogleClicked] = useState(false);
   const [error, setError] = useState('');
-  const [needsName, setNeedsName] = useState(false);
-  const [fullName, setFullName] = useState('');
-  const [regEmail, setRegEmail] = useState('');
-
   const redirectTo = searchParams.get('redirect') || '/';
 
   useEffect(() => {
@@ -192,48 +187,17 @@ function LoginPageContent() {
     setError('');
     try {
       const result = await authApi.verifyOtp(`+91${phone}`, otpString);
-      if (result.isNewUser) {
-        setNeedsName(true);
-      } else {
-        localStorage.setItem('xelnova-auth-provider', 'phone');
-        document.cookie = `xelnova-token=${result.accessToken}; path=/; max-age=${COOKIE_MAX_AGE}`;
-        document.cookie = `xelnova-refresh-token=${result.refreshToken}; path=/; max-age=${COOKIE_MAX_AGE}`;
-        window.location.href = redirectTo;
+      if (!result.accessToken || !result.refreshToken) {
+        setError('Could not sign you in. Please try again.');
+        return;
       }
-    } catch (err: unknown) {
-      const e = err as { response?: { data?: { message?: string } }; message?: string };
-      setError(e.response?.data?.message ?? e.message ?? 'Invalid OTP');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const isValidEmail = (val: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val);
-
-  const handleCompleteRegistration = async () => {
-    const trimmedName = fullName.trim();
-    const trimmedEmail = regEmail.trim().toLowerCase();
-
-    if (!trimmedName || trimmedName.length < 2) {
-      setError('Please enter your full name (at least 2 characters)');
-      return;
-    }
-    if (!trimmedEmail || !isValidEmail(trimmedEmail)) {
-      setError('Please enter a valid email address');
-      return;
-    }
-
-    setLoading(true);
-    setError('');
-    try {
-      const result = await authApi.completePhoneRegistration(`+91${phone}`, trimmedName, trimmedEmail);
       localStorage.setItem('xelnova-auth-provider', 'phone');
       document.cookie = `xelnova-token=${result.accessToken}; path=/; max-age=${COOKIE_MAX_AGE}`;
       document.cookie = `xelnova-refresh-token=${result.refreshToken}; path=/; max-age=${COOKIE_MAX_AGE}`;
       window.location.href = redirectTo;
     } catch (err: unknown) {
       const e = err as { response?: { data?: { message?: string } }; message?: string };
-      setError(e.response?.data?.message ?? e.message ?? 'Registration failed');
+      setError(e.response?.data?.message ?? e.message ?? 'Invalid OTP');
     } finally {
       setLoading(false);
     }
@@ -381,64 +345,11 @@ function LoginPageContent() {
 
           <div className="bg-white rounded-3xl shadow-xl border border-gray-100 p-8">
             <div className="text-center mb-8">
-              <h2 className="text-2xl font-bold text-gray-900 font-display">
-                {needsName ? 'Create your account' : 'Welcome back'}
-              </h2>
-              <p className="text-gray-500 mt-2">
-                {needsName ? 'Fill in your details to get started' : 'Sign in to continue shopping'}
-              </p>
+              <h2 className="text-2xl font-bold text-gray-900 font-display">Welcome back</h2>
+              <p className="text-gray-500 mt-2">Sign in to continue shopping</p>
             </div>
 
-            {needsName ? (
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="space-y-5"
-                >
-                  <div className="text-center">
-                    <div className="mx-auto w-14 h-14 rounded-full bg-violet-100 flex items-center justify-center mb-3">
-                      <Shield size={24} className="text-violet-600" />
-                    </div>
-                    <p className="text-sm text-gray-600">
-                      Phone <span className="font-medium text-gray-800">+91 {phone}</span> verified! Complete your profile to continue.
-                    </p>
-                  </div>
-                  <div>
-                    <label htmlFor="reg-name" className="block text-sm font-medium text-gray-700 mb-2">Full Name</label>
-                    <input
-                      id="reg-name"
-                      type="text"
-                      autoFocus
-                      value={fullName}
-                      onChange={(e) => setFullName(e.target.value)}
-                      placeholder="e.g. Rahul Sharma"
-                      className="w-full px-4 py-3.5 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 outline-none transition-all text-gray-900 placeholder:text-gray-400"
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="reg-email" className="block text-sm font-medium text-gray-700 mb-2">Email Address</label>
-                    <div className="relative">
-                      <Mail size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
-                      <input
-                        id="reg-email"
-                        type="email"
-                        value={regEmail}
-                        onChange={(e) => setRegEmail(e.target.value)}
-                        onKeyDown={(e) => e.key === 'Enter' && fullName.trim() && regEmail.trim() && handleCompleteRegistration()}
-                        placeholder="you@example.com"
-                        className="w-full pl-11 pr-4 py-3.5 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 outline-none transition-all text-gray-900 placeholder:text-gray-400"
-                      />
-                    </div>
-                  </div>
-                  <button
-                    onClick={handleCompleteRegistration}
-                    disabled={fullName.trim().length < 2 || !isValidEmail(regEmail.trim()) || loading}
-                    className="w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-500 to-purple-600 py-3.5 text-sm font-semibold text-white hover:from-violet-600 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-violet-500/25"
-                  >
-                    {loading ? <Loader2 size={16} className="animate-spin" /> : <>Create Account & Sign In <ArrowRight size={16} /></>}
-                  </button>
-                </motion.div>
-              ) : !otpSent ? (
+            {!otpSent ? (
                 <div className="space-y-5">
                   <div
                     className="flex items-center rounded-xl border border-gray-200 bg-gray-50 overflow-hidden focus-within:border-violet-500 focus-within:ring-2 focus-within:ring-violet-500/20 transition-all"
@@ -520,7 +431,7 @@ function LoginPageContent() {
               </motion.div>
             )}
 
-            {!needsName && (
+            {!otpSent && (
               <>
                 {/* Divider */}
                 <div className="relative my-6">

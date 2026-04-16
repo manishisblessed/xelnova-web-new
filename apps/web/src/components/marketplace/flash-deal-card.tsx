@@ -6,6 +6,7 @@ import Image from 'next/image';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Zap, ShoppingCart, Check } from 'lucide-react';
 import type { Product } from '@/lib/data/products';
+import { priceInclusiveOfGst, calculateDiscount } from '@xelnova/utils';
 import { useCartStore } from '@/lib/store/cart-store';
 
 function useCountdown(endAt: string) {
@@ -54,14 +55,15 @@ export const FlashDealCard = memo(function FlashDealCard({ product }: { product:
       comparePrice: product.comparePrice,
       image: product.images[0] || '',
       seller: product.seller?.name || 'Xelnova',
+      gstRate: product.gstRate ?? null,
     });
     setAdded(true);
     setTimeout(() => setAdded(false), 1500);
   };
 
-  const discount = product.comparePrice > product.price
-    ? Math.round(((product.comparePrice - product.price) / product.comparePrice) * 100)
-    : 0;
+  const priceIncl = priceInclusiveOfGst(product.price, product.gstRate);
+  const compareIncl = priceInclusiveOfGst(product.comparePrice, product.gstRate);
+  const discount = calculateDiscount(priceIncl, compareIncl);
 
   const claimed = product.stockCount <= 0
     ? 100
@@ -126,11 +128,11 @@ export const FlashDealCard = memo(function FlashDealCard({ product }: { product:
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-baseline gap-2 min-w-0">
               <span className="text-base font-bold text-text-primary">
-                ₹{product.price.toLocaleString('en-IN')}
+                ₹{priceIncl.toLocaleString('en-IN')}
               </span>
-              {product.comparePrice > product.price && (
+              {compareIncl > priceIncl && (
                 <span className="text-xs text-text-muted line-through">
-                  ₹{product.comparePrice.toLocaleString('en-IN')}
+                  ₹{compareIncl.toLocaleString('en-IN')}
                 </span>
               )}
             </div>

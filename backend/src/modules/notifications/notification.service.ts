@@ -110,7 +110,7 @@ export class NotificationService {
     try {
       const admins = await this.prisma.user.findMany({
         where: { role: 'ADMIN' },
-        select: { id: true },
+        select: { id: true, email: true, name: true },
       });
       if (admins.length === 0) return;
 
@@ -124,6 +124,17 @@ export class NotificationService {
       }));
 
       await this.prisma.notificationLog.createMany({ data: rows });
+
+      const adminEmails = admins.filter((a) => Boolean(a.email));
+      await Promise.allSettled(
+        adminEmails.map((admin) =>
+          this.email.sendGenericEmail(
+            admin.email as string,
+            `[Xelnova Admin] ${params.title}`,
+            `Hello ${admin.name || 'Admin'},\n\n${params.body}\n\nOpen admin dashboard for details.`,
+          ),
+        ),
+      );
     } catch (err: any) {
       this.logger.warn(`notifyAllAdmins failed: ${err?.message ?? err}`);
     }

@@ -19,6 +19,29 @@ interface Settings {
   notifications: { orderConfirmation: boolean; shipmentUpdate: boolean; promotionalEmails: boolean; smsAlerts: boolean; adminNewOrder: boolean };
   shippingLabel: { companyName: string; companyLogo: string; companyAddress: string; companyPhone: string; companyGstin: string; tagline: string; footerText: string; showSellerSignature: boolean; showBarcode: boolean };
   shippingRates: { weightSlabs: WeightSlab[]; dimensionSlabs: DimensionSlab[]; baseCurrency: string };
+  returnPolicy: {
+    isCancellable: boolean;
+    isReturnable: boolean;
+    isReplaceable: boolean;
+    returnWindow: number;
+    cancellationWindow: number;
+  };
+  productAttributePresets?: Record<
+    string,
+    { id: string; keys: string[]; valuesByKey: Record<string, string[]>; defaultValues: string[] }
+  >;
+  platformLogistics?: {
+    xelnovaBackend?: 'delhivery' | 'stub';
+    delhivery?: {
+      clientName?: string;
+      warehouseName?: string;
+      environment?: 'production' | 'staging';
+      sellerGstin?: string;
+      shippingMode?: 'Surface' | 'Express';
+      apiToken?: string;
+      apiTokenHint?: string;
+    };
+  };
 }
 
 function SettingsSection({ title, delay, children }: { title: string; delay: number; children: React.ReactNode }) {
@@ -33,12 +56,19 @@ function SettingsSection({ title, delay, children }: { title: string; delay: num
 
 export default function SettingsPage() {
   const [data, setData] = useState<Settings | null>(null);
+  const [presetsJson, setPresetsJson] = useState('');
   const [loading, setLoading] = useState(true);
 
   const fetchData = useCallback(async () => {
-    try { setData(await apiGet<Settings>('settings')); }
-    catch (e) { toast.error(e instanceof Error ? e.message : 'Failed to load'); }
-    finally { setLoading(false); }
+    try {
+      const d = await apiGet<Settings>('settings');
+      setData(d);
+      setPresetsJson(JSON.stringify(d.productAttributePresets ?? {}, null, 2));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to load');
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
@@ -46,10 +76,37 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const save = async () => {
     if (!data) return;
+    let productAttributePresets: Settings['productAttributePresets'];
+    try {
+      productAttributePresets = JSON.parse(presetsJson) as Settings['productAttributePresets'];
+    } catch {
+      toast.error('Product attribute presets: invalid JSON');
+      return;
+    }
     try {
       setSaving(true);
-      await apiPatchSiteSettings(data as unknown as Record<string, unknown>);
+      const pl = data.platformLogistics;
+      const platformLogistics =
+        pl != null
+          ? {
+              xelnovaBackend: pl.xelnovaBackend ?? 'delhivery',
+              delhivery: {
+                clientName: pl.delhivery?.clientName ?? '',
+                warehouseName: pl.delhivery?.warehouseName ?? '',
+                environment: pl.delhivery?.environment ?? 'production',
+                sellerGstin: pl.delhivery?.sellerGstin ?? '',
+                shippingMode: pl.delhivery?.shippingMode ?? 'Surface',
+                ...(pl.delhivery?.apiToken?.trim() ? { apiToken: pl.delhivery.apiToken.trim() } : {}),
+              },
+            }
+          : undefined;
+      await apiPatchSiteSettings({
+        ...data,
+        productAttributePresets,
+        ...(platformLogistics ? { platformLogistics } : {}),
+      } as unknown as Record<string, unknown>);
       toast.success('Settings saved');
+      await fetchData();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to save');
     } finally {
@@ -94,6 +151,175 @@ export default function SettingsPage() {
             <FormField label="Express Rate (₹)"><FormInput type="number" value={data.shipping.expressRate} onChange={e => setData(d => d ? { ...d, shipping: { ...d.shipping, expressRate: +e.target.value } } : null)} /></FormField>
             <FormToggle label="Enable COD" checked={data.shipping.codEnabled} onChange={v => setData(d => d ? { ...d, shipping: { ...d.shipping, codEnabled: v } } : null)} />
             <FormField label="COD Fee (₹)"><FormInput type="number" value={data.shipping.codFee} onChange={e => setData(d => d ? { ...d, shipping: { ...d.shipping, codFee: +e.target.value } } : null)} /></FormField>
+          </div>
+        </SettingsSection>
+
+        <SettingsSection title="Platform logistics (Xelnova Courier)" delay={0.12}>
+          <p className="text-xs text-text-muted -mt-2 mb-3">
+            Default booking for <strong>Ship with Xelnova</strong> uses Delhivery Live API when credentials are complete.
+            Server env (optional):{' '}
+            <code className="text-[11px] bg-gray-100 px-1 rounded">DELHIVERY_API_TOKEN</code>,{' '}
+            <code className="text-[11px] bg-gray-100 px-1 rounded">DELHIVERY_CLIENT_NAME</code>,{' '}
+            <code className="text-[11px] bg-gray-100 px-1 rounded">DELHIVERY_WAREHOUSE_NAME</code>,{' '}
+            <code className="text-[11px] bg-gray-100 px-1 rounded">DELHIVERY_ENV</code>,{' '}
+            <code className="text-[11px] bg-gray-100 px-1 rounded">DELHIVERY_SELLER_GSTIN</code>,{' '}
+            <code className="text-[11px] bg-gray-100 px-1 rounded">DELHIVERY_SHIPPING_MODE</code>.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <FormField label="Xelnova fulfilment backend">
+              <FormSelect
+                value={data.platformLogistics?.xelnovaBackend ?? 'delhivery'}
+                onChange={(e) =>
+                  setData((d) =>
+                    d
+                      ? {
+                          ...d,
+                          platformLogistics: {
+                            ...d.platformLogistics,
+                            xelnovaBackend: e.target.value as 'delhivery' | 'stub',
+                            delhivery: { ...d.platformLogistics?.delhivery },
+                          },
+                        }
+                      : null,
+                  )
+                }
+              >
+                <option value="delhivery">Delhivery (recommended)</option>
+                <option value="stub">Internal stub only (testing)</option>
+              </FormSelect>
+            </FormField>
+            <div className="sm:col-span-2 text-xs text-text-muted rounded-lg bg-info-50 border border-info-100 px-3 py-2">
+              {(data.platformLogistics?.delhivery as { apiTokenHint?: string })?.apiTokenHint ||
+                'Token status will appear after save/load.'}
+            </div>
+            <FormField label="Delhivery client name (registered)">
+              <FormInput
+                value={data.platformLogistics?.delhivery?.clientName ?? ''}
+                onChange={(e) =>
+                  setData((d) =>
+                    d
+                      ? {
+                          ...d,
+                          platformLogistics: {
+                            ...d.platformLogistics,
+                            delhivery: { ...d.platformLogistics?.delhivery, clientName: e.target.value },
+                          },
+                        }
+                      : null,
+                  )
+                }
+                placeholder="e.g. XELNOVA PRIVATE LIMITED"
+              />
+            </FormField>
+            <FormField label="Pickup location / warehouse name">
+              <FormInput
+                value={data.platformLogistics?.delhivery?.warehouseName ?? ''}
+                onChange={(e) =>
+                  setData((d) =>
+                    d
+                      ? {
+                          ...d,
+                          platformLogistics: {
+                            ...d.platformLogistics,
+                            delhivery: { ...d.platformLogistics?.delhivery, warehouseName: e.target.value },
+                          },
+                        }
+                      : null,
+                  )
+                }
+                placeholder="Exact name in Delhivery One → Warehouses"
+              />
+            </FormField>
+            <FormField label="Delhivery API environment">
+              <FormSelect
+                value={data.platformLogistics?.delhivery?.environment ?? 'production'}
+                onChange={(e) =>
+                  setData((d) =>
+                    d
+                      ? {
+                          ...d,
+                          platformLogistics: {
+                            ...d.platformLogistics,
+                            delhivery: {
+                              ...d.platformLogistics?.delhivery,
+                              environment: e.target.value as 'production' | 'staging',
+                            },
+                          },
+                        }
+                      : null,
+                  )
+                }
+              >
+                <option value="production">Production (Live — track.delhivery.com)</option>
+                <option value="staging">Staging (sandbox — staging-express.delhivery.com)</option>
+              </FormSelect>
+            </FormField>
+            <FormField label="Registered GSTIN (for shipment / labels)">
+              <FormInput
+                value={data.platformLogistics?.delhivery?.sellerGstin ?? ''}
+                onChange={(e) =>
+                  setData((d) =>
+                    d
+                      ? {
+                          ...d,
+                          platformLogistics: {
+                            ...d.platformLogistics,
+                            delhivery: { ...d.platformLogistics?.delhivery, sellerGstin: e.target.value },
+                          },
+                        }
+                      : null,
+                  )
+                }
+                placeholder="15-character GSTIN if required for your account"
+              />
+            </FormField>
+            <FormField label="Default shipping mode (Delhivery)">
+              <FormSelect
+                value={data.platformLogistics?.delhivery?.shippingMode ?? 'Surface'}
+                onChange={(e) =>
+                  setData((d) =>
+                    d
+                      ? {
+                          ...d,
+                          platformLogistics: {
+                            ...d.platformLogistics,
+                            delhivery: {
+                              ...d.platformLogistics?.delhivery,
+                              shippingMode: e.target.value as 'Surface' | 'Express',
+                            },
+                          },
+                        }
+                      : null,
+                  )
+                }
+              >
+                <option value="Surface">Surface</option>
+                <option value="Express">Express</option>
+              </FormSelect>
+            </FormField>
+            <div className="sm:col-span-2">
+              <FormField label="Delhivery Live API token (leave blank to keep existing)">
+                <FormInput
+                  type="password"
+                  autoComplete="off"
+                  value={data.platformLogistics?.delhivery?.apiToken ?? ''}
+                  onChange={(e) =>
+                    setData((d) =>
+                      d
+                        ? {
+                            ...d,
+                            platformLogistics: {
+                              ...d.platformLogistics,
+                              delhivery: { ...d.platformLogistics?.delhivery, apiToken: e.target.value },
+                            },
+                          }
+                        : null,
+                    )
+                  }
+                  placeholder="Paste new token only when rotating"
+                />
+              </FormField>
+            </div>
           </div>
         </SettingsSection>
 
@@ -279,6 +505,115 @@ export default function SettingsPage() {
             >
               <Plus size={14} /> Add dimension slab
             </button>
+          </div>
+        </SettingsSection>
+
+        <SettingsSection title="Product attribute presets (seller inventory)" delay={0.31}>
+          <p className="text-xs text-text-muted -mt-2 mb-3">
+            Defines dropdown keys and allowed values for <strong>Features &amp; Specs</strong>,{' '}
+            <strong>Materials &amp; Care</strong>, <strong>Item Details</strong>, and{' '}
+            <strong>Additional Details</strong> on the seller product form. Sellers fetch this when opening inventory;
+            save merges with built-in defaults so partial edits stay safe.
+          </p>
+          <textarea
+            className="w-full min-h-[240px] rounded-xl border border-border bg-surface-raised px-3 py-2 font-mono text-xs text-text-primary placeholder:text-text-muted"
+            value={presetsJson}
+            onChange={(e) => setPresetsJson(e.target.value)}
+            spellCheck={false}
+            aria-label="Product attribute presets JSON"
+          />
+        </SettingsSection>
+
+        <SettingsSection title="Return & cancellation (marketplace-wide)" delay={0.32}>
+          <p className="text-xs text-text-muted -mt-2 mb-3">
+            Applies to <strong>all products from all sellers</strong>. Sellers cannot override these values. Saving updates every product in the catalog to match.
+          </p>
+          <div className="space-y-3">
+            <FormToggle
+              label="Orders can be cancelled before shipping"
+              checked={data.returnPolicy?.isCancellable ?? true}
+              onChange={(v) =>
+                setData((d) =>
+                  d
+                    ? {
+                        ...d,
+                        returnPolicy: { ...d.returnPolicy, isCancellable: v },
+                      }
+                    : null,
+                )
+              }
+            />
+            <FormToggle
+              label="Returns allowed after delivery"
+              checked={data.returnPolicy?.isReturnable ?? true}
+              onChange={(v) =>
+                setData((d) =>
+                  d
+                    ? {
+                        ...d,
+                        returnPolicy: { ...d.returnPolicy, isReturnable: v },
+                      }
+                    : null,
+                )
+              }
+            />
+            <FormToggle
+              label="Replacement / exchange allowed"
+              checked={data.returnPolicy?.isReplaceable ?? false}
+              onChange={(v) =>
+                setData((d) =>
+                  d
+                    ? {
+                        ...d,
+                        returnPolicy: { ...d.returnPolicy, isReplaceable: v },
+                      }
+                    : null,
+                )
+              }
+            />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
+            <FormField label="Return window (days after delivery)">
+              <FormInput
+                type="number"
+                min={0}
+                value={data.returnPolicy?.returnWindow ?? 7}
+                onChange={(e) =>
+                  setData((d) =>
+                    d
+                      ? {
+                          ...d,
+                          returnPolicy: {
+                            ...d.returnPolicy,
+                            returnWindow: +e.target.value,
+                          },
+                        }
+                      : null,
+                  )
+                }
+              />
+            </FormField>
+            <FormField label="Cancellation window (hours after order)">
+              <FormInput
+                type="number"
+                min={0}
+                value={data.returnPolicy?.cancellationWindow ?? 0}
+                onChange={(e) =>
+                  setData((d) =>
+                    d
+                      ? {
+                          ...d,
+                          returnPolicy: {
+                            ...d.returnPolicy,
+                            cancellationWindow: +e.target.value,
+                          },
+                        }
+                      : null,
+                  )
+                }
+              />
+              <p className="text-[10px] text-text-muted mt-1">Use 0 for “cancellable until shipped” (no fixed hour limit).</p>
+            </FormField>
           </div>
         </SettingsSection>
 

@@ -12,6 +12,14 @@ enum Role {
   CUSTOMER
   SELLER
   ADMIN
+  BUSINESS
+}
+
+/// Role within an organization (B2B buyer app). Distinct from platform `Role`.
+enum OrganizationMemberRole {
+  ORG_ADMIN
+  BUYER
+  APPROVER
 }
 
 enum OrderStatus {
@@ -150,11 +158,45 @@ model User {
   returnRequests   ReturnRequest[]
   tickets          Ticket[]
   ticketMessages   TicketMessage[]
+  organizationMembers OrganizationMember[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@map("users")
+}
+
+// ─── B2B Organizations (business buyer accounts) ───
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  legalName String?
+  /// India GSTIN (15 chars) when applicable
+  gstin     String?
+
+  members OrganizationMember[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("organizations")
+}
+
+model OrganizationMember {
+  id             String                   @id @default(cuid())
+  userId         String
+  user           User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organizationId String
+  organization   Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  role           OrganizationMemberRole   @default(BUYER)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, organizationId])
+  @@index([organizationId])
+  @@map("organization_members")
 }
 
 model RefreshToken {
@@ -509,6 +551,7 @@ model Review {
   comment   String?
   images    String[]
   verified  Boolean  @default(false)
+  approved  Boolean  @default(false)
   helpful   Int      @default(0)
 
   createdAt DateTime @default(now())
@@ -516,6 +559,7 @@ model Review {
 
   @@index([productId])
   @@index([userId])
+  @@index([approved])
   @@map("reviews")
 }
 

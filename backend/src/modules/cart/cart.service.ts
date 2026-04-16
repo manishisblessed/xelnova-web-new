@@ -1,6 +1,10 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AddToCartDto, UpdateCartDto } from './dto/cart.dto';
+import {
+  resolveVariantCompareAtPrice,
+  resolveVariantPrice,
+} from '../../common/helpers/variant-price';
 
 @Injectable()
 export class CartService {
@@ -22,27 +26,35 @@ export class CartService {
             sellerId: true,
             stock: true,
             gstRate: true,
+            variants: true,
           },
         },
       },
       orderBy: { createdAt: 'desc' },
     });
 
-    const cartItems = items.map((item) => ({
-      id: item.id,
-      productId: item.product.id,
-      productName: item.product.name,
-      productSlug: item.product.slug,
-      productImage: item.product.images[0] || '',
-      price: item.product.price,
-      compareAtPrice: item.product.compareAtPrice,
-      quantity: item.quantity,
-      variant: item.variant,
-      brand: item.product.brand,
-      sellerId: item.product.sellerId,
-      stock: item.product.stock,
-      gstRate: item.product.gstRate,
-    }));
+    const cartItems = items.map((item) => {
+      const v = item.variant || '';
+      const variants = item.product.variants;
+      const price = resolveVariantPrice(variants, v) ?? item.product.price;
+      const compareAtPrice =
+        resolveVariantCompareAtPrice(variants, v) ?? item.product.compareAtPrice;
+      return {
+        id: item.id,
+        productId: item.product.id,
+        productName: item.product.name,
+        productSlug: item.product.slug,
+        productImage: item.product.images[0] || '',
+        price,
+        compareAtPrice,
+        quantity: item.quantity,
+        variant: item.variant,
+        brand: item.product.brand,
+        sellerId: item.product.sellerId,
+        stock: item.product.stock,
+        gstRate: item.product.gstRate,
+      };
+    });
 
     const subtotal = cartItems.reduce(
       (sum, item) => sum + item.price * item.quantity,
@@ -176,22 +188,34 @@ export class CartService {
     if (coupon.scope === 'category' && coupon.categoryId) {
       const cartItems = await this.prisma.cartItem.findMany({
         where: { userId },
-        include: { product: { select: { categoryId: true, price: true } } },
+        include: { product: { select: { categoryId: true, price: true, variants: true } } },
       });
       eligibleSubtotal = cartItems
         .filter((ci) => ci.product.categoryId === coupon.categoryId)
-        .reduce((sum, ci) => sum + ci.product.price * ci.quantity, 0);
+        .reduce(
+          (sum, ci) =>
+            sum +
+            (resolveVariantPrice(ci.product.variants, ci.variant || '') ?? ci.product.price) *
+              ci.quantity,
+          0,
+        );
       if (eligibleSubtotal === 0) {
         throw new BadRequestException('No items in your cart match this coupon\'s category');
       }
     } else if (coupon.scope === 'seller' && coupon.sellerId) {
       const cartItems = await this.prisma.cartItem.findMany({
         where: { userId },
-        include: { product: { select: { sellerId: true, price: true } } },
+        include: { product: { select: { sellerId: true, price: true, variants: true } } },
       });
       eligibleSubtotal = cartItems
         .filter((ci) => ci.product.sellerId === coupon.sellerId)
-        .reduce((sum, ci) => sum + ci.product.price * ci.quantity, 0);
+        .reduce(
+          (sum, ci) =>
+            sum +
+            (resolveVariantPrice(ci.product.variants, ci.variant || '') ?? ci.product.price) *
+              ci.quantity,
+          0,
+        );
       if (eligibleSubtotal === 0) {
         throw new BadRequestException('No items in your cart match this coupon\'s seller');
       }

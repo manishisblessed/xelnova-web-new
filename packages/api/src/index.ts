@@ -2,10 +2,29 @@
 export type * from './types';
 
 // Client
-export { api, createApiClient, setAccessToken, getAccessToken } from './client';
+export {
+  api,
+  createApiClient,
+  setAccessToken,
+  getAccessToken,
+  setApiBaseURL,
+  getApiBaseURL,
+} from './client';
+export { configureApiAuthStorage } from './auth-storage';
+export { configureTokenPersistence, type TokenPersistence } from './token-persistence';
 
 // Auth
 export * as authApi from './auth';
+export {
+  login,
+  register,
+  loginBusiness,
+  registerBusiness,
+  logout,
+  refreshTokens,
+  getStoredUser,
+  hydrateAuthFromPersistence,
+} from './auth';
 
 // API modules
 export * as productsApi from './products';
@@ -26,6 +45,7 @@ export * as notificationsApi from './notifications';
 export * as wishlistApi from './wishlist';
 export * as verificationApi from './verification';
 export * as storesApi from './stores';
+export * as businessApi from './business';
 
 // Hooks
 export { AuthProvider, useAuth } from './hooks/use-auth';

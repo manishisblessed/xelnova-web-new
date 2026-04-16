@@ -1,4 +1,5 @@
 import type { Product } from '@/lib/data/products';
+import { calculateDiscount, priceInclusiveOfGst } from '@xelnova/utils';
 
 /** Minimal product shape from category/brand listing APIs */
 export interface ListingProduct {
@@ -14,7 +15,8 @@ export interface ListingProduct {
   category: string;
   stock: number;
   tags: string[];
-  seller?: { storeName: string };
+  seller?: { storeName: string; slug?: string };
+  gstRate?: number | null;
 }
 
 export function listingProductToCardProduct(
@@ -23,10 +25,10 @@ export function listingProductToCardProduct(
 ): Product {
   const comparePrice = p.compareAtPrice ?? 0;
   const price = p.price;
-  const discount =
-    comparePrice > price && comparePrice > 0
-      ? Math.round(((comparePrice - price) / comparePrice) * 100)
-      : 0;
+  const gstRate = p.gstRate ?? null;
+  const priceIncl = priceInclusiveOfGst(price, gstRate);
+  const compareIncl = priceInclusiveOfGst(comparePrice || price, gstRate);
+  const discount = calculateDiscount(priceIncl, compareIncl);
 
   return {
     id: p.id,
@@ -35,6 +37,7 @@ export function listingProductToCardProduct(
     description: '',
     price,
     comparePrice,
+    gstRate,
     discount,
     images: p.images ?? [],
     category: opts.categoryLabel,
@@ -44,7 +47,7 @@ export function listingProductToCardProduct(
     boughtLastMonth: 0,
     inStock: p.stock > 0,
     stockCount: p.stock,
-    seller: { name: p.seller?.storeName ?? 'Seller', rating: 4.5 },
+    seller: { name: p.seller?.storeName ?? 'Seller', rating: 4.5, slug: p.seller?.slug },
     variants: [],
     specifications: {},
     reviews: [],

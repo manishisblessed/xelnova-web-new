@@ -6,12 +6,13 @@ import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  MapPin, CreditCard, Check, Plus, ChevronRight,
-  ShieldCheck, Truck, ArrowLeft, X, Loader2,
+  MapPin, CreditCard, Plus, ChevronRight,
+  ShieldCheck, Truck, X, Loader2, Wallet,
+  Check, ArrowLeft,
 } from "lucide-react";
 import { cn } from "@xelnova/utils";
 import { formatCurrency } from "@xelnova/utils";
-import { useAuth, ordersApi, usersApi, paymentApi, cartApi, setAccessToken } from "@xelnova/api";
+import { useAuth, ordersApi, usersApi, paymentApi, cartApi, setAccessToken, walletApi } from "@xelnova/api";
 import { useCartStore } from "@/lib/store/cart-store";
 import { lookupPincode } from "@/lib/store/location-store";
 import { INDIAN_STATES } from "@/lib/indian-states";
@@ -27,7 +28,7 @@ function hasAuthCookie(): boolean {
   return /(?:^|;\s*)xelnova-token=/.test(document.cookie);
 }
 
-type Step = "address" | "review";
+type PaymentChoice = "razorpay" | "wallet";
 
 interface SavedAddress {
   id: string;
@@ -42,20 +43,14 @@ interface SavedAddress {
   isDefault: boolean;
 }
 
-const STEPS: { id: Step; label: string; icon: React.ElementType }[] = [
-  { id: "address", label: "Address", icon: MapPin },
-  { id: "review", label: "Review & Pay", icon: CreditCard },
-];
-
 const EMPTY_FORM = { name: "", phone: "", line1: "", line2: "", city: "", state: "", pincode: "", type: "HOME" };
 
 export default function CheckoutPage() {
   const router = useRouter();
   const pathname = usePathname();
-  const { isAuthenticated, loading: authLoading } = useAuth();
+  const { user, isAuthenticated, loading: authLoading } = useAuth();
   const [mounted, setMounted] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
-  const [currentStep, setCurrentStep] = useState<Step>("address");
   const [addresses, setAddresses] = useState<SavedAddress[]>([]);
   const [selectedAddress, setSelectedAddress] = useState("");
   const [showNewAddress, setShowNewAddress] = useState(true);
@@ -73,6 +68,12 @@ export default function CheckoutPage() {
   const clearCart = useCartStore((s) => s.clearCart);
   const [shippingConfig, setShippingConfig] = useState<{ freeShippingMin: number; defaultRate: number }>({ freeShippingMin: 499, defaultRate: 49 });
 
+  const [paymentChoice, setPaymentChoice] = useState<PaymentChoice>("razorpay");
+  const [walletBalance, setWalletBalance] = useState<number | null>(null);
+  const [walletLoading, setWalletLoading] = useState(false);
+  const [addMoneyAmount, setAddMoneyAmount] = useState("");
+  const [addingMoney, setAddingMoney] = useState(false);
+
   const razorpayLoaded = useRef(false);
 
   useEffect(() => setMounted(true), []);
@@ -80,6 +81,16 @@ export default function CheckoutPage() {
   useEffect(() => {
     cartApi.getShippingConfig().then(setShippingConfig).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!authChecked) return;
+    setWalletLoading(true);
+    walletApi
+      .getCustomerBalance()
+      .then((b) => setWalletBalance(b.balance))
+      .catch(() => setWalletBalance(0))
+      .finally(() => setWalletLoading(false));
+  }, [authChecked]);
 
   useEffect(() => {
     if (authLoading) return;
@@ -155,7 +166,7 @@ export default function CheckoutPage() {
         order_id: paymentOrder.razorpayOrderId,
         prefill: {
           name: addr?.name || "",
-          contact: addr?.phone || "",
+          contact: addr?.phone || user?.phone || "",
         },
         theme: { color: "#10b981" },
         handler: async (response: { razorpay_order_id: string; razorpay_payment_id: string; razorpay_signature: string }) => {
@@ -184,7 +195,7 @@ export default function CheckoutPage() {
       });
       rzp.open();
     });
-  }, [addresses, selectedAddress, syncToken]);
+  }, [addresses, selectedAddress, syncToken, user?.phone]);
 
   if (!mounted || !authChecked) {
     return (
@@ -427,10 +438,17 @@ export default function CheckoutPage() {
     );
   }
 
-  const stepIndex = STEPS.findIndex((s) => s.id === currentStep);
   const priceTotal = totalPrice();
   const savings = totalSavings();
   const itemCount = totalItems();
+  const shippingCharge = priceTotal >= shippingConfig.freeShippingMin ? 0 : shippingConfig.defaultRate;
+  const tax = Math.round(
+    items.reduce((sum, item) => {
+      const lineTotal = item.price * item.quantity;
+      return sum + lineTotal * (((item.gstRate ?? 18) as number) / 100);
+    }, 0),
+  );
+  const grandTotal = priceTotal + shippingCharge + tax;
 
   const updateField = async (field: string, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -516,14 +534,74 @@ export default function CheckoutPage() {
     }
   };
 
-  const canProceed = () => {
-    if (currentStep === "address") return !!selectedAddress;
-    return !placingOrder;
+  const canPay = () => {
+    if (!selectedAddress || placingOrder) return false;
+    if (paymentChoice === "wallet") {
+      if (walletLoading || walletBalance === null) return false;
+      if (walletBalance < grandTotal) return false;
+    }
+    return true;
+  };
+
+  const handleAddMoneyToWallet = async () => {
+    const amt = Math.floor(Number(addMoneyAmount));
+    if (!amt || amt < 10) {
+      setOrderError("Enter at least ₹10 to add to wallet.");
+      return;
+    }
+    setAddingMoney(true);
+    setOrderError("");
+    try {
+      syncToken();
+      const wm = await walletApi.createAddMoneyOrder(amt);
+      if (!window.Razorpay) throw new Error("Payment gateway is loading. Please try again in a moment.");
+      await new Promise<void>((resolve, reject) => {
+        const rzp = new window.Razorpay!({
+          key: wm.keyId,
+          amount: Math.round(wm.amount * 100),
+          currency: wm.currency,
+          name: "Xelnova Wallet",
+          description: `Add ₹${wm.walletCredit} to wallet`,
+          order_id: wm.razorpayOrderId,
+          theme: { color: "#7c3aed" },
+          handler: async (response: {
+            razorpay_order_id: string;
+            razorpay_payment_id: string;
+            razorpay_signature: string;
+          }) => {
+            try {
+              syncToken();
+              await walletApi.verifyAddMoney(response);
+              const b = await walletApi.getCustomerBalance();
+              setWalletBalance(b.balance);
+              setAddMoneyAmount("");
+              resolve();
+            } catch (e) {
+              reject(e instanceof Error ? e : new Error("Verification failed"));
+            }
+          },
+          modal: { ondismiss: () => reject(new Error("Payment cancelled")) },
+        });
+        rzp.on("payment.failed", () => reject(new Error("Payment failed")));
+        rzp.open();
+      });
+    } catch (err) {
+      setOrderError(err instanceof Error ? err.message : "Could not add money to wallet.");
+    } finally {
+      setAddingMoney(false);
+    }
   };
 
   const placeOrder = async () => {
     const addr = addresses.find((a) => a.id === selectedAddress);
     if (!addr || items.length === 0) return;
+
+    if (paymentChoice === "wallet") {
+      if (walletBalance === null || walletBalance < grandTotal) {
+        setOrderError("Insufficient wallet balance. Add money or choose card / UPI.");
+        return;
+      }
+    }
 
     setPlacingOrder(true);
     setOrderError("");
@@ -546,11 +624,18 @@ export default function CheckoutPage() {
           pincode: addr.pincode,
           type: addr.type,
         },
-        paymentMethod: "razorpay",
+        paymentMethod: paymentChoice === "wallet" ? "wallet" : "razorpay",
       });
 
       if (!order?.id) {
         throw new Error("Order creation failed. Please try again.");
+      }
+
+      if (paymentChoice === "wallet") {
+        setOrderNumber(order.orderNumber);
+        setOrderPlaced(true);
+        clearCart();
+        return;
       }
 
       syncToken();
@@ -580,66 +665,24 @@ export default function CheckoutPage() {
     }
   };
 
-  const handleNext = () => {
-    if (currentStep === "address") setCurrentStep("review");
-    else placeOrder();
-  };
-
-  const handleBack = () => {
-    if (currentStep === "review") setCurrentStep("address");
-  };
-
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:px-8">
-        {/* Step Indicator */}
-        <div className="mb-8 flex items-center justify-center gap-2">
-          {STEPS.map((step, i) => {
-            const completed = i < stepIndex;
-            const active = step.id === currentStep;
-            const Icon = step.icon;
-            return (
-              <div key={step.id} className="flex items-center">
-                {i > 0 && (
-                  <div className={cn("mx-2 h-0.5 w-8 sm:w-16 rounded transition-colors", completed ? "bg-primary-600" : "bg-gray-300")} />
-                )}
-                <button
-                  onClick={() => i < stepIndex && setCurrentStep(step.id)}
-                  disabled={i > stepIndex}
-                  className={cn(
-                    "flex items-center gap-2 rounded-xl px-3 py-2 sm:px-4 text-sm font-medium transition-all",
-                    active && "bg-primary-600 text-white shadow-sm",
-                    completed && "bg-primary-50 text-primary-700 hover:bg-primary-100",
-                    !active && !completed && "text-text-muted"
-                  )}
-                >
-                  {completed ? (
-                    <div className="flex h-5 w-5 items-center justify-center rounded-full bg-primary-600 text-white">
-                      <Check size={12} />
-                    </div>
-                  ) : (
-                    <Icon size={16} />
-                  )}
-                  <span className="hidden sm:inline">{step.label}</span>
-                </button>
-              </div>
-            );
-          })}
+        <div className="mb-6 flex items-center gap-2 text-text-secondary">
+          <MapPin size={18} className="text-primary-600" />
+          <h1 className="text-lg font-bold text-text-primary">Checkout</h1>
+          <span className="text-sm text-text-muted hidden sm:inline">— delivery &amp; payment</span>
         </div>
 
         <div className="grid gap-6 lg:grid-cols-3">
           {/* Left column */}
           <div className="lg:col-span-2">
-            <AnimatePresence mode="wait">
-              {/* ─── ADDRESS STEP ─── */}
-              {currentStep === "address" && (
-                <motion.div
-                  key="address"
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -20 }}
-                  className="rounded-2xl border border-border bg-white p-6 shadow-sm"
-                >
+            <div className="space-y-5">
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="rounded-2xl border border-border bg-white p-6 shadow-sm"
+              >
                   <h2 className="mb-5 text-lg font-bold text-text-primary">Select Delivery Address</h2>
 
                   {/* Saved addresses */}
@@ -770,53 +813,98 @@ export default function CheckoutPage() {
                       </motion.div>
                     )}
                   </AnimatePresence>
-                </motion.div>
-              )}
+              </motion.div>
 
-              {/* ─── REVIEW STEP ─── */}
-              {currentStep === "review" && (
-                <motion.div
-                  key="review"
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -20 }}
-                  className="space-y-5"
-                >
-                  {/* Address summary */}
-                  <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
-                    <div className="flex items-center justify-between mb-3">
-                      <h3 className="text-sm font-bold text-text-primary">Delivery Address</h3>
-                      <button onClick={() => setCurrentStep("address")} className="text-xs font-medium text-primary-600 hover:text-primary-700">Change</button>
-                    </div>
-                    {(() => {
-                      const addr = addresses.find((a) => a.id === selectedAddress);
-                      if (!addr) return <p className="text-sm text-text-muted">No address selected</p>;
-                      return (
-                        <div className="text-sm text-text-secondary">
-                          <p className="font-semibold text-text-primary">{addr.name}</p>
-                          <p>{addr.line1}{addr.line2 ? `, ${addr.line2}` : ""}</p>
-                          <p>{addr.city}, {addr.state} - {addr.pincode}</p>
-                          <p className="text-text-muted mt-1">Phone: {addr.phone}</p>
+              <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+                    <h3 className="mb-4 text-sm font-bold text-text-primary">Payment method</h3>
+                    <div className="space-y-3">
+                      <label
+                        className={cn(
+                          "flex cursor-pointer gap-3 rounded-xl border-2 p-4 transition-all",
+                          paymentChoice === "razorpay" ? "border-primary-500 bg-primary-50/50" : "border-border hover:border-gray-300",
+                        )}
+                      >
+                        <input
+                          type="radio"
+                          name="pay"
+                          checked={paymentChoice === "razorpay"}
+                          onChange={() => setPaymentChoice("razorpay")}
+                          className="mt-1 accent-primary-600"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-text-primary">Card / UPI / Net banking</p>
+                          <p className="text-xs text-text-muted mt-0.5">Secure checkout powered by Razorpay</p>
                         </div>
-                      );
-                    })()}
-                  </div>
+                        <CreditCard size={22} className="text-primary-600 shrink-0" />
+                      </label>
 
-                  {/* Payment info */}
-                  <div className="rounded-2xl border border-primary-200 bg-primary-50 p-5 shadow-sm">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary-100">
-                        <CreditCard size={20} className="text-primary-600" />
-                      </div>
-                      <div>
-                        <h3 className="text-sm font-bold text-text-primary">Secure Payment</h3>
-                        <p className="text-xs text-text-secondary">UPI, Cards, Net Banking, Wallets — choose at checkout</p>
-                      </div>
+                      <label
+                        className={cn(
+                          "flex cursor-pointer gap-3 rounded-xl border-2 p-4 transition-all",
+                          paymentChoice === "wallet" ? "border-primary-500 bg-primary-50/50" : "border-border hover:border-gray-300",
+                        )}
+                      >
+                        <input
+                          type="radio"
+                          name="pay"
+                          checked={paymentChoice === "wallet"}
+                          onChange={() => setPaymentChoice("wallet")}
+                          className="mt-1 accent-primary-600"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-text-primary flex items-center gap-2">
+                            <Wallet size={16} className="text-primary-600" />
+                            Xelnova Wallet
+                          </p>
+                          <p className="text-xs text-text-muted mt-0.5">
+                            {walletLoading
+                              ? "Loading balance…"
+                              : walletBalance !== null
+                                ? `Available: ${formatCurrency(walletBalance)}`
+                                : "—"}
+                          </p>
+                          {paymentChoice === "wallet" && walletBalance !== null && walletBalance < grandTotal && (
+                            <p className="text-xs text-amber-800 mt-2 rounded-lg bg-amber-50 border border-amber-200 px-2 py-1.5">
+                              Need {formatCurrency(grandTotal - walletBalance)} more. Add money below (Aadhaar KYC required) or choose card / UPI.
+                            </p>
+                          )}
+                        </div>
+                      </label>
+
+                      {paymentChoice === "wallet" && (
+                        <div className="rounded-xl border border-dashed border-primary-200 bg-gray-50/80 p-4 space-y-3">
+                          <p className="text-xs font-medium text-text-primary">Add money to wallet</p>
+                          <div className="flex flex-wrap gap-2 items-end">
+                            <div className="flex-1 min-w-[120px]">
+                              <label className="text-[10px] text-text-muted block mb-1">Amount (₹)</label>
+                              <input
+                                type="number"
+                                min={10}
+                                step={1}
+                                value={addMoneyAmount}
+                                onChange={(e) => setAddMoneyAmount(e.target.value)}
+                                placeholder="e.g. 500"
+                                className="w-full rounded-lg border border-border bg-white px-3 py-2 text-sm"
+                              />
+                            </div>
+                            <button
+                              type="button"
+                              onClick={handleAddMoneyToWallet}
+                              disabled={addingMoney}
+                              className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-semibold text-white hover:bg-primary-700 disabled:opacity-50"
+                            >
+                              {addingMoney ? "…" : "Add money"}
+                            </button>
+                          </div>
+                          <Link href="/account/wallet" className="text-xs text-primary-600 hover:underline inline-block">
+                            Open wallet & KYC settings →
+                          </Link>
+                        </div>
+                      )}
                     </div>
                   </div>
 
-                  {/* Order items */}
-                  <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+              <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
                     <h3 className="mb-4 text-sm font-bold text-text-primary">Order Items ({itemCount})</h3>
                     <div className="space-y-3">
                       {items.map((item) => (
@@ -833,28 +921,28 @@ export default function CheckoutPage() {
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-medium text-text-primary truncate">{item.name}</p>
                             {item.variant && (
-                              <p className="text-xs text-text-muted capitalize">{item.variant.replace(/-/g, ' / ')}</p>
+                              <p className="text-xs text-text-muted capitalize">{item.variant.replace(/-/g, " / ")}</p>
                             )}
                             <p className="text-xs text-text-muted">Qty: {item.quantity}</p>
-                            <p className="text-sm font-semibold text-text-primary">{formatCurrency(item.price * item.quantity)}</p>
+                            <p className="text-sm font-semibold text-text-primary">
+                              {formatCurrency(
+                                item.price * item.quantity +
+                                Math.round((item.price * item.quantity) * (((item.gstRate ?? 18) as number) / 100)),
+                              )}
+                            </p>
                           </div>
                         </div>
                       ))}
                     </div>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
+              </div>
+            </div>
           </div>
 
           {/* Right column — Price Details */}
           <div className="lg:col-span-1">
             <div className="sticky top-28 rounded-2xl border border-border bg-white p-6 shadow-sm">
-              <h2 className="mb-4 text-lg font-bold text-text-primary">Price Details</h2>
+              <h2 className="mb-4 text-lg font-bold text-text-primary">Order Summary</h2>
               {(() => {
-                const shippingCharge = priceTotal >= shippingConfig.freeShippingMin ? 0 : shippingConfig.defaultRate;
-                const estTax = Math.round(priceTotal * 0.18);
-                const grandTotal = priceTotal + shippingCharge + estTax;
                 const amountForFreeShipping = shippingConfig.freeShippingMin - priceTotal;
                 return (
               <div className="space-y-3 text-sm">
@@ -876,10 +964,10 @@ export default function CheckoutPage() {
                     <span>{formatCurrency(shippingCharge)}</span>
                   )}
                 </div>
-                {estTax > 0 && (
+                {tax > 0 && (
                   <div className="flex justify-between text-text-secondary">
-                    <span>Est. Tax (GST)</span>
-                    <span>{formatCurrency(estTax)}</span>
+                    <span>Tax (GST)</span>
+                    <span>{formatCurrency(tax)}</span>
                   </div>
                 )}
                 {shippingCharge > 0 && amountForFreeShipping > 0 && (
@@ -892,7 +980,7 @@ export default function CheckoutPage() {
                   <span>Total Amount</span>
                   <span>{formatCurrency(grandTotal)}</span>
                 </div>
-                <p className="text-xs text-text-muted">Final tax calculated at order confirmation based on product GST rates</p>
+                <p className="text-xs text-text-muted">Tax is calculated per product GST rate and included in total payable.</p>
                 {savings > 0 && (
                   <p className="rounded-xl bg-success-50 border border-success-200 p-2.5 text-center text-sm font-medium text-success-700">
                     You will save {formatCurrency(savings)}
@@ -902,30 +990,25 @@ export default function CheckoutPage() {
                 );
               })()}
 
-              <div className="mt-6 flex gap-3">
-                {stepIndex > 0 && (
-                  <button
-                    onClick={handleBack}
-                    className="flex items-center gap-1 rounded-xl border border-border px-4 py-3 text-sm font-medium text-text-secondary hover:bg-gray-50 transition-colors"
-                  >
-                    <ArrowLeft size={16} /> Back
-                  </button>
-                )}
+              <div className="mt-6">
                 <button
-                  onClick={handleNext}
-                  disabled={!canProceed()}
+                  type="button"
+                  onClick={() => void placeOrder()}
+                  disabled={!canPay()}
                   className={cn(
-                    "flex flex-1 items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold text-white transition-all",
-                    currentStep === "review"
-                      ? "bg-success-600 hover:bg-success-700"
-                      : "bg-primary-600 hover:bg-primary-700",
-                    "disabled:opacity-40 disabled:cursor-not-allowed"
+                    "flex w-full items-center justify-center gap-2 rounded-xl bg-success-600 py-3 text-sm font-bold text-white transition-all hover:bg-success-700",
+                    "disabled:cursor-not-allowed disabled:opacity-40"
                   )}
                 >
                   {placingOrder ? (
-                    <><Loader2 size={16} className="animate-spin" /> Processing…</>
+                    <>
+                      <Loader2 size={16} className="animate-spin" /> Processing…
+                    </>
                   ) : (
-                    <>{currentStep === "review" ? "Pay Now" : "Continue"} <ChevronRight size={16} /></>
+                    <>
+                      {paymentChoice === "wallet" ? "Pay with wallet" : "Pay Now"}
+                      <ChevronRight size={16} />
+                    </>
                   )}
                 </button>
               </div>
@@ -936,9 +1019,27 @@ export default function CheckoutPage() {
                 </div>
               )}
 
-              <div className="mt-4 flex items-center gap-2 text-xs text-text-muted">
-                <ShieldCheck size={14} className="text-success-600" />
-                <span>Safe and Secure Payments. 100% Authentic.</span>
+              <div className="mt-5 space-y-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Image
+                    src="/checkout-trust/razorpay.svg"
+                    alt="Razorpay"
+                    width={100}
+                    height={28}
+                    className="h-7 w-auto opacity-90"
+                  />
+                  <Image
+                    src="/checkout-trust/axis-bank.svg"
+                    alt="Axis Bank"
+                    width={100}
+                    height={28}
+                    className="h-7 w-auto opacity-90"
+                  />
+                </div>
+                <div className="flex items-start gap-2 text-xs text-text-muted">
+                  <ShieldCheck size={14} className="text-success-600 shrink-0 mt-0.5" />
+                  <span>Safe and Secure Payments. 100% Authentic.</span>
+                </div>
               </div>
             </div>
           </div>

@@ -20,6 +20,10 @@ import { ShipRocketProvider } from './providers/shiprocket.provider';
 import { XpressBeesProvider } from './providers/xpressbees.provider';
 import { EkartProvider } from './providers/ekart.provider';
 import { XelnovaCourierProvider } from './providers/xelnova-courier.provider';
+import {
+  DEFAULT_PLATFORM_LOGISTICS,
+  PlatformLogisticsSettings,
+} from '../../common/platform-logistics';
 import * as crypto from 'crypto';
 
 const ENCRYPTION_ALGORITHM = 'aes-256-cbc';
@@ -38,14 +42,14 @@ export class ShippingService {
     shiprocket: ShipRocketProvider,
     xpressbees: XpressBeesProvider,
     ekart: EkartProvider,
-    xelnovaCourier: XelnovaCourierProvider,
+    private readonly xelnovaCourier: XelnovaCourierProvider,
   ) {
     this.providers = new Map<ShippingMode, CourierProvider>([
       [ShippingMode.DELHIVERY, delhivery],
       [ShippingMode.SHIPROCKET, shiprocket],
       [ShippingMode.XPRESSBEES, xpressbees],
       [ShippingMode.EKART, ekart],
-      [ShippingMode.XELNOVA_COURIER, xelnovaCourier],
+      [ShippingMode.XELNOVA_COURIER, this.xelnovaCourier],
     ]);
 
     const secret = this.config.get<string>('ENCRYPTION_SECRET') || 'xelnova-default-encryption-key-32b';
@@ -74,6 +78,168 @@ export class ShippingService {
     } catch {
       return text;
     }
+  }
+
+  // ─── Platform logistics (Xelnova → Delhivery default) ───
+
+  private async getMergedPlatformLogistics(): Promise<PlatformLogisticsSettings> {
+    const row = await this.prisma.siteSettings.findUnique({ where: { id: 1 } });
+    const payload =
+      row?.payload && typeof row.payload === 'object' ? (row.payload as Record<string, unknown>) : {};
+    const pl = payload.platformLogistics;
+    const p = pl && typeof pl === 'object' ? (pl as Partial<PlatformLogisticsSettings>) : {};
+    return {
+      ...DEFAULT_PLATFORM_LOGISTICS,
+      ...p,
+      delhivery: {
+        ...DEFAULT_PLATFORM_LOGISTICS.delhivery,
+        ...p.delhivery,
+      },
+    };
+  }
+
+  private async resolveDelhiveryForXelnova(): Promise<
+    { mode: 'delhivery'; config: SellerCourierConfig } | { mode: 'stub' }
+  > {
+    const pl = await this.getMergedPlatformLogistics();
+    const backend = pl.xelnovaBackend || 'delhivery';
+
+    const envToken =
+      this.config.get<string>('DELHIVERY_API_TOKEN')?.trim() ||
+      this.config.get<string>('DELHIVERY_TOKEN')?.trim() ||
+      '';
+    const envClient = this.config.get<string>('DELHIVERY_CLIENT_NAME')?.trim() || '';
+    const envWh = this.config.get<string>('DELHIVERY_WAREHOUSE_NAME')?.trim() || '';
+
+    let apiKey = envToken;
+    const dbTok = pl.delhivery?.apiTokenEnc;
+    if (dbTok?.trim()) {
+      try {
+        apiKey = this.decrypt(dbTok);
+      } catch {
+        apiKey = dbTok;
+      }
+    }
+
+    const clientName = pl.delhivery?.clientName?.trim() || envClient;
+    const warehouseName = pl.delhivery?.warehouseName?.trim() || envWh;
+
+    const envDelhiveryEnv = this.config.get<string>('DELHIVERY_ENV')?.trim().toLowerCase();
+    const delhiveryEnvironment =
+      pl.delhivery?.environment === 'staging' || pl.delhivery?.environment === 'production'
+        ? pl.delhivery.environment
+        : envDelhiveryEnv === 'staging'
+          ? 'staging'
+          : 'production';
+
+    const sellerGstin =
+      pl.delhivery?.sellerGstin?.trim() ||
+      this.config.get<string>('DELHIVERY_SELLER_GSTIN')?.trim() ||
+      '';
+    const shippingModeRaw =
+      pl.delhivery?.shippingMode?.trim() ||
+      this.config.get<string>('DELHIVERY_SHIPPING_MODE')?.trim() ||
+      'Surface';
+    const delhiveryShippingMode =
+      shippingModeRaw.toLowerCase() === 'express' ? 'Express' : 'Surface';
+
+    if (backend === 'stub') {
+      return { mode: 'stub' };
+    }
+    if (!apiKey || !clientName || !warehouseName) {
+      this.logger.warn(
+        'Xelnova→Delhivery: incomplete credentials (token, client name, warehouse). Falling back to stub AWB.',
+      );
+      return { mode: 'stub' };
+    }
+
+    const synthetic = {
+      id: 'platform-delhivery',
+      sellerId: 'platform',
+      provider: ShippingMode.DELHIVERY,
+      apiKey,
+      apiSecret: null,
+      accountId: clientName,
+      warehouseId: warehouseName,
+      isActive: true,
+      metadata: {
+        delhiveryEnvironment,
+        sellerGstin,
+        delhiveryShippingMode,
+      },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as unknown as SellerCourierConfig;
+
+    return { mode: 'delhivery', config: synthetic };
+  }
+
+  sanitizePlatformLogisticsForResponse(
+    raw: PlatformLogisticsSettings | undefined,
+  ): PlatformLogisticsSettings & {
+    delhivery?: PlatformLogisticsSettings['delhivery'] & { apiTokenHint?: string };
+  } {
+    const pl = {
+      ...DEFAULT_PLATFORM_LOGISTICS,
+      ...raw,
+      delhivery: { ...DEFAULT_PLATFORM_LOGISTICS.delhivery, ...raw?.delhivery },
+    };
+    const envToken = this.config.get('DELHIVERY_API_TOKEN')?.trim();
+    const parts: string[] = [];
+    if (envToken) parts.push('Server env has DELHIVERY_API_TOKEN');
+    const enc = pl.delhivery?.apiTokenEnc;
+    if (enc) {
+      try {
+        const d = this.decrypt(enc);
+        if (d && d.length > 4) parts.push(`Saved API token ends with ${d.slice(-4)}`);
+        else parts.push('Saved API token in database');
+      } catch {
+        parts.push('Saved API token in database');
+      }
+    }
+    if (parts.length === 0) parts.push('No token yet — paste Live API Token below or set DELHIVERY_API_TOKEN on the server');
+
+    const { apiTokenEnc: _omit, ...delWithoutSecret } = pl.delhivery || {};
+    return {
+      ...pl,
+      delhivery: {
+        ...delWithoutSecret,
+        environment: pl.delhivery?.environment ?? 'production',
+        sellerGstin: pl.delhivery?.sellerGstin ?? '',
+        shippingMode: pl.delhivery?.shippingMode ?? 'Surface',
+        apiTokenHint: parts.join(' · '),
+      },
+    };
+  }
+
+  preparePlatformLogisticsSave(
+    current: PlatformLogisticsSettings | undefined,
+    incoming: Partial<PlatformLogisticsSettings> & {
+      delhivery?: Partial<NonNullable<PlatformLogisticsSettings['delhivery']>> & { apiToken?: string };
+    },
+  ): PlatformLogisticsSettings {
+    const cur = {
+      ...DEFAULT_PLATFORM_LOGISTICS,
+      ...current,
+      delhivery: { ...DEFAULT_PLATFORM_LOGISTICS.delhivery, ...current?.delhivery },
+    };
+    const incDel = incoming.delhivery || {};
+    const plainTok = (incDel as { apiToken?: string }).apiToken;
+    const { apiToken: _dropTok, ...incDelSafe } = incDel as { apiToken?: string };
+
+    const next: PlatformLogisticsSettings = {
+      ...cur,
+      ...incoming,
+      delhivery: {
+        ...cur.delhivery,
+        ...incDelSafe,
+      },
+    };
+
+    if (plainTok !== undefined && String(plainTok).trim()) {
+      next.delhivery!.apiTokenEnc = this.encrypt(String(plainTok).trim());
+    }
+    return next;
   }
 
   // ─── Seller profile helper ───
@@ -209,14 +375,25 @@ export class ShippingService {
     shippingMode: ShippingMode,
     dto: { weight?: number; dimensions?: string },
   ) {
-    const provider = this.providers.get(shippingMode);
+    let provider = this.providers.get(shippingMode);
     if (!provider) {
       throw new BadRequestException(`Unsupported shipping mode: ${shippingMode}`);
     }
 
-    // Get courier config (not needed for Xelnova Courier)
     let courierConfig: SellerCourierConfig | null = null;
-    if (shippingMode !== ShippingMode.XELNOVA_COURIER) {
+    let usedDelhiveryForXelnova = false;
+
+    if (shippingMode === ShippingMode.XELNOVA_COURIER) {
+      const resolved = await this.resolveDelhiveryForXelnova();
+      if (resolved.mode === 'delhivery') {
+        provider = this.providers.get(ShippingMode.DELHIVERY)!;
+        courierConfig = resolved.config;
+        usedDelhiveryForXelnova = true;
+      } else {
+        provider = this.xelnovaCourier;
+        courierConfig = null;
+      }
+    } else {
       courierConfig = await this.prisma.sellerCourierConfig.findUnique({
         where: { sellerId_provider: { sellerId: seller.id, provider: shippingMode } },
       });
@@ -225,7 +402,6 @@ export class ShippingService {
           `No ${shippingMode} API configuration found. Please add your API keys in Shipping Settings.`,
         );
       }
-      // Decrypt API keys
       courierConfig = {
         ...courierConfig,
         apiKey: this.decrypt(courierConfig.apiKey),
@@ -277,8 +453,22 @@ export class ShippingService {
         order.paymentMethod?.toLowerCase() === 'cash_on_delivery',
     };
 
-    // Call courier API
-    const result = await provider.createShipment(courierConfig!, shipmentDetails);
+    const result = await provider.createShipment(
+      courierConfig as SellerCourierConfig,
+      shipmentDetails,
+    );
+
+    let pickupAt = result.pickupScheduledAt;
+    let carrierLine = result.displayCourierLine || provider.providerName;
+    if (usedDelhiveryForXelnova) {
+      carrierLine = 'Xelnova · Delhivery';
+      pickupAt = pickupAt ?? this.xelnovaCourier.getNextPickupDate();
+    }
+    const bookedAtIso = new Date().toISOString();
+    let bookRemark = `Shipment booked via ${carrierLine}`;
+    if (pickupAt) {
+      bookRemark += `. Pickup scheduled: ${pickupAt.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' })}`;
+    }
 
     // Create shipment record
     const shipment = await this.prisma.shipment.create({
@@ -286,20 +476,21 @@ export class ShippingService {
         orderId: order.id,
         sellerId: seller.id,
         shippingMode,
-        courierProvider: provider.providerName,
+        courierProvider: carrierLine,
         awbNumber: result.awbNumber,
         trackingUrl: result.trackingUrl,
         shipmentStatus: ShipmentStatus.BOOKED,
         courierOrderId: result.courierOrderId,
         labelUrl: result.labelUrl,
+        pickupDate: pickupAt ?? null,
         weight: dto.weight,
         dimensions: dto.dimensions,
         courierCharges: result.charges,
         statusHistory: [
           {
             status: 'BOOKED',
-            timestamp: new Date().toISOString(),
-            remark: `Shipment booked via ${provider.providerName}`,
+            timestamp: bookedAtIso,
+            remark: bookRemark,
           },
         ],
       },
@@ -316,7 +507,7 @@ export class ShippingService {
       .notifyOrderShipped(
         order.userId,
         order.orderNumber,
-        provider.providerName,
+        carrierLine,
         result.trackingUrl || `https://xelnova.in/track/${order.orderNumber}`,
       )
       .catch((err) =>
@@ -448,10 +639,35 @@ export class ShippingService {
       throw new BadRequestException('No AWB number assigned yet');
     }
 
-    if (
-      shipment.shippingMode === ShippingMode.SELF_SHIP ||
-      shipment.shippingMode === ShippingMode.XELNOVA_COURIER
-    ) {
+    if (shipment.shippingMode === ShippingMode.SELF_SHIP) {
+      return {
+        status: shipment.shipmentStatus,
+        statusHistory: shipment.statusHistory,
+      };
+    }
+
+    if (shipment.shippingMode === ShippingMode.XELNOVA_COURIER) {
+      const resolved = await this.resolveDelhiveryForXelnova();
+      if (resolved.mode === 'delhivery' && resolved.config) {
+        const del = this.providers.get(ShippingMode.DELHIVERY)!;
+        const tracking = await del.trackShipment(shipment.awbNumber, resolved.config);
+        if (tracking.status && tracking.status !== 'UNKNOWN') {
+          const mappedStatus = tracking.status as ShipmentStatus;
+          if (Object.values(ShipmentStatus).includes(mappedStatus) && mappedStatus !== shipment.shipmentStatus) {
+            await this.prisma.shipment.update({
+              where: { orderId },
+              data: {
+                shipmentStatus: mappedStatus,
+                statusHistory: tracking.statusHistory as object[],
+                deliveredAt:
+                  mappedStatus === ShipmentStatus.DELIVERED ? new Date() : undefined,
+              },
+            });
+            await this.syncOrderStatus(orderId, mappedStatus);
+          }
+        }
+        return tracking;
+      }
       return {
         status: shipment.shipmentStatus,
         statusHistory: shipment.statusHistory,
@@ -539,35 +755,43 @@ export class ShippingService {
       return this.cancelShipmentLocally(shipment);
     }
 
-    // For courier-based, call cancel API
+    if (shipment.shippingMode === ShippingMode.XELNOVA_COURIER) {
+      const resolved = await this.resolveDelhiveryForXelnova();
+      if (resolved.mode === 'delhivery' && resolved.config && shipment.awbNumber) {
+        const del = this.providers.get(ShippingMode.DELHIVERY)!;
+        const result = await del.cancelShipment(shipment.awbNumber, resolved.config);
+        if (result.success) await this.cancelShipmentLocally(shipment);
+        return result;
+      }
+      const r = await this.xelnovaCourier.cancelShipment(shipment.awbNumber || '', null);
+      if (r.success) await this.cancelShipmentLocally(shipment);
+      return r;
+    }
+
     const provider = this.providers.get(shipment.shippingMode);
     if (!provider) {
       return this.cancelShipmentLocally(shipment);
     }
 
-    let courierConfig: SellerCourierConfig | null = null;
-    if (shipment.shippingMode !== ShippingMode.XELNOVA_COURIER) {
-      courierConfig = await this.prisma.sellerCourierConfig.findUnique({
-        where: {
-          sellerId_provider: {
-            sellerId: shipment.sellerId,
-            provider: shipment.shippingMode,
-          },
+    const courierConfig = await this.prisma.sellerCourierConfig.findUnique({
+      where: {
+        sellerId_provider: {
+          sellerId: shipment.sellerId,
+          provider: shipment.shippingMode,
         },
-      });
-      if (courierConfig) {
-        courierConfig = {
-          ...courierConfig,
-          apiKey: this.decrypt(courierConfig.apiKey),
-          apiSecret: courierConfig.apiSecret
-            ? this.decrypt(courierConfig.apiSecret)
-            : null,
-        };
-      }
+      },
+    });
+    if (!courierConfig) {
+      return this.cancelShipmentLocally(shipment);
     }
 
-    const cancelId = shipment.courierOrderId || shipment.awbNumber || '';
-    const result = await provider.cancelShipment(cancelId, courierConfig!);
+    const decrypted = {
+      ...courierConfig,
+      apiKey: this.decrypt(courierConfig.apiKey),
+      apiSecret: courierConfig.apiSecret ? this.decrypt(courierConfig.apiSecret) : null,
+    };
+
+    const result = await provider.cancelShipment(shipment.awbNumber || '', decrypted);
 
     if (result.success) {
       await this.cancelShipmentLocally(shipment);

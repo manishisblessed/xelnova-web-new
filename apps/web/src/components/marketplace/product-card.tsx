@@ -5,8 +5,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
 import { Heart, ShoppingCart, Star, Truck, Eye } from 'lucide-react';
-import { cn } from '@xelnova/utils';
-import { formatCurrency } from '@xelnova/utils';
+import { cn, formatCurrency, priceInclusiveOfGst } from '@xelnova/utils';
 import type { Product } from '@/lib/data/products';
 import { useCartStore } from '@/lib/store/cart-store';
 import { useWishlistStore } from '@/lib/store/wishlist-store';
@@ -25,6 +24,8 @@ export const ProductCard = memo(function ProductCard({ product, index = 0 }: Pro
 
   const isBestseller = product.rating >= 4.7 && product.reviewCount >= 1000;
   const isTopRated = product.rating >= 4.5;
+  const priceIncl = priceInclusiveOfGst(product.price, product.gstRate);
+  const compareIncl = priceInclusiveOfGst(product.comparePrice, product.gstRate);
 
   const handleAddToCart = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -38,6 +39,7 @@ export const ProductCard = memo(function ProductCard({ product, index = 0 }: Pro
       comparePrice: product.comparePrice,
       image: product.images[0] || '',
       seller: product.seller.name,
+      gstRate: product.gstRate ?? null,
     });
   };
 
@@ -163,11 +165,11 @@ export const ProductCard = memo(function ProductCard({ product, index = 0 }: Pro
             <div className="mt-auto pt-1.5">
               <div className="flex items-baseline gap-2 flex-wrap">
                 <span className="text-base font-bold text-text-primary">
-                  {formatCurrency(product.price)}
+                  {formatCurrency(priceIncl)}
                 </span>
-                {product.comparePrice > product.price && (
+                {compareIncl > priceIncl && (
                   <span className="text-xs text-text-muted line-through">
-                    {formatCurrency(product.comparePrice)}
+                    {formatCurrency(compareIncl)}
                   </span>
                 )}
               </div>

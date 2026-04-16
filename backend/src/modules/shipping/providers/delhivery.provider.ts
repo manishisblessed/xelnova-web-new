@@ -20,6 +20,9 @@ import {
  *   apiKey       → API Token (from Delhivery One → Settings → API Setup)
  *   accountId    → Client Name (registered business name, case-sensitive)
  *   warehouseId  → Pickup Location Name (exact registered warehouse name)
+ *   metadata.delhiveryEnvironment → production | staging (must match token environment)
+ *   metadata.sellerGstin        → optional GSTIN for CMU `seller_gst_tin`
+ *   metadata.delhiveryShippingMode → Surface | Express (default Surface)
  */
 @Injectable()
 export class DelhiveryProvider implements CourierProvider {
@@ -31,10 +34,45 @@ export class DelhiveryProvider implements CourierProvider {
 
   constructor(private readonly config: ConfigService) {}
 
-  private getBaseUrl(): string {
-    return this.config.get('NODE_ENV') === 'production'
-      ? this.prodBase
-      : this.stagingBase;
+  /**
+   * Resolves API base URL: optional global override, then per-config metadata (platform/seller),
+   * then DELHIVERY_ENV, then NODE_ENV (production → Live API host).
+   */
+  private getBaseUrl(config: SellerCourierConfig): string {
+    const override = this.config.get<string>('DELHIVERY_API_BASE_URL')?.trim();
+    if (override) return override;
+
+    const meta = (config.metadata ?? {}) as {
+      delhiveryEnvironment?: string;
+    };
+
+    if (meta.delhiveryEnvironment === 'staging') return this.stagingBase;
+    if (meta.delhiveryEnvironment === 'production') return this.prodBase;
+
+    const globalEnv = this.config.get<string>('DELHIVERY_ENV')?.trim().toLowerCase();
+    if (globalEnv === 'staging') return this.stagingBase;
+
+    return this.config.get('NODE_ENV') === 'production' ? this.prodBase : this.stagingBase;
+  }
+
+  private getDelhiveryShipmentExtras(config: SellerCourierConfig): {
+    sellerGstin: string;
+    shippingMode: string;
+  } {
+    const meta = (config.metadata ?? {}) as {
+      sellerGstin?: string;
+      delhiveryShippingMode?: string;
+    };
+    const gstin =
+      (meta.sellerGstin && String(meta.sellerGstin).trim()) ||
+      this.config.get<string>('DELHIVERY_SELLER_GSTIN')?.trim() ||
+      '';
+    const modeRaw =
+      (meta.delhiveryShippingMode && String(meta.delhiveryShippingMode).trim()) ||
+      this.config.get<string>('DELHIVERY_SHIPPING_MODE')?.trim() ||
+      'Surface';
+    const shippingMode = modeRaw.toLowerCase() === 'express' ? 'Express' : 'Surface';
+    return { sellerGstin: gstin, shippingMode };
   }
 
   private authHeaders(config: SellerCourierConfig): Record<string, string> {
@@ -48,9 +86,10 @@ export class DelhiveryProvider implements CourierProvider {
     config: SellerCourierConfig,
     details: ShipmentDetails,
   ): Promise<CreateShipmentResult> {
-    const base = this.getBaseUrl();
+    const base = this.getBaseUrl(config);
     const clientName = config.accountId || '';
     const pickupName = config.warehouseId;
+    const { sellerGstin, shippingMode } = this.getDelhiveryShipmentExtras(config);
 
     if (!pickupName) {
       throw new Error(
@@ -122,8 +161,8 @@ export class DelhiveryProvider implements CourierProvider {
           shipment_width: dims[1] || '10',
           shipment_height: dims[2] || '10',
           weight: String(Math.round((details.weight || 0.5) * 1000)),
-          seller_gst_tin: '',
-          shipping_mode: 'Surface',
+          seller_gst_tin: sellerGstin,
+          shipping_mode: shippingMode,
           address_type: 'home',
         },
       ],
@@ -175,7 +214,7 @@ export class DelhiveryProvider implements CourierProvider {
     awbNumber: string,
     config: SellerCourierConfig,
   ): Promise<TrackingResult> {
-    const base = this.getBaseUrl();
+    const base = this.getBaseUrl(config);
 
     const res = await fetch(
       `${base}/api/v1/packages/json/?waybill=${encodeURIComponent(awbNumber)}&token=${config.apiKey}`,
@@ -214,7 +253,7 @@ export class DelhiveryProvider implements CourierProvider {
     awbNumber: string,
     config: SellerCourierConfig,
   ): Promise<CancelResult> {
-    const base = this.getBaseUrl();
+    const base = this.getBaseUrl(config);
 
     const res = await fetch(`${base}/api/p/edit`, {
       method: 'POST',
@@ -241,7 +280,7 @@ export class DelhiveryProvider implements CourierProvider {
     deliveryPincode: string,
     config: SellerCourierConfig,
   ): Promise<ServiceabilityResult> {
-    const base = this.getBaseUrl();
+    const base = this.getBaseUrl(config);
 
     const res = await fetch(
       `${base}/c/api/pin-codes/json/?token=${config.apiKey}&filter_codes=${deliveryPincode}`,
@@ -269,7 +308,7 @@ export class DelhiveryProvider implements CourierProvider {
     awbNumber: string,
     config: SellerCourierConfig,
   ): Promise<any> {
-    const base = this.getBaseUrl();
+    const base = this.getBaseUrl(config);
 
     const res = await fetch(
       `${base}/api/p/packing_slip?wbns=${encodeURIComponent(awbNumber)}&token=${config.apiKey}`,

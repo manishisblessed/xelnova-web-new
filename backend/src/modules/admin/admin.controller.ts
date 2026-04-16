@@ -2,12 +2,13 @@ import { Controller, Get, Post, Patch, Delete, Body, Param, Query, Req, Res } fr
 import { Request, Response } from 'express';
 import { Role } from '@prisma/client';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { ApiTags, ApiOperation } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { AdminService } from './admin.service';
 import { ReportsService } from './reports.service';
 import { DuplicateListingService } from './duplicate-listing.service';
 import { PricingCheckService } from './pricing-check.service';
 import { SplitPaymentService } from '../payment/split-payment.service';
+import { ReviewsService } from '../reviews/reviews.service';
 import { Auth } from '../../common/decorators/auth.decorator';
 import { successResponse, paginatedResponse } from '../../common/helpers/response.helper';
 import { getClientIp } from '../../common/helpers/client-ip';
@@ -37,6 +38,7 @@ export class AdminController {
     private readonly duplicates: DuplicateListingService,
     private readonly pricing: PricingCheckService,
     private readonly splitPayment: SplitPaymentService,
+    private readonly reviewsService: ReviewsService,
   ) {}
 
   @Get('dashboard')
@@ -58,6 +60,12 @@ export class AdminController {
   async getPendingProducts(@Query() query: AdminProductQueryDto) {
     const { items, total, page, limit } = await this.service.getProducts({ ...query, status: 'PENDING' });
     return paginatedResponse(items, total, page, limit, 'Pending products fetched');
+  }
+
+  @Get('products/:id')
+  @ApiOperation({ summary: 'Get one product (full detail for review / approval)' })
+  async getProduct(@Param('id') id: string) {
+    return successResponse(await this.service.getProductById(id), 'Product fetched');
   }
 
   @Patch('products/:id')
@@ -575,5 +583,55 @@ export class AdminController {
   @ApiOperation({ summary: 'Create settlement payouts for all sellers in an order' })
   async settleOrder(@Param('orderId') orderId: string) {
     return successResponse(await this.splitPayment.settleOrder(orderId), 'Order settled');
+  }
+
+  // ─── Reviews ───
+  @Get('reviews')
+  @ApiOperation({ summary: 'List all reviews (with filters)' })
+  @ApiQuery({ name: 'page', required: false })
+  @ApiQuery({ name: 'limit', required: false })
+  @ApiQuery({ name: 'approved', required: false })
+  @ApiQuery({ name: 'search', required: false })
+  async getReviews(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('approved') approved?: string,
+    @Query('search') search?: string,
+  ) {
+    const { items, total, page: p, limit: l } = await this.reviewsService.findAllForAdmin({
+      page: page ? parseInt(page, 10) : 1,
+      limit: limit ? parseInt(limit, 10) : 20,
+      approved: approved === undefined ? undefined : approved === 'true',
+      search,
+    });
+    return paginatedResponse(items, total, p, l, 'Reviews fetched');
+  }
+
+  @Get('reviews/pending')
+  @ApiOperation({ summary: 'List reviews pending approval' })
+  @ApiQuery({ name: 'page', required: false })
+  @ApiQuery({ name: 'limit', required: false })
+  async getPendingReviews(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const { items, total, page: p, limit: l } = await this.reviewsService.findAllForAdmin({
+      page: page ? parseInt(page, 10) : 1,
+      limit: limit ? parseInt(limit, 10) : 20,
+      approved: false,
+    });
+    return paginatedResponse(items, total, p, l, 'Pending reviews fetched');
+  }
+
+  @Post('reviews/:id/approve')
+  @ApiOperation({ summary: 'Approve a review' })
+  async approveReview(@Param('id') id: string) {
+    return successResponse(await this.reviewsService.approveReview(id), 'Review approved');
+  }
+
+  @Post('reviews/:id/reject')
+  @ApiOperation({ summary: 'Reject and delete a review' })
+  async rejectReview(@Param('id') id: string) {
+    return successResponse(await this.reviewsService.rejectReview(id), 'Review rejected');
   }
 }
