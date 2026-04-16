@@ -77,16 +77,16 @@ npm ci --prefer-offline 2>&1 | tail -5
 echo ""
 
 echo "========================================="
-echo "  STEP 5: Build backend first"
+echo "  STEP 5: Build shared packages first"
 echo "========================================="
 cd ~/xelnova-web-new
-NODE_OPTIONS="--max-old-space-size=1536" npx turbo run build --filter=@xelnova/backend 2>&1 | tail -10
+NODE_OPTIONS="--max-old-space-size=1536" npx turbo run build --filter=@xelnova/ui --filter=@xelnova/utils --filter=@xelnova/api 2>&1 | tail -10
 echo ""
 
 echo "========================================="
-echo "  STEP 5b: Build packages"
+echo "  STEP 5b: Build backend"
 echo "========================================="
-NODE_OPTIONS="--max-old-space-size=1536" npx turbo run build --filter=@xelnova/ui --filter=@xelnova/utils --filter=@xelnova/api 2>&1 | tail -10
+NODE_OPTIONS="--max-old-space-size=1536" npx turbo run build --filter=@xelnova/backend 2>&1 | tail -10
 echo ""
 
 echo "========================================="
