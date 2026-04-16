@@ -1,0 +1,19 @@
+version: 1
+frontend:
+  phases:
+    preBuild:
+      commands:
+        - nvm install 20
+        - nvm use 20
+        - npm ci
+    build:
+      commands:
+        - npx turbo run build --filter=@xelnova/business
+  artifacts:
+    baseDirectory: apps/business/.next
+    files:
+      - '**/*'
+  cache:
+    paths:
+      - node_modules/**/*
+      - apps/business/.next/cache/**/*

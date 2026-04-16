@@ -79,3 +79,23 @@ applications:
         paths:
           - node_modules/**/*
           - apps/api/.next/cache/**/*
+
+  - appRoot: apps/business
+    frontend:
+      buildPath: /
+      phases:
+        preBuild:
+          commands:
+            - nvm install 20
+            - npm ci
+        build:
+          commands:
+            - npx turbo run build --filter=@xelnova/business
+      artifacts:
+        baseDirectory: apps/business/.next
+        files:
+          - '**/*'
+      cache:
+        paths:
+          - node_modules/**/*
+          - apps/business/.next/cache/**/*
