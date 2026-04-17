@@ -3,14 +3,26 @@ import type { MetadataRoute } from 'next';
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://www.xelnova.in';
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://api.xelnova.in/api/v1';
 
-async function fetchJson<T>(url: string): Promise<T | null> {
+// Generate at request time (with ISR) so a slow/unreachable API never blocks
+// the Amplify build. The sitemap is cached for 1 hour at the edge.
+export const dynamic = 'force-dynamic';
+export const revalidate = 3600;
+
+async function fetchJson<T>(url: string, timeoutMs = 8000): Promise<T | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(url, { next: { revalidate: 3600 } });
+    const res = await fetch(url, {
+      next: { revalidate: 3600 },
+      signal: controller.signal,
+    });
     if (!res.ok) return null;
     const json = await res.json();
     return json.data ?? null;
   } catch {
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
