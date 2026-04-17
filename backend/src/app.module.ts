@@ -27,6 +27,7 @@ import { WishlistModule } from './modules/wishlist/wishlist.module';
 import { FeatureFlagsModule } from './modules/feature-flags/feature-flags.module';
 import { SellerStoreModule } from './modules/seller-store/seller-store.module';
 import { BusinessModule } from './modules/business/business.module';
+import { ContactModule } from './modules/contact/contact.module';
 import { LoggingMiddleware } from './common/middleware/logging.middleware';
 
 @Module({
@@ -59,6 +60,7 @@ import { LoggingMiddleware } from './common/middleware/logging.middleware';
     FeatureFlagsModule,
     SellerStoreModule,
     BusinessModule,
+    ContactModule,
   ],
 })
 export class AppModule implements NestModule {

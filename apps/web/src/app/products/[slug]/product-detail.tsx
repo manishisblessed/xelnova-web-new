@@ -951,18 +951,53 @@ function KeyValueTable({ data, title }: { data: Record<string, string>; title?: 
   );
 }
 
+// Bullet/paragraph renderer used for productDescription, safetyInfo etc.
+//
+// Sellers compose these fields with up to 5 leading bullets followed by an
+// optional free-form paragraph (see BulletListEditor in the seller app).
+// Lines starting with •, *, or - are rendered as a clean bulleted list, and
+// the remaining lines are rendered as a paragraph below the list so the page
+// feels visually structured rather than a single wall of text.
 function BulletText({ text }: { text: string }) {
-  const bullets = text
-    .split('\n')
-    .map((line) => line.replace(/^[\s*-]+/, '').trim())
-    .filter(Boolean);
-  if (bullets.length === 0) return null;
+  if (!text) return null;
+  const bulletLineRe = /^\s*[•*\-]\s+/;
+  const lines = text.split(/\r?\n/);
+  const bullets: string[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (bulletLineRe.test(line)) {
+      bullets.push(line.replace(bulletLineRe, '').trim());
+      i += 1;
+      continue;
+    }
+    if (line.trim() === '' && bullets.length > 0 && bullets.length < 50) {
+      // Skip blank lines while we're still consuming the leading bullet block.
+      const next = lines[i + 1];
+      if (next !== undefined && bulletLineRe.test(next)) {
+        i += 1;
+        continue;
+      }
+    }
+    break;
+  }
+  const rest = lines.slice(i).join('\n').trim();
+
+  if (bullets.length === 0 && !rest) return null;
+
   return (
-    <ul className="list-disc space-y-1 pl-5 text-sm text-text-secondary leading-relaxed">
-      {bullets.map((line, index) => (
-        <li key={`${index}-${line}`}>{line}</li>
-      ))}
-    </ul>
+    <div className="space-y-3">
+      {bullets.length > 0 && (
+        <ul className="list-disc space-y-1 pl-5 text-sm text-text-secondary leading-relaxed">
+          {bullets.map((line, index) => (
+            <li key={`${index}-${line}`}>{line}</li>
+          ))}
+        </ul>
+      )}
+      {rest && (
+        <p className="whitespace-pre-line text-sm text-text-secondary leading-relaxed">{rest}</p>
+      )}
+    </div>
   );
 }
 
@@ -1013,9 +1048,7 @@ function ProductInfoTab({ product }: { product: any }) {
       {/* Safety & Product Resources */}
       {product.safetyInfo && (
         <CollapsibleSection title="Safety & Product Resources" icon={ShieldCheck}>
-          <p className="text-sm text-text-secondary whitespace-pre-line leading-relaxed">
-            {product.safetyInfo}
-          </p>
+          <BulletText text={product.safetyInfo} />
         </CollapsibleSection>
       )}
 

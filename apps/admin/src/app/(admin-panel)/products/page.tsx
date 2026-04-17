@@ -6,7 +6,7 @@ import { AdminListPage } from '@/components/dashboard/admin-list-page';
 import { ActionModal } from '@/components/dashboard/action-modal';
 import { ConfirmDialog } from '@/components/dashboard/confirm-dialog';
 import { FormField, FormSelect, FormToggle, FormTextarea } from '@/components/dashboard/form-field';
-import { Pencil, Trash2, CheckCircle, XCircle, Clock, AlertTriangle, Eye, Loader2 } from 'lucide-react';
+import { Pencil, Trash2, CheckCircle, XCircle, Clock, AlertTriangle, Eye, Loader2, Layers } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Column } from '@/components/dashboard/data-table';
 import { apiDelete, apiUpdate, apiPost, apiGetAdminProduct } from '@/lib/api';
@@ -32,8 +32,10 @@ interface Product {
   createdAt: string;
   rejectionReason?: string | null;
   images?: string[];
+  variants?: unknown;
   category: { name: string } | null;
   seller: { storeName: string } | null;
+  bestSellersRank?: number | null;
 }
 
 /** Full product from GET /admin/products/:id (extends list row with seller copy fields). */
@@ -64,6 +66,184 @@ type AdminProductDetail = Product & {
   category?: { id: string; name: string } | null;
   seller?: { storeName: string; email?: string | null; phone?: string | null } | null;
 };
+
+// ─── Variant types (shared shape with seller @/lib/product-variants) ───
+type AdminVariantOption = {
+  value?: string;
+  label?: string;
+  available?: boolean;
+  hex?: string;
+  images?: string[];
+  price?: number;
+  compareAtPrice?: number;
+  stock?: number;
+  sku?: string;
+};
+type AdminVariantGroup = {
+  type?: string;
+  label?: string;
+  defaultLabel?: string;
+  options?: AdminVariantOption[];
+  sizeChart?: { label?: string; values?: Record<string, string> }[];
+};
+
+function isVariantArray(v: unknown): v is AdminVariantGroup[] {
+  return Array.isArray(v) && v.every((g) => g && typeof g === 'object');
+}
+
+/**
+ * Renders all product variants (Color, Size, etc.) as an admin-friendly grid
+ * so reviewers can verify every SKU/option before approval — without having to
+ * decode raw JSON.
+ */
+function VariantsPreview({ variants }: { variants: unknown }) {
+  if (!isVariantArray(variants) || variants.length === 0) return null;
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-semibold text-text-primary">
+          Variants &middot; {variants.length} group{variants.length === 1 ? '' : 's'}
+        </p>
+        <span className="text-[10px] text-text-muted">
+          Total options: {variants.reduce((acc, g) => acc + (g.options?.length ?? 0), 0)}
+        </span>
+      </div>
+      <div className="space-y-3">
+        {variants.map((group, gi) => {
+          const opts = group.options ?? [];
+          return (
+            <div key={`${group.type ?? 'g'}-${gi}`} className="rounded-xl border border-border bg-surface-muted/30 p-3">
+              <div className="flex flex-wrap items-baseline justify-between gap-2 mb-2">
+                <p className="text-sm font-semibold text-text-primary">
+                  {group.label || group.type || `Group ${gi + 1}`}
+                  <span className="ml-2 text-[10px] font-normal uppercase tracking-wider text-text-muted">
+                    {group.type ?? 'option'}
+                  </span>
+                </p>
+                {group.defaultLabel && (
+                  <span className="text-[11px] text-text-muted">
+                    Default label: <span className="text-text-secondary font-medium">{group.defaultLabel}</span>
+                  </span>
+                )}
+              </div>
+
+              {opts.length === 0 ? (
+                <p className="text-xs text-text-muted">No options.</p>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                  {opts.map((opt, oi) => (
+                    <div
+                      key={`${opt.value ?? oi}-${oi}`}
+                      className={`rounded-lg border bg-surface px-2.5 py-2 ${
+                        opt.available === false ? 'border-danger-200 bg-danger-50/40' : 'border-border'
+                      }`}
+                    >
+                      <div className="flex items-start gap-2">
+                        {opt.images?.[0] ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={opt.images[0]}
+                            alt={opt.label || opt.value || ''}
+                            className="h-12 w-12 rounded-md object-cover border border-border shrink-0"
+                          />
+                        ) : opt.hex ? (
+                          <span
+                            className="h-12 w-12 rounded-md border border-border shrink-0"
+                            style={{ background: opt.hex }}
+                            title={opt.hex}
+                          />
+                        ) : (
+                          <span className="h-12 w-12 rounded-md border border-dashed border-border bg-surface-muted shrink-0" />
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-semibold text-text-primary truncate" title={opt.label}>
+                            {opt.label || opt.value || `Option ${oi + 1}`}
+                          </p>
+                          <div className="mt-0.5 text-[11px] text-text-muted leading-relaxed space-y-0.5">
+                            {opt.price != null && (
+                              <p>
+                                <span className="text-text-secondary font-medium">₹{Number(opt.price).toLocaleString()}</span>
+                                {opt.compareAtPrice != null && opt.compareAtPrice > opt.price && (
+                                  <span className="ml-1 line-through">₹{Number(opt.compareAtPrice).toLocaleString()}</span>
+                                )}
+                              </p>
+                            )}
+                            {opt.stock != null && (
+                              <p>
+                                Stock:{' '}
+                                <span className={Number(opt.stock) <= 5 ? 'text-danger-500 font-medium' : 'text-text-secondary'}>
+                                  {opt.stock}
+                                </span>
+                              </p>
+                            )}
+                            {opt.sku && (
+                              <p className="truncate" title={opt.sku}>
+                                SKU: <span className="text-text-secondary">{opt.sku}</span>
+                              </p>
+                            )}
+                            {opt.available === false && (
+                              <p className="text-danger-500 font-medium">Unavailable</p>
+                            )}
+                            {opt.images && opt.images.length > 1 && (
+                              <p className="text-text-muted">+{opt.images.length - 1} more image{opt.images.length - 1 === 1 ? '' : 's'}</p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      {opt.images && opt.images.length > 1 && (
+                        <div className="mt-2 flex gap-1 overflow-x-auto">
+                          {opt.images.slice(1, 5).map((url, ii) => (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              key={ii}
+                              src={url}
+                              alt=""
+                              className="h-9 w-9 rounded border border-border object-cover shrink-0"
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {Array.isArray(group.sizeChart) && group.sizeChart.length > 0 && (
+                <details className="mt-3 group">
+                  <summary className="cursor-pointer text-[11px] font-semibold text-primary-600 hover:text-primary-700">
+                    Size chart ({group.sizeChart.length} rows)
+                  </summary>
+                  <div className="mt-2 overflow-x-auto rounded-md border border-border bg-surface">
+                    <table className="w-full text-[11px]">
+                      <thead className="bg-surface-muted/50 text-text-muted">
+                        <tr>
+                          <th className="px-2 py-1 text-left">Size</th>
+                          {Object.keys(group.sizeChart[0]?.values ?? {}).map((h) => (
+                            <th key={h} className="px-2 py-1 text-left">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {group.sizeChart.map((row, ri) => (
+                          <tr key={ri} className="border-t border-border">
+                            <td className="px-2 py-1 font-medium text-text-primary">{row.label ?? '—'}</td>
+                            {Object.keys(group.sizeChart![0]?.values ?? {}).map((h) => (
+                              <td key={h} className="px-2 py-1 text-text-secondary">{row.values?.[h] ?? '—'}</td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </details>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 function SpecSection({ label, value }: { label: string; value: unknown }) {
   if (value == null || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -127,6 +307,9 @@ export default function ProductsPage() {
   const [deleting, setDeleting] = useState(false);
   const [approving, setApproving] = useState<string | null>(null);
   const [rejectionReason, setRejectionReason] = useState('');
+  const [approveCommission, setApproveCommission] = useState<string>('10');
+  // Optional curated bestseller rank set at approval time. Empty = no rank.
+  const [approveBestSellersRank, setApproveBestSellersRank] = useState<string>('');
   const [viewOpen, setViewOpen] = useState(false);
   const [viewing, setViewing] = useState<AdminProductDetail | null>(null);
   const [viewLoading, setViewLoading] = useState(false);
@@ -137,6 +320,8 @@ export default function ProductsPage() {
     isTrending: false,
     isFlashDeal: false,
     rejectionReason: '',
+    // Empty string = "no rank". Stored as string so the input behaves naturally.
+    bestSellersRank: '',
   });
 
   const openEdit = (p: Product) => {
@@ -147,6 +332,8 @@ export default function ProductsPage() {
       isTrending: p.isTrending,
       isFlashDeal: p.isFlashDeal,
       rejectionReason: p.rejectionReason || '',
+      bestSellersRank:
+        p.bestSellersRank != null && p.bestSellersRank > 0 ? String(p.bestSellersRank) : '',
     });
     setModalOpen(true);
   };
@@ -159,6 +346,8 @@ export default function ProductsPage() {
     setViewOpen(true);
     setViewLoading(true);
     setViewing(null);
+    setApproveCommission('10');
+    setApproveBestSellersRank('');
     try {
       const detail = await apiGetAdminProduct<AdminProductDetail>(p.id);
       setViewing(detail);
@@ -171,10 +360,39 @@ export default function ProductsPage() {
   };
 
   const handleApprove = async (product: Product, options?: { closeView?: boolean }) => {
+    const trimmed = approveCommission.trim();
+    if (!trimmed) {
+      toast.error('Set a commission % before approving');
+      return;
+    }
+    const rate = Number(trimmed);
+    if (!Number.isFinite(rate) || rate < 0 || rate > 100) {
+      toast.error('Commission must be between 0 and 100');
+      return;
+    }
+
+    let rank: number | null = null;
+    const rawRank = approveBestSellersRank.trim();
+    if (rawRank) {
+      const n = Number(rawRank);
+      if (!Number.isFinite(n) || n < 1 || n > 100000 || !Number.isInteger(n)) {
+        toast.error('Best Sellers Rank must be a whole number between 1 and 100000');
+        return;
+      }
+      rank = n;
+    }
+
     setApproving(product.id);
     try {
-      await apiPost(`products/${product.id}/approve`, {});
-      toast.success(`"${product.name}" approved and now live`);
+      await apiPost(`products/${product.id}/approve`, {
+        commissionRate: rate,
+        ...(rank !== null ? { bestSellersRank: rank } : {}),
+      });
+      toast.success(
+        rank !== null
+          ? `"${product.name}" approved at ${rate}% commission · rank #${rank}`
+          : `"${product.name}" approved at ${rate}% commission`,
+      );
       setRefreshTrigger((n) => n + 1);
       if (options?.closeView) {
         setViewOpen(false);
@@ -210,6 +428,18 @@ export default function ProductsPage() {
 
   const handleSave = async () => {
     if (!editing) return;
+    let rankPayload: number | null | undefined = undefined;
+    const rawRank = form.bestSellersRank.trim();
+    if (rawRank === '') {
+      rankPayload = null; // explicitly clear
+    } else {
+      const n = Number(rawRank);
+      if (!Number.isFinite(n) || n < 1 || n > 100000 || !Number.isInteger(n)) {
+        toast.error('Best Sellers Rank must be a whole number between 1 and 100000');
+        return;
+      }
+      rankPayload = n;
+    }
     setSaving(true);
     try {
       await apiUpdate('products', editing.id, {
@@ -218,6 +448,7 @@ export default function ProductsPage() {
         isTrending: form.isTrending,
         isFlashDeal: form.isFlashDeal,
         rejectionReason: form.status === 'REJECTED' ? form.rejectionReason : null,
+        bestSellersRank: rankPayload,
       });
       toast.success('Product updated');
       setModalOpen(false);
@@ -307,6 +538,26 @@ export default function ProductsPage() {
           {r.stock}
         </span>
       ),
+    },
+    {
+      key: 'variants',
+      header: 'Variants',
+      className: 'whitespace-nowrap text-center w-[100px]',
+      render: (r) => {
+        if (!isVariantArray(r.variants) || r.variants.length === 0) {
+          return <span className="text-text-muted">—</span>;
+        }
+        const totalOptions = r.variants.reduce((acc, g) => acc + (g.options?.length ?? 0), 0);
+        return (
+          <span
+            className="inline-flex items-center gap-1 rounded-full bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-700"
+            title={`${r.variants.length} group${r.variants.length === 1 ? '' : 's'} · ${totalOptions} option${totalOptions === 1 ? '' : 's'}`}
+          >
+            <Layers className="h-3 w-3" />
+            {totalOptions}
+          </span>
+        );
+      },
     },
     {
       key: 'status',
@@ -586,38 +837,89 @@ export default function ProductsPage() {
               )}
             </div>
 
-            {viewing.variants != null && (
-              <div>
-                <p className="text-xs font-semibold text-text-primary mb-1">Variants (JSON)</p>
-                <pre className="text-[11px] leading-relaxed bg-surface-muted/40 border border-border rounded-lg p-3 max-h-52 overflow-auto whitespace-pre-wrap break-words">
-                  {JSON.stringify(viewing.variants, null, 2)}
-                </pre>
-              </div>
+            {isVariantArray(viewing.variants) && viewing.variants.length > 0 ? (
+              <VariantsPreview variants={viewing.variants} />
+            ) : (
+              <p className="text-xs text-text-muted">
+                Single-SKU product &middot; no variants.
+              </p>
             )}
 
             {viewing.status === 'PENDING' && (
-              <div className="flex flex-wrap gap-2 justify-end pt-4 border-t border-border">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    const p = viewing;
-                    setViewOpen(false);
-                    setViewing(null);
-                    openReject(p);
-                  }}
-                >
-                  Reject…
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  loading={approving === viewing.id}
-                  onClick={() => handleApprove(viewing, { closeView: true })}
-                >
-                  Approve & publish
-                </Button>
+              <div className="space-y-3 pt-4 border-t border-border">
+                <div className="rounded-xl border border-border bg-surface-muted/50 px-3 py-3">
+                  <label
+                    htmlFor="approve-commission"
+                    className="block text-xs font-semibold uppercase tracking-wide text-text-muted"
+                  >
+                    Commission % for this product
+                  </label>
+                  <p className="mt-1 text-xs text-text-muted">
+                    Charged on every order of this listing. Defaults to seller&apos;s rate when blank.
+                  </p>
+                  <div className="mt-2 flex items-center gap-2">
+                    <input
+                      id="approve-commission"
+                      type="number"
+                      min={0}
+                      max={100}
+                      step={0.5}
+                      value={approveCommission}
+                      onChange={(e) => setApproveCommission(e.target.value)}
+                      className="w-32 rounded-lg border border-border bg-surface px-3 py-2 text-sm font-semibold text-text-primary outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/30"
+                    />
+                    <span className="text-sm font-semibold text-text-muted">%</span>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-border bg-surface-muted/50 px-3 py-3">
+                  <label
+                    htmlFor="approve-bestseller-rank"
+                    className="block text-xs font-semibold uppercase tracking-wide text-text-muted"
+                  >
+                    Best Sellers Rank
+                    <span className="ml-1 font-normal normal-case tracking-normal text-text-muted">(optional)</span>
+                  </label>
+                  <p className="mt-1 text-xs text-text-muted">
+                    Curate this product into the Best Sellers rail. Lower number = higher position. Leave blank to skip.
+                  </p>
+                  <div className="mt-2 flex items-center gap-2">
+                    <span className="text-sm font-semibold text-text-muted">#</span>
+                    <input
+                      id="approve-bestseller-rank"
+                      type="number"
+                      min={1}
+                      step={1}
+                      placeholder="e.g. 1"
+                      value={approveBestSellersRank}
+                      onChange={(e) => setApproveBestSellersRank(e.target.value)}
+                      className="w-32 rounded-lg border border-border bg-surface px-3 py-2 text-sm font-semibold text-text-primary outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/30"
+                    />
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2 justify-end">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const p = viewing;
+                      setViewOpen(false);
+                      setViewing(null);
+                      openReject(p);
+                    }}
+                  >
+                    Reject…
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    loading={approving === viewing.id}
+                    onClick={() => handleApprove(viewing, { closeView: true })}
+                  >
+                    Approve & publish
+                  </Button>
+                </div>
               </div>
             )}
           </div>
@@ -678,6 +980,23 @@ export default function ProductsPage() {
             onChange={(v) => setForm((f) => ({ ...f, isFlashDeal: v }))}
           />
         </div>
+        <FormField
+          label="Best Sellers Rank (optional)"
+          hint="Lower number = higher priority on the Best Sellers rail. Leave blank to remove from rail."
+        >
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold text-text-muted">#</span>
+            <input
+              type="number"
+              min={1}
+              step={1}
+              placeholder="e.g. 1"
+              value={form.bestSellersRank}
+              onChange={(e) => setForm((f) => ({ ...f, bestSellersRank: e.target.value }))}
+              className="w-32 rounded-lg border border-border bg-surface px-3 py-2 text-sm font-semibold text-text-primary outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/30"
+            />
+          </div>
+        </FormField>
       </ActionModal>
       <ActionModal
         open={rejectOpen}

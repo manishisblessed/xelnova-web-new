@@ -411,6 +411,7 @@ export class TicketsService {
       take: 5,
     });
     for (const admin of admins) {
+      if (!admin.email) continue;
       await this.emailService.sendEmail({
         to: admin.email,
         subject: `New Support Ticket #${ticketNumber}`,

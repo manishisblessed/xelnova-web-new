@@ -111,6 +111,13 @@ export class OrdersService {
   }
 
   async create(userId: string, dto: CreateOrderDto) {
+    // Phone-only signups land here without a name/email on record. The
+    // checkout form captures both so we update the User profile in-place
+    // (without overwriting values the user already set).
+    if (dto.customerName?.trim() || dto.customerEmail?.trim()) {
+      await this.upsertCustomerContact(userId, dto.customerName, dto.customerEmail);
+    }
+
     const productUpdates: Array<{
       productId: string;
       stockDelta: number;
@@ -437,6 +444,49 @@ export class OrdersService {
     this.loyaltyService.earnFromOrder(userId, order.total, order.id).catch((err) =>
       this.logger.warn(`Loyalty earn failed for order ${order.id}: ${err.message}`),
     );
+  }
+
+  /**
+   * Persist name/email collected at checkout for users who signed up by phone.
+   * Only fills empty fields; never overrides values the user already saved.
+   * Email update is skipped silently if it would collide with another account.
+   */
+  private async upsertCustomerContact(
+    userId: string,
+    name?: string,
+    email?: string,
+  ): Promise<void> {
+    const current = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { name: true, email: true },
+    });
+    if (!current) return;
+
+    const update: { name?: string; email?: string } = {};
+
+    const trimmedName = name?.trim();
+    if (trimmedName && !current.name?.trim()) {
+      update.name = trimmedName;
+    }
+
+    const trimmedEmail = email?.trim().toLowerCase();
+    if (trimmedEmail && !current.email) {
+      const conflict = await this.prisma.user.findFirst({
+        where: { email: trimmedEmail, id: { not: userId } },
+        select: { id: true },
+      });
+      if (!conflict) update.email = trimmedEmail;
+    }
+
+    if (Object.keys(update).length === 0) return;
+
+    try {
+      await this.prisma.user.update({ where: { id: userId }, data: update });
+    } catch (err) {
+      this.logger.warn(
+        `Could not persist checkout contact for user ${userId}: ${(err as Error).message}`,
+      );
+    }
   }
 
   private async sendOrderConfirmationEmail(

@@ -1,5 +1,5 @@
-import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { create } from "zustand";
+import { persist } from "zustand/middleware";
 
 export interface CartItem {
   id: string;
@@ -12,12 +12,13 @@ export interface CartItem {
   quantity: number;
   variant?: string;
   seller: string;
+  gstRate?: number | null;
 }
 
-type NewCartItem = Omit<CartItem, 'quantity'>;
+type NewCartItem = Omit<CartItem, "quantity">;
 
 function sameProduct(a: { productId: string; variant?: string }, b: { productId: string; variant?: string }) {
-  return a.productId === b.productId && (a.variant ?? '') === (b.variant ?? '');
+  return a.productId === b.productId && (a.variant ?? "") === (b.variant ?? "");
 }
 
 interface CartState {
@@ -37,6 +38,7 @@ export const useCartStore = create<CartState>()(
   persist(
     (set, get) => ({
       items: [],
+
       addItem: (item, quantity = 1) =>
         set((state) => {
           const qty = Math.max(1, quantity);
@@ -65,7 +67,11 @@ export const useCartStore = create<CartState>()(
           return { items: [...state.items, { ...item, quantity }] };
         }),
 
-      removeItem: (id) => set((state) => ({ items: state.items.filter((i) => i.id !== id) })),
+      removeItem: (id) =>
+        set((state) => ({
+          items: state.items.filter((i) => i.id !== id),
+        })),
+
       updateQuantity: (id, quantity) =>
         set((state) => ({
           items:
@@ -78,14 +84,20 @@ export const useCartStore = create<CartState>()(
         get().items.find((i) => sameProduct(i, { productId, variant }))?.quantity ?? 0,
 
       clearCart: () => set({ items: [] }),
-      totalItems: () => get().items.reduce((sum, item) => sum + item.quantity, 0),
-      totalPrice: () => get().items.reduce((sum, item) => sum + item.price * item.quantity, 0),
+
+      totalItems: () =>
+        get().items.reduce((sum, item) => sum + item.quantity, 0),
+
+      totalPrice: () =>
+        get().items.reduce((sum, item) => sum + item.price * item.quantity, 0),
+
       totalSavings: () =>
         get().items.reduce(
-          (sum, item) => sum + Math.max(0, item.comparePrice - item.price) * item.quantity,
-          0,
+          (sum, item) =>
+            sum + Math.max(0, item.comparePrice - item.price) * item.quantity,
+          0
         ),
     }),
-    { name: 'xelnova-business-cart' },
-  ),
+    { name: "xelnova-cart" }
+  )
 );

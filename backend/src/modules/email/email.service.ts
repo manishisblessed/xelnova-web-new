@@ -14,10 +14,48 @@ export class EmailService {
   /** Lazily created so the app can boot without RESEND_API_KEY (local dev). */
   private resend: Resend | null = null;
   private readonly logger = new Logger(EmailService.name);
+  /**
+   * Default "From" address for all transactional emails. Defaults to
+   * `XelNova <seller@xelnova.in>` per product policy. Override with
+   * `EMAIL_FROM` env var.
+   */
   private readonly fromEmail: string;
+  /**
+   * Dedicated "From" address for payout-related notifications (seller
+   * payouts, payout failures, etc.). Defaults to
+   * `XelNova Payments <payments@xelnova.in>`. Override with
+   * `EMAIL_PAYMENT_FROM` env var.
+   */
+  private readonly paymentFromEmail: string;
 
   constructor(private readonly config: ConfigService) {
-    this.fromEmail = this.config.get('EMAIL_FROM') || 'XelNova <noreply@xelnova.in>';
+    this.fromEmail = this.config.get('EMAIL_FROM') || 'XelNova <seller@xelnova.in>';
+    this.paymentFromEmail =
+      this.config.get('EMAIL_PAYMENT_FROM') || 'XelNova Payments <payments@xelnova.in>';
+  }
+
+  /**
+   * Returns a human-friendly greeting name. Guards against the all-too-common
+   * footgun of callers passing an email address as the recipient's name (which
+   * leads to "Hi user@example.com" greetings).
+   *
+   * - Empty / whitespace-only input → fallback ("there", "Customer", etc.).
+   * - Looks like an email (contains "@") → uses the local-part, splitting on
+   *   `. _ - +` and Title-Casing each token (e.g. "john.smith@acme.in" → "John Smith").
+   * - Otherwise returns the trimmed name as-is.
+   */
+  private cleanName(name?: string | null, fallback = 'there'): string {
+    const raw = (name ?? '').trim();
+    if (!raw) return fallback;
+    if (!raw.includes('@')) return raw;
+    const local = raw.split('@')[0]?.trim();
+    if (!local) return fallback;
+    const pretty = local
+      .split(/[._\-+]+/)
+      .filter(Boolean)
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+      .join(' ');
+    return pretty || fallback;
   }
 
   private getResend(): Resend {
@@ -55,7 +93,7 @@ export class EmailService {
       html: `
         <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
           <h1 style="color:#7c3aed">Welcome to XelNova!</h1>
-          <p>Hi ${name},</p>
+          <p>Hi ${this.cleanName(name)},</p>
           <p>Thank you for joining XelNova marketplace. We're excited to have you!</p>
           <p>Start exploring our amazing collection of products from verified sellers.</p>
           <a href="${this.config.get('APP_URL') || 'http://localhost:3000'}" 
@@ -78,7 +116,7 @@ export class EmailService {
       html: `
         <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
           <h1 style="color:#7c3aed">Order Confirmed!</h1>
-          <p>Hi ${name},</p>
+          <p>Hi ${this.cleanName(name)},</p>
           <p>Your order <strong>#${order.orderNumber}</strong> has been confirmed.</p>
           <table style="width:100%;border-collapse:collapse;margin:16px 0">
             <thead><tr style="background:#f5f3ff"><th style="padding:8px;text-align:left">Item</th><th style="padding:8px">Qty</th><th style="padding:8px">Price</th></tr></thead>
@@ -106,7 +144,7 @@ export class EmailService {
       html: `
         <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
           <h1 style="color:#7c3aed">Order Update</h1>
-          <p>Hi ${name},</p>
+          <p>Hi ${this.cleanName(name)},</p>
           <p>Your order <strong>#${orderNumber}</strong> status has been updated to: <strong>${statusLabels[status] || status}</strong></p>
           <a href="${this.config.get('APP_URL') || 'http://localhost:3000'}/account/orders" 
              style="display:inline-block;padding:12px 24px;background:#7c3aed;color:white;text-decoration:none;border-radius:8px;margin-top:16px">
@@ -125,7 +163,7 @@ export class EmailService {
       html: `
         <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
           <h1 style="color:#7c3aed">Password Reset</h1>
-          <p>Hi ${name},</p>
+          <p>Hi ${this.cleanName(name)},</p>
           <p>You requested a password reset. Click the button below to set a new password:</p>
           <a href="${resetUrl}" 
              style="display:inline-block;padding:12px 24px;background:#7c3aed;color:white;text-decoration:none;border-radius:8px;margin-top:16px">
@@ -168,11 +206,12 @@ export class EmailService {
   async sendPayoutNotification(to: string, name: string, amount: number, status: string) {
     return this.sendEmail({
       to,
+      from: this.paymentFromEmail,
       subject: `Payout ${status === 'PAID' ? 'Processed' : 'Update'} - XelNova`,
       html: `
         <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
           <h1 style="color:#7c3aed">Payout ${status === 'PAID' ? 'Processed' : 'Update'}</h1>
-          <p>Hi ${name},</p>
+          <p>Hi ${this.cleanName(name)},</p>
           <p>Your payout of <strong>₹${amount}</strong> has been ${status.toLowerCase()}.</p>
           ${status === 'PAID' ? '<p>The amount will be credited to your bank account within 2-3 business days.</p>' : ''}
         </div>
@@ -189,7 +228,7 @@ export class EmailService {
       html: `
         <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
           <h1 style="color:#7c3aed">Order Cancelled</h1>
-          <p>Hi ${name},</p>
+          <p>Hi ${this.cleanName(name)},</p>
           <p>Your order <strong>#${orderNumber}</strong> has been cancelled.</p>
           <p>Refund of <strong>₹${refundAmount}</strong> will be processed within 5-7 business days.</p>
           <a href="${this.config.get('APP_URL') || 'https://xelnova.in'}/account/orders" 
@@ -208,7 +247,7 @@ export class EmailService {
       html: `
         <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
           <h1 style="color:#7c3aed">Order Packed!</h1>
-          <p>Hi ${name},</p>
+          <p>Hi ${this.cleanName(name)},</p>
           <p>Great news! Your order <strong>#${orderNumber}</strong> is packed and ready for dispatch.</p>
           <p>You'll receive tracking details once it's shipped.</p>
         </div>
@@ -223,7 +262,7 @@ export class EmailService {
       html: `
         <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
           <h1 style="color:#7c3aed">Out for Delivery!</h1>
-          <p>Hi ${name},</p>
+          <p>Hi ${this.cleanName(name)},</p>
           <p>Exciting news! Your order <strong>#${orderNumber}</strong> is out for delivery today.</p>
           <p>Please keep your phone handy for delivery updates.</p>
         </div>
@@ -240,7 +279,7 @@ export class EmailService {
       html: `
         <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
           <h1 style="color:#7c3aed">Payment Successful!</h1>
-          <p>Hi ${name},</p>
+          <p>Hi ${this.cleanName(name)},</p>
           <p>We've received your payment of <strong>₹${amount}</strong> for order <strong>#${orderNumber}</strong>.</p>
           <p>Thank you for shopping with us!</p>
         </div>
@@ -255,7 +294,7 @@ export class EmailService {
       html: `
         <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
           <h1 style="color:#dc2626">Payment Failed</h1>
-          <p>Hi ${name},</p>
+          <p>Hi ${this.cleanName(name)},</p>
           <p>Your payment for order <strong>#${orderNumber}</strong> was unsuccessful.</p>
           <p>Please retry to avoid order cancellation.</p>
           <a href="${paymentUrl}" 
@@ -276,7 +315,7 @@ export class EmailService {
       html: `
         <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
           <h1 style="color:#7c3aed">Refund Processed</h1>
-          <p>Hi ${name},</p>
+          <p>Hi ${this.cleanName(name)},</p>
           <p>Your refund of <strong>₹${amount}</strong> for order <strong>#${orderNumber}</strong> has been processed.</p>
           <p>It will reflect in your account within 5-7 business days.</p>
         </div>
@@ -291,7 +330,7 @@ export class EmailService {
       html: `
         <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
           <h1 style="color:#7c3aed">Return Approved</h1>
-          <p>Hi ${name},</p>
+          <p>Hi ${this.cleanName(name)},</p>
           <p>Your return request for order <strong>#${orderNumber}</strong> has been approved.</p>
           <p>Pickup will be scheduled shortly. Please keep the item packed and ready.</p>
         </div>
@@ -306,7 +345,7 @@ export class EmailService {
       html: `
         <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
           <h1 style="color:#7c3aed">Return Request Update</h1>
-          <p>Hi ${name},</p>
+          <p>Hi ${this.cleanName(name)},</p>
           <p>Your return request for order <strong>#${orderNumber}</strong> could not be approved.</p>
           <p><strong>Reason:</strong> ${reason}</p>
           <p>If you have questions, please contact our support team.</p>
@@ -326,7 +365,7 @@ export class EmailService {
       html: `
         <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
           <h1 style="color:#7c3aed">Pickup Scheduled</h1>
-          <p>Hi ${name},</p>
+          <p>Hi ${this.cleanName(name)},</p>
           <p>Return pickup for order <strong>#${orderNumber}</strong> has been scheduled.</p>
           <p><strong>Pickup Date:</strong> ${pickupDate}</p>
           <p>Please keep the package ready for pickup.</p>
@@ -344,7 +383,7 @@ export class EmailService {
       html: `
         <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
           <h1 style="color:#7c3aed">Wallet Credited</h1>
-          <p>Hi ${name},</p>
+          <p>Hi ${this.cleanName(name)},</p>
           <p><strong>₹${amount}</strong> has been added to your Xelnova wallet${reason ? ` (${reason})` : ''}.</p>
           <p><strong>New Balance:</strong> ₹${newBalance}</p>
         </div>
@@ -380,7 +419,7 @@ export class EmailService {
       html: `
         <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
           <h1 style="color:#7c3aed">New Order!</h1>
-          <p>Hi ${sellerName},</p>
+          <p>Hi ${this.cleanName(sellerName, 'Seller')},</p>
           <p>You have received a new order.</p>
           <p><strong>Order #:</strong> ${orderNumber}</p>
           <p><strong>Amount:</strong> ₹${amount}</p>
@@ -401,7 +440,7 @@ export class EmailService {
       html: `
         <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
           <h1 style="color:#7c3aed">Product Approved!</h1>
-          <p>Hi ${sellerName},</p>
+          <p>Hi ${this.cleanName(sellerName, 'Seller')},</p>
           <p>Your product <strong>${productName}</strong> has been approved and is now live on the marketplace.</p>
           <a href="${this.config.get('SELLER_URL') || 'https://seller.xelnova.in'}/products" 
              style="display:inline-block;padding:12px 24px;background:#7c3aed;color:white;text-decoration:none;border-radius:8px;margin-top:16px">
@@ -419,7 +458,7 @@ export class EmailService {
       html: `
         <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
           <h1 style="color:#7c3aed">Product Review Update</h1>
-          <p>Hi ${sellerName},</p>
+          <p>Hi ${this.cleanName(sellerName, 'Seller')},</p>
           <p>Your product <strong>${productName}</strong> was not approved.</p>
           ${reason ? `<p><strong>Reason:</strong> ${reason}</p>` : ''}
           <p>Please update and resubmit.</p>
@@ -441,7 +480,7 @@ export class EmailService {
       html: `
         <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
           <h1 style="color:#7c3aed">Ticket Created</h1>
-          <p>Hi ${name},</p>
+          <p>Hi ${this.cleanName(name)},</p>
           <p>Your support ticket <strong>#${ticketNumber}</strong> has been created.</p>
           <p>We will respond within 24 hours.</p>
           <a href="${this.config.get('APP_URL') || 'https://xelnova.in'}/account/support" 
@@ -460,7 +499,7 @@ export class EmailService {
       html: `
         <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
           <h1 style="color:#7c3aed">New Reply</h1>
-          <p>Hi ${name},</p>
+          <p>Hi ${this.cleanName(name)},</p>
           <p><strong>${replierName}</strong> has replied to your support ticket <strong>#${ticketNumber}</strong>.</p>
           <a href="${this.config.get('APP_URL') || 'https://xelnova.in'}/account/support" 
              style="display:inline-block;padding:12px 24px;background:#7c3aed;color:white;text-decoration:none;border-radius:8px;margin-top:16px">
@@ -478,7 +517,7 @@ export class EmailService {
       html: `
         <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
           <h1 style="color:#7c3aed">Ticket Resolved</h1>
-          <p>Hi ${name},</p>
+          <p>Hi ${this.cleanName(name)},</p>
           <p>Your support ticket <strong>#${ticketNumber}</strong> has been resolved.</p>
           <p>Thank you for contacting us. If you need further assistance, feel free to create a new ticket.</p>
         </div>

@@ -197,6 +197,7 @@ export default function ProductDetail() {
     image: selectedVariantImage || product.images[0] || "",
     variant: variantString || undefined,
     seller: product.seller.name,
+    gstRate: product.gstRate ?? null,
   } : null;
 
   const handleAddToCart = () => {
@@ -723,7 +724,13 @@ export default function ProductDetail() {
               {/* Seller info */}
               <div className="rounded-xl bg-gray-50 p-3.5 border border-border">
                 <p className="text-xs text-text-muted">Sold by</p>
-                <p className="text-sm font-semibold text-primary-700 mt-0.5">{product.seller.name}</p>
+                {product.seller.slug ? (
+                  <Link href={`/stores/${product.seller.slug}`} className="text-sm font-semibold text-primary-700 mt-0.5 inline-block hover:underline">
+                    {product.seller.name}
+                  </Link>
+                ) : (
+                  <p className="text-sm font-semibold text-primary-700 mt-0.5">{product.seller.name}</p>
+                )}
                 <div className="mt-1 flex items-center gap-1 text-xs text-text-muted">
                   <span className="font-medium text-text-primary">{product.seller.rating}</span>
                   <Star size={10} className="fill-accent-400 text-accent-400" />
@@ -766,9 +773,11 @@ export default function ProductDetail() {
             <AnimatePresence mode="wait">
               {activeTab === "description" && (
                 <motion.div key="desc" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
-                  <p className="leading-relaxed text-text-secondary whitespace-pre-line">
-                    {product.description || "No description available for this product."}
-                  </p>
+                  {product.description ? (
+                    <BulletText text={product.description} />
+                  ) : (
+                    <p className="leading-relaxed text-text-secondary">No description available for this product.</p>
+                  )}
                 </motion.div>
               )}
               {activeTab === "specifications" && (
@@ -942,6 +951,56 @@ function KeyValueTable({ data, title }: { data: Record<string, string>; title?: 
   );
 }
 
+// Bullet/paragraph renderer used for productDescription, safetyInfo etc.
+//
+// Sellers compose these fields with up to 5 leading bullets followed by an
+// optional free-form paragraph (see BulletListEditor in the seller app).
+// Lines starting with •, *, or - are rendered as a clean bulleted list, and
+// the remaining lines are rendered as a paragraph below the list so the page
+// feels visually structured rather than a single wall of text.
+function BulletText({ text }: { text: string }) {
+  if (!text) return null;
+  const bulletLineRe = /^\s*[•*\-]\s+/;
+  const lines = text.split(/\r?\n/);
+  const bullets: string[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (bulletLineRe.test(line)) {
+      bullets.push(line.replace(bulletLineRe, '').trim());
+      i += 1;
+      continue;
+    }
+    if (line.trim() === '' && bullets.length > 0 && bullets.length < 50) {
+      // Skip blank lines while we're still consuming the leading bullet block.
+      const next = lines[i + 1];
+      if (next !== undefined && bulletLineRe.test(next)) {
+        i += 1;
+        continue;
+      }
+    }
+    break;
+  }
+  const rest = lines.slice(i).join('\n').trim();
+
+  if (bullets.length === 0 && !rest) return null;
+
+  return (
+    <div className="space-y-3">
+      {bullets.length > 0 && (
+        <ul className="list-disc space-y-1 pl-5 text-sm text-text-secondary leading-relaxed">
+          {bullets.map((line, index) => (
+            <li key={`${index}-${line}`}>{line}</li>
+          ))}
+        </ul>
+      )}
+      {rest && (
+        <p className="whitespace-pre-line text-sm text-text-secondary leading-relaxed">{rest}</p>
+      )}
+    </div>
+  );
+}
+
 function ProductInfoTab({ product }: { product: any }) {
   return (
     <motion.div 
@@ -982,18 +1041,14 @@ function ProductInfoTab({ product }: { product: any }) {
       {/* Product Description */}
       {product.productDescription && (
         <CollapsibleSection title="Product Description" icon={FileText} defaultOpen={true}>
-          <p className="text-sm text-text-secondary whitespace-pre-line leading-relaxed">
-            {product.productDescription}
-          </p>
+          <BulletText text={product.productDescription} />
         </CollapsibleSection>
       )}
 
       {/* Safety & Product Resources */}
       {product.safetyInfo && (
         <CollapsibleSection title="Safety & Product Resources" icon={ShieldCheck}>
-          <p className="text-sm text-text-secondary whitespace-pre-line leading-relaxed">
-            {product.safetyInfo}
-          </p>
+          <BulletText text={product.safetyInfo} />
         </CollapsibleSection>
       )}
 

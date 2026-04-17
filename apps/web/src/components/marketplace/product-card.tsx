@@ -15,6 +15,46 @@ interface ProductCardProps {
   index?: number;
 }
 
+/** Pluralized, human-friendly label for a variant axis (Color → Colours, Size → Sizes). */
+const VARIANT_LABELS: Record<string, string> = {
+  color: 'Colours',
+  colour: 'Colours',
+  size: 'Sizes',
+  pattern: 'Patterns',
+  material: 'Materials',
+  style: 'Styles',
+  flavor: 'Flavours',
+  flavour: 'Flavours',
+  scent: 'Scents',
+  storage: 'Storage',
+  ram: 'RAM Options',
+  capacity: 'Capacities',
+};
+
+function pluralizeVariantLabel(type: string, label: string | undefined): string {
+  const key = (type || '').toLowerCase().trim();
+  if (VARIANT_LABELS[key]) return VARIANT_LABELS[key];
+  const base = (label || type || 'Options').trim();
+  if (!base) return 'Options';
+  return /s$/i.test(base) ? base : `${base}s`;
+}
+
+export function summarizeVariants(
+  variants: Product['variants'] | undefined,
+): { count: number; label: string } | null {
+  if (!Array.isArray(variants) || variants.length === 0) return null;
+  // Pick the first axis with available options — that's what shows on the PDP swatch row.
+  for (const axis of variants) {
+    const options = Array.isArray(axis?.options)
+      ? axis.options.filter((o) => o?.available !== false && o?.value)
+      : [];
+    if (options.length >= 2) {
+      return { count: options.length, label: pluralizeVariantLabel(axis.type, axis.label) };
+    }
+  }
+  return null;
+}
+
 export const ProductCard = memo(function ProductCard({ product, index = 0 }: ProductCardProps) {
   const [imgLoaded, setImgLoaded] = useState(false);
   const [imgError, setImgError] = useState(false);
@@ -26,6 +66,7 @@ export const ProductCard = memo(function ProductCard({ product, index = 0 }: Pro
   const isTopRated = product.rating >= 4.5;
   const priceIncl = priceInclusiveOfGst(product.price, product.gstRate);
   const compareIncl = priceInclusiveOfGst(product.comparePrice, product.gstRate);
+  const variantSummary = summarizeVariants(product.variants);
 
   const handleAddToCart = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -149,7 +190,7 @@ export const ProductCard = memo(function ProductCard({ product, index = 0 }: Pro
               {product.name}
             </h3>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <div className="flex items-center gap-0.5 bg-gradient-to-r from-primary-600 to-primary-700 text-white text-[10px] font-bold px-2 py-1 rounded-lg shadow-sm">
                 <Star className="w-3 h-3 fill-accent-300 text-accent-300" />
                 <span>{product.rating.toFixed(1)}</span>
@@ -159,6 +200,14 @@ export const ProductCard = memo(function ProductCard({ product, index = 0 }: Pro
               </span>
               {isTopRated && !isBestseller && (
                 <span className="text-[10px] text-primary-600 font-semibold bg-primary-50 px-1.5 py-0.5 rounded-md">✨ Top Rated</span>
+              )}
+              {variantSummary && (
+                <span
+                  className="text-[10px] font-semibold text-accent-700 bg-accent-50 border border-accent-100 px-1.5 py-0.5 rounded-md"
+                  title={`${variantSummary.count} ${variantSummary.label} available`}
+                >
+                  {variantSummary.count} {variantSummary.label}
+                </span>
               )}
             </div>
 

@@ -5,6 +5,8 @@ import { motion } from 'framer-motion';
 import {
   Building2,
   CheckCircle,
+  Check,
+  Copy,
   Mail,
   MapPin,
   Phone,
@@ -21,6 +23,42 @@ import { DashboardHeader } from '@/components/dashboard/dashboard-header';
 import { StatCard } from '@/components/dashboard/stat-card';
 import { Badge, Button, Input, Modal } from '@xelnova/ui';
 import { apiGetProfile, apiUpdateProfile, apiUploadImage } from '@/lib/api';
+
+function SellerIdBadge({ code }: { code: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(async () => {
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard) {
+        await navigator.clipboard.writeText(code);
+      }
+      setCopied(true);
+      toast.success('Seller ID copied');
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      toast.error('Could not copy');
+    }
+  }, [code]);
+
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      title="Click to copy"
+      className="group mt-2 inline-flex items-center gap-2 rounded-lg border border-primary-200 bg-primary-50/70 px-2.5 py-1 text-xs font-mono font-semibold tracking-wide text-primary-700 shadow-sm transition-all hover:border-primary-300 hover:bg-primary-100/80 focus:outline-none focus:ring-2 focus:ring-primary-500/40"
+    >
+      <span className="text-[10px] font-sans font-medium uppercase tracking-[0.12em] text-primary-600/70">
+        Seller ID
+      </span>
+      <span className="text-text-primary">{code}</span>
+      {copied ? (
+        <Check className="h-3.5 w-3.5 text-success-500" aria-hidden />
+      ) : (
+        <Copy className="h-3.5 w-3.5 text-primary-500/70 transition-opacity group-hover:opacity-100 opacity-70" aria-hidden />
+      )}
+    </button>
+  );
+}
 
 function storeInitials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -83,6 +121,8 @@ interface SellerProfileResponse {
   id: string;
   storeName: string;
   slug: string;
+  /** Friendly public seller code, e.g. "Grand_HR-XEL00001". Falls back to slug when null (legacy sellers). */
+  sellerCode?: string | null;
   logo?: string | null;
   description?: string | null;
   verified: boolean;
@@ -290,9 +330,7 @@ export default function ProfilePage() {
                     <Mail className="h-3.5 w-3.5 shrink-0 opacity-70" />
                     <span className="truncate">{profile.user?.email}</span>
                   </p>
-                  <p className="text-xs text-text-muted mt-2 font-mono bg-surface-muted/80 inline-block px-2 py-0.5 rounded-md">
-                    {profile.slug}
-                  </p>
+                  <SellerIdBadge code={profile.sellerCode || profile.slug} />
                 </div>
               </div>
               <Button type="button" variant="outline" onClick={openEdit} className="shrink-0 self-start sm:self-end">
@@ -336,7 +374,10 @@ export default function ProfilePage() {
               <div className="flex items-start gap-3 py-3 border-b border-border">
                 <div className="min-w-0 flex-1">
                   <p className="text-xs font-medium text-text-muted uppercase tracking-wide">Name</p>
-                  <p className="text-text-primary mt-0.5">{profile.user?.name ?? '—'}</p>
+                  <p className="text-text-primary mt-0.5">{profile.storeName || profile.user?.name || '—'}</p>
+                  {profile.user?.name && profile.user.name !== profile.storeName ? (
+                    <p className="text-xs text-text-muted mt-0.5">Owner: {profile.user.name}</p>
+                  ) : null}
                 </div>
               </div>
               <div className="flex items-start gap-3 py-3 border-b border-border">

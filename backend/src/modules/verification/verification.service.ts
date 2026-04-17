@@ -48,11 +48,29 @@ export interface GSTINResponse {
   gstin: string;
   tradeName: string;
   legalName: string;
+  /** Best human-readable principal place of business address. */
   address: string;
+  /** Structured address parts extracted from the principal address payload. */
+  addressParts: {
+    doorNumber: string;
+    floor: string;
+    buildingName: string;
+    street: string;
+    landmark: string;
+    locality: string;
+    city: string;
+    district: string;
+    state: string;
+    pincode: string;
+  };
   status: string;
   stateCode: string;
+  state: string;
+  city: string;
+  pincode: string;
   taxpayerType: string;
   constitutionOfBusiness: string;
+  natureOfBusiness: string[];
   dateOfRegistration: string;
   lastUpdated: string;
   valid: boolean;
@@ -296,15 +314,30 @@ export class VerificationService {
         );
       }
 
+      const parts = this.extractGSTAddressParts(rawData.data);
+      const nba: string[] = Array.isArray(rawData.data?.nba)
+        ? rawData.data.nba
+            .map((v: unknown) => String(v ?? '').trim())
+            .filter((v: string) => v.length > 0)
+        : [];
+
       const data: GSTINResponse = {
         gstin: rawData.data?.gstin || normalizedGstin,
         tradeName: rawData.data?.tradeNam || rawData.data?.tradeName || '',
         legalName: rawData.data?.lgnm || rawData.data?.legalName || '',
-        address: this.formatGSTAddress(rawData.data),
+        address: this.formatGSTAddress(rawData.data, parts),
+        addressParts: parts,
         status: rawData.data?.sts || rawData.data?.status || '',
-        stateCode: rawData.data?.stcd || normalizedGstin.substring(0, 2),
+        // GSTIN's first two digits are the state code; the API also ships
+        // the state name in `stcd`. Keep both available so consumers don't
+        // have to map state codes to names themselves.
+        stateCode: normalizedGstin.substring(0, 2),
+        state: parts.state,
+        city: parts.city || parts.district,
+        pincode: parts.pincode,
         taxpayerType: rawData.data?.dty || rawData.data?.taxpayerType || '',
         constitutionOfBusiness: rawData.data?.ctb || '',
+        natureOfBusiness: nba,
         dateOfRegistration: rawData.data?.rgdt || '',
         lastUpdated: rawData.data?.lstupdt || '',
         valid: true,
@@ -324,25 +357,104 @@ export class VerificationService {
     }
   }
 
-  private formatGSTAddress(data: any): string {
-    if (!data) return '';
-    
-    const pradr = data.pradr || data.principalAddress || {};
+  /**
+   * Normalise a value coming from the GSTIN API: trim whitespace and reject
+   * placeholders the upstream sometimes returns ("", "NA", "null", "0", "-").
+   * Numeric `0` is treated as junk for door / floor numbers because real
+   * addresses never use it.
+   */
+  private normGstField(v: unknown): string {
+    if (v === null || v === undefined) return '';
+    const s = String(v).trim();
+    if (!s) return '';
+    const lower = s.toLowerCase();
+    if (lower === 'na' || lower === 'n/a' || lower === 'null' || lower === '-' || lower === '0') {
+      return '';
+    }
+    return s;
+  }
+
+  /**
+   * Pull the structured address parts out of a GSTINCheck payload. The API
+   * returns either the short field codes (`bno`, `bnm`, `flno`, `lt`, `st`,
+   * `loc`, `city`, `dst`, `stcd`, `pncd`) on `pradr.addr`, or the spelled-out
+   * names on `principalAddress`. We accept both shapes.
+   */
+  private extractGSTAddressParts(data: any): GSTINResponse['addressParts'] {
+    const pradr = data?.pradr || data?.principalAddress || {};
     const addr = pradr.addr || pradr;
-    
-    const parts = [
-      addr.bno || addr.buildingNumber,
-      addr.flno || addr.floorNumber,
-      addr.bnm || addr.buildingName,
-      addr.st || addr.street,
-      addr.loc || addr.locality,
-      addr.city,
-      addr.dst || addr.district,
-      addr.stcd || addr.state,
-      addr.pncd || addr.pincode,
-    ].filter(Boolean);
-    
-    return parts.join(', ');
+    const norm = this.normGstField.bind(this);
+    return {
+      doorNumber: norm(addr.bno ?? addr.buildingNumber ?? addr.doorNumber ?? addr.doorNo),
+      floor: norm(addr.flno ?? addr.floorNumber ?? addr.floorNo),
+      buildingName: norm(addr.bnm ?? addr.buildingName ?? addr.complex),
+      street: norm(addr.st ?? addr.street ?? addr.road),
+      landmark: norm(addr.lt ?? addr.landmark),
+      locality: norm(addr.loc ?? addr.locality ?? addr.subLocality),
+      city: norm(addr.city ?? addr.town ?? addr.village),
+      district: norm(addr.dst ?? addr.district),
+      state: norm(addr.stcd ?? addr.state ?? addr.stateName),
+      pincode: norm(addr.pncd ?? addr.pincode ?? addr.pin),
+    };
+  }
+
+  /**
+   * Format the principal place of business address from a GSTINCheck API
+   * payload into a single, complete, human-readable address string.
+   *
+   * Strategy:
+   *   1. Prefer the upstream `pradr.adr` string — it is already a complete,
+   *      correctly-ordered address ("1ST FLOOR, E-1/427/428, SHIV RAM PARK,
+   *      NANGLOI, New Delhi, West Delhi, Delhi, 110041") and is the most
+   *      reliable signal.
+   *   2. Fall back to composing from the structured `addr.*` fields when
+   *      `adr` is missing or blank, in canonical Indian address order.
+   */
+  private formatGSTAddress(data: any, parts?: GSTINResponse['addressParts']): string {
+    if (!data) return '';
+
+    const pradr = data.pradr || data.principalAddress || {};
+    const norm = this.normGstField.bind(this);
+
+    // 1) Prefer the API's own pre-formatted address — it almost always wins
+    //    because the API has fields we don't (suite numbers, etc.) and orders
+    //    them correctly for the state.
+    const apiAddress = norm(pradr.adr) || norm(data.adr) || norm(data.address);
+    if (apiAddress) return apiAddress;
+
+    // 2) Compose from structured parts.
+    const p = parts ?? this.extractGSTAddressParts(data);
+
+    const ordered: string[] = [];
+    const push = (v: string, transform?: (s: string) => string) => {
+      const s = transform ? transform(v) : v;
+      if (!s) return;
+      // Avoid duplicates (e.g. district == city, locality == district).
+      if (ordered.some((x) => x.toLowerCase() === s.toLowerCase())) return;
+      ordered.push(s);
+    };
+
+    push(p.doorNumber);
+    if (p.floor) {
+      // If the floor is already prefixed with words (e.g. "1ST FLOOR") leave
+      // it alone; otherwise add a "Floor" suffix.
+      push(/floor/i.test(p.floor) ? p.floor : `${p.floor} Floor`);
+    }
+    push(p.buildingName);
+    push(p.street);
+    if (p.landmark) push(/near/i.test(p.landmark) ? p.landmark : `Near ${p.landmark}`);
+    push(p.locality);
+    // City / district can both be present and different — keep both.
+    push(p.city || p.district);
+    if (p.city && p.district && p.city.toLowerCase() !== p.district.toLowerCase()) {
+      push(p.district);
+    }
+    push(p.state);
+
+    let composed = ordered.join(', ');
+    if (p.pincode) composed = composed ? `${composed} - ${p.pincode}` : p.pincode;
+
+    return composed;
   }
 
   async validatePAN(pan: string): Promise<{ valid: boolean; format: boolean }> {

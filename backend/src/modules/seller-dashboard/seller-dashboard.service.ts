@@ -310,7 +310,62 @@ export class SellerDashboardService {
       }
     }
 
+    /**
+     * Re-approval guard.
+     *
+     * If the seller edits any of these *catalog content* fields on a product
+     * that has already been approved (status === ACTIVE), the listing is
+     * pulled back into the admin approval queue (status = PENDING, hidden
+     * from storefront) so a human can re-verify the change before it goes
+     * live again. Inventory-only updates (stock, low-stock threshold,
+     * pause/resume via ON_HOLD) do not trigger re-approval.
+     */
+    const REVIEW_TRIGGER_FIELDS = [
+      'name',
+      'shortDescription',
+      'description',
+      'productDescription',
+      'price',
+      'compareAtPrice',
+      'images',
+      'variants',
+      'categoryId',
+      'brand',
+      'brandAuthorizationCertificate',
+      'highlights',
+      'tags',
+      'featuresAndSpecs',
+      'materialsAndCare',
+      'itemDetails',
+      'additionalDetails',
+      'safetyInfo',
+      'regulatoryInfo',
+      'warrantyInfo',
+      'weight',
+      'dimensions',
+      'hsnCode',
+      'gstRate',
+      'metaTitle',
+      'metaDescription',
+      'sku',
+    ] as const;
+
+    const hasContentChange = REVIEW_TRIGGER_FIELDS.some(
+      (field) => (dto as Record<string, unknown>)[field] !== undefined,
+    );
+    const triggerReapproval =
+      hasContentChange &&
+      product.status === ProductStatus.ACTIVE &&
+      // Don't bounce back into review if seller is also explicitly
+      // putting the listing on hold (their own pause action).
+      dto.status !== ProductStatus.ON_HOLD;
+
     const data: any = { ...dto };
+    if (triggerReapproval) {
+      data.status = ProductStatus.PENDING;
+      data.isActive = false;
+      data.rejectionReason = null;
+    }
     if (dto.brand !== undefined && !dto.brand.trim()) {
       throw new BadRequestException('Brand cannot be empty');
     }
@@ -348,11 +403,19 @@ export class SellerDashboardService {
 
     if (dto.name) data.slug = this.slugify(dto.name) + '-' + Date.now().toString(36);
 
-    return this.prisma.product.update({
+    const updated = await this.prisma.product.update({
       where: { id: productId },
       data,
       include: { category: { select: { name: true } } },
     });
+
+    if (triggerReapproval) {
+      this.logger.log(
+        `Product ${productId} returned to PENDING review after seller edit (sellerId=${seller.id}).`,
+      );
+    }
+
+    return updated;
   }
 
   async deleteProduct(userId: string, productId: string) {

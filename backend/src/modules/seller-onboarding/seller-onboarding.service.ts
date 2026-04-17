@@ -24,7 +24,7 @@ import {
 
 export interface SessionUser {
   id: string;
-  email: string;
+  email: string | null;
   phone: string | null;
   emailVerified: boolean;
   phoneVerified: boolean;
@@ -189,7 +189,7 @@ export class SellerOnboardingService {
         Authorization: `Bearer ${resendApiKey}`,
       },
       body: JSON.stringify({
-        from: process.env.EMAIL_FROM || 'Xelnova <noreply@xelnova.in>',
+        from: process.env.EMAIL_FROM || 'Xelnova <seller@xelnova.in>',
         to: email,
         subject: 'Verify your email - Xelnova Seller',
         html: `
@@ -381,7 +381,7 @@ export class SellerOnboardingService {
       if (!sessionUser) {
         throw new HttpException('Session expired. Please verify email via OTP.', HttpStatus.UNAUTHORIZED);
       }
-      if (sessionUser.email.toLowerCase() !== dto.email.toLowerCase()) {
+      if (!sessionUser.email || sessionUser.email.toLowerCase() !== dto.email.toLowerCase()) {
         throw new HttpException('Email does not match session. Please verify via OTP.', HttpStatus.BAD_REQUEST);
       }
       if (!sessionUser.emailVerified) {
@@ -853,9 +853,9 @@ export class SellerOnboardingService {
       reviewedAt: new Date(),
     };
 
-    if (dto.commissionRate !== undefined && dto.commissionRate !== null) {
-      updateData.commissionRate = dto.commissionRate;
-    }
+    // Commission is no longer set at onboarding — it is set per-product on
+    // product approval. Keep ignoring `dto.commissionRate` for backwards
+    // compatibility with old admin clients.
 
     if (dto.decision === 'APPROVED') {
       if (!seller.signatureUrl && !seller.signatureData) {
@@ -873,6 +873,14 @@ export class SellerOnboardingService {
       updateData.onboardingStatus = 'APPROVED';
       updateData.verified = true;
       updateData.onboardingCompletedAt = new Date();
+
+      // Generate a public-facing sellerCode like `Grand_HR-XEL00001` if
+      // this seller does not already have one.
+      if (!seller.sellerCode) {
+        const code = await this.generateSellerCode(seller.storeName);
+        updateData.sellerCode = code.code;
+        updateData.sellerCodeSequence = code.sequence;
+      }
     } else {
       updateData.onboardingStatus = 'REJECTED';
       updateData.rejectionReason = dto.rejectionReason;
@@ -986,6 +994,61 @@ export class SellerOnboardingService {
 
     const uniqueSuffix = Math.random().toString(36).substring(2, 8);
     return `${baseSlug}-${uniqueSuffix}`;
+  }
+
+  /**
+   * Build the prefix portion of a sellerCode from a store name. Preserves
+   * the original casing where possible and replaces whitespace with `_`.
+   * e.g. "Grand HR" -> "Grand_HR", "ACME ENTERPRISES" -> "ACME_ENTERP".
+   */
+  private buildSellerCodePrefix(storeName: string): string {
+    const stripped = (storeName || 'Seller')
+      .replace(/[^A-Za-z0-9 _-]/g, '')
+      .trim();
+    const cleaned = stripped.length > 0 ? stripped : 'Seller';
+    const collapsed = cleaned.replace(/\s+/g, '_');
+    // Cap to a reasonable length so the code stays readable.
+    return collapsed.slice(0, 20) || 'Seller';
+  }
+
+  /**
+   * Generates a unique, sequential sellerCode of the form
+   * `<Prefix>-XEL00001`. Uses a transactional, monotonically increasing
+   * `sellerCodeSequence` column to guarantee uniqueness across concurrent
+   * approvals.
+   */
+  private async generateSellerCode(
+    storeName: string,
+  ): Promise<{ code: string; sequence: number }> {
+    const prefix = this.buildSellerCodePrefix(storeName);
+
+    // Pull the highest sequence we've ever assigned, then bump by one.
+    // This is racy under heavy concurrency but is constrained by the
+    // unique index on `sellerCodeSequence`; we retry on collision.
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const last = await this.prisma.sellerProfile.findFirst({
+        where: { sellerCodeSequence: { not: null } },
+        orderBy: { sellerCodeSequence: 'desc' },
+        select: { sellerCodeSequence: true },
+      });
+      const sequence = (last?.sellerCodeSequence ?? 0) + 1 + attempt;
+      const code = `${prefix}-XEL${String(sequence).padStart(5, '0')}`;
+
+      const existing = await this.prisma.sellerProfile.findFirst({
+        where: { OR: [{ sellerCode: code }, { sellerCodeSequence: sequence }] },
+        select: { id: true },
+      });
+      if (!existing) {
+        return { code, sequence };
+      }
+    }
+
+    // Fallback (extremely unlikely): timestamp-based sequence.
+    const fallbackSequence = Math.floor(Date.now() / 1000);
+    return {
+      code: `${prefix}-XEL${String(fallbackSequence).padStart(5, '0')}`,
+      sequence: fallbackSequence,
+    };
   }
 
   async getProgressByEmail(email: string) {

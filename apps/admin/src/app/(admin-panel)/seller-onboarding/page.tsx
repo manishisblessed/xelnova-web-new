@@ -22,7 +22,7 @@ import { DashboardHeader } from '@/components/dashboard/dashboard-header';
 import { StatCard } from '@/components/dashboard/stat-card';
 import { DataTable, type Column } from '@/components/dashboard/data-table';
 import { ActionModal } from '@/components/dashboard/action-modal';
-import { FormField, FormTextarea, FormInput } from '@/components/dashboard/form-field';
+import { FormField, FormTextarea } from '@/components/dashboard/form-field';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL?.trim().replace(/\/$/, '') || '/api/v1';
 
@@ -179,7 +179,6 @@ export default function SellerOnboardingPage() {
   const [reviewOpen, setReviewOpen] = useState(false);
   const [reviewLoading, setReviewLoading] = useState(false);
   const [rejectionReason, setRejectionReason] = useState('');
-  const [commissionRate, setCommissionRate] = useState(10);
   const [signatureComment, setSignatureComment] = useState('');
   const [signatureLoading, setSignatureLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState('');
@@ -251,7 +250,6 @@ export default function SellerOnboardingPage() {
         body: JSON.stringify({
           decision,
           rejectionReason: decision === 'REJECTED' ? rejectionReason : undefined,
-          commissionRate: decision === 'APPROVED' ? commissionRate : undefined,
         }),
       });
       const data = await res.json();
@@ -854,18 +852,9 @@ export default function SellerOnboardingPage() {
               </div>
             </div>
 
-            <FormField label="Commission Rate (%)">
-              <FormInput
-                type="number"
-                min={0}
-                max={100}
-                step={0.5}
-                value={commissionRate}
-                onChange={(e) => setCommissionRate(parseFloat(e.target.value) || 0)}
-                placeholder="e.g. 10"
-              />
-              <p className="text-xs text-text-muted mt-1">Set the commission percentage for this seller (default: 10%)</p>
-            </FormField>
+            <div className="rounded-xl border border-border bg-surface-muted/40 px-3 py-2.5 text-xs text-text-muted">
+              Commission is now set on each product when you approve it — not at onboarding.
+            </div>
 
             <FormField label="Rejection Reason (required if rejecting)">
               <FormTextarea

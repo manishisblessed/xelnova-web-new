@@ -28,6 +28,17 @@ export class AdminUpdateProductDto {
   @ApiPropertyOptional() @IsOptional() @IsBoolean() isActive?: boolean;
   @ApiPropertyOptional({ description: 'Reason for rejection (required when status is REJECTED)' })
   @IsOptional() @IsString() rejectionReason?: string;
+  @ApiPropertyOptional({ description: 'Commission % charged on this listing (set on approval).' })
+  @IsOptional() commissionRate?: number;
+  @ApiPropertyOptional({ description: 'Curated bestseller rank (1 = top). null/0 to clear.' })
+  @IsOptional() bestSellersRank?: number | null;
+}
+
+export class AdminApproveProductDto {
+  @ApiPropertyOptional({ description: 'Commission % charged on this listing.' })
+  @IsOptional() commissionRate?: number;
+  @ApiPropertyOptional({ description: 'Curated bestseller rank (1 = top). Optional.' })
+  @IsOptional() bestSellersRank?: number | null;
 }
 
 // ─── Order management ───
@@ -172,6 +183,22 @@ export class CreateRoleDto {
 export class UpdateRoleDto {
   @ApiPropertyOptional() @IsOptional() @IsString() name?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() permissions?: string;
+}
+
+// ─── Sub-admin (admin user) management ───
+export class CreateSubAdminDto {
+  @ApiProperty() @IsString() name: string;
+  @ApiProperty() @IsString() email: string;
+  /** Optional initial password — generated if omitted. */
+  @ApiPropertyOptional() @IsOptional() @IsString() password?: string;
+  /** AdminRole.id to grant. Required for sub-admins. */
+  @ApiPropertyOptional() @IsOptional() @IsString() adminRoleId?: string;
+}
+
+export class UpdateSubAdminDto {
+  @ApiPropertyOptional() @IsOptional() @IsString() name?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() adminRoleId?: string | null;
+  @ApiPropertyOptional() @IsOptional() @IsBoolean() isActive?: boolean;
 }
 
 // ─── CMS Page ───

@@ -24,6 +24,7 @@ import {
   CreateCommissionDto, UpdateCommissionDto,
   AdminPayoutQueryDto, UpdatePayoutDto,
   CreateRoleDto, UpdateRoleDto,
+  CreateSubAdminDto, UpdateSubAdminDto,
   CreatePageDto, UpdatePageDto,
   AdminSiteSettingsDto,
 } from './dto/admin.dto';
@@ -75,10 +76,18 @@ export class AdminController {
   }
 
   @Post('products/:id/approve')
-  @ApiOperation({ summary: 'Approve a pending product' })
-  async approveProduct(@Param('id') id: string) {
+  @ApiOperation({ summary: 'Approve a pending product (admin sets commission % and optional bestseller rank)' })
+  async approveProduct(
+    @Param('id') id: string,
+    @Body() body: { commissionRate?: number; bestSellersRank?: number | null } = {},
+  ) {
     return successResponse(
-      await this.service.updateProduct(id, { status: 'ACTIVE', isActive: true }),
+      await this.service.updateProduct(id, {
+        status: 'ACTIVE',
+        isActive: true,
+        commissionRate: body.commissionRate,
+        bestSellersRank: body.bestSellersRank,
+      }),
       'Product approved and now live',
     );
   }
@@ -397,6 +406,88 @@ export class AdminController {
   @ApiOperation({ summary: 'Delete admin role' })
   async deleteRole(@Param('id') id: string) {
     return successResponse(await this.service.deleteRole(id), 'Role deleted');
+  }
+
+  // ─── Sub-admins ───
+  // A "sub-admin" is a user with `role = ADMIN` and an assigned `AdminRole`.
+  // The original super-admin (no AdminRole link) keeps unrestricted access.
+
+  @Get('sub-admins')
+  @ApiOperation({ summary: 'List all sub-admins (admin users)' })
+  async getSubAdmins() {
+    return successResponse(await this.service.getSubAdmins(), 'Sub-admins fetched');
+  }
+
+  @Post('sub-admins')
+  @ApiOperation({ summary: 'Create a new sub-admin and assign a role' })
+  async createSubAdmin(
+    @Body() dto: CreateSubAdminDto,
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('role') adminRole: Role,
+    @Req() req: Request,
+  ) {
+    const audit = {
+      adminId,
+      adminRole,
+      ipAddress: getClientIp(req),
+      userAgent: req.get('user-agent') || '',
+    };
+    return successResponse(await this.service.createSubAdmin(dto, audit), 'Sub-admin created');
+  }
+
+  @Patch('sub-admins/:id')
+  @ApiOperation({ summary: 'Update a sub-admin (rename, change role, activate/deactivate)' })
+  async updateSubAdmin(
+    @Param('id') id: string,
+    @Body() dto: UpdateSubAdminDto,
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('role') adminRole: Role,
+    @Req() req: Request,
+  ) {
+    const audit = {
+      adminId,
+      adminRole,
+      ipAddress: getClientIp(req),
+      userAgent: req.get('user-agent') || '',
+    };
+    return successResponse(await this.service.updateSubAdmin(id, dto, audit), 'Sub-admin updated');
+  }
+
+  @Post('sub-admins/:id/reset-password')
+  @ApiOperation({ summary: 'Generate a new temporary password for a sub-admin' })
+  async resetSubAdminPassword(
+    @Param('id') id: string,
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('role') adminRole: Role,
+    @Req() req: Request,
+  ) {
+    const audit = {
+      adminId,
+      adminRole,
+      ipAddress: getClientIp(req),
+      userAgent: req.get('user-agent') || '',
+    };
+    return successResponse(
+      await this.service.resetSubAdminPassword(id, audit),
+      'Temporary password generated',
+    );
+  }
+
+  @Delete('sub-admins/:id')
+  @ApiOperation({ summary: 'Remove sub-admin access (demote to customer)' })
+  async deleteSubAdmin(
+    @Param('id') id: string,
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('role') adminRole: Role,
+    @Req() req: Request,
+  ) {
+    const audit = {
+      adminId,
+      adminRole,
+      ipAddress: getClientIp(req),
+      userAgent: req.get('user-agent') || '',
+    };
+    return successResponse(await this.service.deleteSubAdmin(id, audit), 'Sub-admin removed');
   }
 
   // ─── Revenue ───

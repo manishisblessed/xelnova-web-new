@@ -1,8 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { motion, AnimatePresence, Reorder, useDragControls } from 'framer-motion';
-import { ImagePlus, Pencil, Plus, Trash2, X, Crown, Loader2, Layers, GripVertical, Upload, Camera, Ruler, Image as ImageIcon, Pause, Play } from 'lucide-react';
+import { ImagePlus, Pencil, Plus, Trash2, X, Crown, Loader2, Layers, GripVertical, Upload, Camera, Ruler, Image as ImageIcon, Pause, Play, Search } from 'lucide-react';
 import { toast } from 'sonner';
 import { DashboardHeader } from '@/components/dashboard/dashboard-header';
 import { DataTable, type Column } from '@/components/dashboard/data-table';
@@ -40,6 +41,7 @@ import {
 import {
   BUNDLED_PRODUCT_ATTRIBUTE_PRESETS,
   CUSTOM_ATTRIBUTE_PENDING,
+  CUSTOM_VALUE_PENDING,
   getValueOptionsForKey,
   type AttributePreset,
   type ProductAttributePresetsBundle,
@@ -160,7 +162,8 @@ function keyValueArrayToObject(arr: { key: string; value: string }[]): Record<st
     (item) =>
       item.key.trim() &&
       item.key.trim() !== CUSTOM_ATTRIBUTE_PENDING &&
-      item.value.trim(),
+      item.value.trim() &&
+      item.value.trim() !== CUSTOM_VALUE_PENDING,
   );
   if (filtered.length === 0) return undefined;
   return Object.fromEntries(filtered.map((item) => [item.key.trim(), item.value.trim()]));
@@ -175,6 +178,32 @@ function splitMetaKeywords(raw: string): string[] {
         .filter(Boolean),
     ),
   );
+}
+
+/**
+ * Split a "30x20x15" / "30 × 20 × 15" / "30 X 20 X 15 cm" style string into
+ * its three numeric parts. Empty / unparseable parts become "".
+ */
+function parseDimensionsString(raw: string | undefined | null): { l: string; w: string; h: string } {
+  const empty = { l: '', w: '', h: '' };
+  if (!raw) return empty;
+  const parts = String(raw)
+    .replace(/cm|mm|in|inch(es)?/gi, '')
+    .split(/[x×*]/i)
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0);
+  return {
+    l: parts[0] ?? '',
+    w: parts[1] ?? '',
+    h: parts[2] ?? '',
+  };
+}
+
+/** Compose 3 dim parts back into a single "L x W x H" string (in cm). */
+function composeDimensionsString(l: string, w: string, h: string): string {
+  const parts = [l, w, h].map((p) => p.trim()).filter((p) => p.length > 0);
+  if (parts.length === 0) return '';
+  return parts.join(' x ');
 }
 
 // ─── Image Gallery Component ───
@@ -548,6 +577,209 @@ function ProductImageGallery({
 const OTHER_KEY_TOKEN = '__other_key__';
 const OTHER_VALUE_TOKEN = '__other_value__';
 
+// ─── Bullets + description editor ─────────────────────────────────────────────
+//
+// Used for the long-form "Product description" and "Safety & product resources"
+// sections. Sellers see a structured list of up to 5 bullet rows plus an
+// optional free-form paragraph. We serialise everything back into a single
+// plain string for storage so the backend / storefront contract is unchanged:
+//
+//   • First bullet
+//   • Second bullet
+//
+//   Optional paragraph text below the bullets.
+//
+// On load we parse leading "• "/"- "/"* " lines into the bullets list and put
+// the remaining text into the paragraph field.
+
+const MAX_BULLETS = 5;
+const BULLET_LINE_RE = /^\s*[•\-*]\s+/;
+
+function parseBulletString(raw: string): { bullets: string[]; rest: string } {
+  if (!raw) return { bullets: [], rest: '' };
+  const lines = raw.split(/\r?\n/);
+  const bullets: string[] = [];
+  let i = 0;
+  while (i < lines.length && bullets.length < MAX_BULLETS) {
+    const line = lines[i];
+    if (BULLET_LINE_RE.test(line)) {
+      bullets.push(line.replace(BULLET_LINE_RE, '').trim());
+      i += 1;
+      continue;
+    }
+    if (line.trim() === '' && bullets.length > 0) {
+      i += 1;
+      continue;
+    }
+    break;
+  }
+  const rest = lines.slice(i).join('\n').replace(/^\s+/, '');
+  return { bullets, rest };
+}
+
+function composeBulletString(bullets: string[], rest: string): string {
+  const cleanBullets = bullets.map((b) => b.trim()).filter(Boolean);
+  const bulletBlock = cleanBullets.map((b) => `• ${b}`).join('\n');
+  const cleanRest = rest.trim();
+  if (bulletBlock && cleanRest) return `${bulletBlock}\n\n${cleanRest}`;
+  return bulletBlock || cleanRest;
+}
+
+interface BulletListEditorProps {
+  label: string;
+  description?: string;
+  bulletPlaceholder?: string;
+  paragraphPlaceholder?: string;
+  paragraphLabel?: string;
+  paragraphRows?: number;
+  value: string;
+  onChange: (next: string) => void;
+}
+
+function BulletListEditor({
+  label,
+  description,
+  bulletPlaceholder = 'Highlight a key feature or benefit',
+  paragraphPlaceholder = 'Optional supporting paragraph (visible after the bullet points).',
+  paragraphLabel = 'Additional details',
+  paragraphRows = 4,
+  value,
+  onChange,
+}: BulletListEditorProps) {
+  // We keep an internal mirror of the parsed structure so typing in either
+  // field doesn't cause cursor jumps from re-parsing the joined string.
+  const initial = useMemo(() => parseBulletString(value), [value]);
+  const [bullets, setBullets] = useState<string[]>(initial.bullets);
+  const [paragraph, setParagraph] = useState<string>(initial.rest);
+  const lastEmittedRef = useRef<string>(value);
+
+  // If the parent value changes from outside (edit modal hydration, autosave
+  // restore, reset form), re-sync the local state. We compare against the last
+  // string we emitted to avoid clobbering in-progress edits.
+  useEffect(() => {
+    if (value === lastEmittedRef.current) return;
+    const parsed = parseBulletString(value);
+    setBullets(parsed.bullets);
+    setParagraph(parsed.rest);
+    lastEmittedRef.current = value;
+  }, [value]);
+
+  const emit = useCallback(
+    (nextBullets: string[], nextParagraph: string) => {
+      const composed = composeBulletString(nextBullets, nextParagraph);
+      lastEmittedRef.current = composed;
+      onChange(composed);
+    },
+    [onChange],
+  );
+
+  const updateBullet = (index: number, next: string) => {
+    setBullets((prev) => {
+      const updated = prev.map((b, i) => (i === index ? next : b));
+      emit(updated, paragraph);
+      return updated;
+    });
+  };
+
+  const addBullet = () => {
+    setBullets((prev) => {
+      if (prev.length >= MAX_BULLETS) return prev;
+      const updated = [...prev, ''];
+      emit(updated, paragraph);
+      return updated;
+    });
+  };
+
+  const removeBullet = (index: number) => {
+    setBullets((prev) => {
+      const updated = prev.filter((_, i) => i !== index);
+      emit(updated, paragraph);
+      return updated;
+    });
+  };
+
+  const updateParagraph = (next: string) => {
+    setParagraph(next);
+    emit(bullets, next);
+  };
+
+  const canAdd = bullets.length < MAX_BULLETS;
+
+  return (
+    <div className="rounded-xl border border-border bg-surface-muted/30 p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-text-secondary">{label}</p>
+          {description && <p className="mt-0.5 text-[11px] text-text-muted">{description}</p>}
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={addBullet}
+          disabled={!canAdd}
+          title={canAdd ? `Add a bullet (up to ${MAX_BULLETS})` : `Maximum ${MAX_BULLETS} bullets reached`}
+        >
+          <Plus className="h-3 w-3 mr-1" />
+          Add bullet
+        </Button>
+      </div>
+
+      <div className="mt-3 space-y-2">
+        {bullets.length === 0 ? (
+          <p className="text-[11px] text-text-muted">
+            No bullets yet. Click <span className="font-medium">“Add bullet”</span> to highlight up to {MAX_BULLETS} key
+            points — they show up as a clean bulleted list on the product page.
+          </p>
+        ) : (
+          bullets.map((bullet, index) => (
+            <div
+              key={index}
+              className="flex items-start gap-2 rounded-lg border border-border bg-surface-raised px-2 py-1.5"
+            >
+              <span
+                aria-hidden
+                className="mt-2.5 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-primary-500"
+              />
+              <input
+                type="text"
+                value={bullet}
+                onChange={(e) => updateBullet(index, e.target.value)}
+                placeholder={bulletPlaceholder}
+                maxLength={200}
+                className="flex-1 bg-transparent px-1 py-1 text-sm text-text-primary outline-none placeholder:text-text-muted"
+              />
+              <button
+                type="button"
+                onClick={() => removeBullet(index)}
+                className="rounded p-1 text-text-muted hover:bg-danger-50 hover:text-danger-600"
+                aria-label={`Remove bullet ${index + 1}`}
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ))
+        )}
+        <div className="flex items-center justify-between text-[10px] text-text-muted">
+          <span>Tip: keep each bullet to one line for the cleanest look.</span>
+          <span>{bullets.length}/{MAX_BULLETS}</span>
+        </div>
+      </div>
+
+      <div className="mt-4">
+        <label className="mb-1 block text-[11px] font-medium text-text-muted">{paragraphLabel}</label>
+        <textarea
+          value={paragraph}
+          onChange={(e) => updateParagraph(e.target.value)}
+          placeholder={paragraphPlaceholder}
+          rows={paragraphRows}
+          className="w-full rounded-lg border border-border bg-surface-raised px-3 py-2 text-sm text-text-primary outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30 resize-y"
+        />
+      </div>
+    </div>
+  );
+}
+
 interface PresetKeyValueEditorProps {
   label: string;
   description?: string;
@@ -586,22 +818,18 @@ function PresetKeyValueEditor({ label, description, preset, items, onChange }: P
           {items.map((item, index) => {
             const keyIsPreset = Boolean(item.key && preset.keys.includes(item.key));
             const keyIsPendingCustom = item.key === CUSTOM_ATTRIBUTE_PENDING;
-            const keySelectValue = keyIsPreset
-              ? item.key
-              : item.key && !keyIsPendingCustom
-                ? OTHER_KEY_TOKEN
-                : keyIsPendingCustom
-                  ? OTHER_KEY_TOKEN
-                  : '';
+            const keyIsCustom = Boolean(item.key) && !keyIsPreset; // includes pending sentinel
+            const keySelectValue = keyIsPreset ? item.key : keyIsCustom ? OTHER_KEY_TOKEN : '';
 
             const valueOpts =
               item.key && item.key !== CUSTOM_ATTRIBUTE_PENDING ? getValueOptionsForKey(preset, item.key) : [];
             const valueIsListed = Boolean(item.value && valueOpts.includes(item.value));
-            const valueSelectValue = valueIsListed ? item.value : item.value ? OTHER_VALUE_TOKEN : '';
+            const valueIsPendingCustom = item.value === CUSTOM_VALUE_PENDING;
+            const valueIsCustom = Boolean(item.value) && !valueIsListed; // includes pending
+            const valueSelectValue = valueIsListed ? item.value : valueIsCustom ? OTHER_VALUE_TOKEN : '';
             const showKeyCustom = Boolean(keySelectValue === OTHER_KEY_TOKEN);
             const showValueCustom =
-              Boolean(item.key && item.key !== CUSTOM_ATTRIBUTE_PENDING) &&
-              (valueSelectValue === OTHER_VALUE_TOKEN || Boolean(item.value && !valueIsListed));
+              Boolean(item.key && item.key !== CUSTOM_ATTRIBUTE_PENDING) && valueIsCustom;
 
             return (
               <div key={index} className="flex flex-col sm:flex-row sm:items-start gap-2">
@@ -637,8 +865,10 @@ function PresetKeyValueEditor({ label, description, preset, items, onChange }: P
                       type="text"
                       value={keyIsPendingCustom ? '' : item.key}
                       onChange={(e) => {
-                        const k = e.target.value.trim();
-                        setRow(index, { key: k || CUSTOM_ATTRIBUTE_PENDING, value: '' });
+                        // Preserve spaces as the seller types — we only trim on submit.
+                        const raw = e.target.value;
+                        const isBlank = raw.trim().length === 0;
+                        setRow(index, { key: isBlank ? CUSTOM_ATTRIBUTE_PENDING : raw, value: item.value });
                       }}
                       placeholder="Type attribute name"
                       className="w-full rounded-lg border border-dashed border-primary-300 bg-surface-raised px-2 py-1.5 text-xs text-text-primary outline-none focus:border-primary-500"
@@ -657,8 +887,14 @@ function PresetKeyValueEditor({ label, description, preset, items, onChange }: P
                         value={valueSelectValue}
                         onChange={(e) => {
                           const v = e.target.value;
-                          if (v === '' || v === OTHER_VALUE_TOKEN) {
+                          if (v === '') {
                             setRow(index, { ...item, value: '' });
+                            return;
+                          }
+                          if (v === OTHER_VALUE_TOKEN) {
+                            // Mark as pending so the custom input shows immediately
+                            // even though the typed value is still empty.
+                            setRow(index, { ...item, value: CUSTOM_VALUE_PENDING });
                             return;
                           }
                           setRow(index, { ...item, value: v });
@@ -676,8 +912,12 @@ function PresetKeyValueEditor({ label, description, preset, items, onChange }: P
                       {showValueCustom && (
                         <input
                           type="text"
-                          value={item.value}
-                          onChange={(e) => setRow(index, { ...item, value: e.target.value })}
+                          value={valueIsPendingCustom ? '' : item.value}
+                          onChange={(e) => {
+                            const raw = e.target.value;
+                            const isBlank = raw.trim().length === 0;
+                            setRow(index, { ...item, value: isBlank ? CUSTOM_VALUE_PENDING : raw });
+                          }}
                           placeholder="Type value"
                           className="w-full rounded-lg border border-dashed border-primary-300 bg-surface-raised px-2 py-1.5 text-xs text-text-primary outline-none focus:border-primary-500"
                         />
@@ -706,9 +946,27 @@ function PresetKeyValueEditor({ label, description, preset, items, onChange }: P
 
 export default function SellerInventoryPage() {
   const { isApproved } = useSellerProfile();
+  const searchParams = useSearchParams();
+  const initialSearch = searchParams?.get('search') ?? '';
   const [products, setProducts] = useState<SellerProduct[]>([]);
   const [loading, setLoading] = useState(true);
   const [categories, setCategories] = useState<{ id: string; name: string }[]>([]);
+  const [search, setSearch] = useState(initialSearch);
+
+  useEffect(() => {
+    setSearch(initialSearch);
+  }, [initialSearch]);
+
+  const filteredProducts = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return products;
+    return products.filter((p) => {
+      const haystack = [p.name, p.category?.name ?? '', p.status]
+        .join(' ')
+        .toLowerCase();
+      return haystack.includes(q);
+    });
+  }, [products, search]);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [editProduct, setEditProduct] = useState<SellerProduct | null>(null);
@@ -737,7 +995,17 @@ export default function SellerInventoryPage() {
   const [uploadingBrandCertificate, setUploadingBrandCertificate] = useState(false);
   const [formLowStock, setFormLowStock] = useState('5');
   const [formWeight, setFormWeight] = useState('');
+  // Dimensions are persisted as a single "L x W x H" string for backwards
+  // compatibility but edited as three separate inputs in the UI.
   const [formDimensions, setFormDimensions] = useState('');
+  const [formDimL, setFormDimL] = useState('');
+  const [formDimW, setFormDimW] = useState('');
+  const [formDimH, setFormDimH] = useState('');
+  // Recompose the canonical dimensions string whenever any of the parts
+  // change, so existing submit / autosave code keeps working without changes.
+  useEffect(() => {
+    setFormDimensions(composeDimensionsString(formDimL, formDimW, formDimH));
+  }, [formDimL, formDimW, formDimH]);
 
   // Amazon-style product information
   const [formFeaturesAndSpecs, setFormFeaturesAndSpecs] = useState<{ key: string; value: string }[]>([]);
@@ -749,6 +1017,154 @@ export default function SellerInventoryPage() {
   const [formRegulatoryInfo, setFormRegulatoryInfo] = useState('');
   const [formWarrantyInfo, setFormWarrantyInfo] = useState('');
   const brandCertificateInputRef = useRef<HTMLInputElement>(null);
+
+  // ─── Autosave (Add Product draft) ───
+  // We persist the entire create-form state to localStorage so the seller
+  // never loses work to a tab crash, refresh or accidental navigation.
+  // Only active for the *create* flow — edits read directly from the API.
+  const AUTOSAVE_KEY = 'xelnova:seller:product-draft:v1';
+  const [draftRestored, setDraftRestored] = useState(false);
+  const [draftSavedAt, setDraftSavedAt] = useState<number | null>(null);
+  const draftHydratedRef = useRef(false);
+  const draftDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const collectDraft = useCallback(
+    () => ({
+      formName,
+      formBrand,
+      formPrice,
+      formCompare,
+      formStock,
+      formCategoryId,
+      formShort,
+      formImages,
+      formVariantRows,
+      formMetaTitle,
+      formMetaKeywords,
+      formMetaDesc,
+      formHsnCode,
+      formGstRate,
+      formBrandCertificate,
+      formLowStock,
+      formWeight,
+      formDimensions,
+      formFeaturesAndSpecs,
+      formMaterialsAndCare,
+      formItemDetails,
+      formAdditionalDetails,
+      formProductDescription,
+      formSafetyInfo,
+      formRegulatoryInfo,
+      formWarrantyInfo,
+    }),
+    [
+      formName, formBrand, formPrice, formCompare, formStock, formCategoryId,
+      formShort, formImages, formVariantRows, formMetaTitle, formMetaKeywords,
+      formMetaDesc, formHsnCode, formGstRate, formBrandCertificate, formLowStock,
+      formWeight, formDimensions, formFeaturesAndSpecs, formMaterialsAndCare,
+      formItemDetails, formAdditionalDetails, formProductDescription,
+      formSafetyInfo, formRegulatoryInfo, formWarrantyInfo,
+    ],
+  );
+
+  const clearDraft = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.removeItem(AUTOSAVE_KEY);
+    } catch {
+      // ignore quota / privacy mode errors
+    }
+    setDraftRestored(false);
+    setDraftSavedAt(null);
+  }, []);
+
+  // Restore draft when create modal opens and we're not editing.
+  useEffect(() => {
+    if (!createOpen || editProduct) return;
+    if (draftHydratedRef.current) return;
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = window.localStorage.getItem(AUTOSAVE_KEY);
+      if (!raw) {
+        draftHydratedRef.current = true;
+        return;
+      }
+      const parsed = JSON.parse(raw) as { savedAt?: number; data?: Record<string, unknown> };
+      const data = parsed?.data ?? (parsed as Record<string, unknown>);
+      if (!data || typeof data !== 'object') {
+        draftHydratedRef.current = true;
+        return;
+      }
+      const get = <T,>(key: string, fallback: T): T => {
+        const v = (data as Record<string, unknown>)[key];
+        return (v === undefined ? fallback : (v as T));
+      };
+      setFormName(get('formName', ''));
+      setFormBrand(get('formBrand', ''));
+      setFormPrice(get('formPrice', ''));
+      setFormCompare(get('formCompare', ''));
+      setFormStock(get('formStock', ''));
+      setFormCategoryId(get('formCategoryId', ''));
+      setFormShort(get('formShort', ''));
+      setFormImages(get<ProductImage[]>('formImages', []));
+      setFormVariantRows(get<FormVariantRow[]>('formVariantRows', []));
+      setFormMetaTitle(get('formMetaTitle', ''));
+      setFormMetaKeywords(get<string[]>('formMetaKeywords', []));
+      setFormMetaDesc(get('formMetaDesc', ''));
+      setFormHsnCode(get('formHsnCode', ''));
+      setFormGstRate(get('formGstRate', ''));
+      setFormBrandCertificate(get('formBrandCertificate', ''));
+      setFormLowStock(get('formLowStock', '5'));
+      setFormWeight(get('formWeight', ''));
+      const dimDraft = get('formDimensions', '');
+      setFormDimensions(dimDraft);
+      const dimParts = parseDimensionsString(dimDraft);
+      setFormDimL(dimParts.l);
+      setFormDimW(dimParts.w);
+      setFormDimH(dimParts.h);
+      setFormFeaturesAndSpecs(get<{ key: string; value: string }[]>('formFeaturesAndSpecs', []));
+      setFormMaterialsAndCare(get<{ key: string; value: string }[]>('formMaterialsAndCare', []));
+      setFormItemDetails(get<{ key: string; value: string }[]>('formItemDetails', []));
+      setFormAdditionalDetails(get<{ key: string; value: string }[]>('formAdditionalDetails', []));
+      setFormProductDescription(get('formProductDescription', ''));
+      setFormSafetyInfo(get('formSafetyInfo', ''));
+      setFormRegulatoryInfo(get('formRegulatoryInfo', ''));
+      setFormWarrantyInfo(get('formWarrantyInfo', ''));
+      draftHydratedRef.current = true;
+      setDraftRestored(true);
+      setDraftSavedAt(parsed?.savedAt ?? null);
+      toast.message('Draft restored', { description: 'Your previous unsaved product draft was restored.' });
+    } catch {
+      draftHydratedRef.current = true;
+    }
+  }, [createOpen, editProduct]);
+
+  // Reset hydration flag when the modal closes so reopening can hydrate again.
+  useEffect(() => {
+    if (!createOpen) {
+      draftHydratedRef.current = false;
+    }
+  }, [createOpen]);
+
+  // Persist (debounced) on every relevant field change while creating.
+  useEffect(() => {
+    if (!createOpen || editProduct) return;
+    if (typeof window === 'undefined') return;
+    if (!draftHydratedRef.current) return;
+    if (draftDebounceRef.current) clearTimeout(draftDebounceRef.current);
+    draftDebounceRef.current = setTimeout(() => {
+      try {
+        const payload = { savedAt: Date.now(), data: collectDraft() };
+        window.localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(payload));
+        setDraftSavedAt(payload.savedAt);
+      } catch {
+        // ignore quota errors
+      }
+    }, 600);
+    return () => {
+      if (draftDebounceRef.current) clearTimeout(draftDebounceRef.current);
+    };
+  }, [createOpen, editProduct, collectDraft]);
 
   const [fetchedAttrPresets, setFetchedAttrPresets] = useState<ProductAttributePresetsBundle | null>(null);
   useEffect(() => {
@@ -805,6 +1221,9 @@ export default function SellerInventoryPage() {
     setFormLowStock('5');
     setFormWeight('');
     setFormDimensions('');
+    setFormDimL('');
+    setFormDimW('');
+    setFormDimH('');
     setFormFeaturesAndSpecs([]);
     setFormMaterialsAndCare([]);
     setFormItemDetails([]);
@@ -856,7 +1275,12 @@ export default function SellerInventoryPage() {
         setFormBrand(String(full.brand ?? ''));
         setFormLowStock(String(full.lowStockThreshold ?? '5'));
         setFormWeight(full.weight != null ? String(full.weight) : '');
-        setFormDimensions(String(full.dimensions ?? ''));
+        const dimRaw = String(full.dimensions ?? '');
+        setFormDimensions(dimRaw);
+        const parts = parseDimensionsString(dimRaw);
+        setFormDimL(parts.l);
+        setFormDimW(parts.w);
+        setFormDimH(parts.h);
         // Amazon-style product information
         setFormFeaturesAndSpecs(objectToKeyValueArray(full.featuresAndSpecs as Record<string, string> | null));
         setFormMaterialsAndCare(objectToKeyValueArray(full.materialsAndCare as Record<string, string> | null));
@@ -1051,10 +1475,18 @@ export default function SellerInventoryPage() {
     );
   };
 
+  const MAX_META_KEYWORDS = 5;
   const addMetaKeyword = (rawKeyword: string) => {
     const keyword = rawKeyword.trim();
     if (!keyword) return;
-    setFormMetaKeywords((prev) => (prev.includes(keyword) ? prev : [...prev, keyword]));
+    setFormMetaKeywords((prev) => {
+      if (prev.includes(keyword)) return prev;
+      if (prev.length >= MAX_META_KEYWORDS) {
+        toast.info(`You can add up to ${MAX_META_KEYWORDS} meta title keywords.`);
+        return prev;
+      }
+      return [...prev, keyword];
+    });
     setMetaKeywordInput('');
   };
 
@@ -1164,6 +1596,7 @@ export default function SellerInventoryPage() {
       });
       setCreateOpen(false);
       resetForm();
+      clearDraft();
       loadProducts();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to create product');
@@ -1437,30 +1870,48 @@ export default function SellerInventoryPage() {
         </div>
       )}
 
-      <Input label="Name" value={formName} onChange={(e) => setFormName(e.target.value)} />
-      <Input label="Brand name *" value={formBrand} onChange={(e) => setFormBrand(e.target.value)} />
-      <div>
-        <label className="text-xs text-text-muted block mb-1">GST rate (%) *</label>
-        <Input
-          type="number"
-          min={0}
-          placeholder={`Default ${DEFAULT_GST_PERCENT}`}
-          value={formGstRate}
-          onChange={(e) => setFormGstRate(e.target.value)}
-        />
-        <p className="text-[11px] text-text-muted mt-1">
-          Used with the prices below: enter amounts <span className="font-medium text-text-primary">inclusive of GST</span>
-          ; we store the pre-tax amount for records.
-        </p>
-      </div>
-      <div className="rounded-xl border border-border bg-surface-muted/30 p-3">
-        <label className="text-xs text-text-muted block mb-1">Brand authorization certificate *</label>
-        <div className="flex flex-wrap items-center gap-2">
-          <Input
-            placeholder="Certificate URL"
-            value={formBrandCertificate}
-            onChange={(e) => setFormBrandCertificate(e.target.value)}
-          />
+      <Input
+        stackedLabel
+        label="Product name"
+        required
+        value={formName}
+        onChange={(e) => setFormName(e.target.value)}
+      />
+      <Input
+        stackedLabel
+        label="Brand name"
+        required
+        value={formBrand}
+        onChange={(e) => setFormBrand(e.target.value)}
+      />
+      <Input
+        stackedLabel
+        label="GST rate (%)"
+        required
+        type="number"
+        min={0}
+        value={formGstRate}
+        onChange={(e) => setFormGstRate(e.target.value)}
+        hint={
+          <>
+            Default {DEFAULT_GST_PERCENT}%. Enter prices below{' '}
+            <span className="font-medium text-text-primary">inclusive of GST</span>; we store the
+            pre-tax amount for records.
+          </>
+        }
+      />
+      <div className="rounded-xl border border-border bg-surface-muted/30 p-4">
+        <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-text-secondary">
+          Brand authorization certificate
+          <span className="ml-0.5 text-danger-500">*</span>
+        </label>
+        <div className="flex flex-wrap items-stretch gap-2">
+          <div className="min-w-[200px] flex-1">
+            <Input
+              value={formBrandCertificate}
+              onChange={(e) => setFormBrandCertificate(e.target.value)}
+            />
+          </div>
           <Button
             type="button"
             variant="outline"
@@ -1482,13 +1933,15 @@ export default function SellerInventoryPage() {
             }}
           />
         </div>
-        <p className="text-[11px] text-text-muted mt-1">
-          Upload a clear certificate image proving authorization for this brand.
+        <p className="mt-1.5 text-[11px] text-text-muted">
+          Upload a clear certificate image proving authorization for this brand, or paste a URL above.
         </p>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Input
+          stackedLabel
           label="Price (₹), incl. GST"
+          required
           type="number"
           min={0}
           step="0.01"
@@ -1496,15 +1949,25 @@ export default function SellerInventoryPage() {
           onChange={(e) => setFormPrice(e.target.value)}
         />
         <Input
-          label="Compare at (₹), incl. GST"
+          stackedLabel
+          label="MRP (₹), incl. GST"
           type="number"
           min={0}
           step="0.01"
           value={formCompare}
           onChange={(e) => setFormCompare(e.target.value)}
+          hint="Maximum retail price — shown as the strike-through original price."
         />
       </div>
-      <Input label="Stock" type="number" min={0} value={formStock} onChange={(e) => setFormStock(e.target.value)} />
+      <Input
+        stackedLabel
+        label="Stock"
+        required
+        type="number"
+        min={0}
+        value={formStock}
+        onChange={(e) => setFormStock(e.target.value)}
+      />
 
       <ProductImageGallery
         images={formImages}
@@ -1594,7 +2057,7 @@ export default function SellerInventoryPage() {
                           Price (₹)
                         </th>
                         <th className="pb-1.5 pr-2 font-medium w-[100px]" title="Inclusive of GST">
-                          Compare (₹)
+                          MRP (₹)
                         </th>
                         <th className="pb-1.5 pr-2 font-medium w-[70px]">Stock</th>
                         <th className="pb-1.5 pr-2 font-medium w-[90px]">SKU</th>
@@ -1822,9 +2285,12 @@ export default function SellerInventoryPage() {
 
       {createOpen && (
         <div>
-          <label className="text-xs text-text-muted block mb-1">Category</label>
+          <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-text-secondary">
+            Category
+            <span className="ml-0.5 text-danger-500">*</span>
+          </label>
           <select
-            className="w-full rounded-xl border border-border bg-surface-raised px-3 py-2.5 text-sm text-text-primary"
+            className="w-full rounded-xl border border-border bg-surface-raised px-3 py-2.5 text-sm text-text-primary outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30"
             value={formCategoryId}
             onChange={(e) => setFormCategoryId(e.target.value)}
           >
@@ -1839,9 +2305,11 @@ export default function SellerInventoryPage() {
       )}
       {editProduct && (
         <div>
-          <label className="text-xs text-text-muted block mb-1">Change category (optional)</label>
+          <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-text-secondary">
+            Change category
+          </label>
           <select
-            className="w-full rounded-xl border border-border bg-surface-raised px-3 py-2.5 text-sm text-text-primary"
+            className="w-full rounded-xl border border-border bg-surface-raised px-3 py-2.5 text-sm text-text-primary outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30"
             value={formCategoryId}
             onChange={(e) => setFormCategoryId(e.target.value)}
           >
@@ -1852,32 +2320,65 @@ export default function SellerInventoryPage() {
               </option>
             ))}
           </select>
+          <p className="mt-1 text-xs text-text-muted">Leave as &ldquo;Keep current&rdquo; to retain the existing category.</p>
         </div>
       )}
       <div>
-        <label className="text-xs text-text-muted block mb-1">Short description</label>
+        <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-text-secondary">
+          Short description
+        </label>
         <textarea
-          className="w-full min-h-[80px] rounded-xl border border-border bg-surface-raised px-3 py-2 text-sm text-text-primary placeholder:text-text-muted"
-          placeholder="Optional"
+          className="w-full min-h-[80px] rounded-xl border border-border bg-surface-raised px-3 py-2 text-sm text-text-primary outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30"
           value={formShort}
           onChange={(e) => setFormShort(e.target.value)}
         />
+        <p className="mt-1 text-xs text-text-muted">Optional one-liner shown on the product card.</p>
       </div>
 
       {/* Shipping Details */}
       <div className="border-t border-border pt-4 mt-4">
-        <p className="text-xs font-semibold text-text-primary mb-3">Shipping Details</p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
-            <label className="text-xs text-text-muted block mb-1">Weight (kg) *</label>
-            <Input type="number" step="0.01" min="0" placeholder="e.g. 0.5" value={formWeight} onChange={(e) => setFormWeight(e.target.value)} />
-            <p className="text-[10px] text-text-muted mt-0.5">Package weight for shipping calculations</p>
+        <p className="text-sm font-semibold text-text-primary mb-3">Shipping Details</p>
+        <Input
+          stackedLabel
+          label="Weight (kg)"
+          required
+          type="number"
+          step="0.01"
+          min="0"
+          value={formWeight}
+          onChange={(e) => setFormWeight(e.target.value)}
+          hint="Package weight used for shipping calculations."
+        />
+        <div className="mt-3">
+          <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-text-secondary">
+            Package dimensions (cm)
+            <span className="ml-0.5 text-danger-500">*</span>
+          </label>
+          <div className="grid grid-cols-3 gap-2">
+            {[
+              { id: 'dim-l', label: 'Length', value: formDimL, set: setFormDimL },
+              { id: 'dim-w', label: 'Width', value: formDimW, set: setFormDimW },
+              { id: 'dim-h', label: 'Height', value: formDimH, set: setFormDimH },
+            ].map(({ id, label, value, set }) => (
+              <div key={id}>
+                <label htmlFor={id} className="mb-1 block text-[11px] font-medium text-text-muted">
+                  {label}
+                </label>
+                <input
+                  id={id}
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  value={value}
+                  onChange={(e) => set(e.target.value)}
+                  className="w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-text-primary outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30"
+                />
+              </div>
+            ))}
           </div>
-          <div>
-            <label className="text-xs text-text-muted block mb-1">Dimensions (L×W×H in cm) *</label>
-            <Input placeholder="e.g. 30x20x15" value={formDimensions} onChange={(e) => setFormDimensions(e.target.value)} />
-            <p className="text-[10px] text-text-muted mt-0.5">Length × Width × Height for shipping</p>
-          </div>
+          <p className="mt-1 text-xs text-text-muted">
+            Length × Width × Height in centimetres — used for shipping rate calculations.
+          </p>
         </div>
       </div>
 
@@ -1924,71 +2425,84 @@ export default function SellerInventoryPage() {
 
         {/* Product Description */}
         <div className="mt-4">
-          <label className="text-xs text-text-muted block mb-1">Product Description</label>
-          <textarea
-            className="w-full min-h-[100px] rounded-xl border border-border bg-surface-raised px-3 py-2 text-sm text-text-primary placeholder:text-text-muted resize-y"
-            placeholder="Detailed description of the product features, benefits, and uses..."
+          <BulletListEditor
+            label="Product description"
+            description="Add up to 5 short, scannable bullets that highlight what makes the product great, plus an optional supporting paragraph."
+            bulletPlaceholder="e.g. 100% pure cotton — soft against the skin"
+            paragraphLabel="Long-form description"
+            paragraphPlaceholder="Tell the full story of the product — features, benefits, materials, and any usage notes."
+            paragraphRows={5}
             value={formProductDescription}
-            onChange={(e) => setFormProductDescription(e.target.value)}
+            onChange={setFormProductDescription}
           />
         </div>
 
         {/* Warranty Info */}
         <div className="mt-4">
-          <label className="text-xs text-text-muted block mb-1">Warranty Information</label>
           <Input
-            placeholder="e.g. 1 Year Manufacturer Warranty"
+            stackedLabel
+            label="Warranty information"
             value={formWarrantyInfo}
             onChange={(e) => setFormWarrantyInfo(e.target.value)}
+            hint="For example, 1 Year Manufacturer Warranty."
           />
         </div>
 
         {/* Safety Info */}
         <div className="mt-4">
-          <label className="text-xs text-text-muted block mb-1">Safety & Product Resources</label>
-          <textarea
-            className="w-full min-h-[80px] rounded-xl border border-border bg-surface-raised px-3 py-2 text-sm text-text-primary placeholder:text-text-muted resize-y"
-            placeholder="Safety information, warnings, age recommendations..."
+          <BulletListEditor
+            label="Safety & product resources"
+            description="List up to 5 quick safety call-outs (warnings, age recommendations, certifications) and any longer notes below."
+            bulletPlaceholder="e.g. Not recommended for children under 3 years"
+            paragraphLabel="Additional safety notes"
+            paragraphPlaceholder="Detailed safety information, warnings, age recommendations, or links to manuals."
+            paragraphRows={3}
             value={formSafetyInfo}
-            onChange={(e) => setFormSafetyInfo(e.target.value)}
+            onChange={setFormSafetyInfo}
           />
         </div>
 
         {/* Regulatory Info */}
         <div className="mt-4">
-          <label className="text-xs text-text-muted block mb-1">Regulatory Information</label>
+          <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-text-secondary">
+            Regulatory information
+          </label>
           <textarea
-            className="w-full min-h-[80px] rounded-xl border border-border bg-surface-raised px-3 py-2 text-sm text-text-primary placeholder:text-text-muted resize-y"
-            placeholder="BIS marking, certifications, compliance information..."
+            className="w-full min-h-[80px] rounded-xl border border-border bg-surface-raised px-3 py-2 text-sm text-text-primary outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30 resize-y"
             value={formRegulatoryInfo}
             onChange={(e) => setFormRegulatoryInfo(e.target.value)}
           />
+          <p className="mt-1 text-xs text-text-muted">BIS marking, certifications, compliance information.</p>
         </div>
       </div>
 
       {/* SEO & Tax Fields */}
       <div className="border-t border-border pt-4 mt-4">
-        <p className="text-xs font-semibold text-text-primary mb-3">SEO & Tax</p>
+        <p className="text-sm font-semibold text-text-primary mb-3">SEO &amp; Tax</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="sm:col-span-2">
-            <label className="text-xs text-text-muted block mb-1">Meta title keywords</label>
+            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-text-secondary">
+              Meta title keywords
+            </label>
             <div className="flex gap-2">
-              <Input
-                placeholder="Type keyword and click +"
-                value={metaKeywordInput}
-                onChange={(e) => setMetaKeywordInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    addMetaKeyword(metaKeywordInput);
-                  }
-                }}
-              />
+              <div className="flex-1">
+                <Input
+                  value={metaKeywordInput}
+                  onChange={(e) => setMetaKeywordInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      addMetaKeyword(metaKeywordInput);
+                    }
+                  }}
+                />
+              </div>
               <Button type="button" variant="outline" size="sm" onClick={() => addMetaKeyword(metaKeywordInput)}>
                 <Plus className="h-3 w-3 mr-1" />
                 Add
               </Button>
             </div>
+            <p className="mt-1 text-xs text-text-muted">Type a keyword and press Enter or click Add.</p>
             {formMetaKeywords.length > 0 && (
               <div className="mt-2 flex flex-wrap gap-2">
                 {formMetaKeywords.map((keyword) => (
@@ -2010,25 +2524,41 @@ export default function SellerInventoryPage() {
               </div>
             )}
             {formMetaKeywords.length === 0 && (
-              <Input
-                placeholder="Fallback meta title"
-                value={formMetaTitle}
-                onChange={(e) => setFormMetaTitle(e.target.value)}
-              />
+              <div className="mt-2">
+                <Input
+                  stackedLabel
+                  label="Fallback meta title"
+                  value={formMetaTitle}
+                  onChange={(e) => setFormMetaTitle(e.target.value)}
+                  hint="Used if no keywords are added above."
+                />
+              </div>
             )}
           </div>
-          <div>
-            <label className="text-xs text-text-muted block mb-1">HSN Code *</label>
-            <Input placeholder="e.g. 6109" value={formHsnCode} onChange={(e) => setFormHsnCode(e.target.value)} />
-          </div>
+          <Input
+            stackedLabel
+            label="HSN code"
+            required
+            value={formHsnCode}
+            onChange={(e) => setFormHsnCode(e.target.value)}
+          />
           <div className="sm:col-span-2">
-            <label className="text-xs text-text-muted block mb-1">Meta Description</label>
-            <Input placeholder="SEO description (optional)" value={formMetaDesc} onChange={(e) => setFormMetaDesc(e.target.value)} />
+            <Input
+              stackedLabel
+              label="Meta description"
+              value={formMetaDesc}
+              onChange={(e) => setFormMetaDesc(e.target.value)}
+              hint="Optional description used by search engines."
+            />
           </div>
-          <div>
-            <label className="text-xs text-text-muted block mb-1">Low Stock Threshold</label>
-            <Input type="number" placeholder="5" value={formLowStock} onChange={(e) => setFormLowStock(e.target.value)} />
-          </div>
+          <Input
+            stackedLabel
+            label="Low stock threshold"
+            type="number"
+            value={formLowStock}
+            onChange={(e) => setFormLowStock(e.target.value)}
+            hint="Get an alert when stock falls below this number."
+          />
         </div>
       </div>
     </div>
@@ -2059,15 +2589,41 @@ export default function SellerInventoryPage() {
         <motion.div
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.04 }}
+          className="flex items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2 max-w-md"
+        >
+          <Search size={16} className="text-text-muted shrink-0" />
+          <input
+            type="text"
+            placeholder="Search products by name, category or status…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="flex-1 bg-transparent text-sm text-text-primary outline-none placeholder:text-text-muted"
+          />
+          {search && (
+            <button
+              type="button"
+              onClick={() => setSearch('')}
+              className="text-xs text-text-muted hover:text-text-primary"
+              aria-label="Clear search"
+            >
+              Clear
+            </button>
+          )}
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.05 }}
           className="rounded-2xl border border-border bg-surface p-6 shadow-card"
         >
           <DataTable
             columns={columns}
-            data={products}
+            data={filteredProducts}
             keyExtractor={(row) => row.id}
             loading={loading}
-            emptyMessage="No products yet"
+            emptyMessage={search ? `No products match "${search}"` : 'No products yet'}
           />
         </motion.div>
       </div>
@@ -2079,6 +2635,32 @@ export default function SellerInventoryPage() {
         size="lg"
         className="max-w-3xl max-h-[92vh] overflow-y-auto"
       >
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-200 bg-emerald-50/70 px-3 py-2 text-xs">
+          <div className="flex items-center gap-2 text-emerald-800">
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            <span className="font-medium">Autosave on</span>
+            {draftRestored ? (
+              <span className="text-emerald-700">— draft restored from your last session</span>
+            ) : draftSavedAt ? (
+              <span className="text-emerald-700">
+                — saved {new Date(draftSavedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </span>
+            ) : (
+              <span className="text-emerald-700">— your changes are saved as you type</span>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              clearDraft();
+              resetForm();
+              toast.success('Draft discarded');
+            }}
+            className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700 hover:text-emerald-900 underline-offset-2 hover:underline"
+          >
+            Discard draft
+          </button>
+        </div>
         {formFields}
         <div className="flex justify-end gap-2 mt-6">
           <Button type="button" variant="outline" onClick={() => setCreateOpen(false)} disabled={saving || uploading || uploadingBrandCertificate}>
@@ -2097,6 +2679,16 @@ export default function SellerInventoryPage() {
         size="lg"
         className="max-w-3xl max-h-[92vh] overflow-y-auto"
       >
+        {editProduct?.status === 'ACTIVE' && (
+          <div className="mb-4 rounded-lg border border-warning-200 bg-warning-50 p-3 text-xs text-warning-800">
+            <p className="font-semibold mb-0.5">Editing a published listing</p>
+            <p>
+              Saving changes to the catalog details (name, description, price, images, variants, etc.)
+              will return this product to <strong>Pending review</strong> and remove it from the marketplace
+              until an admin re-approves it. Stock-only updates do not require re-approval.
+            </p>
+          </div>
+        )}
         {formFields}
         <div className="flex justify-end gap-2 mt-6">
           <Button type="button" variant="outline" onClick={() => setEditProduct(null)} disabled={saving || uploading || uploadingBrandCertificate}>

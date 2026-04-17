@@ -82,57 +82,77 @@ export default function DashboardPage() {
       <DashboardHeader title="Admin Dashboard" />
       <div className="p-6 space-y-6">
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <StatCard loading={loading} label="Total Revenue" value={data ? `₹${data.totalRevenue.toLocaleString()}` : '—'} icon={DollarSign} />
-          <StatCard loading={loading} label="Total Orders" value={data?.totalOrders ?? '—'} change={orderChange || undefined} changeLabel="vs last month" icon={ShoppingCart} />
-          <StatCard loading={loading} label="Users" value={data?.totalCustomers ?? '—'} icon={Users} />
-          <StatCard loading={loading} label="Sellers" value={data ? `${data.activeSellers} / ${data.totalSellers}` : '—'} icon={Store} />
+          <Link href="/revenue" className="block rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 transition-transform hover:-translate-y-0.5" aria-label="Open revenue analytics">
+            <StatCard loading={loading} label="Total Revenue" value={data ? `₹${data.totalRevenue.toLocaleString()}` : '—'} icon={DollarSign} />
+          </Link>
+          <Link href="/orders" className="block rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 transition-transform hover:-translate-y-0.5" aria-label="Open all orders">
+            <StatCard loading={loading} label="Total Orders" value={data?.totalOrders ?? '—'} change={orderChange || undefined} changeLabel="vs last month" icon={ShoppingCart} />
+          </Link>
+          <Link href="/customers" className="block rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 transition-transform hover:-translate-y-0.5" aria-label="Open customers list">
+            <StatCard loading={loading} label="Users" value={data?.totalCustomers ?? '—'} icon={Users} />
+          </Link>
+          <Link href="/sellers" className="block rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 transition-transform hover:-translate-y-0.5" aria-label="Open sellers list">
+            <StatCard loading={loading} label="Sellers" value={data ? `${data.activeSellers} / ${data.totalSellers}` : '—'} icon={Store} />
+          </Link>
         </motion.div>
 
         <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-          <div className="rounded-2xl border border-border bg-surface p-5 shadow-card">
+          <Link
+            href="/products"
+            className="rounded-2xl border border-border bg-surface p-5 shadow-card transition-all hover:-translate-y-0.5 hover:border-primary-300 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40"
+            aria-label="Open products list"
+          >
             <div className="flex items-center gap-3 mb-1">
               <Package size={18} className="text-text-muted" />
               <span className="text-sm text-text-muted">Products</span>
             </div>
             <p className="text-2xl font-bold text-text-primary">{loading ? '—' : data?.totalProducts}</p>
             {!loading && data && data.pendingProducts > 0 && (
-              <Link href="/products?status=PENDING" className="text-xs text-accent-600 mt-1 inline-block hover:underline">
+              <span className="text-xs text-accent-600 mt-1 inline-block">
                 {data.pendingProducts} pending review
-              </Link>
+              </span>
             )}
-          </div>
-          <div className="rounded-2xl border border-border bg-surface p-5 shadow-card">
+          </Link>
+          <Link
+            href="/orders?status=PENDING"
+            className="rounded-2xl border border-border bg-surface p-5 shadow-card transition-all hover:-translate-y-0.5 hover:border-primary-300 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40"
+            aria-label="Open pending orders"
+          >
             <div className="flex items-center gap-3 mb-1">
               <Clock size={18} className="text-text-muted" />
               <span className="text-sm text-text-muted">Pending Orders</span>
             </div>
             <p className="text-2xl font-bold text-text-primary">{loading ? '—' : data?.pendingOrders}</p>
             {!loading && (data?.pendingOrders ?? 0) > 0 && (
-              <Link href="/orders?status=PENDING" className="text-xs text-accent-600 mt-1 inline-block hover:underline">
-                View pending orders
-              </Link>
+              <span className="text-xs text-accent-600 mt-1 inline-block">View pending orders</span>
             )}
-          </div>
-          <div className="rounded-2xl border border-border bg-surface p-5 shadow-card">
+          </Link>
+          <Link
+            href="/reviews"
+            className="rounded-2xl border border-border bg-surface p-5 shadow-card transition-all hover:-translate-y-0.5 hover:border-primary-300 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40"
+            aria-label="Open pending reviews"
+          >
             <div className="flex items-center gap-3 mb-1">
               <Star size={18} className="text-text-muted" />
               <span className="text-sm text-text-muted">Pending Reviews</span>
             </div>
             <p className="text-2xl font-bold text-text-primary">{loading ? '—' : data?.pendingReviews ?? 0}</p>
             {!loading && (data?.pendingReviews ?? 0) > 0 && (
-              <Link href="/reviews" className="text-xs text-accent-600 mt-1 inline-block hover:underline">
-                Review pending
-              </Link>
+              <span className="text-xs text-accent-600 mt-1 inline-block">Review pending</span>
             )}
-          </div>
-          <div className="rounded-2xl border border-border bg-surface p-5 shadow-card">
+          </Link>
+          <Link
+            href="/revenue"
+            className="rounded-2xl border border-border bg-surface p-5 shadow-card transition-all hover:-translate-y-0.5 hover:border-primary-300 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40"
+            aria-label="Open monthly revenue"
+          >
             <div className="flex items-center gap-3 mb-1">
               <DollarSign size={18} className="text-text-muted" />
               <span className="text-sm text-text-muted">This Month</span>
             </div>
             <p className="text-2xl font-bold text-text-primary">{loading ? '—' : `₹${(data?.monthRevenue ?? 0).toLocaleString()}`}</p>
             <p className="text-xs text-text-muted mt-1">{data?.monthOrders ?? 0} orders</p>
-          </div>
+          </Link>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

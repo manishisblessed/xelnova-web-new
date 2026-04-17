@@ -1,6 +1,8 @@
-import { Injectable, NotFoundException, BadRequestException, HttpException, HttpStatus, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ConflictException, HttpException, HttpStatus, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { Prisma, Role } from '@prisma/client';
+import * as bcrypt from 'bcrypt';
+import { randomBytes } from 'crypto';
 import { LoggingService } from '../logging/logging.service';
 import { NotificationService } from '../notifications/notification.service';
 import {
@@ -15,6 +17,7 @@ import {
   CreateCommissionDto, UpdateCommissionDto,
   AdminPayoutQueryDto, UpdatePayoutDto,
   CreateRoleDto, UpdateRoleDto,
+  CreateSubAdminDto, UpdateSubAdminDto,
   CreatePageDto, UpdatePageDto,
   AdminSiteSettingsDto,
   AdminAuditContext,
@@ -43,7 +46,7 @@ export class AdminService {
   }
 
   /** Creates a SellerProfile for SELLER users who have none (e.g. Google sign-in before profile sync). */
-  private async ensureSellerProfileRow(userId: string, name: string, email?: string, phone?: string): Promise<void> {
+  private async ensureSellerProfileRow(userId: string, name: string, email?: string | null, phone?: string): Promise<void> {
     const existing = await this.prisma.sellerProfile.findUnique({ where: { userId } });
     if (existing) return;
 
@@ -67,9 +70,9 @@ export class AdminService {
     await this.prisma.sellerProfile.create({
       data: {
         userId,
-        email,
+        email: email ?? null,
         phone,
-        storeName: `${name}'s Store`,
+        storeName: `${name || 'My'}'s Store`,
         slug,
         onboardingStatus: 'EMAIL_VERIFIED',
         onboardingStep: 2,
@@ -212,6 +215,25 @@ export class AdminService {
     if (dto.isActive !== undefined) data.isActive = dto.isActive;
     if (dto.rejectionReason !== undefined && dto.status !== 'ACTIVE') {
       data.rejectionReason = dto.rejectionReason || null;
+    }
+    if (dto.commissionRate !== undefined && dto.commissionRate !== null) {
+      const rate = Number(dto.commissionRate);
+      if (!Number.isFinite(rate) || rate < 0 || rate > 100) {
+        throw new BadRequestException('commissionRate must be between 0 and 100');
+      }
+      data.commissionRate = rate;
+    }
+    if (dto.bestSellersRank !== undefined) {
+      // null / 0 / "" all clear the rank — anything else must be a positive int.
+      if (dto.bestSellersRank === null || (dto.bestSellersRank as unknown) === '' || dto.bestSellersRank === 0) {
+        data.bestSellersRank = null;
+      } else {
+        const rank = Math.floor(Number(dto.bestSellersRank));
+        if (!Number.isFinite(rank) || rank < 1 || rank > 100000) {
+          throw new BadRequestException('bestSellersRank must be a positive integer (1–100000)');
+        }
+        data.bestSellersRank = rank;
+      }
     }
 
     const product = await this.prisma.product.update({ 
@@ -848,7 +870,19 @@ export class AdminService {
   // ─── Admin Roles ───
 
   async getRoles() {
-    return this.prisma.adminRole.findMany({ orderBy: { createdAt: 'desc' } });
+    const rows = await this.prisma.adminRole.findMany({
+      orderBy: { createdAt: 'desc' },
+      include: { _count: { select: { members: true } } },
+    });
+    return rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      permissions: r.permissions,
+      isSystem: r.isSystem,
+      users: r._count.members,
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt,
+    }));
   }
 
   async createRole(dto: CreateRoleDto) {
@@ -862,11 +896,232 @@ export class AdminService {
   }
 
   async deleteRole(id: string) {
-    const role = await this.prisma.adminRole.findUnique({ where: { id } });
+    const role = await this.prisma.adminRole.findUnique({
+      where: { id },
+      include: { _count: { select: { members: true } } },
+    });
     if (!role) throw new NotFoundException('Role not found');
-    if (role.isSystem) throw new NotFoundException('Cannot delete system roles');
+    if (role.isSystem) throw new BadRequestException('Cannot delete system roles');
+    if (role._count.members > 0) {
+      throw new BadRequestException(
+        `Cannot delete: ${role._count.members} sub-admin(s) are assigned to this role. Reassign them first.`,
+      );
+    }
     await this.prisma.adminRole.delete({ where: { id } });
     return { deleted: true };
+  }
+
+  // ─── Sub-admins (admin users with optional custom RBAC role) ───
+
+  async getSubAdmins() {
+    const rows = await this.prisma.user.findMany({
+      where: { role: 'ADMIN' },
+      orderBy: [{ createdAt: 'desc' }],
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        avatar: true,
+        isActive: true,
+        isBanned: true,
+        lastLoginAt: true,
+        createdAt: true,
+        adminRoleId: true,
+        adminRole: {
+          select: { id: true, name: true, permissions: true, isSystem: true },
+        },
+      },
+    });
+    return rows.map((r) => ({
+      ...r,
+      // Sub-admins have an assigned custom AdminRole. Users without one are
+      // treated as the original "super admin" — they inherit full access.
+      isSuperAdmin: !r.adminRoleId,
+    }));
+  }
+
+  async createSubAdmin(dto: CreateSubAdminDto, audit?: AdminAuditContext) {
+    const email = String(dto.email || '').trim().toLowerCase();
+    const name = String(dto.name || '').trim();
+    if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
+      throw new BadRequestException('A valid email is required');
+    }
+    if (!name) throw new BadRequestException('Name is required');
+
+    const existing = await this.prisma.user.findUnique({ where: { email } });
+    if (existing) {
+      throw new ConflictException('A user with this email already exists');
+    }
+
+    let adminRoleId: string | null = null;
+    if (dto.adminRoleId) {
+      const role = await this.prisma.adminRole.findUnique({ where: { id: dto.adminRoleId } });
+      if (!role) throw new BadRequestException('Selected role does not exist');
+      adminRoleId = role.id;
+    }
+
+    // Generate a strong temporary password if the admin didn't set one.
+    // The new sub-admin can change it after first login.
+    const rawPassword =
+      (dto.password && dto.password.length >= 6 ? dto.password : null) ??
+      randomBytes(9).toString('base64url'); // ~12 chars, URL-safe
+
+    const hashed = await bcrypt.hash(rawPassword, 12);
+
+    const user = await this.prisma.user.create({
+      data: {
+        name,
+        email,
+        password: hashed,
+        role: 'ADMIN',
+        emailVerified: true,
+        authProvider: 'EMAIL',
+        adminRoleId,
+      },
+      select: {
+        id: true, name: true, email: true, role: true, isActive: true,
+        adminRoleId: true,
+        adminRole: { select: { id: true, name: true, permissions: true } },
+        createdAt: true,
+      },
+    });
+
+    if (audit) {
+      this.logging
+        .logAdminAudit({
+          adminId: audit.adminId,
+          adminRole: audit.adminRole,
+          action: 'SUB_ADMIN_CREATED',
+          message: `Created sub-admin ${user.email}`,
+          ipAddress: audit.ipAddress,
+          userAgent: audit.userAgent,
+          meta: { userId: user.id, adminRoleId },
+          endpoint: '/admin/sub-admins',
+          method: 'POST',
+        })
+        .catch(() => undefined);
+    }
+
+    // Return the temp password only when we generated it ourselves so the
+    // creating admin can hand it off out-of-band. We never echo back a
+    // user-supplied password.
+    return { ...user, tempPassword: dto.password ? null : rawPassword };
+  }
+
+  async updateSubAdmin(id: string, dto: UpdateSubAdminDto, audit?: AdminAuditContext) {
+    const target = await this.prisma.user.findUnique({ where: { id } });
+    if (!target || target.role !== 'ADMIN') {
+      throw new NotFoundException('Sub-admin not found');
+    }
+    if (audit?.adminId === id && dto.isActive === false) {
+      throw new BadRequestException('You cannot deactivate your own account');
+    }
+
+    const data: Prisma.UserUpdateInput = {};
+    if (dto.name !== undefined) {
+      const trimmed = dto.name.trim();
+      if (!trimmed) throw new BadRequestException('Name cannot be empty');
+      data.name = trimmed;
+    }
+    if (dto.adminRoleId !== undefined) {
+      if (dto.adminRoleId === null || dto.adminRoleId === '') {
+        // Clearing role promotes to super-admin — only the original super-admin
+        // (no role) can do this and only for other sub-admins.
+        data.adminRole = { disconnect: true };
+      } else {
+        const role = await this.prisma.adminRole.findUnique({ where: { id: dto.adminRoleId } });
+        if (!role) throw new BadRequestException('Selected role does not exist');
+        data.adminRole = { connect: { id: role.id } };
+      }
+    }
+    if (dto.isActive !== undefined) data.isActive = dto.isActive;
+
+    const updated = await this.prisma.user.update({
+      where: { id },
+      data,
+      select: {
+        id: true, name: true, email: true, isActive: true, adminRoleId: true,
+        adminRole: { select: { id: true, name: true, permissions: true } },
+      },
+    });
+
+    if (audit) {
+      this.logging
+        .logAdminAudit({
+          adminId: audit.adminId,
+          adminRole: audit.adminRole,
+          action: 'SUB_ADMIN_UPDATED',
+          message: `Updated sub-admin ${target.email ?? target.id}`,
+          ipAddress: audit.ipAddress,
+          userAgent: audit.userAgent,
+          meta: { userId: id, patch: dto as unknown as Record<string, unknown> },
+          endpoint: '/admin/sub-admins/:id',
+          method: 'PATCH',
+        })
+        .catch(() => undefined);
+    }
+
+    return updated;
+  }
+
+  async deleteSubAdmin(id: string, audit?: AdminAuditContext) {
+    const target = await this.prisma.user.findUnique({ where: { id } });
+    if (!target || target.role !== 'ADMIN') {
+      throw new NotFoundException('Sub-admin not found');
+    }
+    if (audit?.adminId === id) {
+      throw new BadRequestException('You cannot remove your own account');
+    }
+    // Soft remove: demote rather than hard-delete so existing FK references
+    // (orders, audit logs, etc.) remain valid.
+    await this.prisma.user.update({
+      where: { id },
+      data: { role: 'CUSTOMER', adminRoleId: null, isActive: false },
+    });
+
+    if (audit) {
+      this.logging
+        .logAdminAudit({
+          adminId: audit.adminId,
+          adminRole: audit.adminRole,
+          action: 'SUB_ADMIN_REMOVED',
+          message: `Removed sub-admin ${target.email ?? target.id}`,
+          ipAddress: audit.ipAddress,
+          userAgent: audit.userAgent,
+          meta: { userId: id },
+          endpoint: '/admin/sub-admins/:id',
+          method: 'DELETE',
+        })
+        .catch(() => undefined);
+    }
+    return { removed: true };
+  }
+
+  async resetSubAdminPassword(id: string, audit?: AdminAuditContext) {
+    const target = await this.prisma.user.findUnique({ where: { id } });
+    if (!target || target.role !== 'ADMIN') {
+      throw new NotFoundException('Sub-admin not found');
+    }
+    const newPassword = randomBytes(9).toString('base64url');
+    const hashed = await bcrypt.hash(newPassword, 12);
+    await this.prisma.user.update({ where: { id }, data: { password: hashed } });
+
+    if (audit) {
+      this.logging
+        .logAdminAudit({
+          adminId: audit.adminId,
+          adminRole: audit.adminRole,
+          action: 'SUB_ADMIN_PASSWORD_RESET',
+          message: `Reset password for sub-admin ${target.email ?? target.id}`,
+          ipAddress: audit.ipAddress,
+          userAgent: audit.userAgent,
+          meta: { userId: id },
+          endpoint: '/admin/sub-admins/:id/reset-password',
+          method: 'POST',
+        })
+        .catch(() => undefined);
+    }
+    return { tempPassword: newPassword };
   }
 
   // ─── Revenue Analytics ───

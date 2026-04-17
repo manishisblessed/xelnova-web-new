@@ -73,9 +73,17 @@ const structuredData = [
       'https://www.youtube.com/@XelnovaIndia',
       'https://www.instagram.com/xelnova.in',
     ],
+    address: {
+      '@type': 'PostalAddress',
+      streetAddress: '122/1, Pole No - New Line, Sector No. 28, Bamnoli, Dwarka',
+      addressLocality: 'New Delhi',
+      addressRegion: 'DL',
+      postalCode: '110077',
+      addressCountry: 'IN',
+    },
     contactPoint: {
       '@type': 'ContactPoint',
-      telephone: '1800-123-XELNOVA',
+      telephone: '+91-9259131155',
       contactType: 'customer service',
       areaServed: 'IN',
       availableLanguage: 'English',

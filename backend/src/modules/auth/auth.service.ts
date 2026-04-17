@@ -259,14 +259,14 @@ export class AuthService {
     let createdNewPhoneUser = false;
 
     if (!user) {
-      /** Placeholder email so we can satisfy DB constraints; user may add a real email in profile or at checkout. */
-      const syntheticEmail = this.syntheticEmailForPhoneLogin(phone);
+      // Phone-only signup: email stays NULL until the user provides one
+      // (e.g. at checkout or on their profile page).
       const tempPassword = await bcrypt.hash(Math.random().toString(36).slice(-12), 10);
       try {
         user = await this.prisma.user.create({
           data: {
-            name: 'Customer',
-            email: syntheticEmail,
+            name: '',
+            email: null,
             phone,
             password: tempPassword,
             avatar: null,
@@ -283,9 +283,6 @@ export class AuthService {
         user = await this.prisma.user.findFirst({
           where: { phone: { in: phoneVariants } },
         });
-        if (!user) {
-          user = await this.prisma.user.findUnique({ where: { email: syntheticEmail } });
-        }
         if (!user) throw err;
       }
     }
@@ -307,7 +304,7 @@ export class AuthService {
       },
     });
 
-    const tokens = await this.generateTokens(user.id, user.email, user.role);
+    const tokens = await this.generateTokens(user.id, user.email ?? '', user.role);
     await this.saveRefreshToken(user.id, tokens.refreshToken);
     const hasSellerProfile = await this.userHasSellerProfile(user.id);
 
@@ -612,7 +609,7 @@ export class AuthService {
   }
 
   /** Every SELLER user must have a SellerProfile row (admin /seller list uses this table). */
-  private async ensureSellerProfileForSellerUser(userId: string, name: string, email?: string, phone?: string): Promise<void> {
+  private async ensureSellerProfileForSellerUser(userId: string, name: string, email?: string | null, phone?: string): Promise<void> {
     const existing = await this.prisma.sellerProfile.findUnique({ where: { userId } });
     if (existing) return;
 
@@ -641,9 +638,9 @@ export class AuthService {
     await this.prisma.sellerProfile.create({
       data: {
         userId,
-        email,
+        email: email ?? null,
         phone,
-        storeName: `${name}'s Store`,
+        storeName: `${name || 'My'}'s Store`,
         slug,
         onboardingStatus: 'EMAIL_VERIFIED',
         onboardingStep: 2,
@@ -655,12 +652,6 @@ export class AuthService {
    * Given a phone string like "+919090702705" or "9090702705", returns all
    * plausible stored variants so lookups succeed regardless of format.
    */
-  /** Unique placeholder inbox for phone-only signup (users can replace via profile later). */
-  private syntheticEmailForPhoneLogin(phone: string): string {
-    const digits = phone.replace(/\D/g, '').slice(-10) || phone.replace(/\D/g, '');
-    return `${digits}@phone.user.xelnova.in`;
-  }
-
   private getPhoneVariants(phone: string): string[] {
     const digits = phone.replace(/\D/g, '');
     const variants = new Set<string>();
@@ -679,8 +670,8 @@ export class AuthService {
     return Array.from(variants);
   }
 
-  private async generateTokens(userId: string, email: string, role: string) {
-    const payload = { sub: userId, email, role };
+  private async generateTokens(userId: string, email: string | null, role: string) {
+    const payload = { sub: userId, email: email ?? '', role };
 
     const [accessToken, refreshToken] = await Promise.all([
       this.jwtService.signAsync(payload, {
@@ -805,7 +796,9 @@ export class AuthService {
       data: { passwordResetToken: token, passwordResetExpires: expires },
     });
 
-    await this.emailService.sendPasswordReset(user.email, user.name, token);
+    if (user.email) {
+      await this.emailService.sendPasswordReset(user.email, user.name, token);
+    }
 
     return { message: 'If that email is registered, a reset link has been sent.' };
   }

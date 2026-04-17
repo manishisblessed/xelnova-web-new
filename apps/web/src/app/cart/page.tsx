@@ -5,11 +5,29 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { Trash2, Minus, Plus, ShoppingBag, ArrowRight, Tag, ShieldCheck, Truck, Heart } from "lucide-react";
-import { formatCurrency } from "@xelnova/utils";
+import { Trash2, Minus, Plus, ShoppingBag, ArrowRight, Tag, ShieldCheck, Truck, Heart, RefreshCw } from "lucide-react";
+import { formatCurrency, priceInclusiveOfGst } from "@xelnova/utils";
 import { useAuth, cartApi } from "@xelnova/api";
 import { useCartStore, type CartItem } from "@/lib/store/cart-store";
 import { useWishlistStore } from "@/lib/store/wishlist-store";
+
+function inclusiveTotal(items: CartItem[]): number {
+  return items.reduce(
+    (sum, item) =>
+      sum + priceInclusiveOfGst(item.price, item.gstRate ?? null) * item.quantity,
+    0,
+  );
+}
+
+function inclusiveCompareTotal(items: CartItem[]): number {
+  return items.reduce(
+    (sum, item) =>
+      sum +
+      priceInclusiveOfGst(Math.max(item.price, item.comparePrice), item.gstRate ?? null) *
+        item.quantity,
+    0,
+  );
+}
 
 export default function CartPage() {
   const router = useRouter();
@@ -19,9 +37,7 @@ export default function CartPage() {
   const removeItem = useCartStore((s) => s.removeItem);
   const updateQuantity = useCartStore((s) => s.updateQuantity);
   const clearCart = useCartStore((s) => s.clearCart);
-  const totalPrice = useCartStore((s) => s.totalPrice);
   const totalItems = useCartStore((s) => s.totalItems);
-  const totalSavings = useCartStore((s) => s.totalSavings);
   const toggleWishlist = useWishlistStore((s) => s.toggle);
   const [shippingConfig, setShippingConfig] = useState<{ freeShippingMin: number; defaultRate: number }>({ freeShippingMin: 499, defaultRate: 49 });
 
@@ -64,8 +80,10 @@ export default function CartPage() {
     );
   }
 
-  const priceTotal = totalPrice();
-  const savings = totalSavings();
+  // Cart shows the same tax-inclusive price the user saw on the product card / PDP.
+  const priceTotal = inclusiveTotal(items);
+  const compareTotal = inclusiveCompareTotal(items);
+  const savings = Math.max(0, compareTotal - priceTotal);
   const itemCount = totalItems();
 
   return (
@@ -87,20 +105,21 @@ export default function CartPage() {
             <div className="sticky top-28 rounded-2xl border border-border bg-white p-6 shadow-card">
               <h2 className="mb-4 text-lg font-bold text-text-primary">Order Summary</h2>
               <div className="space-y-3 text-sm">
-                <div className="flex justify-between text-text-secondary"><span>Subtotal ({itemCount} items)</span><span className="font-medium text-text-primary">{formatCurrency(priceTotal + savings)}</span></div>
+                <div className="flex justify-between text-text-secondary"><span>Price ({itemCount} {itemCount === 1 ? "item" : "items"})</span><span className="font-medium text-text-primary">{formatCurrency(compareTotal)}</span></div>
                 {savings > 0 && (<div className="flex justify-between text-success-600"><span className="flex items-center gap-1"><Tag size={14} />Discount</span><span className="font-medium">-{formatCurrency(savings)}</span></div>)}
                 <div className="flex justify-between text-text-secondary"><span>Delivery</span><span className={priceTotal >= shippingConfig.freeShippingMin ? "font-semibold text-success-600" : "font-medium text-text-primary"}>{priceTotal >= shippingConfig.freeShippingMin ? "FREE" : formatCurrency(shippingConfig.defaultRate)}</span></div>
-                <div className="flex justify-between text-text-secondary"><span>Est. Tax (GST)</span><span className="font-medium text-text-primary">Calculated at checkout</span></div>
                 <hr className="border-border-light" />
-                <div className="flex justify-between text-lg font-bold text-text-primary"><span>Subtotal</span><span>{formatCurrency(priceTotal)}</span></div>
+                <div className="flex justify-between text-lg font-bold text-text-primary"><span>Total</span><span>{formatCurrency(priceTotal)}</span></div>
+                <p className="text-[11px] text-text-muted">Inclusive of all taxes</p>
                 {savings > 0 && (<p className="rounded-xl bg-success-50 border border-success-100 px-3 py-2 text-center text-sm font-medium text-success-700">You save {formatCurrency(savings)} on this order</p>)}
               </div>
               <button onClick={handleCheckout} className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-primary-600 py-3.5 text-sm font-bold text-white shadow-primary hover:bg-primary-700 transition-all cursor-pointer">
                 Proceed to Checkout <ArrowRight size={16} />
               </button>
-              <div className="mt-5 space-y-2.5">
-                <div className="flex items-center gap-2 text-xs text-text-secondary"><ShieldCheck size={14} className="text-success-600" /><span>Safe and Secure Payments</span></div>
-                <div className="flex items-center gap-2 text-xs text-text-secondary"><Truck size={14} className="text-primary-600" /><span>Free delivery on all orders</span></div>
+              <div className="mt-5 grid grid-cols-3 gap-2">
+                <TrustBadge icon={<ShieldCheck size={18} className="text-success-600" />} title="Secure" subtitle="100% safe payments" />
+                <TrustBadge icon={<Truck size={18} className="text-primary-600" />} title="Free shipping" subtitle="On every order" />
+                <TrustBadge icon={<RefreshCw size={18} className="text-accent-600" />} title="Easy returns" subtitle="7-day window" />
               </div>
             </div>
           </div>
@@ -110,7 +129,19 @@ export default function CartPage() {
   );
 }
 
+function TrustBadge({ icon, title, subtitle }: { icon: React.ReactNode; title: string; subtitle: string }) {
+  return (
+    <div className="flex flex-col items-center gap-1 rounded-xl border border-border-light bg-surface-raised px-2 py-3 text-center">
+      <div className="flex h-9 w-9 items-center justify-center rounded-full bg-white shadow-sm">{icon}</div>
+      <p className="text-[11px] font-semibold text-text-primary leading-tight">{title}</p>
+      <p className="text-[10px] text-text-muted leading-tight">{subtitle}</p>
+    </div>
+  );
+}
+
 function CartItemCard({ item, onRemove, onUpdateQty, onSaveForLater }: { item: CartItem; onRemove: (id: string) => void; onUpdateQty: (id: string, qty: number) => void; onSaveForLater: (id: string, productId: string) => void; }) {
+  const priceIncl = priceInclusiveOfGst(item.price, item.gstRate ?? null);
+  const compareIncl = priceInclusiveOfGst(Math.max(item.price, item.comparePrice), item.gstRate ?? null);
   return (
     <motion.div layout initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, x: -100, height: 0, marginBottom: 0, padding: 0 }} transition={{ duration: 0.3 }} className="rounded-2xl border border-border bg-white p-4 shadow-card sm:p-5">
       <div className="flex gap-4">
@@ -126,8 +157,8 @@ function CartItemCard({ item, onRemove, onUpdateQty, onSaveForLater }: { item: C
           <p className="mt-0.5 text-xs text-text-muted">Sold by {item.seller}</p>
           {item.variant && <p className="mt-0.5 text-xs text-text-muted">Variant: {item.variant}</p>}
           <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-lg font-bold text-text-primary">{formatCurrency(item.price)}</span>
-            {item.comparePrice > item.price && <span className="text-sm text-text-muted line-through">{formatCurrency(item.comparePrice)}</span>}
+            <span className="text-lg font-bold text-text-primary">{formatCurrency(priceIncl)}</span>
+            {compareIncl > priceIncl && <span className="text-sm text-text-muted line-through">{formatCurrency(compareIncl)}</span>}
           </div>
           <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center rounded-lg border border-gray-200">
@@ -140,7 +171,7 @@ function CartItemCard({ item, onRemove, onUpdateQty, onSaveForLater }: { item: C
               <button onClick={() => onRemove(item.id)} className="flex items-center gap-1 text-xs font-medium text-danger-600 hover:text-danger-700 transition-colors"><Trash2 size={14} /><span className="hidden sm:inline">Remove</span></button>
             </div>
           </div>
-          <div className="mt-2 text-right"><span className="text-sm font-semibold text-text-primary">Subtotal: {formatCurrency(item.price * item.quantity)}</span></div>
+          <div className="mt-2 text-right"><span className="text-sm font-semibold text-text-primary">Subtotal: {formatCurrency(priceIncl * item.quantity)}</span></div>
         </div>
       </div>
     </motion.div>

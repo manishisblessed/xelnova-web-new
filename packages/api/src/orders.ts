@@ -40,6 +40,10 @@ export interface CreateOrderPayload {
   };
   paymentMethod: string;
   couponCode?: string;
+  /** Saved on the user's profile if it doesn't already have a name. */
+  customerName?: string;
+  /** Saved on the user's profile if it doesn't already have an email (e.g. phone-only signups). */
+  customerEmail?: string;
 }
 
 export async function createOrder(payload: CreateOrderPayload): Promise<Order> {

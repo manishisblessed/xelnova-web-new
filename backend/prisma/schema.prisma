@@ -120,7 +120,7 @@ enum ShipmentStatus {
 model User {
   id                String       @id @default(cuid())
   name              String
-  email             String       @unique
+  email             String?      @unique
   phone             String?      @unique
   password          String
   avatar            String?
@@ -135,7 +135,14 @@ model User {
   isActive          Boolean      @default(true)
   isBanned          Boolean      @default(false)
   banReason         String?
+  /**
+   * Optional link to a custom admin RBAC role (used for sub-admins). When
+   * `role = ADMIN` and `adminRoleId` is set, the user has the permissions
+   * granted by that AdminRole. The classic super-admin keeps `adminRoleId`
+   * null and has unrestricted access.
+   */
   adminRoleId       String?
+  adminRole         AdminRole?   @relation("AdminRoleUsers", fields: [adminRoleId], references: [id], onDelete: SetNull)
 
   // Aadhaar verification for wallet access
   aadhaarVerified     Boolean   @default(false)
@@ -251,6 +258,14 @@ model SellerProfile {
   phone       String?
   storeName   String
   slug        String  @unique
+  /**
+   * Public-facing seller code, e.g. `Grand_HR-XEL00001`. Generated on
+   * approval and used as the seller's friendly ID on the storefront and in
+   * dashboards. Optional because legacy sellers are backfilled lazily.
+   */
+  sellerCode  String? @unique
+  /** Sequential number used when composing sellerCode. */
+  sellerCodeSequence Int? @unique
   logo        String?
   description String?
   verified    Boolean @default(false)
@@ -508,7 +523,19 @@ model Product {
   metaDescription   String?
   hsnCode           String?
   gstRate           Float?
+  /**
+   * Commission percentage charged for this listing. Set by the admin when
+   * the product is approved; falls back to the seller's default
+   * commissionRate when null at order time.
+   */
+  commissionRate    Float?
   lowStockThreshold Int     @default(5)
+  /**
+   * Curated bestseller rank assigned by the admin (lower = higher priority).
+   * Sellers cannot set this themselves — it's used to power the
+   * "Best Sellers" merchandising rails.
+   */
+  bestSellersRank   Int?
 
   // Shipping details
   weight     Float? // Weight in kg
@@ -902,9 +929,15 @@ model ApiRequestLog {
 model AdminRole {
   id          String  @id @default(cuid())
   name        String  @unique
+  /**
+   * Comma-separated list of permission tokens (e.g. "products,orders,reviews")
+   * understood by the backend RBAC guard and the admin UI.
+   */
   permissions String
   isSystem    Boolean @default(false)
-  users       Int     @default(0)
+
+  /// Sub-admin users assigned to this role.
+  members     User[]  @relation("AdminRoleUsers")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

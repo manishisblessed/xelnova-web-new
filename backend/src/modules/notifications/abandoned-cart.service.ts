@@ -23,6 +23,7 @@ export class AbandonedCartService {
     const cartItems = await this.prisma.cartItem.findMany({
       where: {
         updatedAt: { lt: cutoff },
+        user: { email: { not: null } },
       },
       include: {
         user: { select: { id: true, email: true, name: true } },
@@ -39,11 +40,12 @@ export class AbandonedCartService {
     }>();
 
     for (const ci of cartItems) {
+      if (!ci.user.email) continue;
       const existing = userMap.get(ci.userId) || {
         userId: ci.userId,
         email: ci.user.email,
         name: ci.user.name,
-        items: [],
+        items: [] as { name: string; price: number; image: string }[],
         totalValue: 0,
       };
       existing.items.push({

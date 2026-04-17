@@ -1073,10 +1073,23 @@ export default function RegisterPage() {
             selectedCategories: formData.categorySelectionType === 'choose'
               ? formData.selectedCategories
               : categories.map((c) => c.value),
+            // Prefer the structured fields the GST API now exposes; fall
+            // back to splitting the formatted address only when they are
+            // missing (older payloads / non-GST sellers).
             businessAddress: gstData?.address,
-            businessCity: gstData?.address?.split(', ').slice(-3, -2)[0],
-            businessState: gstData?.address?.split(', ').slice(-2, -1)[0],
-            businessPincode: gstData?.address?.split(', ').slice(-1)[0],
+            businessCity:
+              gstData?.city ||
+              gstData?.addressParts?.city ||
+              gstData?.addressParts?.district ||
+              gstData?.address?.split(', ').slice(-3, -2)[0],
+            businessState:
+              gstData?.state ||
+              gstData?.addressParts?.state ||
+              gstData?.address?.split(', ').slice(-2, -1)[0],
+            businessPincode:
+              gstData?.pincode ||
+              gstData?.addressParts?.pincode ||
+              gstData?.address?.split(' - ').slice(-1)[0]?.split(', ').slice(-1)[0],
           }),
         });
         const data = await res.json();
@@ -1482,10 +1495,84 @@ export default function RegisterPage() {
                           </div>
                         )}
                         {gstVerification.status === 'verified' && gstVerification.data && (
-                          <div className="mt-2 p-3 rounded-lg bg-green-50 border border-green-200 text-sm">
-                            <p className="font-medium text-green-800">Trade: {gstVerification.data.tradeName}</p>
-                            <p className="text-green-700">Legal: {gstVerification.data.legalName}</p>
-                            {gstVerification.data.address && <p className="text-green-600 text-xs mt-1">{gstVerification.data.address}</p>}
+                          <div className="mt-2 rounded-lg border border-green-200 bg-green-50 p-3 text-sm space-y-1.5">
+                            <div className="flex items-start gap-2">
+                              <CheckCircle size={14} className="mt-0.5 shrink-0 text-green-600" />
+                              <div className="min-w-0 flex-1">
+                                <p className="font-semibold text-green-800">
+                                  {gstVerification.data.tradeName || gstVerification.data.legalName}
+                                </p>
+                                {gstVerification.data.legalName &&
+                                  gstVerification.data.legalName !== gstVerification.data.tradeName && (
+                                    <p className="text-xs text-green-700">Legal name: {gstVerification.data.legalName}</p>
+                                  )}
+                              </div>
+                              {gstVerification.data.status && (
+                                <span
+                                  className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                                    /active/i.test(gstVerification.data.status)
+                                      ? 'bg-green-100 text-green-700'
+                                      : 'bg-amber-100 text-amber-700'
+                                  }`}
+                                >
+                                  {gstVerification.data.status}
+                                </span>
+                              )}
+                            </div>
+
+                            {gstVerification.data.address && (
+                              <div className="rounded-md border border-green-200/70 bg-white/70 p-2">
+                                <p className="text-[10px] font-medium uppercase tracking-wide text-green-700/80">
+                                  Principal place of business
+                                </p>
+                                <p className="mt-0.5 text-xs leading-relaxed text-green-900">
+                                  {gstVerification.data.address}
+                                </p>
+                              </div>
+                            )}
+
+                            <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[11px] text-green-700">
+                              {gstVerification.data.constitutionOfBusiness && (
+                                <p>
+                                  <span className="text-green-600/80">Constitution:</span>{' '}
+                                  <span className="font-medium text-green-900">
+                                    {gstVerification.data.constitutionOfBusiness}
+                                  </span>
+                                </p>
+                              )}
+                              {gstVerification.data.taxpayerType && (
+                                <p>
+                                  <span className="text-green-600/80">Taxpayer:</span>{' '}
+                                  <span className="font-medium text-green-900">
+                                    {gstVerification.data.taxpayerType}
+                                  </span>
+                                </p>
+                              )}
+                              {gstVerification.data.dateOfRegistration && (
+                                <p>
+                                  <span className="text-green-600/80">Registered:</span>{' '}
+                                  <span className="font-medium text-green-900">
+                                    {gstVerification.data.dateOfRegistration}
+                                  </span>
+                                </p>
+                              )}
+                              {gstVerification.data.state && (
+                                <p>
+                                  <span className="text-green-600/80">State:</span>{' '}
+                                  <span className="font-medium text-green-900">{gstVerification.data.state}</span>
+                                </p>
+                              )}
+                            </div>
+
+                            {Array.isArray(gstVerification.data.natureOfBusiness) &&
+                              gstVerification.data.natureOfBusiness.length > 0 && (
+                                <p className="text-[11px] text-green-700">
+                                  <span className="text-green-600/80">Nature of business:</span>{' '}
+                                  <span className="font-medium text-green-900">
+                                    {gstVerification.data.natureOfBusiness.join(', ')}
+                                  </span>
+                                </p>
+                              )}
                           </div>
                         )}
                         {gstVerification.status === 'error' && <p className="text-xs text-red-500 mt-1">{gstVerification.error}</p>}

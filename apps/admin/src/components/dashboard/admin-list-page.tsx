@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, type ReactNode } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { Plus, Search, RefreshCw } from 'lucide-react';
 import { Button } from '@xelnova/ui';
@@ -53,10 +54,22 @@ export function AdminListPage<T extends object>({
   queryParams,
   normalizeItems,
 }: AdminListPageProps<T>) {
+  const searchParams = useSearchParams();
+  const initialSearch = searchParams?.get('search') ?? '';
+  const initialFilter = searchParams?.get('status') ?? '';
   const [data, setData] = useState<T[]>([]);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState('');
+  const [search, setSearch] = useState(initialSearch);
+  const [filter, setFilter] = useState(initialFilter);
+
+  // Keep state in sync if user navigates between list pages with different
+  // ?search params (e.g. via the global search jump links).
+  useEffect(() => {
+    setSearch(initialSearch);
+  }, [initialSearch]);
+  useEffect(() => {
+    setFilter(initialFilter);
+  }, [initialFilter]);
 
   const fetchData = useCallback(async () => {
     try {

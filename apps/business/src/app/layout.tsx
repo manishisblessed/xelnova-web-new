@@ -1,9 +1,11 @@
 import type { Metadata } from 'next';
-import { Inter, DM_Sans } from 'next/font/google';
+import { Inter, Poppins } from 'next/font/google';
 import './globals.css';
+import { Header } from '@/components/layout/header';
+import { Footer } from '@/components/layout/footer';
+import { Toaster } from '@/components/layout/toaster';
 import { Providers } from './providers';
-import { BusinessHeader } from '@/components/business-shell/header';
-import { BusinessFooter } from '@/components/business-shell/footer';
+import { BusinessOrgBanner } from '@/components/business-shell/org-banner';
 
 const SITE_URL = process.env.NEXT_PUBLIC_BUSINESS_SITE_URL || 'http://localhost:3004';
 
@@ -13,10 +15,10 @@ const inter = Inter({
   display: 'swap',
 });
 
-const dmSans = DM_Sans({
+const poppins = Poppins({
   subsets: ['latin'],
-  weight: ['400', '500', '600', '700'],
-  variable: '--font-dm-sans',
+  weight: ['400', '500', '600', '700', '800'],
+  variable: '--font-poppins',
   display: 'swap',
 });
 
@@ -27,17 +29,34 @@ export const metadata: Metadata = {
     template: '%s | Xelnova Business',
   },
   description:
-    'Shop for your company on Xelnova: catalog search, business checkout with GSTIN, and order tracking.',
+    'Shop for your company on Xelnova: full marketplace catalog with business checkout (GSTIN), wallet, order tracking and more.',
+  icons: {
+    icon: '/xelnova-icon-dark.png',
+    apple: '/xelnova-icon-dark.png',
+  },
+  robots: {
+    index: false,
+    follow: false,
+  },
+  alternates: {
+    canonical: SITE_URL,
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${inter.variable} ${dmSans.variable}`} data-scroll-behavior="smooth">
-      <body className="font-sans antialiased min-h-screen flex flex-col bg-surface-raised" suppressHydrationWarning>
+    <html lang="en" className={`${inter.variable} ${poppins.variable}`} data-scroll-behavior="smooth">
+      <head>
+        <link rel="preconnect" href="https://res.cloudinary.com" />
+        <link rel="dns-prefetch" href="https://res.cloudinary.com" />
+      </head>
+      <body className="font-sans antialiased min-h-screen flex flex-col" suppressHydrationWarning>
         <Providers>
-          <BusinessHeader />
+          <Toaster />
+          <BusinessOrgBanner />
+          <Header />
           <main className="flex-grow">{children}</main>
-          <BusinessFooter />
+          <Footer />
         </Providers>
       </body>
     </html>

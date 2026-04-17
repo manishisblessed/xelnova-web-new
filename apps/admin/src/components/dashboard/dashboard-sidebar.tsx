@@ -99,6 +99,7 @@ const NAV_SECTIONS: NavSection[] = [
     title: 'System',
     items: [
       { href: '/roles', label: 'Roles', icon: Shield },
+      { href: '/sub-admins', label: 'Sub-admins', icon: Users },
       { href: '/settings', label: 'Settings', icon: Settings },
     ],
   },
@@ -110,13 +111,26 @@ export function DashboardSidebar() {
 
   return (
     <aside className="fixed inset-y-0 left-0 z-40 flex h-dvh w-64 flex-col overflow-hidden border-r border-border bg-surface">
-      <div className="shrink-0 border-b border-border p-6">
-        <Link href="/dashboard" className="flex items-center gap-2.5">
-          <Image src="/xelnova-icon-dark.png" alt="Xelnova" width={36} height={36} className="h-8 w-8" />
-          <div className="flex items-center gap-1.5">
-            <span className="text-xl font-bold text-primary-600 font-display">Xelnova</span>
-            <span className="text-xs text-text-muted font-medium uppercase tracking-wider">Admin</span>
-          </div>
+      <div className="shrink-0 border-b border-border px-5 py-5">
+        <Link
+          href="/dashboard"
+          className="flex items-center gap-2"
+          aria-label="Xelnova Admin"
+        >
+          {/* Use the same gold wordmark as the public website so the brand
+              feels consistent across surfaces; the "Admin" chip sits beside
+              it to identify the console without competing with the logo. */}
+          <Image
+            src="/xelnova-logo-dark.png"
+            alt="Xelnova"
+            width={280}
+            height={80}
+            priority
+            className="h-9 w-auto"
+          />
+          <span className="rounded-md border border-primary-200 bg-primary-50 px-1.5 py-[2px] text-[9px] font-semibold uppercase tracking-[0.18em] text-primary-700">
+            Admin
+          </span>
         </Link>
       </div>
       <nav className="min-h-0 flex-1 space-y-4 overflow-y-auto overflow-x-hidden overscroll-y-contain p-3">

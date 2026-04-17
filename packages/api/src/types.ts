@@ -23,7 +23,7 @@ export type AuthProvider = 'EMAIL' | 'PHONE' | 'GOOGLE';
 export interface AuthUser {
   id: string;
   name: string;
-  email: string;
+  email: string | null;
   phone: string | null;
   avatar: string | null;
   role: 'CUSTOMER' | 'SELLER' | 'ADMIN' | 'BUSINESS';

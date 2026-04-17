@@ -65,7 +65,7 @@ export type FormVariantRow = {
 
 // ─── Image helpers ───
 
-export const MAX_PRODUCT_IMAGES = 10;
+export const MAX_PRODUCT_IMAGES = 5;
 
 export type ProductImage = {
   id: string;

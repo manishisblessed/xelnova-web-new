@@ -46,6 +46,7 @@ export * as wishlistApi from './wishlist';
 export * as verificationApi from './verification';
 export * as storesApi from './stores';
 export * as businessApi from './business';
+export * as contactApi from './contact';
 
 // Hooks
 export { AuthProvider, useAuth } from './hooks/use-auth';

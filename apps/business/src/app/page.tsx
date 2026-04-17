@@ -1,89 +1,213 @@
 'use client';
 
+import { useState, useEffect } from 'react';
+import dynamic from 'next/dynamic';
 import Link from 'next/link';
-import { ArrowRight, Building2, FileText, Shield } from 'lucide-react';
-import { productsApi } from '@xelnova/api';
-import { useEffect, useState } from 'react';
+import Image from 'next/image';
+import {
+  TrendingUp, ArrowRight, Package, Users, Store, Truck,
+} from 'lucide-react';
+import { searchApi, productsApi } from '@xelnova/api';
+import type { Banner } from '@xelnova/api';
+import { HeroCarousel } from '@/components/marketplace/hero-carousel';
+import { CategoryCard } from '@/components/marketplace/category-card';
+import { HomeFilterBar } from '@/components/marketplace/home-filter-bar';
+import { useCategories } from '@/lib/api';
 
-export default function BusinessHomePage() {
-  const [stats, setStats] = useState<{ products: number; sellers: number } | null>(null);
+const HomeBelowFold = dynamic(
+  () => import('@/components/marketplace/home-below-fold').then((m) => m.HomeBelowFold),
+  {
+    loading: () => (
+      <div className="flex items-center justify-center py-20">
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary-600 border-t-transparent" />
+      </div>
+    ),
+  }
+);
+
+const fallbackSearches: string[] = [];
+
+const defaultSidePromos: { image: string; title: string; subtitle: string; href: string; badge: string; accent: string }[] = [];
+
+const statIcons = [Package, Store, Users, Truck];
+
+function formatStatValue(key: string, val: number): string {
+  if (key === 'orders') return val > 0 ? 'FREE' : 'FREE';
+  if (val >= 10_000_000) return `${(val / 1_000_000).toFixed(0)}M+`;
+  if (val >= 1_000_000) return `${(val / 1_000_000).toFixed(1)}M+`;
+  if (val >= 1_000) return `${(val / 1_000).toFixed(0)}K+`;
+  if (val > 0) return `${val}+`;
+  return '0';
+}
+
+const statLabels: Record<string, string> = {
+  products: 'Products',
+  sellers: 'Trusted Sellers',
+  customers: 'Happy Customers',
+  orders: 'Delivery over ₹499',
+};
+
+export default function HomePage() {
+  const { data: categories } = useCategories();
+  const [trendingSearches, setTrendingSearches] = useState(fallbackSearches);
+  const [stats, setStats] = useState<{ icon: typeof Package; value: string; label: string }[]>([
+    { icon: Package, value: '...', label: 'Products' },
+    { icon: Store, value: '...', label: 'Trusted Sellers' },
+    { icon: Users, value: '...', label: 'Happy Customers' },
+    { icon: Truck, value: 'FREE', label: 'Delivery over ₹499' },
+  ]);
+  const [sidePromos, setSidePromos] = useState(defaultSidePromos);
+  const [brands, setBrands] = useState<{ id: string; name: string; slug: string }[]>([]);
 
   useEffect(() => {
-    productsApi.getStats().then(setStats).catch(() => setStats({ products: 0, sellers: 0 }));
+    let cancelled = false;
+    Promise.allSettled([
+      searchApi.getPopularSearches(),
+      productsApi.getStats(),
+      productsApi.getBanners('side'),
+      productsApi.getBrands(),
+    ]).then(([searchesResult, statsResult, bannersResult, brandsResult]) => {
+      if (cancelled) return;
+      if (searchesResult.status === 'fulfilled' && searchesResult.value?.length) {
+        setTrendingSearches(searchesResult.value);
+      }
+      if (statsResult.status === 'fulfilled') {
+        const data = statsResult.value;
+        const keys = ['products', 'sellers', 'customers', 'orders'] as const;
+        setStats(keys.map((key, i) => ({
+          icon: statIcons[i],
+          value: key === 'orders' ? 'FREE' : formatStatValue(key, data[key]),
+          label: statLabels[key],
+        })));
+      }
+      if (bannersResult.status === 'fulfilled') {
+        const banners = bannersResult.value;
+        if (banners?.length >= 2) {
+          const accentColors = ['from-primary-500/80 to-primary-700/90', 'from-accent-500/80 to-accent-700/90'];
+          setSidePromos(banners.slice(0, 2).map((b: any, i: number) => ({
+            image: b.image || defaultSidePromos[i]?.image || '',
+            title: b.title,
+            subtitle: b.subtitle || '',
+            href: b.ctaLink || '/products',
+            badge: b.ctaText || '',
+            accent: accentColors[i % 2],
+          })));
+        }
+      }
+      if (brandsResult.status === 'fulfilled' && brandsResult.value?.length) {
+        setBrands(brandsResult.value.map((b: any) => ({
+          id: b.id,
+          name: b.name,
+          slug: b.slug || b.name.toLowerCase().replace(/\s+/g, '-'),
+        })));
+      }
+    });
+    return () => { cancelled = true; };
   }, []);
 
   return (
-    <div className="bg-surface-raised">
-      <section className="border-b border-slate-200 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 px-4 py-16 text-white">
-        <div className="mx-auto max-w-7xl">
-          <p className="text-sm font-medium uppercase tracking-wider text-slate-300">Procurement</p>
-          <h1 className="mt-2 max-w-2xl font-display text-3xl font-bold leading-tight sm:text-4xl">
-            Buy for your organization on Xelnova Business
-          </h1>
-          <p className="mt-4 max-w-xl text-slate-300">
-            Same marketplace catalog with company context, GSTIN on invoices where applicable, and order history for
-            your team. Contract pricing and approvals are not enabled in v1 — list prices apply.
-          </p>
-          <div className="mt-8 flex flex-wrap gap-3">
-            <Link
-              href="/register"
-              className="inline-flex items-center gap-2 rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-100"
-            >
-              Create business account <ArrowRight className="h-4 w-4" />
-            </Link>
-            <Link
-              href="/products"
-              className="inline-flex items-center gap-2 rounded-xl border border-white/30 px-5 py-3 text-sm font-semibold text-white hover:bg-white/10"
-            >
-              Browse catalog
-            </Link>
-          </div>
-          {stats && (
-            <p className="mt-8 text-sm text-slate-400">
-              Catalog: {stats.products.toLocaleString('en-IN')}+ SKUs · {stats.sellers.toLocaleString('en-IN')}+ sellers
-            </p>
-          )}
-        </div>
-      </section>
+    <div className="min-h-screen mesh-hero">
+      {/* ─── FILTER BAR ─── */}
+      <HomeFilterBar categories={categories || []} brands={brands} />
 
-      <section className="mx-auto max-w-7xl px-4 py-12">
-        <h2 className="text-lg font-semibold text-slate-900">Built for procurement teams</h2>
-        <div className="mt-6 grid gap-6 sm:grid-cols-3">
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <Building2 className="h-8 w-8 text-primary-600" />
-            <h3 className="mt-3 font-semibold text-slate-900">Organization context</h3>
-            <p className="mt-2 text-sm text-slate-600">
-              Always see which company you are purchasing for. Org admins manage GSTIN and company legal name.
-            </p>
-          </div>
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <FileText className="h-8 w-8 text-primary-600" />
-            <h3 className="mt-3 font-semibold text-slate-900">India tax-ready</h3>
-            <p className="mt-2 text-sm text-slate-600">
-              Collect and display GSTIN for invoices. Checkout uses standard GST rules on product tax fields.
-            </p>
-          </div>
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <Shield className="h-8 w-8 text-primary-600" />
-            <h3 className="mt-3 font-semibold text-slate-900">Roles (v1)</h3>
-            <p className="mt-2 text-sm text-slate-600">
-              Org admin, buyer, and approver roles are modeled; approval workflows ship in a later release unless
-              enabled for your tenant.
-            </p>
+      {/* ─── 1. BENTO HERO GRID ─── */}
+      <section className="pt-3 pb-2">
+        <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
+          <div className={`grid grid-cols-1 ${sidePromos.length > 0 ? 'lg:grid-cols-4' : ''} gap-3 lg:gap-4 lg:h-[420px]`}>
+            <div className={`${sidePromos.length > 0 ? 'lg:col-span-3' : ''} h-[220px] sm:h-[300px] lg:h-full`}>
+              <HeroCarousel />
+            </div>
+            {sidePromos.length > 0 && (
+              <div className="hidden lg:grid grid-rows-2 gap-3 h-full">
+                {sidePromos.map((promo) => (
+                  <Link key={promo.title} href={promo.href} className="relative rounded-2xl overflow-hidden group">
+                    <Image src={promo.image} alt={promo.title} fill sizes="220px" className="object-cover group-hover:scale-110 transition-transform duration-700" />
+                    <div className={`absolute inset-0 bg-gradient-to-t ${promo.accent}`} />
+                    <div className="absolute inset-0 flex flex-col justify-end p-5">
+                      <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-white/70 mb-1">{promo.badge}</span>
+                      <h3 className="text-lg font-bold text-white leading-tight">{promo.title}</h3>
+                      <p className="text-xs text-white/70 mt-0.5">{promo.subtitle}</p>
+                      <span className="inline-flex items-center gap-1 text-xs font-semibold text-white mt-2 group-hover:gap-2 transition-all">
+                        Shop Now <ArrowRight className="w-3 h-3" />
+                      </span>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </section>
 
-      <section className="border-t border-slate-200 bg-white py-10">
-        <div className="mx-auto max-w-7xl px-4 text-center">
-          <p className="text-sm text-slate-600">
-            Need the consumer storefront?{' '}
-            <a href={process.env.NEXT_PUBLIC_RETAIL_SITE_URL || 'https://www.xelnova.in'} className="font-medium text-primary-600 hover:underline">
-              Go to Xelnova retail
-            </a>
-          </p>
+      {/* ─── 2. TRENDING SEARCHES ─── */}
+      {trendingSearches.length > 0 && (
+        <section className="pb-2">
+          <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
+            <div className="flex items-center gap-2.5 overflow-x-auto scrollbar-hide py-1">
+              <span className="flex-shrink-0 text-xs font-semibold text-text-muted flex items-center gap-1">
+                <TrendingUp size={12} className="text-primary-500" /> Trending:
+              </span>
+              {trendingSearches.map((term) => (
+                <Link
+                  key={term}
+                  href={`/products?search=${encodeURIComponent(term)}`}
+                  className="flex-shrink-0 text-xs glass-subtle border border-white/70 rounded-full px-3.5 py-1.5 text-text-secondary shadow-sm hover:border-primary-300/80 hover:text-primary-700 hover:bg-primary-50/90 hover:shadow-md hover:-translate-y-0.5 transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]"
+                >
+                  {term}
+                </Link>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* ─── 3. SOCIAL PROOF STATS ─── */}
+      <section className="py-5">
+        <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
+          <div className="stats-ribbon p-5 md:p-7">
+            <div className="pointer-events-none absolute inset-0 z-0 opacity-[0.12]">
+              <div className="absolute top-0 left-1/4 h-44 w-44 rounded-full bg-white blur-3xl" />
+              <div className="absolute right-1/4 bottom-0 h-60 w-60 rounded-full bg-accent-300/80 blur-3xl" />
+            </div>
+            <div className="relative z-10 grid grid-cols-2 gap-3 text-center md:grid-cols-4 md:gap-4">
+              {stats.map((stat, i) => (
+                <div
+                  key={i}
+                  className="group flex flex-col items-center rounded-2xl border border-white/15 bg-white/10 px-3 py-4 backdrop-blur-md transition-all duration-300 hover:bg-white/18 hover:border-white/25 hover:shadow-lg hover:-translate-y-0.5"
+                >
+                  <div className="mb-2.5 flex h-11 w-11 items-center justify-center rounded-2xl bg-white/15 shadow-inner ring-1 ring-white/20 transition-transform duration-300 group-hover:scale-105">
+                    <stat.icon className="h-5 w-5 text-white/95" />
+                  </div>
+                  <div className="text-2xl md:text-3xl font-extrabold text-white font-display tracking-tight drop-shadow-sm">{stat.value}</div>
+                  <div className="mt-1 text-[11px] md:text-xs font-medium text-white/85 leading-snug max-w-[9rem] mx-auto">{stat.label}</div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       </section>
+
+      {/* ─── 4. CATEGORIES ─── */}
+      <section className="py-5">
+        <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
+          <div className="relative panel-glass py-7 px-4 sm:px-6 transition-all duration-500 hover:shadow-[0_24px_56px_-14px_rgba(124,58,237,0.22)]">
+            {/* Decorative background shapes */}
+            <div className="absolute inset-0 overflow-hidden rounded-[1.25rem] pointer-events-none">
+              <div className="absolute -top-10 -left-10 w-40 h-40 bg-gradient-to-br from-primary-200/30 to-transparent rounded-full blur-2xl" />
+              <div className="absolute -bottom-10 -right-10 w-32 h-32 bg-gradient-to-tl from-accent-200/25 to-transparent rounded-full blur-2xl" />
+            </div>
+            
+            <div className="relative flex items-center justify-between sm:justify-center gap-5 sm:gap-7 lg:gap-10 overflow-x-auto scrollbar-hide pb-1">
+              {(categories || []).map((cat, i) => (
+                <CategoryCard key={cat.id} category={cat} index={i} />
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ─── Below-the-fold content (lazy loaded) ─── */}
+      <HomeBelowFold />
     </div>
   );
 }

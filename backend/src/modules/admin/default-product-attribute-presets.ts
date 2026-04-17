@@ -165,10 +165,8 @@ export const DEFAULT_PRODUCT_ATTRIBUTE_PRESETS: ProductAttributePresetsPayload =
   additionalDetails: {
     id: 'additionalDetails',
     keys: [
-      'Best Sellers Rank',
       'Launch Date',
-      'ASIN / Style ID',
-      'Customer Reviews Summary',
+      'Style ID',
       'Certifications',
       'Compatibility',
       'Age Range',

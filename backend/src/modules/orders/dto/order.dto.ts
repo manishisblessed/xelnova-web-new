@@ -6,6 +6,8 @@ import {
   IsOptional,
   IsInt,
   Min,
+  IsEmail,
+  MaxLength,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -86,6 +88,20 @@ export class CreateOrderDto {
   @IsOptional()
   @IsString()
   couponCode?: string;
+
+  /** Captured at checkout for phone-only signups; updates the User record. */
+  @ApiPropertyOptional({ description: 'Buyer name to save on the user profile if missing' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  customerName?: string;
+
+  /** Captured at checkout for phone-only signups; updates the User record. */
+  @ApiPropertyOptional({ description: 'Buyer email to save on the user profile if missing' })
+  @IsOptional()
+  @IsEmail()
+  @MaxLength(160)
+  customerEmail?: string;
 }
 
 export class CancelOrderDto {

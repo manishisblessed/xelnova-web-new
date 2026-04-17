@@ -506,7 +506,7 @@ export class WalletService {
           });
           if (user) {
             ownerName = user.name;
-            ownerEmail = user.email;
+            ownerEmail = user.email ?? '';
           }
         }
         return { ...w, ownerName, ownerEmail };

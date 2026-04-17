@@ -1,6 +1,6 @@
-import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
-import { wishlistApi, getAccessToken } from '@xelnova/api';
+import { create } from "zustand";
+import { persist } from "zustand/middleware";
+import { wishlistApi, getAccessToken } from "@xelnova/api";
 
 interface WishlistState {
   items: string[];
@@ -37,6 +37,7 @@ export const useWishlistStore = create<WishlistState>()(
           const local = get().items;
           const merged = [...new Set([...ids, ...local])];
           set({ items: merged, synced: true });
+          // Sync any local-only items to server
           const serverSet = new Set(ids);
           for (const id of local) {
             if (!serverSet.has(id)) {
@@ -44,10 +45,10 @@ export const useWishlistStore = create<WishlistState>()(
             }
           }
         } catch {
-          // keep local
+          // Keep local items if server fails
         }
       },
     }),
-    { name: 'xelnova-business-wishlist' },
-  ),
+    { name: "xelnova-wishlist" }
+  )
 );

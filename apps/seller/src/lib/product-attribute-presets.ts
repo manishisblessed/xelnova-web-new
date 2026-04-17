@@ -37,6 +37,8 @@ const commonCare = [
 
 /** Internal placeholder until seller types a custom attribute name (not saved as-is). */
 export const CUSTOM_ATTRIBUTE_PENDING = '__custom_attribute__';
+/** Internal placeholder used to track that the seller picked "Custom value…" but has not typed yet. */
+export const CUSTOM_VALUE_PENDING = '__custom_value__';
 
 export type AttributePreset = {
   id: string;
@@ -165,10 +167,8 @@ export const PRESET_ITEM_DETAILS: AttributePreset = {
 export const PRESET_ADDITIONAL_DETAILS: AttributePreset = {
   id: 'additionalDetails',
   keys: [
-    'Best Sellers Rank',
     'Launch Date',
-    'ASIN / Style ID',
-    'Customer Reviews Summary',
+    'Style ID',
     'Certifications',
     'Compatibility',
     'Age Range',
