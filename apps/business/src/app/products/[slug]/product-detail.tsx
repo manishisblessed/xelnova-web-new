@@ -731,11 +731,18 @@ export default function ProductDetail() {
                 ) : (
                   <p className="text-sm font-semibold text-primary-700 mt-0.5">{product.seller.name}</p>
                 )}
-                <div className="mt-1 flex items-center gap-1 text-xs text-text-muted">
-                  <span className="font-medium text-text-primary">{product.seller.rating}</span>
-                  <Star size={10} className="fill-accent-400 text-accent-400" />
-                  <span>seller rating</span>
-                </div>
+                {product.seller.rating > 0 ? (
+                  <div className="mt-1 flex items-center gap-1 text-xs text-text-muted">
+                    <span className="font-medium text-text-primary">{product.seller.rating.toFixed(1)}</span>
+                    <Star size={10} className="fill-accent-400 text-accent-400" />
+                    <span>seller rating</span>
+                  </div>
+                ) : (
+                  <div className="mt-1 text-xs text-text-muted">
+                    <span className="font-medium text-primary-700">New seller</span>
+                    <span className="ml-1">on Xelnova</span>
+                  </div>
+                )}
                 {product.seller.slug && (
                   <Link
                     href={`/stores/${product.seller.slug}`}

@@ -74,7 +74,7 @@ export function mapProduct(p: ApiProduct): Product {
     stockCount: p.stock,
     seller: {
       name: (p.seller as any)?.storeName || 'Xelnova Seller',
-      rating: (p.seller as any)?.rating || 4.5,
+      rating: typeof (p.seller as any)?.rating === 'number' ? (p.seller as any).rating : 0,
       slug: (p.seller as any)?.slug || undefined,
     },
     variants: normalizeVariants(p.variants),

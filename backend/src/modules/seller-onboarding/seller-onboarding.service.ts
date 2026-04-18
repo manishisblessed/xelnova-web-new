@@ -464,6 +464,10 @@ export class SellerOnboardingService {
     const hashedPassword = await bcrypt.hash(dto.password, 12);
     const user = await this.findOrCreateUser(dto, hashedPassword, ipAddress);
 
+    // Step 1 only seeds a placeholder slug from the user's full name. The
+    // real, canonical slug is derived from the chosen storeName at step 2,
+    // so we keep this disposable and add a random suffix to avoid clashing
+    // with another seller who happens to share the same first name.
     const slug = this.generateSlug(dto.fullName);
     const sellerProfile = await this.prisma.sellerProfile.create({
       data: {
@@ -552,13 +556,18 @@ export class SellerOnboardingService {
       }
     }
 
-    const slug = this.generateSlug(dto.storeName);
-    const existingSlug = await this.prisma.sellerProfile.findFirst({
-      where: { slug, id: { not: sellerId } },
-    });
-    if (existingSlug) {
-      throw new HttpException('Store name already taken', HttpStatus.CONFLICT);
-    }
+    // Resolve a clean, human-readable slug for the chosen storeName. If the
+    // seller is just resubmitting step 2 with the same storeName we keep
+    // their existing slug so any cached product/store links stay valid; we
+    // only pick a fresh slug when the name has actually changed (or the
+    // current slug is the throwaway "<firstname>-xxxxxx" stub from step 1).
+    const desiredBaseSlug = this.slugifyName(dto.storeName);
+    const currentSlugBase = (seller.slug || '').replace(/-\d+$/, '');
+    const keepExistingSlug =
+      seller.storeName === dto.storeName && currentSlugBase === desiredBaseSlug;
+    const slug = keepExistingSlug
+      ? seller.slug
+      : await this.reserveUniqueSlug(dto.storeName, sellerId);
 
     // Aadhaar verification via DigiLocker is mandatory in production
     if (!dto.aadhaarVerified || !dto.aadhaarVerifiedData) {
@@ -991,14 +1000,58 @@ export class SellerOnboardingService {
     return steps;
   }
 
-  private generateSlug(name: string): string {
-    const baseSlug = name
+  /**
+   * Build the canonical store slug for a given storeName/fullName. Returns a
+   * lowercase, dash-separated, URL-safe string (e.g. "Grand HR Store" ->
+   * "grand-hr-store"). No random suffix is appended here — uniqueness is
+   * resolved by {@link reserveUniqueSlug} so URLs stay clean and stable.
+   */
+  private slugifyName(name: string): string {
+    const slug = (name || '')
       .toLowerCase()
       .trim()
       .replace(/[^\w\s-]/g, '')
-      .replace(/\s+/g, '-')
-      .substring(0, 40);
+      .replace(/[\s_]+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .substring(0, 50);
+    return slug || 'seller';
+  }
 
+  /**
+   * Reserve a slug that does not collide with any other seller. If the
+   * canonical slug is already free (or already owned by `currentSellerId`),
+   * we keep it as-is so the seller's storefront URL remains stable across
+   * profile updates. Only on a real conflict do we append a numeric suffix
+   * (e.g. `grand-hr-store-2`) which is far more readable than the random
+   * 6-char hash that legacy sellers received.
+   */
+  private async reserveUniqueSlug(
+    name: string,
+    currentSellerId?: string,
+  ): Promise<string> {
+    const base = this.slugifyName(name);
+
+    for (let attempt = 0; attempt < 50; attempt++) {
+      const candidate = attempt === 0 ? base : `${base}-${attempt + 1}`;
+      const existing = await this.prisma.sellerProfile.findFirst({
+        where: { slug: candidate },
+        select: { id: true },
+      });
+      if (!existing || existing.id === currentSellerId) return candidate;
+    }
+
+    // Extremely unlikely fall-through — guarantees forward progress.
+    const suffix = Math.random().toString(36).substring(2, 8);
+    return `${base}-${suffix}`;
+  }
+
+  /**
+   * @deprecated retained for backwards compatibility — prefer
+   * {@link reserveUniqueSlug} which avoids random suffixes when possible.
+   */
+  private generateSlug(name: string): string {
+    const baseSlug = this.slugifyName(name);
     const uniqueSuffix = Math.random().toString(36).substring(2, 8);
     return `${baseSlug}-${uniqueSuffix}`;
   }

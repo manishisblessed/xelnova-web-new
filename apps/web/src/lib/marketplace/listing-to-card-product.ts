@@ -49,7 +49,7 @@ export function listingProductToCardProduct(
     boughtLastMonth: 0,
     inStock: p.stock > 0,
     stockCount: p.stock,
-    seller: { name: p.seller?.storeName ?? 'Seller', rating: 4.5, slug: p.seller?.slug },
+    seller: { name: p.seller?.storeName ?? 'Seller', rating: 0, slug: p.seller?.slug },
     variants: Array.isArray(p.variants) ? (p.variants as ProductVariant[]) : [],
     specifications: {},
     reviews: [],

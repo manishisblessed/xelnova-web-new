@@ -27,16 +27,82 @@ export class SellerStoreService {
 
   // ─── Public Methods (for buyers) ───
 
-  async getStoreBySlug(slug: string) {
-    const store = await this.prisma.sellerProfile.findUnique({
-      where: { slug },
-      include: {
-        storeBanners: {
-          where: { isActive: true },
-          orderBy: { sortOrder: 'asc' },
-        },
+  /**
+   * Look up a seller by storefront slug, with a tolerant fallback for legacy
+   * URLs.
+   *
+   * Historically `generateSlug` always appended a random 6-char suffix
+   * (e.g. `grand-hr-store-bhsldi`). Resubmitting onboarding step 2 produced
+   * a *different* random suffix and silently broke any cached product or
+   * share link pointing at the previous slug. To stop those URLs returning
+   * 404 we:
+   *   1. Try the exact slug match (covers all current sellers).
+   *   2. If that misses, treat the trailing 6-char block as the legacy
+   *      random hash, strip it, and look for a unique seller whose slug
+   *      begins with the same human-readable base. This safely re-routes
+   *      `malika-bhsldi` -> `malika` (or `malika-2`, etc.) without
+   *      hijacking unrelated stores when multiple candidates exist.
+   */
+  private async resolveStoreBySlug(slug: string) {
+    const include = {
+      storeBanners: {
+        where: { isActive: true },
+        orderBy: { sortOrder: 'asc' as const },
       },
+    };
+
+    const exact = await this.prisma.sellerProfile.findUnique({
+      where: { slug },
+      include,
     });
+    if (exact) return exact;
+
+    const legacyMatch = slug.match(/^(.+)-[a-z0-9]{6}$/i);
+    if (!legacyMatch) return null;
+
+    const base = legacyMatch[1];
+    const candidates = await this.prisma.sellerProfile.findMany({
+      where: {
+        OR: [
+          { slug: base },
+          { slug: { startsWith: `${base}-` } },
+        ],
+      },
+      include,
+      take: 2,
+    });
+
+    return candidates.length === 1 ? candidates[0] : null;
+  }
+
+  /**
+   * Resolve a slug -> sellerId, applying the same legacy-fallback rules as
+   * {@link resolveStoreBySlug}. Used by the lighter store endpoints
+   * (products, categories, deals, bestsellers) that only need the id.
+   */
+  private async resolveSellerIdBySlug(slug: string): Promise<string | null> {
+    const exact = await this.prisma.sellerProfile.findUnique({
+      where: { slug },
+      select: { id: true },
+    });
+    if (exact) return exact.id;
+
+    const legacyMatch = slug.match(/^(.+)-[a-z0-9]{6}$/i);
+    if (!legacyMatch) return null;
+
+    const base = legacyMatch[1];
+    const candidates = await this.prisma.sellerProfile.findMany({
+      where: {
+        OR: [{ slug: base }, { slug: { startsWith: `${base}-` } }],
+      },
+      select: { id: true },
+      take: 2,
+    });
+    return candidates.length === 1 ? candidates[0].id : null;
+  }
+
+  async getStoreBySlug(slug: string) {
+    const store = await this.resolveStoreBySlug(slug);
 
     if (!store) {
       throw new NotFoundException('Store not found');
@@ -115,19 +181,16 @@ export class SellerStoreService {
   }
 
   async getStoreProducts(slug: string, query: StoreProductsQueryDto) {
-    const store = await this.prisma.sellerProfile.findUnique({
-      where: { slug },
-      select: { id: true },
-    });
+    const sellerId = await this.resolveSellerIdBySlug(slug);
 
-    if (!store) {
+    if (!sellerId) {
       throw new NotFoundException('Store not found');
     }
 
     const { category, search, sort, page = 1, limit = 20, minPrice, maxPrice, inStock } = query;
 
     const where: Prisma.ProductWhereInput = {
-      sellerId: store.id,
+      sellerId,
       isActive: true,
     };
 
@@ -189,19 +252,16 @@ export class SellerStoreService {
   }
 
   async getStoreCategories(slug: string) {
-    const store = await this.prisma.sellerProfile.findUnique({
-      where: { slug },
-      select: { id: true },
-    });
+    const sellerId = await this.resolveSellerIdBySlug(slug);
 
-    if (!store) {
+    if (!sellerId) {
       throw new NotFoundException('Store not found');
     }
 
     return this.prisma.category.findMany({
       where: {
         products: {
-          some: { sellerId: store.id, isActive: true },
+          some: { sellerId, isActive: true },
         },
       },
       select: {
@@ -212,7 +272,7 @@ export class SellerStoreService {
         _count: {
           select: {
             products: {
-              where: { sellerId: store.id, isActive: true },
+              where: { sellerId, isActive: true },
             },
           },
         },
@@ -221,19 +281,15 @@ export class SellerStoreService {
   }
 
   async getStoreDeals(slug: string, limit = 20) {
-    const store = await this.prisma.sellerProfile.findUnique({
-      where: { slug },
-      select: { id: true },
-    });
-
-    if (!store) {
+    const sellerId = await this.resolveSellerIdBySlug(slug);
+    if (!sellerId) {
       throw new NotFoundException('Store not found');
     }
 
     // Get products with discounts (compareAtPrice > price)
     const products = await this.prisma.product.findMany({
       where: {
-        sellerId: store.id,
+        sellerId,
         isActive: true,
         compareAtPrice: { not: null },
       },
@@ -249,19 +305,16 @@ export class SellerStoreService {
   }
 
   async getStoreBestsellers(slug: string, limit = 10) {
-    const store = await this.prisma.sellerProfile.findUnique({
-      where: { slug },
-      select: { id: true },
-    });
+    const sellerId = await this.resolveSellerIdBySlug(slug);
 
-    if (!store) {
+    if (!sellerId) {
       throw new NotFoundException('Store not found');
     }
 
     // Get bestsellers based on order count
     const bestsellers = await this.prisma.product.findMany({
       where: {
-        sellerId: store.id,
+        sellerId,
         isActive: true,
       },
       orderBy: [{ reviewCount: 'desc' }, { rating: 'desc' }],
