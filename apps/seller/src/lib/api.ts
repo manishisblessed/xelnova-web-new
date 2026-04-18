@@ -220,25 +220,59 @@ export async function apiCheckServiceability(orderId: string) {
 
 // ─── Shipping Label ───
 
-export async function apiDownloadShippingLabel(orderId: string) {
-  const res = await fetch(`${API_URL}/seller/orders/${orderId}/label`, {
-    headers: authHeaders(),
-  });
+async function downloadPdfBlob(url: string, filename: string, fallbackMessage: string) {
+  const res = await fetch(url, { headers: authHeaders() });
   if (!res.ok) {
     const text = await res.text();
-    let msg = 'Failed to download label';
+    let msg = fallbackMessage;
     try { msg = JSON.parse(text).message || msg; } catch { /* plain text error */ }
     throw new Error(msg);
   }
   const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
+  const objectUrl = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = url;
-  a.download = `shipping-label-${orderId}.pdf`;
+  a.href = objectUrl;
+  a.download = filename;
   document.body.appendChild(a);
   a.click();
   a.remove();
-  URL.revokeObjectURL(url);
+  URL.revokeObjectURL(objectUrl);
+}
+
+export async function apiDownloadShippingLabel(orderId: string) {
+  await downloadPdfBlob(
+    `${API_URL}/seller/orders/${orderId}/label`,
+    `shipping-label-${orderId}.pdf`,
+    'Failed to download label',
+  );
+}
+
+/** Customer-format invoice PDF (per testing observation #7). */
+export async function apiDownloadCustomerInvoice(orderId: string) {
+  await downloadPdfBlob(
+    `${API_URL}/seller/orders/${orderId}/invoice`,
+    `invoice-${orderId}.pdf`,
+    'Failed to download invoice',
+  );
+}
+
+/**
+ * Bulk download every customer invoice for a calendar month as one merged
+ * PDF (per testing observation #23). When year/month are omitted, the
+ * backend uses the current calendar month.
+ */
+export async function apiDownloadMonthlyInvoices(opts: { year?: number; month?: number } = {}) {
+  const params = new URLSearchParams();
+  if (opts.year != null) params.set('year', String(opts.year));
+  if (opts.month != null) params.set('month', String(opts.month));
+  const qs = params.toString();
+  const y = opts.year ?? new Date().getFullYear();
+  const m = opts.month ?? new Date().getMonth() + 1;
+  await downloadPdfBlob(
+    `${API_URL}/seller/invoices/monthly${qs ? `?${qs}` : ''}`,
+    `invoices-${y}-${String(m).padStart(2, '0')}.pdf`,
+    'Failed to download monthly invoices',
+  );
 }
 
 // ─── Courier Configs ───
@@ -480,11 +514,11 @@ export async function apiSendInventoryAlerts() {
 
 // ─── Brand Proposal ───
 
-export async function apiProposeBrand(name: string, logo?: string) {
+export async function apiProposeBrand(name: string, logo?: string, authorizationCertificate?: string) {
   const res = await fetch(`${API_URL}/seller/brands/propose`, {
     method: 'POST',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, logo }),
+    body: JSON.stringify({ name, logo, authorizationCertificate }),
   });
   return handleResponse(res);
 }

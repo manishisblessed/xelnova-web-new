@@ -67,13 +67,7 @@ export function NotificationBell() {
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  const handleToggle = () => {
-    const willOpen = !open;
-    setOpen(willOpen);
-    if (willOpen) fetchNotifications();
-  };
-
-  const markAllRead = async () => {
+  const markAllRead = useCallback(async () => {
     try {
       const headers = authHeaders();
       if (!headers.Authorization) return;
@@ -84,6 +78,19 @@ export function NotificationBell() {
       setUnread(0);
       setNotifications(prev => prev.map(n => ({ ...n, read: true })));
     } catch {}
+  }, []);
+
+  const handleToggle = () => {
+    const willOpen = !open;
+    setOpen(willOpen);
+    if (willOpen) {
+      fetchNotifications();
+      // Auto-mark unread items as read as soon as the panel opens — testing
+      // observation #3: bell icon should clear once clicked.
+      if (unread > 0) {
+        void markAllRead();
+      }
+    }
   };
 
   if (!isAuthenticated) return null;

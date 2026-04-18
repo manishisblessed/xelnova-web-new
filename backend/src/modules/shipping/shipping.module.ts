@@ -10,6 +10,7 @@ import { XpressBeesProvider } from './providers/xpressbees.provider';
 import { EkartProvider } from './providers/ekart.provider';
 import { XelnovaCourierProvider } from './providers/xelnova-courier.provider';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { InvoiceService } from '../orders/invoice.service';
 
 @Module({
   imports: [ConfigModule, NotificationsModule],
@@ -22,6 +23,10 @@ import { NotificationsModule } from '../notifications/notifications.module';
     XpressBeesProvider,
     EkartProvider,
     XelnovaCourierProvider,
+    // Re-providing InvoiceService here so the seller shipping controller can
+    // serve customer-format invoice PDFs (testing observation #7) without
+    // needing a wider OrdersModule import cycle.
+    InvoiceService,
   ],
   exports: [ShippingService, LabelGeneratorService],
 })

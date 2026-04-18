@@ -512,8 +512,22 @@ export default function RegisterPage() {
       }
       if (data.success) {
         setGstVerification({ status: 'verified', data: data.data });
-        if (data.data.tradeName) {
-          setFormData(prev => ({ ...prev, storeName: prev.storeName || data.data.tradeName }));
+        // Per testing observation #21 — once GSTIN verifies, the legal /
+        // trade name returned by the GST registry is the source of truth
+        // for the seller's business name. We always overwrite the store
+        // name with the verified value (preferring the more complete
+        // legal name) so the seller can't accidentally proceed with a
+        // mismatched typed-in name.
+        const verifiedFirmName = (data.data?.legalName || data.data?.tradeName || '').trim();
+        if (verifiedFirmName) {
+          setFormData(prev => ({
+            ...prev,
+            storeName: verifiedFirmName,
+            // Also seed the bank account holder name (so penny-drop has
+            // a sensible default to match against) only if the seller
+            // hasn't typed something else yet.
+            accountHolderName: prev.accountHolderName?.trim() ? prev.accountHolderName : verifiedFirmName,
+          }));
         }
       } else {
         setGstVerification({ status: 'error', error: extractErrorMessage(data, 'GST verification failed. Please try again.') });
@@ -666,8 +680,13 @@ export default function RegisterPage() {
       }
       if (data.success) {
         setBankVerification({ status: 'verified', data: data.data });
-        if (data.data.nameAtBank && !formData.accountHolderName) {
-          setFormData(prev => ({ ...prev, accountHolderName: data.data.nameAtBank }));
+        // Per testing observation #20 — the bank's penny-drop response
+        // is the authoritative full firm name on the bank record; always
+        // use it to populate the account holder ("bank name") column so
+        // the seller can't accidentally proceed with a mistyped value.
+        const verifiedHolder = String(data.data?.nameAtBank ?? '').trim();
+        if (verifiedHolder) {
+          setFormData(prev => ({ ...prev, accountHolderName: verifiedHolder }));
         }
       } else {
         setBankVerification({ status: 'error', error: extractErrorMessage(data, 'Bank account verification failed. Please try again.') });

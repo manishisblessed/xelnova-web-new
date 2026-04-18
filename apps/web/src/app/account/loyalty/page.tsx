@@ -47,7 +47,10 @@ export default function LoyaltyPage() {
     if (!pts || pts <= 0) return;
     try {
       const res = await notificationsApi.redeemPoints(pts) as any;
-      setMessage(`Redeemed ${res.pointsRedeemed} points for ₹${res.discountAmount} discount!`);
+      setMessage(
+        res?.message ||
+          `Redeemed ${res.pointsRedeemed} points — ₹${res.discountAmount} added to your wallet. View it under Account → Wallet.`,
+      );
       setRedeemAmount("");
       loadData();
     } catch (err: any) {
@@ -120,7 +123,9 @@ export default function LoyaltyPage() {
               Redeem
             </button>
           </div>
-          <p className="text-xs text-text-secondary mt-2">10 points = ₹1 discount on your next order</p>
+          <p className="text-xs text-text-secondary mt-2">
+            10 points = ₹1. Redeemed points are credited to your <a href="/account/wallet" className="text-primary-600 font-medium hover:underline">Xelnova Wallet</a> instantly.
+          </p>
         </div>
 
         {/* Referral */}

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 56" role="img" aria-label="Shadowfax">
+  <g>
+    <circle cx="28" cy="28" r="22" fill="#1A1A1A"/>
+    <path d="M14 22l14 4 14-4-7 12-14-4z" fill="#F8C500"/>
+  </g>
+  <g font-family="'Helvetica Neue',Arial,sans-serif">
+    <text x="60" y="28" font-size="16" font-weight="800" fill="#1A1A1A" letter-spacing="-0.3">Shadowfax</text>
+    <text x="60" y="44" font-size="9" font-weight="500" fill="#7A7A7A" letter-spacing="1.4">HYPERLOCAL · SAME DAY</text>
+  </g>
+</svg>

@@ -1,5 +1,6 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { WalletService } from '../wallet/wallet.service';
 
 const POINTS_PER_RUPEE = 1;
 const REFERRAL_BONUS_POINTS = 200;
@@ -9,7 +10,10 @@ const POINTS_TO_RUPEE_RATIO = 10; // 10 points = ₹1
 
 @Injectable()
 export class LoyaltyService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly walletService: WalletService,
+  ) {}
 
   async getBalance(userId: string) {
     const result = await this.prisma.loyaltyLedger.aggregate({
@@ -73,18 +77,50 @@ export class LoyaltyService {
     const balance = await this.getBalance(userId);
     if (balance.points < points) throw new BadRequestException('Insufficient loyalty points');
 
-    const discount = points / POINTS_TO_RUPEE_RATIO;
+    const discount = Math.round((points / POINTS_TO_RUPEE_RATIO) * 100) / 100;
 
-    await this.prisma.loyaltyLedger.create({
-      data: {
-        userId,
-        points: -points,
-        type: 'REDEEM',
-        description: `Redeemed ${points} points for ₹${discount.toFixed(2)} discount`,
-      },
+    // Deduct from the loyalty ledger and credit the equivalent rupees into the wallet
+    // in a single transaction so the customer sees the value land somewhere they can spend it.
+    const wallet = await this.walletService.getOrCreateWallet(userId, 'CUSTOMER');
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.loyaltyLedger.create({
+        data: {
+          userId,
+          points: -points,
+          type: 'REDEEM',
+          description: `Redeemed ${points} points → ₹${discount.toFixed(2)} added to wallet`,
+        },
+      });
+
+      const w = await tx.wallet.findUnique({ where: { id: wallet.id } });
+      const currentBalance = w?.balance ?? 0;
+      const newBalance = currentBalance + discount;
+
+      await tx.wallet.update({
+        where: { id: wallet.id },
+        data: { balance: newBalance },
+      });
+
+      await tx.walletTransaction.create({
+        data: {
+          walletId: wallet.id,
+          type: 'CREDIT',
+          amount: discount,
+          balanceAfter: newBalance,
+          description: `Loyalty redemption — ${points} points`,
+          referenceType: 'MANUAL',
+          referenceId: `loyalty-${Date.now()}`,
+          createdBy: userId,
+        },
+      });
     });
 
-    return { pointsRedeemed: points, discountAmount: discount };
+    return {
+      pointsRedeemed: points,
+      discountAmount: discount,
+      message: `₹${discount.toFixed(2)} added to your Xelnova Wallet. Use it on your next order.`,
+    };
   }
 
   // ─── Referral ───

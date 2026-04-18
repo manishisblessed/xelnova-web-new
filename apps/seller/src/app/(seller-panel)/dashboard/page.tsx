@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { motion } from 'framer-motion';
 import {
   IndianRupee,
@@ -82,84 +83,104 @@ export default function SellerDashboardPage() {
           className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4"
         >
           <motion.div variants={item}>
-            <StatCard
-              loading={loading}
-              label="Total products"
-              value={data?.totalProducts ?? '—'}
-              icon={Package}
-            />
+            <Link href="/inventory" className="block group focus:outline-none focus:ring-2 focus:ring-primary-500/40 rounded-2xl">
+              <StatCard
+                loading={loading}
+                label="Total products"
+                value={data?.totalProducts ?? '—'}
+                icon={Package}
+              />
+            </Link>
           </motion.div>
           <motion.div variants={item}>
-            <StatCard
-              loading={loading}
-              label="Active products"
-              value={data?.activeProducts ?? '—'}
-              icon={CheckCircle}
-            />
+            <Link href="/inventory?status=active" className="block group focus:outline-none focus:ring-2 focus:ring-primary-500/40 rounded-2xl">
+              <StatCard
+                loading={loading}
+                label="Active products"
+                value={data?.activeProducts ?? '—'}
+                icon={CheckCircle}
+              />
+            </Link>
           </motion.div>
           <motion.div variants={item}>
-            <StatCard
-              loading={loading}
-              label="Pending products"
-              value={data?.pendingProducts ?? '—'}
-              icon={Clock}
-            />
+            <Link href="/inventory?status=pending" className="block group focus:outline-none focus:ring-2 focus:ring-primary-500/40 rounded-2xl">
+              <StatCard
+                loading={loading}
+                label="Pending products"
+                value={data?.pendingProducts ?? '—'}
+                icon={Clock}
+              />
+            </Link>
           </motion.div>
           <motion.div variants={item}>
-            <StatCard
-              loading={loading}
-              label="Total orders"
-              value={data?.totalOrders ?? '—'}
-              icon={ShoppingCart}
-            />
+            <Link href="/orders" className="block group focus:outline-none focus:ring-2 focus:ring-primary-500/40 rounded-2xl">
+              <StatCard
+                loading={loading}
+                label="Total orders"
+                value={data?.totalOrders ?? '—'}
+                icon={ShoppingCart}
+              />
+            </Link>
           </motion.div>
           <motion.div variants={item}>
-            <StatCard
-              loading={loading}
-              label="Pending orders"
-              value={data?.pendingOrders ?? '—'}
-              icon={Clock}
-            />
+            <Link href="/orders?tab=action_required" className="block group focus:outline-none focus:ring-2 focus:ring-primary-500/40 rounded-2xl">
+              <StatCard
+                loading={loading}
+                label="Pending orders"
+                value={data?.pendingOrders ?? '—'}
+                icon={Clock}
+              />
+            </Link>
           </motion.div>
           <motion.div variants={item}>
-            <StatCard
-              loading={loading}
-              label="Total revenue"
-              value={data != null ? fmt(data.totalRevenue) : '—'}
-              icon={IndianRupee}
-            />
+            <Link href="/payouts" className="block group focus:outline-none focus:ring-2 focus:ring-primary-500/40 rounded-2xl">
+              <StatCard
+                loading={loading}
+                label="Total revenue"
+                value={data != null ? fmt(data.totalRevenue) : '—'}
+                icon={IndianRupee}
+              />
+            </Link>
           </motion.div>
           <motion.div variants={item}>
-            <StatCard
-              loading={loading}
-              label="This month revenue"
-              value={data != null ? fmt(data.monthRevenue) : '—'}
-              icon={IndianRupee}
-            />
+            <Link href="/analytics" className="block group focus:outline-none focus:ring-2 focus:ring-primary-500/40 rounded-2xl">
+              <StatCard
+                loading={loading}
+                label="This month revenue"
+                value={data != null ? fmt(data.monthRevenue) : '—'}
+                icon={IndianRupee}
+              />
+            </Link>
           </motion.div>
           <motion.div variants={item}>
-            <StatCard
-              loading={loading}
-              label="Total sales"
-              value={data?.totalSales ?? '—'}
-              icon={TrendingUp}
-            />
+            <Link href="/analytics" className="block group focus:outline-none focus:ring-2 focus:ring-primary-500/40 rounded-2xl">
+              <StatCard
+                loading={loading}
+                label="Total sales"
+                value={data?.totalSales ?? '—'}
+                icon={TrendingUp}
+              />
+            </Link>
           </motion.div>
           <motion.div variants={item}>
-            <StatCard
-              loading={loading}
-              label="Rating"
-              value={data != null && typeof data.rating === 'number' ? data.rating.toFixed(1) : '—'}
-              icon={Star}
-            />
+            <Link href="/profile" className="block group focus:outline-none focus:ring-2 focus:ring-primary-500/40 rounded-2xl">
+              <StatCard
+                loading={loading}
+                label="Rating"
+                value={data != null && typeof data.rating === 'number' ? data.rating.toFixed(1) : '—'}
+                icon={Star}
+              />
+            </Link>
           </motion.div>
           <motion.div variants={item}>
-            <StatCard
-              loading={loading}
-              label="Verified store"
-              value={data == null ? '—' : data.verified ? 'Yes' : 'No'}
-              icon={data?.verified ? CheckCircle : XCircle}
-            />
+            <Link href="/profile" className="block group focus:outline-none focus:ring-2 focus:ring-primary-500/40 rounded-2xl">
+              <StatCard
+                loading={loading}
+                label="Verified store"
+                value={data == null ? '—' : data.verified ? 'Yes' : 'No'}
+                icon={data?.verified ? CheckCircle : XCircle}
+              />
+            </Link>
           </motion.div>
         </motion.div>
 

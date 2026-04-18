@@ -324,7 +324,7 @@ export default function SellerLandingPage() {
               {[
                 { label: 'Benefits', href: '#benefits' },
                 { label: 'How it Works', href: '#how-it-works' },
-                { label: 'Commission', href: '#pricing' },
+                // 'Commission' link removed per testing observation #22.
                 { label: 'Tools', href: '#tools' },
                 { label: 'FAQ', href: '#faq' },
               ].map((item) => (
@@ -374,7 +374,7 @@ export default function SellerLandingPage() {
               className="lg:hidden bg-white border-t border-gray-100 shadow-xl"
             >
               <div className="px-4 py-6 space-y-1">
-                {['Benefits', 'How it Works', 'Commission', 'Tools', 'FAQ'].map((item) => (
+                {['Benefits', 'How it Works', 'Tools', 'FAQ'].map((item) => (
                   <a
                     key={item}
                     href={`#${item.toLowerCase().replace(/\s+/g, '-')}`}
@@ -781,6 +781,13 @@ export default function SellerLandingPage() {
       </section>
 
       {/* ─── Commission / Pricing Section ─── */}
+      {/*
+       * Removed per testing observation #22 — the marketing site no longer
+       * shows a public commission/pricing table on the seller landing page.
+       * Sellers see the per-category commission rate during onboarding /
+       * settlement instead.
+       */}
+      {false && (
       <section id="pricing" className="py-20 lg:py-32 bg-white relative overflow-hidden">
         <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-primary-100/30 rounded-full blur-[120px]" />
         <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -875,6 +882,7 @@ export default function SellerLandingPage() {
           </motion.div>
         </div>
       </section>
+      )}
 
       {/* ─── Seller Tools Section ─── */}
       <section id="tools" className="py-20 lg:py-32 bg-gradient-to-b from-gray-50 to-white relative">

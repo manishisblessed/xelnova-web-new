@@ -2,9 +2,15 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { FileText, Download, Calendar, IndianRupee } from 'lucide-react';
+import { FileText, Download, Calendar, IndianRupee, FileDown } from 'lucide-react';
+import { toast } from 'sonner';
 import { DashboardHeader } from '@/components/dashboard/dashboard-header';
-import { apiGetSettlement, apiDownloadSettlementCsv } from '@/lib/api';
+import {
+  apiGetSettlement,
+  apiDownloadSettlementCsv,
+  apiDownloadCustomerInvoice,
+  apiDownloadMonthlyInvoices,
+} from '@/lib/api';
 
 type SettlementRow = {
   orderNumber: string;
@@ -19,6 +25,7 @@ type SettlementRow = {
   net: number;
   orderStatus: string;
   paymentMethod: string;
+  commissionWaived?: boolean;
 };
 
 type SettlementReport = {
@@ -33,6 +40,11 @@ export default function SettlementPage() {
   const [error, setError] = useState<string | null>(null);
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const today = new Date();
+  const [billYear, setBillYear] = useState<number>(today.getFullYear());
+  const [billMonth, setBillMonth] = useState<number>(today.getMonth() + 1);
+  const [downloadingMonthly, setDownloadingMonthly] = useState(false);
+  const [downloadingOrder, setDownloadingOrder] = useState<string | null>(null);
 
   const loadReport = useCallback(async () => {
     setLoading(true);
@@ -59,6 +71,38 @@ export default function SettlementPage() {
     await apiDownloadSettlementCsv(params);
   };
 
+  const handleDownloadMonthlyBills = async () => {
+    try {
+      setDownloadingMonthly(true);
+      await apiDownloadMonthlyInvoices({ year: billYear, month: billMonth });
+      toast.success(`Monthly invoices for ${String(billMonth).padStart(2, '0')}/${billYear} downloaded`);
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to download monthly invoices');
+    } finally {
+      setDownloadingMonthly(false);
+    }
+  };
+
+  const handleDownloadSingleBill = async (orderNumber: string) => {
+    try {
+      setDownloadingOrder(orderNumber);
+      await apiDownloadCustomerInvoice(orderNumber);
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to download invoice');
+    } finally {
+      setDownloadingOrder(null);
+    }
+  };
+
+  const monthOptions = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December',
+  ];
+  const yearOptions = (() => {
+    const y = today.getFullYear();
+    return [y - 2, y - 1, y, y + 1];
+  })();
+
   return (
     <>
       <DashboardHeader title="Settlement Report" subtitle="Track your earnings, commissions, and payouts" />
@@ -82,6 +126,51 @@ export default function SettlementPage() {
           </button>
         </div>
 
+        {/* Monthly invoice bills downloader (testing observation #23) */}
+        <div className="bg-white rounded-2xl border border-gray-200 p-4 mb-6">
+          <div className="flex flex-wrap items-end gap-3">
+            <div>
+              <div className="text-sm font-semibold text-gray-900 mb-0.5">Monthly invoice bills</div>
+              <div className="text-xs text-gray-500">Download every customer invoice for a calendar month as a single PDF, or use the
+                row icons below to grab a single bill.</div>
+            </div>
+            <div className="ml-auto flex flex-wrap items-end gap-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Month</label>
+                <select
+                  value={billMonth}
+                  onChange={(e) => setBillMonth(parseInt(e.target.value, 10))}
+                  className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
+                >
+                  {monthOptions.map((m, idx) => (
+                    <option key={m} value={idx + 1}>{m}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Year</label>
+                <select
+                  value={billYear}
+                  onChange={(e) => setBillYear(parseInt(e.target.value, 10))}
+                  className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
+                >
+                  {yearOptions.map((y) => (
+                    <option key={y} value={y}>{y}</option>
+                  ))}
+                </select>
+              </div>
+              <button
+                onClick={handleDownloadMonthlyBills}
+                disabled={downloadingMonthly}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gray-900 text-white text-sm font-medium hover:bg-gray-800 disabled:opacity-50 transition-colors"
+              >
+                <FileDown size={16} />
+                {downloadingMonthly ? 'Preparing PDF…' : 'Download monthly bills (PDF)'}
+              </button>
+            </div>
+          </div>
+        </div>
+
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-4 text-sm text-red-700">{error}</div>
         )}
@@ -96,6 +185,7 @@ export default function SettlementPage() {
               <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} className="bg-white rounded-2xl border border-gray-200 p-5">
                 <div className="flex items-center gap-2 text-gray-500 text-sm mb-1"><FileText size={16} />Commission ({report.commissionRate}%)</div>
                 <div className="text-2xl font-bold text-red-600">-₹{report.totals.commission.toFixed(2)}</div>
+                <div className="text-[11px] text-gray-400 mt-1">Refunded orders are commission-free.</div>
               </motion.div>
               <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="bg-violet-50 rounded-2xl border border-violet-200 p-5">
                 <div className="flex items-center gap-2 text-violet-600 text-sm mb-1"><IndianRupee size={16} />Net Earnings</div>
@@ -119,6 +209,7 @@ export default function SettlementPage() {
                         <th className="px-3 py-2.5 text-right font-medium text-gray-600">Commission</th>
                         <th className="px-3 py-2.5 text-right font-medium text-gray-600">Net</th>
                         <th className="px-3 py-2.5 text-center font-medium text-gray-600">Status</th>
+                        <th className="px-3 py-2.5 text-center font-medium text-gray-600">Bill</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -129,10 +220,34 @@ export default function SettlementPage() {
                           <td className="px-3 py-2 truncate max-w-[200px]">{r.productName}</td>
                           <td className="px-3 py-2 text-right">{r.quantity}</td>
                           <td className="px-3 py-2 text-right">₹{r.gross.toFixed(2)}</td>
-                          <td className="px-3 py-2 text-right text-red-600">-₹{r.commission.toFixed(2)}</td>
+                          <td className={`px-3 py-2 text-right ${r.commissionWaived ? 'text-emerald-600' : 'text-red-600'}`}>
+                            {r.commissionWaived ? (
+                              <span title="Commission waived because the order was refunded">₹0.00 (waived)</span>
+                            ) : (
+                              <>-₹{r.commission.toFixed(2)}</>
+                            )}
+                          </td>
                           <td className="px-3 py-2 text-right font-medium">₹{r.net.toFixed(2)}</td>
                           <td className="px-3 py-2 text-center">
-                            <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{r.orderStatus}</span>
+                            <span
+                              className={`text-xs px-2 py-0.5 rounded-full ${
+                                r.commissionWaived
+                                  ? 'bg-amber-100 text-amber-700'
+                                  : 'bg-gray-100 text-gray-600'
+                              }`}
+                            >
+                              {r.orderStatus}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 text-center">
+                            <button
+                              onClick={() => handleDownloadSingleBill(r.orderNumber)}
+                              disabled={downloadingOrder === r.orderNumber}
+                              title="Download invoice for this order"
+                              className="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-100 disabled:opacity-50"
+                            >
+                              <FileDown size={14} />
+                            </button>
                           </td>
                         </tr>
                       ))}

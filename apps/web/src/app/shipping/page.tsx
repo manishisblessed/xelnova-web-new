@@ -1,11 +1,22 @@
 'use client';
 
 import { motion } from 'framer-motion';
+import Image from 'next/image';
 import Link from 'next/link';
 import {
   Truck, Clock, MapPin, Package, Shield, ArrowLeft,
   CheckCircle2, IndianRupee, ArrowRight, MessageCircle,
 } from 'lucide-react';
+
+const deliveryPartners = [
+  { name: 'Delhivery', src: '/couriers/delhivery.svg' },
+  { name: 'Blue Dart', src: '/couriers/bluedart.svg' },
+  { name: 'DTDC', src: '/couriers/dtdc.svg' },
+  { name: 'Ecom Express', src: '/couriers/ecom-express.svg' },
+  { name: 'Xpressbees', src: '/couriers/xpressbees.svg' },
+  { name: 'Shadowfax', src: '/couriers/shadowfax.svg' },
+  { name: 'India Post', src: '/couriers/india-post.svg' },
+];
 
 const fadeUp = {
   hidden: { opacity: 0, y: 30 },
@@ -111,8 +122,46 @@ export default function ShippingPage() {
         </div>
       </section>
 
-      {/* Policies */}
+      {/* Delivery Partners */}
       <section className="py-16 bg-surface-muted">
+        <div className="mx-auto max-w-5xl px-6">
+          <div className="text-center mb-10">
+            <h2 className="text-2xl font-extrabold text-text-primary font-display mb-2">Our Delivery Partners</h2>
+            <p className="text-sm text-text-muted max-w-xl mx-auto">
+              We&apos;ve teamed up with India&apos;s most trusted logistics providers to bring your orders to your doorstep on time, every time.
+            </p>
+          </div>
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.5 }}
+            className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4"
+          >
+            {deliveryPartners.map((p) => (
+              <div
+                key={p.name}
+                className="bg-white rounded-xl border border-border/60 px-4 py-5 shadow-card hover:shadow-card-hover hover:-translate-y-0.5 transition-all flex items-center justify-center h-20"
+                title={p.name}
+              >
+                <Image
+                  src={p.src}
+                  alt={p.name}
+                  width={180}
+                  height={42}
+                  className="h-9 w-auto object-contain"
+                />
+              </div>
+            ))}
+          </motion.div>
+          <p className="text-center text-xs text-text-muted mt-6">
+            The actual courier assigned to your order is selected based on serviceability and pin-code.
+          </p>
+        </div>
+      </section>
+
+      {/* Policies */}
+      <section className="py-16">
         <div className="mx-auto max-w-3xl px-6">
           <h2 className="text-2xl font-extrabold text-text-primary font-display mb-8 text-center">Shipping Policies</h2>
           <div className="space-y-3">

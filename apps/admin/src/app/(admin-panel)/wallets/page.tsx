@@ -9,6 +9,7 @@ import {
   RefreshCw,
   Loader2,
   X,
+  ListOrdered,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button, Badge } from '@xelnova/ui';
@@ -18,17 +19,37 @@ import { StatCard } from '@/components/dashboard/stat-card';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL?.trim().replace(/\/$/, '') || '/api/v1';
 
+type OwnerType = 'ADMIN' | 'SELLER' | 'CUSTOMER';
+
+interface WalletTxn {
+  id: string;
+  type: string;
+  amount: number;
+  balanceAfter?: number;
+  description: string;
+  referenceType?: string;
+  referenceId?: string | null;
+  createdAt: string;
+}
+
 interface WalletItem {
   id: string;
   ownerId: string;
-  ownerType: 'ADMIN' | 'SELLER';
+  ownerType: OwnerType;
   balance: number;
   ownerName: string;
   ownerEmail: string;
   createdAt: string;
   updatedAt: string;
-  transactions: { id: string; type: string; amount: number; description: string; createdAt: string }[];
+  transactions: WalletTxn[];
 }
+
+const OWNER_FILTERS: Array<{ key: 'ALL' | OwnerType; label: string }> = [
+  { key: 'ALL', label: 'All wallets' },
+  { key: 'CUSTOMER', label: 'Customers' },
+  { key: 'SELLER', label: 'Sellers' },
+  { key: 'ADMIN', label: 'Admin' },
+];
 
 function getAuthToken() {
   if (typeof window === 'undefined') return null;
@@ -38,16 +59,42 @@ function getAuthToken() {
     ?.split('=')[1] ?? null;
 }
 
+function fmtMoney(n: number) {
+  return `₹${Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function ownerBadgeVariant(t: OwnerType): 'default' | 'success' | 'warning' | 'info' {
+  if (t === 'ADMIN') return 'default';
+  if (t === 'SELLER') return 'success';
+  return 'info';
+}
+
+function txnBadgeVariant(type: string): 'success' | 'warning' | 'danger' | 'default' | 'info' {
+  const upper = type.toUpperCase();
+  if (upper.includes('CREDIT') || upper.includes('RECHARGE') || upper.includes('REFUND') || upper.includes('TOPUP')) {
+    return 'success';
+  }
+  if (upper.includes('DEBIT') || upper.includes('WITHDRAW') || upper.includes('PAYOUT')) {
+    return 'danger';
+  }
+  return 'default';
+}
+
 export default function WalletsPage() {
   const [wallets, setWallets] = useState<WalletItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [pagination, setPagination] = useState({ page: 1, limit: 20, total: 0, totalPages: 0 });
+  const [ownerFilter, setOwnerFilter] = useState<'ALL' | OwnerType>('ALL');
 
   const [actionModal, setActionModal] = useState<{ type: 'credit' | 'debit'; wallet: WalletItem } | null>(null);
   const [actionAmount, setActionAmount] = useState('');
   const [actionDescription, setActionDescription] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
+
+  const [txnModalWallet, setTxnModalWallet] = useState<WalletItem | null>(null);
+  const [txnList, setTxnList] = useState<WalletTxn[]>([]);
+  const [txnLoading, setTxnLoading] = useState(false);
 
   const fetchWallets = useCallback(async () => {
     setLoading(true);
@@ -57,6 +104,7 @@ export default function WalletsPage() {
         page: pagination.page.toString(),
         limit: pagination.limit.toString(),
       });
+      if (ownerFilter !== 'ALL') params.set('ownerType', ownerFilter);
       const res = await fetch(`${API_BASE}/wallet/admin/all?${params}`, {
         headers: {
           'Content-Type': 'application/json',
@@ -73,7 +121,7 @@ export default function WalletsPage() {
     } finally {
       setLoading(false);
     }
-  }, [pagination.page, pagination.limit]);
+  }, [pagination.page, pagination.limit, ownerFilter]);
 
   useEffect(() => {
     fetchWallets();
@@ -127,7 +175,33 @@ export default function WalletsPage() {
     }
   };
 
+  const openTransactions = async (w: WalletItem) => {
+    setTxnModalWallet(w);
+    setTxnList([]);
+    setTxnLoading(true);
+    try {
+      const token = getAuthToken();
+      const res = await fetch(`${API_BASE}/wallet/admin/transactions/${w.id}?limit=200`, {
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${decodeURIComponent(token)}` } : {}),
+        },
+      });
+      const data = await res.json();
+      if (data.success) {
+        setTxnList(data.data.transactions);
+      } else {
+        toast.error(data.message || 'Failed to load transactions');
+      }
+    } catch {
+      toast.error('Failed to load transactions');
+    } finally {
+      setTxnLoading(false);
+    }
+  };
+
   const totalBalance = wallets.reduce((sum, w) => sum + w.balance, 0);
+  const customerWallets = wallets.filter((w) => w.ownerType === 'CUSTOMER');
   const sellerWallets = wallets.filter((w) => w.ownerType === 'SELLER');
 
   const filteredWallets = searchQuery
@@ -143,14 +217,15 @@ export default function WalletsPage() {
       <DashboardHeader title="Wallets" />
 
       <div className="p-6 space-y-6">
-        <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard label="Total Wallets" value={wallets.length} icon={Wallet} loading={loading} />
           <StatCard
             label="Total Balance"
-            value={`₹${totalBalance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`}
+            value={fmtMoney(totalBalance)}
             icon={Wallet}
             loading={loading}
           />
+          <StatCard label="Customer Wallets" value={customerWallets.length} icon={Wallet} loading={loading} />
           <StatCard label="Seller Wallets" value={sellerWallets.length} icon={Wallet} loading={loading} />
         </div>
 
@@ -169,9 +244,29 @@ export default function WalletsPage() {
               className="flex-1 bg-transparent text-sm text-text-primary outline-none placeholder:text-text-muted"
             />
           </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {OWNER_FILTERS.map((f) => (
+              <button
+                key={f.key}
+                type="button"
+                onClick={() => {
+                  setOwnerFilter(f.key);
+                  setPagination((p) => ({ ...p, page: 1 }));
+                }}
+                className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+                  ownerFilter === f.key
+                    ? 'border-primary-500 bg-primary-500 text-white'
+                    : 'border-border bg-surface text-text-secondary hover:border-primary-300 hover:text-primary-600'
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
           <button
             onClick={() => { setLoading(true); fetchWallets(); }}
             className="flex items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2 text-sm text-text-primary hover:bg-surface-muted transition-colors"
+            title="Refresh"
           >
             <RefreshCw size={16} />
           </button>
@@ -185,7 +280,7 @@ export default function WalletsPage() {
                   <th className="text-left py-3 px-4 font-medium text-text-muted">Owner</th>
                   <th className="text-left py-3 px-4 font-medium text-text-muted">Type</th>
                   <th className="text-left py-3 px-4 font-medium text-text-muted">Balance</th>
-                  <th className="text-left py-3 px-4 font-medium text-text-muted">Last Activity</th>
+                  <th className="text-left py-3 px-4 font-medium text-text-muted">Last activity</th>
                   <th className="text-right py-3 px-4 font-medium text-text-muted">Actions</th>
                 </tr>
               </thead>
@@ -216,21 +311,26 @@ export default function WalletsPage() {
                         </div>
                       </td>
                       <td className="py-3 px-4">
-                        <Badge variant={wallet.ownerType === 'ADMIN' ? 'default' : 'success'}>
+                        <Badge variant={ownerBadgeVariant(wallet.ownerType)}>
                           {wallet.ownerType}
                         </Badge>
                       </td>
                       <td className="py-3 px-4">
                         <span className={`font-semibold ${wallet.balance >= 0 ? 'text-success-600' : 'text-danger-600'}`}>
-                          ₹{wallet.balance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                          {fmtMoney(wallet.balance)}
                         </span>
                       </td>
                       <td className="py-3 px-4">
                         {wallet.transactions[0] ? (
-                          <div className="min-w-0">
-                            <p className="text-sm text-text-primary truncate">{wallet.transactions[0].description}</p>
-                            <p className="text-xs text-text-muted">
-                              {new Date(wallet.transactions[0].createdAt).toLocaleDateString()}
+                          <div className="min-w-0 max-w-[260px]">
+                            <p className="text-sm text-text-primary truncate" title={wallet.transactions[0].description}>
+                              <Badge variant={txnBadgeVariant(wallet.transactions[0].type)} className="mr-1.5">
+                                {wallet.transactions[0].type}
+                              </Badge>
+                              {fmtMoney(wallet.transactions[0].amount)}
+                            </p>
+                            <p className="text-xs text-text-muted truncate">
+                              {wallet.transactions[0].description} · {new Date(wallet.transactions[0].createdAt).toLocaleString()}
                             </p>
                           </div>
                         ) : (
@@ -239,6 +339,13 @@ export default function WalletsPage() {
                       </td>
                       <td className="py-3 px-4 text-right">
                         <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            onClick={() => void openTransactions(wallet)}
+                            className="p-1.5 rounded-lg hover:bg-primary-50 text-primary-600 transition-colors"
+                            title="View all transactions"
+                          >
+                            <ListOrdered size={16} />
+                          </button>
                           <button
                             onClick={() => {
                               setActionModal({ type: 'credit', wallet });
@@ -325,7 +432,7 @@ export default function WalletsPage() {
                   <p className="text-sm font-medium text-text-primary">{actionModal.wallet.ownerName}</p>
                   <p className="text-xs text-text-muted">{actionModal.wallet.ownerEmail}</p>
                   <p className="text-sm font-semibold text-text-primary mt-1">
-                    Balance: ₹{actionModal.wallet.balance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                    Balance: {fmtMoney(actionModal.wallet.balance)}
                   </p>
                 </div>
                 <div>
@@ -367,6 +474,100 @@ export default function WalletsPage() {
                     <><ArrowDownCircle size={14} /> Debit</>
                   )}
                 </Button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Transactions Modal */}
+      <AnimatePresence>
+        {txnModalWallet && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm px-4"
+            onClick={(e) => { if (e.target === e.currentTarget) setTxnModalWallet(null); }}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              transition={{ duration: 0.2 }}
+              className="bg-surface rounded-2xl border border-border shadow-elevated w-full max-w-3xl max-h-[85vh] flex flex-col"
+            >
+              <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+                <div>
+                  <h2 className="text-base font-semibold text-text-primary font-display">
+                    Transactions — {txnModalWallet.ownerName}
+                  </h2>
+                  <p className="text-xs text-text-muted mt-0.5">
+                    {txnModalWallet.ownerEmail} · Balance {fmtMoney(txnModalWallet.balance)}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setTxnModalWallet(null)}
+                  className="p-1 rounded-lg hover:bg-surface-muted text-text-muted"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+              <div className="overflow-auto px-2 py-2">
+                {txnLoading ? (
+                  <div className="flex items-center justify-center py-12 text-text-muted">
+                    <Loader2 className="h-6 w-6 animate-spin text-primary-500" />
+                  </div>
+                ) : txnList.length === 0 ? (
+                  <p className="py-12 text-center text-sm text-text-muted">
+                    No transactions on this wallet yet.
+                  </p>
+                ) : (
+                  <table className="w-full text-xs">
+                    <thead className="bg-surface-muted/50 text-text-muted sticky top-0">
+                      <tr>
+                        <th className="px-3 py-2 text-left">When</th>
+                        <th className="px-3 py-2 text-left">Type</th>
+                        <th className="px-3 py-2 text-left">Reference</th>
+                        <th className="px-3 py-2 text-right">Amount</th>
+                        <th className="px-3 py-2 text-right">Balance after</th>
+                        <th className="px-3 py-2 text-left">Note</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {txnList.map((t) => (
+                        <tr key={t.id} className="border-t border-border align-top">
+                          <td className="px-3 py-2 text-text-secondary whitespace-nowrap">
+                            {new Date(t.createdAt).toLocaleString()}
+                          </td>
+                          <td className="px-3 py-2">
+                            <Badge variant={txnBadgeVariant(t.type)}>{t.type}</Badge>
+                          </td>
+                          <td className="px-3 py-2 text-text-muted">
+                            {t.referenceType ?? '—'}
+                            {t.referenceId && (
+                              <span className="block text-[10px] truncate max-w-[160px]" title={t.referenceId}>
+                                {t.referenceId}
+                              </span>
+                            )}
+                          </td>
+                          <td
+                            className={`px-3 py-2 text-right font-semibold whitespace-nowrap ${
+                              txnBadgeVariant(t.type) === 'success'
+                                ? 'text-success-600'
+                                : txnBadgeVariant(t.type) === 'danger'
+                                  ? 'text-danger-600'
+                                  : 'text-text-primary'
+                            }`}
+                          >
+                            {fmtMoney(t.amount)}
+                          </td>
+                          <td className="px-3 py-2 text-right text-text-secondary whitespace-nowrap">
+                            {t.balanceAfter != null ? fmtMoney(t.balanceAfter) : '—'}
+                          </td>
+                          <td className="px-3 py-2 text-text-secondary">{t.description ?? '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
               </div>
             </motion.div>
           </div>

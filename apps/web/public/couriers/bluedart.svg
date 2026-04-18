@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 56" role="img" aria-label="Blue Dart">
+  <g>
+    <rect x="2" y="6" width="44" height="44" rx="6" fill="#003B8E"/>
+    <path d="M14 18h12c4 0 7 1.6 7 5 0 2.2-1.3 3.5-3 4.2 2.2.6 3.6 2 3.6 4.6 0 3.4-2.7 5.4-7 5.4H14zm6 4v5h6c1.6 0 2.7-.9 2.7-2.5S27.6 22 26 22zm0 9v6h6.6c1.8 0 3-1 3-2.9 0-1.9-1.2-3.1-3-3.1z" fill="#fff"/>
+    <circle cx="40" cy="46" r="4" fill="#FFCC00"/>
+  </g>
+  <g font-family="'Helvetica Neue',Arial,sans-serif" font-weight="800">
+    <text x="58" y="28" font-size="18" fill="#003B8E" letter-spacing="-0.4">Blue Dart</text>
+    <text x="58" y="44" font-size="9" fill="#7A7A7A" letter-spacing="1.5" font-weight="500">EXPRESS DELIVERY</text>
+  </g>
+</svg>

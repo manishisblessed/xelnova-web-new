@@ -8,7 +8,8 @@ import { motion } from "framer-motion";
 import {
   Package, Truck, CheckCircle, Clock, ChevronLeft, MapPin, Phone,
   CreditCard, AlertCircle, Ban, RotateCcw, Banknote, Loader2,
-  Copy, ShoppingBag, User, XCircle, Download, RefreshCw,
+  Copy, ShoppingBag, User, XCircle, Download, RefreshCw, Wallet,
+  Info, ShieldCheck,
 } from "lucide-react";
 import { formatCurrency } from "@xelnova/utils";
 import { ordersApi, returnsApi, setAccessToken, type Order, type OrderItem } from "@xelnova/api";
@@ -48,6 +49,39 @@ const statusConfig: Record<string, { icon: React.ElementType; color: string; bg:
 
 function getStatus(s: string) {
   return statusConfig[s.toUpperCase()] ?? { icon: AlertCircle, color: "text-gray-600", bg: "bg-gray-50", border: "border-gray-200", label: s };
+}
+
+const paymentStatusConfig: Record<string, { color: string; bg: string; border: string; label: string }> = {
+  PENDING:   { color: "text-amber-700",   bg: "bg-amber-50",   border: "border-amber-200",   label: "Payment Pending" },
+  PROCESSING:{ color: "text-blue-700",    bg: "bg-blue-50",    border: "border-blue-200",    label: "Payment Processing" },
+  PAID:      { color: "text-emerald-700", bg: "bg-emerald-50", border: "border-emerald-200", label: "Paid" },
+  FAILED:    { color: "text-red-700",     bg: "bg-red-50",     border: "border-red-200",     label: "Payment Failed" },
+  REFUNDED:  { color: "text-gray-700",    bg: "bg-gray-50",    border: "border-gray-200",    label: "Refunded" },
+};
+
+const paymentMethodLabels: Record<string, string> = {
+  razorpay: "Razorpay (Card / UPI / Net Banking)",
+  RAZORPAY: "Razorpay (Card / UPI / Net Banking)",
+  wallet:   "Xelnova Wallet",
+  WALLET:   "Xelnova Wallet",
+  cod:      "Cash on Delivery",
+  COD:      "Cash on Delivery",
+};
+
+function prettyPaymentMethod(method?: string | null): string {
+  if (!method) return "Not selected";
+  return paymentMethodLabels[method] || paymentMethodLabels[method.toLowerCase()] || method.replace(/_/g, " ");
+}
+
+function refundDescription(method?: string | null): { destination: string; timeline: string } {
+  const m = (method || "").toLowerCase();
+  if (m === "wallet") {
+    return { destination: "Xelnova Wallet", timeline: "Instant — usable for your next order" };
+  }
+  if (m === "cod") {
+    return { destination: "Xelnova Wallet", timeline: "Instant — COD orders refund to wallet" };
+  }
+  return { destination: "Original payment method (Razorpay)", timeline: "5–7 business days" };
 }
 
 const PROGRESS_STEPS = ["PENDING", "PROCESSING", "CONFIRMED", "SHIPPED", "DELIVERED"];
@@ -404,11 +438,122 @@ export default function OrderDetailPage() {
             <h3 className="text-sm font-bold text-text-primary mb-3 flex items-center gap-1.5">
               <CreditCard size={14} /> Payment
             </h3>
-            <div className="text-sm space-y-1.5">
-              <p className="text-text-secondary capitalize">{order.paymentMethod?.replace("_", " ") || "N/A"}</p>
+            <div className="text-sm space-y-2">
+              {(() => {
+                const ps = (order.paymentStatus || 'PENDING').toUpperCase();
+                const cfg = paymentStatusConfig[ps] || paymentStatusConfig.PENDING;
+                return (
+                  <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${cfg.color} ${cfg.bg} ${cfg.border} border`}>
+                    {ps === 'PAID' ? <CheckCircle size={12} /> : ps === 'FAILED' ? <XCircle size={12} /> : <Clock size={12} />}
+                    {cfg.label}
+                  </span>
+                );
+              })()}
+              <p className="text-text-secondary mt-2">
+                <span className="text-text-muted">Method:</span>{' '}
+                <span className="font-medium text-text-primary">{prettyPaymentMethod(order.paymentMethod)}</span>
+              </p>
+              <p className="text-text-secondary">
+                <span className="text-text-muted">Amount:</span>{' '}
+                <span className="font-semibold text-text-primary">{formatCurrency(order.total)}</span>
+              </p>
               {order.couponCode && (
                 <p className="text-success-600 text-xs font-medium">Coupon applied: {order.couponCode}</p>
               )}
+            </div>
+          </motion.div>
+
+          {/* Refund Status — visible on cancelled / refunded orders */}
+          {isCancelled && (
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.18 }}
+              className="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-5 shadow-card"
+            >
+              <h3 className="text-sm font-bold text-emerald-900 mb-2 flex items-center gap-1.5">
+                <Banknote size={14} /> Refund Status
+              </h3>
+              {(() => {
+                const ps = (order.paymentStatus || '').toUpperCase();
+                const refunded = ps === 'REFUNDED';
+                const wasPaid = ps === 'PAID' || refunded;
+                const { destination, timeline } = refundDescription(order.paymentMethod);
+                if (!wasPaid && (order.paymentMethod || '').toLowerCase() !== 'cod') {
+                  return (
+                    <p className="text-sm text-text-secondary">
+                      No payment was captured for this order, so there is nothing to refund.
+                    </p>
+                  );
+                }
+                return (
+                  <div className="text-sm space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-text-secondary">Refund amount</span>
+                      <span className="font-bold text-text-primary">{formatCurrency(order.total)}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-text-secondary">Refunded to</span>
+                      <span className="font-medium text-text-primary text-right">{destination}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-text-secondary">Timeline</span>
+                      <span className="font-medium text-text-primary text-right">{timeline}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-text-secondary">Status</span>
+                      <span className={`text-xs font-semibold rounded-full px-2 py-0.5 ${refunded ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
+                        {refunded ? 'Refund Processed' : 'In Progress'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-text-muted pt-2 border-t border-emerald-200">
+                      You will receive an email & in-app notification once the refund is settled.
+                      {(order.paymentMethod || '').toLowerCase() === 'wallet' || (order.paymentMethod || '').toLowerCase() === 'cod'
+                        ? ' Wallet refunds appear under Account → Wallet immediately.'
+                        : ' Razorpay refunds reflect on your bank statement within 5–7 business days.'}
+                    </p>
+                  </div>
+                );
+              })()}
+            </motion.div>
+          )}
+
+          {/* How payments & refunds work — appears once on every order page */}
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.22 }}
+            className="rounded-2xl border border-border bg-white p-5 shadow-card"
+          >
+            <h3 className="text-sm font-bold text-text-primary mb-3 flex items-center gap-1.5">
+              <Info size={14} className="text-primary-600" /> How Payments &amp; Refunds Work
+            </h3>
+            <div className="space-y-3 text-xs text-text-secondary leading-relaxed">
+              <div className="flex gap-2">
+                <ShieldCheck size={14} className="text-primary-600 shrink-0 mt-0.5" />
+                <p>
+                  <strong className="text-text-primary">Online (Razorpay):</strong> Payment is captured instantly through
+                  Razorpay using Card / UPI / Net Banking. Funds are held by our acquiring bank (Axis Bank) and released
+                  to the seller after the order is delivered.
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <Wallet size={14} className="text-primary-600 shrink-0 mt-0.5" />
+                <p>
+                  <strong className="text-text-primary">Xelnova Wallet:</strong> Wallet balance is debited at order
+                  confirmation. The same balance can be used for any future order. Money you add to the wallet is held
+                  in an Axis Bank settlement account, fully protected by Razorpay&apos;s PCI-DSS infrastructure.
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <Banknote size={14} className="text-primary-600 shrink-0 mt-0.5" />
+                <p>
+                  <strong className="text-text-primary">Cancellations &amp; refunds:</strong> When you cancel a paid
+                  order, you can choose where the refund lands — your <strong>Xelnova Wallet (instant)</strong> or your
+                  <strong> original payment method (5–7 business days via Razorpay)</strong>. COD orders are always
+                  refunded to your wallet.
+                </p>
+              </div>
             </div>
           </motion.div>
 
@@ -474,8 +619,8 @@ export default function OrderDetailPage() {
               Are you sure you want to cancel order <strong>#{order.orderNumber}</strong>?
             </p>
 
-            {/* Refund Options */}
-            {order.paymentStatus === "PAID" && (
+            {/* Refund Options — ask the customer where the refund should land */}
+            {order.paymentStatus === "PAID" ? (
               <div className="space-y-2">
                 <label className="block text-sm font-medium text-text-primary">
                   Where should we send your refund?
@@ -490,7 +635,7 @@ export default function OrderDetailPage() {
                       <label
                         key={option.destination}
                         className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all ${
-                          !option.available 
+                          !option.available
                             ? 'opacity-50 cursor-not-allowed border-gray-200 bg-gray-50'
                             : selectedRefundTo === option.destination
                             ? 'border-primary-500 bg-primary-50 ring-1 ring-primary-500'
@@ -508,12 +653,22 @@ export default function OrderDetailPage() {
                         />
                         <div className="flex-1">
                           <div className="flex items-center gap-2">
-                            <span className="text-sm font-semibold text-text-primary">{option.label}</span>
+                            {option.destination === 'WALLET' ? (
+                              <Wallet size={14} className="text-primary-600" />
+                            ) : (
+                              <CreditCard size={14} className="text-primary-600" />
+                            )}
+                            <span className="text-sm font-semibold text-text-primary">
+                              {option.destination === 'WALLET' ? 'Xelnova Wallet — early settlement' : 'Original Payment Method'}
+                            </span>
                             <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-text-muted">
                               {option.timeline}
                             </span>
                           </div>
                           <p className="text-xs text-text-secondary mt-0.5">{option.description}</p>
+                          {!option.available && (
+                            <p className="text-[11px] text-amber-700 mt-1">Not available for this order.</p>
+                          )}
                         </div>
                       </label>
                     ))}
@@ -524,6 +679,16 @@ export default function OrderDetailPage() {
                 ) : (
                   <p className="text-sm text-text-secondary">Refund will be credited to your Xelnova Wallet.</p>
                 )}
+              </div>
+            ) : (order.paymentMethod || '').toLowerCase() === 'cod' ? (
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-3 text-xs text-emerald-900 flex gap-2">
+                <Info size={14} className="shrink-0 mt-0.5" />
+                <span>This is a Cash-on-Delivery order — no payment has been collected yet. There is nothing to refund.</span>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3 text-xs text-amber-900 flex gap-2">
+                <Info size={14} className="shrink-0 mt-0.5" />
+                <span>Payment was not captured for this order, so no refund is needed.</span>
               </div>
             )}
 

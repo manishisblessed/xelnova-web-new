@@ -24,12 +24,30 @@ import { StatCard } from '@/components/dashboard/stat-card';
 import { Badge, Button, Input, Modal } from '@xelnova/ui';
 import { apiGetProfile, apiUpdateProfile, apiUploadImage } from '@/lib/api';
 
+/**
+ * Display a seller code in a more human-friendly form by inserting
+ * thousands separators in the trailing numeric segment, e.g.
+ *   "XEL3501"            → "XEL3,501"
+ *   "Grand_HR-XEL003502" → "Grand_HR-XEL3,502"  (also strips leading zeros)
+ *
+ * Per testing observation #17 — the raw padded number was hard to read.
+ */
+function formatSellerCodeForDisplay(code: string): string {
+  return code.replace(/(XEL)(0*)(\d+)/i, (_, prefix: string, _zeros: string, num: string) => {
+    const n = num.replace(/^0+/, '') || '0';
+    const withCommas = Number(n).toLocaleString('en-IN');
+    return `${prefix}${withCommas}`;
+  });
+}
+
 function SellerIdBadge({ code }: { code: string }) {
   const [copied, setCopied] = useState(false);
+  const display = formatSellerCodeForDisplay(code);
 
   const handleCopy = useCallback(async () => {
     try {
       if (typeof navigator !== 'undefined' && navigator.clipboard) {
+        // Copy the raw code (without commas) so it stays valid for lookups.
         await navigator.clipboard.writeText(code);
       }
       setCopied(true);
@@ -50,7 +68,7 @@ function SellerIdBadge({ code }: { code: string }) {
       <span className="text-[10px] font-sans font-medium uppercase tracking-[0.12em] text-primary-600/70">
         Seller ID
       </span>
-      <span className="text-text-primary">{code}</span>
+      <span className="text-text-primary">{display}</span>
       {copied ? (
         <Check className="h-3.5 w-3.5 text-success-500" aria-hidden />
       ) : (
@@ -139,6 +157,8 @@ interface SellerProfileResponse {
   businessState?: string | null;
   businessPincode?: string | null;
   commissionRate?: number;
+  /** Seller's business phone (kept on SellerProfile, may differ from User.phone). */
+  phone?: string | null;
   user: {
     name: string;
     email: string;
@@ -389,7 +409,9 @@ export default function ProfilePage() {
               <div className="flex items-start gap-3 py-3">
                 <div className="min-w-0 flex-1">
                   <p className="text-xs font-medium text-text-muted uppercase tracking-wide">Phone</p>
-                  <p className="text-text-primary mt-0.5">{profile.user?.phone || '—'}</p>
+                  <p className="text-text-primary mt-0.5">
+                    {profile.user?.phone || profile.phone || '—'}
+                  </p>
                 </div>
               </div>
             </div>

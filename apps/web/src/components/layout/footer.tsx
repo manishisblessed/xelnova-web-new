@@ -73,11 +73,11 @@ const itemVariants = {
 };
 
 const paymentMethods: { name: string; src: string; w: number; h: number }[] = [
-  { name: 'Visa', src: '/payments/visa.svg', w: 50, h: 18 },
-  { name: 'Mastercard', src: '/payments/mastercard.svg', w: 38, h: 24 },
-  { name: 'RuPay', src: '/payments/rupay.svg', w: 60, h: 20 },
-  { name: 'UPI', src: '/payments/upi.svg', w: 50, h: 22 },
-  { name: 'Net Banking', src: '/payments/netbanking.svg', w: 80, h: 22 },
+  { name: 'Visa', src: '/payments/visa.svg', w: 56, h: 22 },
+  { name: 'Mastercard', src: '/payments/mastercard.svg', w: 40, h: 26 },
+  { name: 'RuPay', src: '/payments/rupay.svg', w: 64, h: 22 },
+  { name: 'UPI', src: '/payments/upi.svg', w: 64, h: 22 },
+  { name: 'Net Banking', src: '/payments/netbanking.svg', w: 78, h: 22 },
   { name: 'Wallets', src: '/payments/wallets.svg', w: 60, h: 22 },
 ];
 
@@ -126,7 +126,7 @@ export function Footer() {
         <button
           type="button"
           onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-          className="flex w-full items-center justify-center gap-2 bg-violet-600 py-3 text-sm text-white/90 hover:bg-purple-600 transition-colors"
+          className="flex w-full items-center justify-center gap-2 bg-primary-600 py-3 text-sm text-white/90 hover:bg-primary-500 transition-colors"
         >
           <ArrowUp size={14} />
           Back to top

@@ -154,7 +154,7 @@ export default function SettingsPage() {
           </div>
         </SettingsSection>
 
-        <SettingsSection title="Platform logistics (Xelnova Courier)" delay={0.12}>
+        <SettingsSection title="Platform logistics (Xelgo — internal)" delay={0.12}>
           <p className="text-xs text-text-muted -mt-2 mb-3">
             Default booking for <strong>Ship with Xelnova</strong> uses Delhivery Live API when credentials are complete.
             Server env (optional):{' '}

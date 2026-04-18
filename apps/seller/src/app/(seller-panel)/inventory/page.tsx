@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { motion, AnimatePresence, Reorder, useDragControls } from 'framer-motion';
-import { ImagePlus, Pencil, Plus, Trash2, X, Crown, Loader2, Layers, GripVertical, Upload, Camera, Ruler, Image as ImageIcon, Pause, Play, Search } from 'lucide-react';
+import { ImagePlus, Pencil, Plus, Trash2, X, Crown, Loader2, Layers, GripVertical, Upload, Camera, Ruler, Image as ImageIcon, Pause, Play, Search, ChevronLeft as ChevronLeftIcon, ChevronRight as ChevronRightIcon, ChevronDown } from 'lucide-react';
 import { toast } from 'sonner';
 import { DashboardHeader } from '@/components/dashboard/dashboard-header';
 import { DataTable, type Column } from '@/components/dashboard/data-table';
@@ -113,8 +113,173 @@ interface SellerProduct {
   variants?: unknown;
   categoryId?: string;
   category?: { name: string } | null;
+  /** Brand name set during product creation — surfaced on listing per testing observation #26. */
+  brand?: string | null;
   createdAt: string;
   rejectionReason?: string | null;
+}
+
+const PRODUCT_DRAFT_KEY = 'xelnova:seller:product-draft:v1';
+
+/**
+ * Banner shown above the product list when an auto-saved draft exists in
+ * localStorage (testing observation #12). Survives session expiry, tab
+ * crashes, accidental refreshes — sellers can resume the work or discard it.
+ */
+function DraftBanner({
+  isApproved,
+  onResume,
+  onDiscard,
+}: {
+  isApproved: boolean;
+  onResume: () => void;
+  onDiscard: () => void;
+}) {
+  const [draft, setDraft] = useState<{ savedAt: number; name: string } | null>(null);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const read = () => {
+      try {
+        const raw = window.localStorage.getItem(PRODUCT_DRAFT_KEY);
+        if (!raw) { setDraft(null); return; }
+        const parsed = JSON.parse(raw) as { savedAt?: number; data?: Record<string, unknown> };
+        const data = parsed?.data ?? (parsed as Record<string, unknown>);
+        const name = (data && typeof (data as Record<string, unknown>).formName === 'string')
+          ? ((data as Record<string, unknown>).formName as string).trim()
+          : '';
+        setDraft({ savedAt: parsed?.savedAt ?? 0, name: name || 'Untitled product' });
+      } catch {
+        setDraft(null);
+      }
+    };
+    read();
+    const onStorage = (e: StorageEvent) => { if (e.key === PRODUCT_DRAFT_KEY) read(); };
+    window.addEventListener('storage', onStorage);
+    const interval = window.setInterval(read, 4000);
+    return () => {
+      window.removeEventListener('storage', onStorage);
+      window.clearInterval(interval);
+    };
+  }, []);
+
+  if (!draft) return null;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -4 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4 flex items-start gap-3"
+    >
+      <div className="rounded-xl bg-amber-100 p-2 shrink-0">
+        <Pencil className="h-4 w-4 text-amber-700" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-semibold text-amber-900">
+          You have an unsaved product draft &mdash; <span className="font-bold">{draft.name}</span>
+        </p>
+        <p className="text-xs text-amber-700/90 mt-0.5">
+          {draft.savedAt
+            ? `Auto-saved ${new Date(draft.savedAt).toLocaleString()}`
+            : 'Auto-saved earlier'}{' '}
+          &mdash; resume right where you left off.
+        </p>
+      </div>
+      <div className="flex items-center gap-2 shrink-0">
+        <Button
+          type="button"
+          size="sm"
+          onClick={onResume}
+          disabled={!isApproved}
+          title={!isApproved ? 'Account verification required' : 'Resume editing the saved draft'}
+        >
+          Resume
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={() => { onDiscard(); setDraft(null); }}
+        >
+          Discard
+        </Button>
+      </div>
+    </motion.div>
+  );
+}
+
+/**
+ * Compact "Variants" cell for the product list. Per testing observation
+ * #14 — clicking the badge opens a dropdown listing every option (e.g.
+ * Color: Red / Blue / Green / Black) so the seller can see all four
+ * variants without opening the editor.
+ */
+function VariantsCell({ variants }: { variants: unknown }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onClick = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
+  }, [open]);
+
+  if (!Array.isArray(variants) || variants.length === 0) {
+    return <span className="text-text-muted">—</span>;
+  }
+
+  const groups = variants as Array<{ label?: string; type?: string; options?: Array<{ label?: string; hex?: string }> }>;
+  const totalOptions = groups.reduce((sum, g) => sum + (g.options?.length ?? 0), 0);
+
+  return (
+    <div ref={ref} className="relative inline-block">
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
+        className="inline-flex items-center gap-1 rounded-full bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-700 hover:bg-primary-100 transition-colors"
+        title="Click to view variants"
+      >
+        <Layers className="h-3 w-3" />
+        {totalOptions || groups.length}
+        <ChevronDown className={`h-3 w-3 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div className="absolute z-30 mt-1 min-w-[200px] max-w-[280px] rounded-xl border border-border bg-white p-2.5 shadow-lg">
+          <div className="space-y-2">
+            {groups.map((g, i) => (
+              <div key={i}>
+                <p className="text-[10px] font-bold uppercase tracking-wider text-text-muted mb-1">
+                  {g.label || g.type || `Group ${i + 1}`}
+                </p>
+                <div className="flex flex-wrap gap-1">
+                  {(g.options ?? []).map((opt, j) => (
+                    <span
+                      key={j}
+                      className="inline-flex items-center gap-1 rounded-md border border-border bg-surface-muted px-1.5 py-0.5 text-[11px] text-text-primary"
+                    >
+                      {opt.hex && (
+                        <span
+                          className="h-2.5 w-2.5 rounded-full border border-black/10"
+                          style={{ backgroundColor: opt.hex }}
+                        />
+                      )}
+                      {opt.label || '—'}
+                    </span>
+                  ))}
+                  {(!g.options || g.options.length === 0) && (
+                    <span className="text-[11px] text-text-muted">No options</span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function productStatusVariant(status: string): 'success' | 'warning' | 'danger' | 'info' | 'default' {
@@ -218,17 +383,21 @@ type UploadingImage = {
 function GalleryThumbnailItem({
   img,
   index,
+  total,
   previewIdx,
   onSelectPreview,
   onRemove,
   onPromoteToMain,
+  onSwap,
 }: {
   img: ProductImage;
   index: number;
+  total: number;
   previewIdx: number;
   onSelectPreview: (i: number) => void;
   onRemove: (id: string) => void;
   onPromoteToMain: (i: number) => void;
+  onSwap: (from: number, to: number) => void;
 }) {
   const dragControls = useDragControls();
 
@@ -299,12 +468,34 @@ function GalleryThumbnailItem({
           <X className="h-2.5 w-2.5" />
         </button>
 
-        <div className="absolute bottom-0 inset-x-0 flex justify-center pb-0.5 opacity-0 group-hover:opacity-60 transition-opacity pointer-events-none">
-          <GripVertical className="h-3 w-3 text-white drop-shadow" />
-        </div>
-
-        <div className="absolute bottom-0.5 right-0.5 flex h-4 min-w-[16px] items-center justify-center rounded bg-black/50 px-0.5 text-[9px] font-bold text-white tabular-nums pointer-events-none">
-          {index + 1}
+        {/* Explicit swap controls — drag-drop is fragile on touch / older browsers,
+            so give sellers reliable arrow buttons (testing observation #11). */}
+        <div className="absolute bottom-0 inset-x-0 flex items-center justify-between px-0.5 pb-0.5 z-10">
+          <button
+            type="button"
+            disabled={index === 0}
+            onClick={(e) => { e.stopPropagation(); onSwap(index, index - 1); }}
+            onPointerDown={(e) => e.stopPropagation()}
+            className="flex h-4 w-4 items-center justify-center rounded bg-black/55 text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-primary-600 disabled:opacity-20 disabled:cursor-not-allowed"
+            title="Move left"
+            aria-label="Swap with previous image"
+          >
+            <ChevronLeftIcon className="h-2.5 w-2.5" />
+          </button>
+          <span className="flex h-4 min-w-[16px] items-center justify-center rounded bg-black/50 px-0.5 text-[9px] font-bold text-white tabular-nums pointer-events-none">
+            {index + 1}
+          </span>
+          <button
+            type="button"
+            disabled={index >= total - 1}
+            onClick={(e) => { e.stopPropagation(); onSwap(index, index + 1); }}
+            onPointerDown={(e) => e.stopPropagation()}
+            className="flex h-4 w-4 items-center justify-center rounded bg-black/55 text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-primary-600 disabled:opacity-20 disabled:cursor-not-allowed"
+            title="Move right"
+            aria-label="Swap with next image"
+          >
+            <ChevronRightIcon className="h-2.5 w-2.5" />
+          </button>
         </div>
       </div>
     </Reorder.Item>
@@ -391,6 +582,18 @@ function ProductImageGallery({
     setPreviewIdx((p) => Math.min(p, Math.max(0, filtered.length - 1)));
   };
 
+  // Swap two images by index — used by the up/down arrow buttons in each thumbnail.
+  // Functional swap that doesn't depend on stale `images` closure.
+  const swapImages = useCallback((from: number, to: number) => {
+    if (from === to) return;
+    if (from < 0 || to < 0) return;
+    if (from >= images.length || to >= images.length) return;
+    const next = [...images];
+    [next[from], next[to]] = [next[to], next[from]];
+    onImagesChange(next);
+    setPreviewIdx((p) => (p === from ? to : p === to ? from : p));
+  }, [images, onImagesChange]);
+
   const promoteToMain = (idx: number) => {
     if (idx === 0 || idx >= images.length) return;
     const next = [...images];
@@ -420,7 +623,7 @@ function ProductImageGallery({
             Product Gallery
           </p>
           <p className="text-[11px] text-text-muted mt-0.5">
-            The first image is the hero. Drag to reorder. Up to {MAX_PRODUCT_IMAGES} images.
+            The first image is the hero. Use the arrows on each thumbnail to reorder. You can pick multiple images at once. Up to {MAX_PRODUCT_IMAGES} images.
           </p>
         </div>
         <span className="text-[11px] font-medium tabular-nums text-text-muted bg-surface rounded-full px-2 py-0.5 border border-border">
@@ -470,7 +673,7 @@ function ProductImageGallery({
             </div>
             <div className="text-center">
               <span className="text-sm font-medium block">Click to add images</span>
-              <span className="text-[11px] opacity-70">or drag & drop files here</span>
+              <span className="text-[11px] opacity-70">Pick multiple files at once, or drag &amp; drop here</span>
             </div>
           </button>
         )}
@@ -490,10 +693,12 @@ function ProductImageGallery({
                 key={img.id}
                 img={img}
                 index={i}
+                total={images.length}
                 previewIdx={previewIdx}
                 onSelectPreview={setPreviewIdx}
                 onRemove={removeImage}
                 onPromoteToMain={promoteToMain}
+                onSwap={swapImages}
               />
             ))}
 
@@ -1798,6 +2003,18 @@ export default function SellerInventoryPage() {
       ),
     },
     {
+      key: 'brand',
+      header: 'Brand',
+      render: (row) =>
+        row.brand?.trim() ? (
+          <span className="inline-flex items-center rounded-md bg-surface-muted px-2 py-0.5 text-xs font-medium text-text-primary border border-border">
+            {row.brand}
+          </span>
+        ) : (
+          <span className="text-xs text-text-muted">—</span>
+        ),
+    },
+    {
       key: 'category',
       header: 'Category',
       render: (row) => row.category?.name ?? '—',
@@ -1805,15 +2022,7 @@ export default function SellerInventoryPage() {
     {
       key: 'variants',
       header: 'Variants',
-      render: (row) =>
-        Array.isArray(row.variants) && row.variants.length > 0 ? (
-          <span className="inline-flex items-center gap-1 rounded-full bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-700">
-            <Layers className="h-3 w-3" />
-            {row.variants.length}
-          </span>
-        ) : (
-          <span className="text-text-muted">—</span>
-        ),
+      render: (row) => <VariantsCell variants={row.variants} />,
     },
     {
       key: 'createdAt',
@@ -2128,7 +2337,6 @@ export default function SellerInventoryPage() {
                               inputMode="decimal"
                               value={val.price}
                               onChange={(e) => updateVariantValue(row.id, val.id, { price: e.target.value })}
-                              placeholder={formPrice || 'base'}
                               className="w-full rounded-lg border border-border bg-surface-raised px-2 py-1.5 text-xs text-text-primary outline-none focus:border-primary-500"
                             />
                           </td>
@@ -2138,7 +2346,6 @@ export default function SellerInventoryPage() {
                               inputMode="decimal"
                               value={val.compareAtPrice}
                               onChange={(e) => updateVariantValue(row.id, val.id, { compareAtPrice: e.target.value })}
-                              placeholder={formCompare || '—'}
                               className="w-full rounded-lg border border-border bg-surface-raised px-2 py-1.5 text-xs text-text-primary outline-none focus:border-primary-500"
                             />
                           </td>
@@ -2148,7 +2355,6 @@ export default function SellerInventoryPage() {
                               inputMode="numeric"
                               value={val.stock}
                               onChange={(e) => updateVariantValue(row.id, val.id, { stock: e.target.value })}
-                              placeholder={formStock || 'base'}
                               className="w-full rounded-lg border border-border bg-surface-raised px-2 py-1.5 text-xs text-text-primary outline-none focus:border-primary-500"
                             />
                           </td>
@@ -2569,6 +2775,17 @@ export default function SellerInventoryPage() {
       <DashboardHeader title="Inventory" />
       <VerificationBanner />
       <div className="p-6 space-y-6">
+        {/*
+          Per testing observation #12 — surface any auto-saved product draft
+          right at the top of the inventory list so sellers whose session
+          expired (or who navigated away mid-edit) can resume immediately.
+        */}
+        <DraftBanner
+          isApproved={isApproved}
+          onResume={openCreate}
+          onDiscard={clearDraft}
+        />
+
         <motion.div
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}

@@ -23,6 +23,7 @@ import {
   apiCancelShipment,
   apiGetCourierConfigs,
   apiDownloadShippingLabel,
+  apiDownloadCustomerInvoice,
   apiGetShippingRates,
   type ShippingRates,
 } from '@/lib/api';
@@ -118,7 +119,7 @@ const FULFILLMENT_FLOW: Record<string, { nextStatus: string; actionLabel: string
 };
 
 const COURIER_PROVIDERS = [
-  { id: 'XELNOVA_COURIER', name: 'Xelnova Courier', desc: 'We handle everything', alwaysAvailable: true },
+  { id: 'XELNOVA_COURIER', name: 'Xelgo', desc: 'Our platform courier — we handle pickup, delivery & tracking', alwaysAvailable: true },
   { id: 'DELHIVERY', name: 'Delhivery', desc: 'Pan-India logistics' },
   { id: 'SHIPROCKET', name: 'ShipRocket', desc: 'Multi-courier aggregator' },
   { id: 'XPRESSBEES', name: 'XpressBees', desc: 'Fast delivery network' },
@@ -281,16 +282,23 @@ export default function SellerOrdersPage() {
       <div className="p-6 space-y-5">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {[
-            { label: 'Action Required', count: counts.action_required, icon: AlertTriangle, color: 'text-amber-600', bg: 'bg-amber-50' },
-            { label: 'Shipped', count: counts.shipped, icon: Truck, color: 'text-purple-600', bg: 'bg-purple-50' },
-            { label: 'Delivered', count: counts.delivered, icon: CheckCircle, color: 'text-emerald-600', bg: 'bg-emerald-50' },
-            { label: 'Total Orders', count: counts.all, icon: ShoppingBag, color: 'text-blue-600', bg: 'bg-blue-50' },
+            { label: 'Action Required', tab: 'action_required' as TabFilter, count: counts.action_required, icon: AlertTriangle, color: 'text-amber-600', bg: 'bg-amber-50' },
+            { label: 'Shipped', tab: 'shipped' as TabFilter, count: counts.shipped, icon: Truck, color: 'text-purple-600', bg: 'bg-purple-50' },
+            { label: 'Delivered', tab: 'delivered' as TabFilter, count: counts.delivered, icon: CheckCircle, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+            { label: 'Total Orders', tab: 'all' as TabFilter, count: counts.all, icon: ShoppingBag, color: 'text-blue-600', bg: 'bg-blue-50' },
           ].map((s) => (
-            <motion.div
+            <motion.button
               key={s.label}
+              type="button"
+              onClick={() => setActiveTab(s.tab)}
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
-              className="rounded-xl border border-border bg-white p-4 flex items-center gap-3"
+              whileHover={{ y: -2 }}
+              whileTap={{ scale: 0.98 }}
+              className={`rounded-xl border bg-white p-4 flex items-center gap-3 text-left transition-all hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary-500/40 ${
+                activeTab === s.tab ? 'border-primary-400 ring-1 ring-primary-300' : 'border-border'
+              }`}
+              aria-label={`Filter by ${s.label}`}
             >
               <div className={`rounded-lg p-2 ${s.bg}`}>
                 <s.icon size={18} className={s.color} />
@@ -299,7 +307,7 @@ export default function SellerOrdersPage() {
                 <p className="text-2xl font-bold text-text-primary">{loading ? '—' : s.count}</p>
                 <p className="text-xs text-text-muted">{s.label}</p>
               </div>
-            </motion.div>
+            </motion.button>
           ))}
         </div>
 
@@ -371,9 +379,15 @@ export default function SellerOrdersPage() {
             ) : (
               filtered.map((order) => {
                 const cfg = STATUS_CONFIG[order.status] || STATUS_CONFIG.PENDING;
-                const flow = FULFILLMENT_FLOW[order.status];
+                const isPaid = order.paymentStatus === 'PAID';
+                // Per client testing observation #5: seller cannot manually flip
+                // status to Confirmed; it must be auto-set when payment is received.
+                // So the Accept/Confirm button is only shown when the order is paid
+                // but somehow stuck in PENDING/PROCESSING (rare edge case).
+                const flow = isPaid ? FULFILLMENT_FLOW[order.status] : null;
                 const StatusIcon = cfg.icon;
-                const showShipBtn = order.status === 'CONFIRMED';
+                // Ship now is paid-only.
+                const showShipBtn = order.status === 'CONFIRMED' && isPaid;
                 return (
                   <motion.div
                     key={order.id}
@@ -425,6 +439,16 @@ export default function SellerOrdersPage() {
                             <flow.actionIcon size={13} />
                             {flow.actionLabel}
                           </button>
+                        )}
+                        {/* Pending-while-unpaid: explain why no action button. */}
+                        {!isPaid && (order.status === 'PENDING' || order.status === 'PROCESSING') && (
+                          <span
+                            className="hidden sm:inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-md"
+                            title="Order will auto-confirm once payment is received."
+                          >
+                            <Clock size={10} />
+                            Awaiting payment
+                          </span>
                         )}
                         {showShipBtn && (
                           <button
@@ -494,12 +518,15 @@ function OrderDetail({
   const [awbTrackingUrl, setAwbTrackingUrl] = useState('');
 
   const cfg = STATUS_CONFIG[order.status] || STATUS_CONFIG.PENDING;
-  const flow = FULFILLMENT_FLOW[order.status];
+  const isPaid = order.paymentStatus === 'PAID';
+  // Per testing observation #5: seller-driven Accept/Confirm only when paid;
+  // otherwise we show an "awaiting payment" hint instead.
+  const flow = isPaid ? FULFILLMENT_FLOW[order.status] : null;
   const StatusIcon = cfg.icon;
   const statusSteps = ['PENDING', 'CONFIRMED', 'SHIPPED', 'DELIVERED'];
   const currentStepIdx = statusSteps.indexOf(order.status);
   const isCancelled = ['CANCELLED', 'RETURNED', 'REFUNDED'].includes(order.status);
-  const showShipAction = order.status === 'CONFIRMED';
+  const showShipAction = order.status === 'CONFIRMED' && isPaid;
 
   const loadShipment = useCallback(async () => {
     setShipmentLoading(true);
@@ -572,6 +599,18 @@ function OrderDetail({
       loadShipment();
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Failed to update status');
+    }
+  };
+
+  const handleDownloadInvoice = async () => {
+    setLabelDownloading(true);
+    try {
+      await apiDownloadCustomerInvoice(order.id);
+      toast.success('Invoice downloaded');
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Failed to download invoice');
+    } finally {
+      setLabelDownloading(false);
     }
   };
 
@@ -674,6 +713,25 @@ function OrderDetail({
           )}
         </motion.div>
 
+        {/* Awaiting payment hint — replaces action buttons until customer pays */}
+        {!isPaid && !isCancelled && (order.status === 'PENDING' || order.status === 'PROCESSING') && (
+          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}
+            className="rounded-2xl border-2 border-dashed border-amber-300 bg-amber-50/50 p-5"
+          >
+            <div className="flex items-start gap-3">
+              <Clock size={18} className="text-amber-600 mt-0.5 shrink-0" />
+              <div className="min-w-0">
+                <h3 className="text-sm font-bold text-amber-900">Awaiting payment</h3>
+                <p className="text-xs text-amber-800/80 mt-0.5 leading-relaxed">
+                  This order will move to <span className="font-semibold">Confirmed</span> automatically once
+                  the customer&apos;s payment is received. You don&apos;t need to confirm it manually, and the
+                  &ldquo;Ship Now&rdquo; option will appear after that.
+                </p>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
         {/* Ship Order Action */}
         {showShipAction && (
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}
@@ -686,7 +744,7 @@ function OrderDetail({
                   Ship This Order
                 </h3>
                 <p className="text-xs text-text-muted mt-0.5">
-                  Choose your shipping method — ship it yourself or use a courier partner via Xelnova.
+                  Choose your shipping method — ship it yourself or use Xelgo (our platform courier).
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -750,6 +808,7 @@ function OrderDetail({
             onCancelShipment={handleCancelShipment}
             onUpdateAwb={() => { setAwbNumber(shipment.awbNumber || ''); setAwbCarrier(shipment.courierProvider || ''); setAwbModal(true); }}
             onUpdateStatus={() => setSelfShipStatusModal(true)}
+            onDownloadInvoice={handleDownloadInvoice}
             onDownloadLabel={handleDownloadLabel}
             labelDownloading={labelDownloading}
             copyText={copyText}
@@ -970,6 +1029,7 @@ function ShipmentInfoPanel({
   onCancelShipment,
   onUpdateAwb,
   onUpdateStatus,
+  onDownloadInvoice,
   onDownloadLabel,
   labelDownloading,
   copyText,
@@ -981,6 +1041,7 @@ function ShipmentInfoPanel({
   onCancelShipment: () => void;
   onUpdateAwb: () => void;
   onUpdateStatus: () => void;
+  onDownloadInvoice: () => void;
   onDownloadLabel: () => void;
   labelDownloading: boolean;
   copyText: (text: string, label: string) => void;
@@ -991,17 +1052,20 @@ function ShipmentInfoPanel({
   const history = trackingData?.statusHistory || shipment.statusHistory || [];
   const carrier = parseCarrierDisplay(shipment.courierProvider);
   const pickupLabel = formatPickup(shipment.pickupDate ?? null);
+  // Refresh tracking should also be available for self-ship orders that
+  // do have a manually-entered AWB (testing observation #6).
+  const canRefreshTracking = !isSelfShip || Boolean(shipment.awbNumber);
 
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.07 }}
       className="rounded-2xl border border-purple-200 bg-white p-5 shadow-sm"
     >
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
         <h3 className="text-sm font-bold text-text-primary flex items-center gap-2">
           <Truck size={16} className="text-purple-600" />
           Shipment Details
         </h3>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           {isSelfShip && (
             <>
               <Button size="sm" variant="outline" onClick={onUpdateAwb}>
@@ -1012,7 +1076,7 @@ function ShipmentInfoPanel({
               </Button>
             </>
           )}
-          {!isSelfShip && (
+          {canRefreshTracking && (
             <Button size="sm" variant="outline" onClick={onLiveTrack} disabled={trackingLoading}>
               {trackingLoading ? <Loader2 size={12} className="animate-spin" /> : <Navigation size={12} />}
               Refresh tracking
@@ -1023,15 +1087,19 @@ function ShipmentInfoPanel({
               <X size={12} /> Cancel
             </Button>
           )}
+          {/* Customer invoice (replaces seller-side shipping-label PDF per
+              testing observation #7). The actual delivery-partner shipping
+              label remains available below as the "Courier label (partner)"
+              link when one exists. */}
           <Button
             size="sm"
             variant="outline"
             className="border-purple-300 bg-purple-50 text-purple-800 hover:bg-purple-100"
-            onClick={onDownloadLabel}
+            onClick={onDownloadInvoice}
             disabled={labelDownloading}
           >
             {labelDownloading ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
-            Shipping label (PDF)
+            Invoice (customer copy)
           </Button>
         </div>
       </div>
@@ -1043,7 +1111,7 @@ function ShipmentInfoPanel({
             {shipment.shippingMode === 'SELF_SHIP'
               ? 'Self Ship'
               : isXelnova
-                ? 'Xelnova Courier (integrated)'
+                ? 'Xelgo (integrated)'
                 : shipment.shippingMode.replace(/_/g, ' ')}
           </p>
         </div>
@@ -1057,7 +1125,7 @@ function ShipmentInfoPanel({
           )}
           {isXelnova && (
             <p className="text-[10px] text-text-muted mt-1 max-w-[220px]">
-              Booked on Xelnova; delivery is completed by the partner shown above (configurable by admin).
+              Booked on Xelgo; delivery is completed by the partner shown above (configurable by admin).
             </p>
           )}
         </div>
@@ -1261,8 +1329,18 @@ function ShipOrderModal({
     }
   }, [open, getDefaultShippingInfo, loadConfigs]);
 
+  // Per testing observations #28 & #29:
+  //   • Self-ship: no shipping/dimension charge is computed by the platform.
+  //   • Xelgo (XELNOVA_COURIER): show a single consolidated amount that
+  //     already includes the 10% surcharge (do NOT break it down for the
+  //     seller — the breakdown stays internal). The customer statement also
+  //     receives the consolidated value via the order's stored shipping fee.
+  //   • Any other configured courier: rate comes from the courier itself,
+  //     so we don't synthesise an estimate here.
   const estimatedShipping = (() => {
     if (!shippingRates) return null;
+    if (selectedCourier !== 'XELNOVA_COURIER') return null;
+
     const w = parseFloat(weight);
     const parts = dimensions.split(/[x×X,\s]+/).map(Number);
     const vol = parts.length === 3 && parts.every(n => n > 0) ? parts[0] * parts[1] * parts[2] : 0;
@@ -1279,8 +1357,12 @@ function ShipOrderModal({
       dimSurcharge = slab ? slab.rate : (shippingRates.dimensionSlabs[shippingRates.dimensionSlabs.length - 1]?.rate ?? 0);
     }
 
-    if (weightCharge === 0 && dimSurcharge === 0) return null;
-    return { total: weightCharge + dimSurcharge, weightCharge, dimSurcharge };
+    const baseTotal = weightCharge + dimSurcharge;
+    if (baseTotal <= 0) return null;
+    // Xelgo applies a flat 10% platform surcharge, presented as part of the
+    // single delivery charge.
+    const total = Math.round(baseTotal * 1.1);
+    return { total };
   })();
 
   const handleSelectCourier = (courier: string) => {
@@ -1351,10 +1433,10 @@ function ShipOrderModal({
                   <div className="rounded-lg bg-primary-100 p-2.5"><Truck size={20} className="text-primary-600" /></div>
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
-                      <h4 className="text-sm font-bold text-text-primary">Xelnova Courier</h4>
+                      <h4 className="text-sm font-bold text-text-primary">Xelgo</h4>
                       <Badge variant="success">Always Available</Badge>
                     </div>
-                    <p className="text-xs text-text-muted mt-0.5">We handle pickup, delivery, AWB & tracking. No setup needed.</p>
+                    <p className="text-xs text-text-muted mt-0.5">Our platform courier — we handle pickup, delivery, AWB &amp; tracking. Charges shown to customer include shipping + applicable surcharges as a single amount.</p>
                   </div>
                   <ArrowRight size={14} className="text-text-muted mt-3" />
                 </button>
@@ -1428,20 +1510,19 @@ function ShipOrderModal({
               icon={<Weight size={14} />}
             />
             <Input
-              label="Dimensions (LxBxH in cm)"
+              label="Dimensions L × B × H (cm)"
               value={dimensions}
               onChange={(e) => setDimensions(e.target.value)}
               placeholder="e.g. 30x20x15"
               icon={<Ruler size={14} />}
             />
             {estimatedShipping && (
-              <div className="rounded-xl border border-primary-200 bg-primary-50/60 p-3 space-y-1">
+              <div className="rounded-xl border border-primary-200 bg-primary-50/60 p-3">
                 <p className="text-sm font-semibold text-primary-700">
-                  Est. shipping: ₹{estimatedShipping.total}
+                  Delivery charge: ₹{estimatedShipping.total}
                 </p>
-                <p className="text-[11px] text-primary-600/80">
-                  Weight: ₹{estimatedShipping.weightCharge}
-                  {estimatedShipping.dimSurcharge > 0 && ` + Dimension surcharge: ₹${estimatedShipping.dimSurcharge}`}
+                <p className="text-[11px] text-primary-600/80 mt-0.5">
+                  All-inclusive Xelgo charge. The same single amount is shown to the customer.
                 </p>
               </div>
             )}

@@ -268,7 +268,7 @@ export class NotificationService {
       this.sms.sendOrderShipped(
         user.phone,
         orderNumber,
-        courier || 'Xelnova Courier',
+        courier || 'Xelgo',
         trackingUrl || `${this.appUrl}/track/${orderNumber}`,
       ).catch((err) =>
         this.logger.warn(`SMS failed for order shipped ${orderNumber}: ${err.message}`),

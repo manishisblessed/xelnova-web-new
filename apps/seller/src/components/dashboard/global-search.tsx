@@ -187,14 +187,14 @@ export function GlobalSearch() {
                       type="button"
                       onMouseEnter={() => setActiveIdx(i)}
                       onClick={() => navigate(r)}
-                      className={`flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors ${
-                        active ? 'bg-primary-50 text-primary-700' : 'hover:bg-surface-muted text-text-primary'
+                      className={`flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors text-text-primary ${
+                        active ? 'bg-primary-100 text-primary-900' : 'hover:bg-surface-muted'
                       }`}
                     >
-                      <Icon size={16} className="shrink-0 text-text-muted" />
+                      <Icon size={16} className={`shrink-0 ${active ? 'text-primary-700' : 'text-text-muted'}`} />
                       <span className="flex-1 truncate">
                         Search <span className="font-semibold">{r.label}</span> for{' '}
-                        <span className="text-primary-600">&ldquo;{r.query}&rdquo;</span>
+                        <span className={active ? 'text-primary-800 font-medium' : 'text-primary-600'}>&ldquo;{r.query}&rdquo;</span>
                       </span>
                       <ArrowRight size={14} className="shrink-0 opacity-60" />
                     </button>
@@ -206,8 +206,8 @@ export function GlobalSearch() {
                     type="button"
                     onMouseEnter={() => setActiveIdx(i)}
                     onClick={() => navigate(r)}
-                    className={`flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors ${
-                      active ? 'bg-primary-50 text-primary-700' : 'hover:bg-surface-muted text-text-primary'
+                    className={`flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors text-text-primary ${
+                      active ? 'bg-primary-100 text-primary-900 font-medium' : 'hover:bg-surface-muted'
                     }`}
                   >
                     <span className="flex-1 truncate">{r.item.label}</span>

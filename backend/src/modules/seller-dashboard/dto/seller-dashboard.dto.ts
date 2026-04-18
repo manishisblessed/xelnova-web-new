@@ -122,6 +122,13 @@ export class UpdateSellerProfileDto {
   @ApiPropertyOptional() @IsOptional() @IsString() bankAccountName?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() bankAccountNumber?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() bankIfscCode?: string;
+  // Pickup / business address (testing observation #8) — sellers manage
+  // their pickup location directly from the seller app instead of having
+  // to update it inside each courier's portal.
+  @ApiPropertyOptional() @IsOptional() @IsString() businessAddress?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() businessCity?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() businessState?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() businessPincode?: string;
 }
 
 export class RevenueQueryDto {
@@ -133,6 +140,15 @@ export class RevenueQueryDto {
 export class ProposeBrandDto {
   @ApiProperty() @IsString() name: string;
   @ApiPropertyOptional() @IsOptional() @IsString() logo?: string;
+  /**
+   * Brand authorisation / authenticity certificate URL. Required for any
+   * seller who already has at least one proposed brand — the first brand
+   * may be proposed without it (admin can ask for it before approval).
+   */
+  @ApiPropertyOptional({
+    description: 'URL to an uploaded brand authorisation certificate (PDF / image).',
+  })
+  @IsOptional() @IsString() authorizationCertificate?: string;
 }
 
 // ─── Seller Coupon Management ───

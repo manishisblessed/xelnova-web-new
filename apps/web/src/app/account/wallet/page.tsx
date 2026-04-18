@@ -152,7 +152,7 @@ export default function WalletPage() {
             loadWallet();
           } catch { setActionError("Payment verification failed"); }
         },
-        theme: { color: "#7c3aed" },
+        theme: { color: "#039855" },
       };
       const razorpay = new (window as any).Razorpay(options);
       razorpay.open();
@@ -420,12 +420,12 @@ export default function WalletPage() {
           ) : (
             <>
               <h3 className="text-sm font-bold text-text-primary mb-1">Add Money to Wallet</h3>
-              <p className="text-xs text-text-muted mb-5">2% convenience fee applies. Secure payment via Razorpay.</p>
+              <p className="text-xs text-text-muted mb-5">No convenience fee — pay only what you add. Secure payment via Razorpay.</p>
               <form onSubmit={handleAddMoney} className="space-y-4">
                 <div>
                   <label className="block text-xs font-semibold text-gray-700 mb-1.5">Amount (₹)</label>
                   <input name="amount" type="number" min="10" step="1" required placeholder="Enter amount" className={inputClass} />
-                  <p className="text-[11px] text-text-muted mt-1">Min ₹10. 2% fee will be added at checkout.</p>
+                  <p className="text-[11px] text-text-muted mt-1">Minimum ₹10. The exact amount you enter is credited to your wallet.</p>
                 </div>
                 <div className="flex gap-2">
                   {[100, 500, 1000, 2000].map((amt) => (

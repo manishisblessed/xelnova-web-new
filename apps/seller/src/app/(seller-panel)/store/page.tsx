@@ -215,10 +215,10 @@ export default function StoreSettingsPage() {
     );
   };
 
-  const filteredProducts = settings?.availableProducts.filter(
+  const filteredProducts = settings?.availableProducts?.filter(
     (p) =>
       !searchQuery || p.name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  ) ?? [];
 
   const previewUrl = useMemo(
     () => resolveStorefrontPreviewUrl(settings?.storeUrl),
@@ -533,7 +533,7 @@ export default function StoreSettingsPage() {
           {featuredProductIds.length > 0 ? (
             <div className="flex flex-wrap gap-2">
               {featuredProductIds.map((id) => {
-                const product = settings?.availableProducts.find((p) => p.id === id);
+                const product = settings?.availableProducts?.find((p) => p.id === id);
                 if (!product) return null;
                 return (
                   <div

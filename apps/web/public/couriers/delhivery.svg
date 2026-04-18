@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 56" role="img" aria-label="Delhivery">
+  <g>
+    <circle cx="28" cy="28" r="22" fill="#E62F8B"/>
+    <path d="M16 22h12c5 0 9 2.7 9 8 0 5-3.7 8-9 8H16zm6 4v8h6c2.6 0 4.4-1.4 4.4-4 0-2.6-1.8-4-4.4-4z" fill="#fff"/>
+  </g>
+  <g font-family="'Helvetica Neue',Arial,sans-serif" font-weight="800" fill="#1A1A1A">
+    <text x="60" y="36" font-size="22" letter-spacing="-0.5">Delhivery</text>
+  </g>
+</svg>

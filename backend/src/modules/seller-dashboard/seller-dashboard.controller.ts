@@ -140,7 +140,10 @@ export class SellerDashboardController {
   @Post('brands/propose')
   @ApiOperation({ summary: 'Propose a new brand for admin approval' })
   async proposeBrand(@CurrentUser('id') userId: string, @Body() dto: ProposeBrandDto) {
-    return successResponse(await this.service.proposeBrand(userId, dto.name, dto.logo), 'Brand proposed');
+    return successResponse(
+      await this.service.proposeBrand(userId, dto.name, dto.logo, dto.authorizationCertificate),
+      'Brand proposed',
+    );
   }
 
   @Get('brands')

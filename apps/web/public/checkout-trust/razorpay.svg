@@ -1,9 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 80" aria-label="Razorpay">
-  <g>
-    <path fill="#3395FF" d="M40 12 22 56h12.5l9-22.6L52 56h13.4L83 12H70.5L60 39 49.5 12z"/>
-    <path fill="#072654" d="M40 12 30 38l5 4 13-30z"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 50" role="img" aria-label="Razorpay">
+  <g transform="translate(8 8)">
+    <path d="M22 0L8 34h7l5-13 7.5 13H35L22 0z" fill="#3395FF"/>
+    <path d="M22 0L17 12l3 2 7-14z" fill="#072654"/>
   </g>
-  <g fill="#072654" font-family="'Helvetica Neue',Arial,sans-serif" font-weight="700">
-    <text x="100" y="50" font-size="34" letter-spacing="-1">Razorpay</text>
+  <g font-family="'Helvetica Neue',Arial,sans-serif" font-weight="700" fill="#072654">
+    <text x="50" y="30" font-size="22" letter-spacing="-0.6">Razorpay</text>
+    <text x="50" y="42" font-size="7" font-weight="500" fill="#5B6A7E" letter-spacing="0.5">Trusted by 10M+ businesses across India</text>
   </g>
 </svg>

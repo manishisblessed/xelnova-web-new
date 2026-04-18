@@ -517,6 +517,12 @@ model Product {
   isActive        Boolean       @default(false)
   status          ProductStatus @default(PENDING)
   rejectionReason String?
+  /**
+   * Separate reason captured when only the product images need to be redone
+   * (set by admin from the products review screen). Independent of the
+   * overall product rejection reason so the seller knows exactly what to fix.
+   */
+  imageRejectionReason String?
   sku             String?
 
   metaTitle         String?
@@ -777,12 +783,23 @@ model Brand {
   featured Boolean @default(false)
   isActive Boolean @default(true)
 
+  /** SellerProfile.id of the seller who proposed this brand (null for admin-created). */
   proposedBy String?
   approved   Boolean @default(true)
+  /**
+   * Brand authorization / authenticity certificate URL. Required for sellers
+   * who want to add MORE brands (only the first proposed brand can skip it).
+   * Admin uses this to verify the seller is authorised to sell the brand.
+   */
+  authorizationCertificate String?
+  /** Optional admin note when rejecting a proposed brand. */
+  rejectionReason          String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@index([proposedBy])
+  @@index([approved])
   @@map("brands")
 }
 

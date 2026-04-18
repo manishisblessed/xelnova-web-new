@@ -103,28 +103,53 @@ export class DelhiveryProvider implements CourierProvider {
       );
     }
 
-    // Step 1: Fetch a waybill (AWB) — Delhivery auto-generates one
+    // Step 1: Pre-fetch a waybill (AWB). Delhivery's CMU create
+    // endpoint *can* auto-assign a waybill in many accounts, but several
+    // accounts (especially newly-onboarded ones) refuse the create call
+    // without a pre-allocated waybill. We treat the pre-fetch as
+    // best-effort and only fail loudly if both pre-fetch and CMU end up
+    // returning no AWB (testing observation #30).
     let awb = '';
     try {
       const waybillRes = await fetch(
         `${base}/waybill/api/fetch/json/?cl=${encodeURIComponent(clientName)}&token=${config.apiKey}`,
+        { headers: this.authHeaders(config) },
       );
       if (waybillRes.ok) {
         const waybillData = await waybillRes.text();
         try {
           const parsed = JSON.parse(waybillData);
-          awb = parsed?.waybill || '';
+          awb = String(parsed?.waybill || parsed?.[0] || '').trim();
         } catch {
           awb = waybillData.trim();
         }
+      } else {
+        const errBody = await waybillRes.text().catch(() => '');
+        this.logger.warn(
+          `Delhivery waybill pre-fetch returned ${waybillRes.status}: ${errBody.slice(0, 200)}`,
+        );
       }
     } catch (err) {
-      this.logger.warn('Waybill pre-fetch failed, will let Delhivery auto-assign');
+      this.logger.warn(
+        `Waybill pre-fetch failed, will let Delhivery auto-assign: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
     }
 
     // Step 2: Create the shipment
     const isCod = details.isCod ?? false;
-    const dims = details.dimensions?.split('x') || [];
+    // Dimensions arrive as "LxBxH" (cm). Parse defensively and pass all
+    // three values — the previous payload was missing `shipment_length`
+    // entirely which caused Delhivery to silently fall back to defaults
+    // that occasionally rejected the booking.
+    const dims = (details.dimensions || '')
+      .split(/[x×X]/i)
+      .map((d) => d.trim())
+      .filter(Boolean);
+    const lengthCm = dims[0] || '10';
+    const widthCm = dims[1] || '10';
+    const heightCm = dims[2] || '10';
 
     const shipmentPayload = {
       shipments: [
@@ -158,8 +183,9 @@ export class DelhiveryProvider implements CourierProvider {
           seller_inv: details.orderNumber,
           quantity: String(details.items.reduce((sum, i) => sum + i.quantity, 0) || 1),
           waybill: awb || '',
-          shipment_width: dims[1] || '10',
-          shipment_height: dims[2] || '10',
+          shipment_length: lengthCm,
+          shipment_width: widthCm,
+          shipment_height: heightCm,
           weight: String(Math.round((details.weight || 0.5) * 1000)),
           seller_gst_tin: sellerGstin,
           shipping_mode: shippingMode,
@@ -192,19 +218,33 @@ export class DelhiveryProvider implements CourierProvider {
     if (!createData.success) {
       const rawMsg = createData.rmk || createData.packages?.[0]?.remarks?.[0] || 'Unknown error';
       let errMsg = rawMsg;
-      
+
       if (rawMsg.includes('ClientWarehouse matching query does not exist')) {
         errMsg = `Invalid Pickup Location Name. Please check your Delhivery Settings → Warehouses and enter the exact warehouse name in your shipping settings.`;
       }
-      
+
       throw new Error(`Delhivery rejected shipment: ${errMsg}`);
     }
 
     const pkg = createData.packages?.[0];
-    const finalAwb = pkg?.waybill || awb;
+    const finalAwb = String(pkg?.waybill || awb || '').trim();
+
+    if (!finalAwb) {
+      // Per testing observation #30 — the most common silent failure for
+      // Delhivery integrations is the API returning success=true but with
+      // no waybill (typically when the client hasn't been allocated a
+      // waybill block). Surface this as a real error instead of saving an
+      // empty AWB into the shipment record.
+      this.logger.error(
+        `Delhivery returned no waybill. Response: ${JSON.stringify(createData).slice(0, 500)}`,
+      );
+      throw new Error(
+        'Delhivery did not return a waybill. Please contact Delhivery support to ensure your account has a waybill block allocated, then try again.',
+      );
+    }
 
     return {
-      awbNumber: String(finalAwb),
+      awbNumber: finalAwb,
       courierOrderId: pkg?.refnum || details.orderNumber,
       trackingUrl: `https://www.delhivery.com/track/package/${finalAwb}`,
     };

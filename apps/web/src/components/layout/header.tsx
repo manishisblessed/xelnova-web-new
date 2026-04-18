@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
+import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search, ShoppingCart, Menu, X, Heart, Package, User, LogIn, LogOut,
@@ -77,6 +78,7 @@ const categoryIcons: Record<string, string> = {
 };
 
 export function Header() {
+  const router = useRouter();
   const [searchQuery, setSearchQuery] = useState('');
   const [searchCategory, setSearchCategory] = useState('All Categories');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -477,8 +479,20 @@ export function Header() {
             )}
 
             {isAuthenticated && (
-              <Link
-                href="/account/notifications"
+              <button
+                type="button"
+                onClick={async () => {
+                  // Optimistically clear the badge so the dot disappears as soon as the user
+                  // clicks — even if the network call is still in flight.
+                  setUnreadNotifications(0);
+                  try {
+                    await notificationsApi.markAllAsRead();
+                  } catch (e) {
+                    console.warn('[Header] mark all read failed:', e);
+                  }
+                  router.push('/account/notifications');
+                }}
+                aria-label="Notifications"
                 className="relative rounded-xl p-2.5 text-text-secondary hover:text-primary-600 hover:bg-primary-50 transition-all"
               >
                 <Bell size={20} />
@@ -491,7 +505,7 @@ export function Header() {
                     {unreadNotifications > 99 ? '99+' : unreadNotifications}
                   </motion.span>
                 )}
-              </Link>
+              </button>
             )}
 
             <Link

@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Truck, Plus, Trash2, Edit2, Check, Eye, EyeOff,
   ExternalLink, Loader2, AlertCircle, CheckCircle2, Settings,
-  Shield, Link2,
+  Shield, Link2, MapPin, Save,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { DashboardHeader } from '@/components/dashboard/dashboard-header';
@@ -15,6 +15,8 @@ import {
   apiSaveCourierConfig,
   apiDeleteCourierConfig,
   apiGetShippingRates,
+  apiGetProfile,
+  apiUpdateProfile,
   type ShippingRates,
 } from '@/lib/api';
 
@@ -210,22 +212,66 @@ export default function ShippingSettingsPage() {
   const [formData, setFormData] = useState<Record<string, string>>({});
   const [showSecrets, setShowSecrets] = useState<Record<string, boolean>>({});
   const [rates, setRates] = useState<ShippingRates | null>(null);
+  // Pickup address (testing observation #8) — sourced from the seller's
+  // business address on the profile. Sellers can edit it inline here so
+  // they don't need to update each courier's portal separately.
+  const [pickupAddress, setPickupAddress] = useState({
+    businessAddress: '',
+    businessCity: '',
+    businessState: '',
+    businessPincode: '',
+  });
+  const [savingPickup, setSavingPickup] = useState(false);
+  const [pickupDirty, setPickupDirty] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [configsRes, ratesRes] = await Promise.allSettled([
+      const [configsRes, ratesRes, profileRes] = await Promise.allSettled([
         apiGetCourierConfigs(),
         apiGetShippingRates(),
+        apiGetProfile(),
       ]);
       setConfigs(configsRes.status === 'fulfilled' && Array.isArray(configsRes.value) ? configsRes.value : []);
       if (ratesRes.status === 'fulfilled') setRates(ratesRes.value);
+      if (profileRes.status === 'fulfilled' && profileRes.value && typeof profileRes.value === 'object') {
+        const p = profileRes.value as Record<string, unknown>;
+        setPickupAddress({
+          businessAddress: typeof p.businessAddress === 'string' ? p.businessAddress : '',
+          businessCity: typeof p.businessCity === 'string' ? p.businessCity : '',
+          businessState: typeof p.businessState === 'string' ? p.businessState : '',
+          businessPincode: typeof p.businessPincode === 'string' ? p.businessPincode : '',
+        });
+        setPickupDirty(false);
+      }
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Failed to load configs');
     } finally {
       setLoading(false);
     }
   }, []);
+
+  const handleSavePickup = async () => {
+    if (!pickupAddress.businessAddress.trim() || !pickupAddress.businessPincode.trim()) {
+      toast.error('Address and pincode are required');
+      return;
+    }
+    setSavingPickup(true);
+    try {
+      await apiUpdateProfile({
+        businessAddress: pickupAddress.businessAddress.trim(),
+        businessCity: pickupAddress.businessCity.trim(),
+        businessState: pickupAddress.businessState.trim(),
+        businessPincode: pickupAddress.businessPincode.trim(),
+      });
+      toast.success('Pickup address updated');
+      setPickupDirty(false);
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save pickup address');
+    } finally {
+      setSavingPickup(false);
+    }
+  };
 
   useEffect(() => { load(); }, [load]);
 
@@ -324,33 +370,71 @@ export default function ShippingSettingsPage() {
       <DashboardHeader title="Shipping Settings" />
       <div className="p-6 space-y-6 max-w-4xl">
 
-        {/* Built-in options */}
+        {/* Pickup address (testing observation #8) — applies to BOTH self-ship
+            and integrated couriers. Saved values are passed as the return /
+            seller address on every shipment booking. */}
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="rounded-2xl border border-primary-200 bg-white p-5 shadow-sm"
+        >
+          <div className="flex items-start justify-between gap-3 mb-3">
+            <div className="flex items-start gap-3">
+              <div className="rounded-xl bg-primary-50 p-2">
+                <MapPin size={18} className="text-primary-600" />
+              </div>
+              <div>
+                <h2 className="text-sm font-semibold text-text-primary">Pickup Address</h2>
+                <p className="text-xs text-text-muted mt-0.5">
+                  Used for both self-ship and integrated couriers as your pickup / return address.
+                </p>
+              </div>
+            </div>
+            <Button
+              size="sm"
+              onClick={handleSavePickup}
+              loading={savingPickup}
+              disabled={!pickupDirty}
+            >
+              <Save size={12} /> Save
+            </Button>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="sm:col-span-2">
+              <Input
+                label="Address line"
+                value={pickupAddress.businessAddress}
+                onChange={(e) => { setPickupAddress((p) => ({ ...p, businessAddress: e.target.value })); setPickupDirty(true); }}
+                placeholder="Building / street / area"
+              />
+            </div>
+            <Input
+              label="City"
+              value={pickupAddress.businessCity}
+              onChange={(e) => { setPickupAddress((p) => ({ ...p, businessCity: e.target.value })); setPickupDirty(true); }}
+              placeholder="e.g. Mumbai"
+            />
+            <Input
+              label="State"
+              value={pickupAddress.businessState}
+              onChange={(e) => { setPickupAddress((p) => ({ ...p, businessState: e.target.value })); setPickupDirty(true); }}
+              placeholder="e.g. Maharashtra"
+            />
+            <Input
+              label="Pincode"
+              value={pickupAddress.businessPincode}
+              onChange={(e) => { setPickupAddress((p) => ({ ...p, businessPincode: e.target.value })); setPickupDirty(true); }}
+              placeholder="6-digit PIN"
+            />
+          </div>
+        </motion.div>
+
+        {/* Built-in option — only Ship By Own here. Xelgo (platform courier) is offered
+            on the per-order ship page when the seller hands a paid order over to us. */}
         <div className="grid gap-3 sm:grid-cols-2">
           <motion.div
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            className="rounded-2xl border-2 border-primary-200 bg-gradient-to-br from-primary-50/80 to-white p-4"
-          >
-            <div className="flex items-start gap-3">
-              <div className="rounded-xl bg-primary-100 p-2">
-                <Truck size={18} className="text-primary-600" />
-              </div>
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <h3 className="text-sm font-semibold text-text-primary">Xelnova Courier</h3>
-                  <Badge variant="success" className="text-[10px] px-1.5 py-0">Active</Badge>
-                </div>
-                <p className="text-xs text-text-muted mt-1 leading-relaxed">
-                  We handle pickup, delivery, AWB &amp; tracking. No setup needed.
-                </p>
-              </div>
-            </div>
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.05 }}
             className="rounded-2xl border border-border bg-white p-4"
           >
             <div className="flex items-start gap-3">
@@ -363,7 +447,7 @@ export default function ShippingSettingsPage() {
                   <Badge variant="info" className="text-[10px] px-1.5 py-0">No Setup</Badge>
                 </div>
                 <p className="text-xs text-text-muted mt-1 leading-relaxed">
-                  Ship with any courier. Manually enter AWB &amp; update status.
+                  Ship with any courier you prefer. We won&apos;t charge any shipping or surcharge for self-shipped orders.
                 </p>
               </div>
             </div>
@@ -469,9 +553,9 @@ export default function ShippingSettingsPage() {
             className="rounded-2xl border border-border bg-white p-5 shadow-sm space-y-5"
           >
             <div>
-              <h2 className="text-sm font-semibold text-text-primary">Xelnova Shipping Rate Chart</h2>
+              <h2 className="text-sm font-semibold text-text-primary">Xelgo Shipping Rate Chart</h2>
               <p className="text-xs text-text-muted mt-1">
-                These rates apply when shipping via Xelnova Courier.
+                These rates apply when shipping via Xelgo (our platform courier). Final amount shown to customer includes everything (shipping + applicable surcharges) as a single line item.
               </p>
             </div>
 
@@ -540,7 +624,14 @@ export default function ShippingSettingsPage() {
             </div>
 
             <p className="text-[10px] text-text-muted">
-              Total shipping cost = weight charge + volumetric surcharge. Rates are in {rates.baseCurrency} and subject to change.
+              {/*
+                Per testing observation #29 — for Xelgo orders we charge
+                weight + volumetric + a flat 10% platform surcharge, and the
+                final consolidated value is what's displayed everywhere
+                (seller, customer statement). Self-shipped orders are not
+                charged any platform shipping fee.
+              */}
+              Xelgo charge = (weight charge + volumetric surcharge) + 10% platform surcharge, billed as a single consolidated amount. Self-shipped orders are not charged any platform shipping fee. Rates are in {rates.baseCurrency} and subject to change.
             </p>
           </motion.div>
         )}

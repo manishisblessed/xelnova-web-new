@@ -83,7 +83,14 @@ export function HomeBelowFold() {
   const allProducts = productsData?.products || [];
   const flashDealProducts = flashDeals || [];
   const showFlashDealsSkeleton = flashDealsLoading && flashDealProducts.length === 0;
-  const trendingProducts = allProducts.filter((p) => p.isFeatured || p.rating >= 4.5).slice(0, 8);
+  // "Trending Now" is curated by admins via the products review screen.
+  // Honour the explicit `isTrending` flag so unchecking it in admin removes
+  // the product from this rail. We fall back to high-rated products only when
+  // no admin has flagged anything as trending yet (e.g. fresh DB).
+  const explicitlyTrending = allProducts.filter((p) => p.isTrending);
+  const trendingProducts = explicitlyTrending.length
+    ? explicitlyTrending.slice(0, 8)
+    : allProducts.filter((p) => p.isFeatured || p.rating >= 4.5).slice(0, 8);
   const newArrivals = [...allProducts].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 8);
   const bestSellers = allProducts.filter((p) => p.rating >= 4.5).sort((a, b) => b.reviewCount - a.reviewCount).slice(0, 8);
   const recommended = allProducts.filter((p) => p.rating >= 4.0).slice(0, 8);

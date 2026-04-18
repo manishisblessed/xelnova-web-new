@@ -61,6 +61,12 @@ export interface Product {
   tags: string[];
   createdAt: string;
   isFeatured?: boolean;
+  /**
+   * Marked as trending by an admin from the products review screen.
+   * The "Trending Now" rail on the homepage uses this exclusively so admins
+   * can pull a product out of the rail just by toggling the flag off.
+   */
+  isTrending?: boolean;
   isFlashDeal?: boolean;
   flashDealEndsAt?: string;
   // Amazon-style product information

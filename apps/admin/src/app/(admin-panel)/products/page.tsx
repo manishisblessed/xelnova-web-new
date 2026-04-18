@@ -31,11 +31,29 @@ interface Product {
   reviewCount: number;
   createdAt: string;
   rejectionReason?: string | null;
+  imageRejectionReason?: string | null;
+  commissionRate?: number | null;
   images?: string[];
   variants?: unknown;
   category: { name: string } | null;
   seller: { storeName: string } | null;
   bestSellersRank?: number | null;
+}
+
+interface BrandRecord {
+  id: string;
+  name: string;
+  slug: string;
+  logo: string | null;
+  approved: boolean;
+  isActive: boolean;
+  authorizationCertificate: string | null;
+  proposedBy: string | null;
+  proposer?: {
+    id: string;
+    storeName: string | null;
+    user?: { email: string | null } | null;
+  } | null;
 }
 
 /** Full product from GET /admin/products/:id (extends list row with seller copy fields). */
@@ -64,7 +82,13 @@ type AdminProductDetail = Product & {
   lowStockThreshold?: number | null;
   deliveredBy?: string | null;
   category?: { id: string; name: string } | null;
-  seller?: { storeName: string; email?: string | null; phone?: string | null } | null;
+  seller?: { id?: string; storeName: string; email?: string | null; phone?: string | null } | null;
+  /**
+   * Resolved Brand record (looked up by name). When present, the admin can
+   * verify the seller's brand authorisation certificate before approving
+   * the listing.
+   */
+  brandRecord?: BrandRecord | null;
 };
 
 // ─── Variant types (shared shape with seller @/lib/product-variants) ───
@@ -320,6 +344,8 @@ export default function ProductsPage() {
     isTrending: false,
     isFlashDeal: false,
     rejectionReason: '',
+    imageRejectionReason: '',
+    commissionRate: '',
     // Empty string = "no rank". Stored as string so the input behaves naturally.
     bestSellersRank: '',
   });
@@ -332,6 +358,11 @@ export default function ProductsPage() {
       isTrending: p.isTrending,
       isFlashDeal: p.isFlashDeal,
       rejectionReason: p.rejectionReason || '',
+      imageRejectionReason: p.imageRejectionReason || '',
+      commissionRate:
+        p.commissionRate != null && Number.isFinite(Number(p.commissionRate))
+          ? String(p.commissionRate)
+          : '',
       bestSellersRank:
         p.bestSellersRank != null && p.bestSellersRank > 0 ? String(p.bestSellersRank) : '',
     });
@@ -440,6 +471,23 @@ export default function ProductsPage() {
       }
       rankPayload = n;
     }
+
+    let commissionPayload: number | undefined = undefined;
+    const rawCommission = form.commissionRate.trim();
+    if (rawCommission !== '') {
+      const c = Number(rawCommission);
+      if (!Number.isFinite(c) || c < 0 || c > 100) {
+        toast.error('Commission % must be between 0 and 100');
+        return;
+      }
+      commissionPayload = c;
+    }
+
+    if (form.status === 'REJECTED' && !form.rejectionReason.trim()) {
+      toast.error('Add a rejection reason so the seller knows what to fix');
+      return;
+    }
+
     setSaving(true);
     try {
       await apiUpdate('products', editing.id, {
@@ -447,8 +495,11 @@ export default function ProductsPage() {
         isFeatured: form.isFeatured,
         isTrending: form.isTrending,
         isFlashDeal: form.isFlashDeal,
-        rejectionReason: form.status === 'REJECTED' ? form.rejectionReason : null,
+        rejectionReason: form.status === 'REJECTED' ? form.rejectionReason.trim() : null,
+        // Pass empty string to clear, undefined to leave alone.
+        imageRejectionReason: form.imageRejectionReason.trim(),
         bestSellersRank: rankPayload,
+        ...(commissionPayload !== undefined ? { commissionRate: commissionPayload } : {}),
       });
       toast.success('Product updated');
       setModalOpen(false);
@@ -599,6 +650,36 @@ export default function ProductsPage() {
         </div>
       ),
     },
+    {
+      key: 'imageRejectionReason',
+      header: 'Image rejection',
+      className: 'min-w-[200px]',
+      render: (r) =>
+        r.imageRejectionReason ? (
+          <div className="flex flex-col gap-1 max-w-[260px]">
+            <Badge variant="warning">Images flagged</Badge>
+            <span
+              className="text-xs text-text-secondary line-clamp-2"
+              title={r.imageRejectionReason}
+            >
+              {r.imageRejectionReason}
+            </span>
+          </div>
+        ) : (
+          <span className="text-text-muted">—</span>
+        ),
+    },
+    {
+      key: 'commissionRate',
+      header: 'Commission',
+      className: 'whitespace-nowrap w-[110px] text-right',
+      render: (r) =>
+        r.commissionRate != null ? (
+          <span className="font-semibold text-text-primary">{Number(r.commissionRate).toFixed(2)}%</span>
+        ) : (
+          <span className="text-text-muted text-xs">Seller default</span>
+        ),
+    },
   ];
 
   return (
@@ -710,6 +791,60 @@ export default function ProductsPage() {
                 {viewing.seller?.phone && <span>Seller phone: {viewing.seller.phone}</span>}
               </p>
             )}
+
+            {/* Brand authorisation block — visible when reviewing the product. */}
+            <div className="rounded-xl border border-border bg-surface-muted/30 p-3 text-xs">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="font-semibold text-text-primary">
+                  Brand: {viewing.brand?.trim() ? viewing.brand : <span className="text-text-muted">— not set —</span>}
+                </p>
+                {viewing.brandRecord && (
+                  <Badge variant={viewing.brandRecord.approved ? 'success' : 'warning'}>
+                    {viewing.brandRecord.approved ? 'Brand approved' : 'Brand pending'}
+                  </Badge>
+                )}
+              </div>
+              {viewing.brandRecord ? (
+                <div className="mt-2 space-y-1.5 text-text-secondary">
+                  {viewing.brandRecord.proposer && (
+                    <p>
+                      Proposed by:{' '}
+                      <span className="font-medium text-text-primary">
+                        {viewing.brandRecord.proposer.storeName ?? '—'}
+                      </span>
+                      {viewing.brandRecord.proposer.user?.email && (
+                        <span className="ml-1 text-text-muted">
+                          ({viewing.brandRecord.proposer.user.email})
+                        </span>
+                      )}
+                    </p>
+                  )}
+                  {viewing.brandRecord.authorizationCertificate ? (
+                    <p>
+                      Authorisation certificate:{' '}
+                      <a
+                        href={viewing.brandRecord.authorizationCertificate}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-semibold text-primary-600 hover:text-primary-700 underline"
+                      >
+                        Open document
+                      </a>
+                    </p>
+                  ) : (
+                    <p className="text-warning-600">
+                      No brand authorisation certificate uploaded by the seller.
+                    </p>
+                  )}
+                </div>
+              ) : viewing.brand?.trim() ? (
+                <p className="mt-1 text-text-muted">
+                  No brand record found in the catalogue for &ldquo;{viewing.brand}&rdquo;. The
+                  seller may have typed a free-text brand name. Confirm authorisation manually
+                  before approving.
+                </p>
+              ) : null}
+            </div>
 
             {viewing.images && viewing.images.length > 0 ? (
               <div className="space-y-2">
@@ -954,7 +1089,7 @@ export default function ProductsPage() {
           </FormField>
         </div>
         {form.status === 'REJECTED' && (
-          <FormField label="Rejection Reason">
+          <FormField label="Rejection Reason (required)">
             <FormTextarea
               value={form.rejectionReason}
               onChange={(e) => setForm((f) => ({ ...f, rejectionReason: e.target.value }))}
@@ -963,6 +1098,17 @@ export default function ProductsPage() {
             />
           </FormField>
         )}
+        <FormField
+          label="Image rejection reason"
+          hint="Use this to ask the seller to redo only the product photos without rejecting the listing. Leave blank if images are fine."
+        >
+          <FormTextarea
+            value={form.imageRejectionReason}
+            onChange={(e) => setForm((f) => ({ ...f, imageRejectionReason: e.target.value }))}
+            placeholder="e.g., Cover image is blurry, please re-upload at 1024×1024 on a white background."
+            rows={2}
+          />
+        </FormField>
         <div className="space-y-3 pt-1">
           <FormToggle
             label="Featured"
@@ -980,6 +1126,24 @@ export default function ProductsPage() {
             onChange={(v) => setForm((f) => ({ ...f, isFlashDeal: v }))}
           />
         </div>
+        <FormField
+          label="Commission % (this listing)"
+          hint="Override the seller's default commission for just this product. Leave blank to keep the current value (the field is pre-filled with the existing rate)."
+        >
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              min={0}
+              max={100}
+              step={0.5}
+              placeholder="e.g. 12.5"
+              value={form.commissionRate}
+              onChange={(e) => setForm((f) => ({ ...f, commissionRate: e.target.value }))}
+              className="w-32 rounded-lg border border-border bg-surface px-3 py-2 text-sm font-semibold text-text-primary outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/30"
+            />
+            <span className="text-sm font-semibold text-text-muted">%</span>
+          </div>
+        </FormField>
         <FormField
           label="Best Sellers Rank (optional)"
           hint="Lower number = higher priority on the Best Sellers rail. Leave blank to remove from rail."

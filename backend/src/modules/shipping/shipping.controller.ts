@@ -6,6 +6,7 @@ import {
   Delete,
   Body,
   Param,
+  Query,
   Res,
   StreamableFile,
 } from '@nestjs/common';
@@ -13,6 +14,8 @@ import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { Response } from 'express';
 import { ShippingService } from './shipping.service';
 import { LabelGeneratorService } from './label-generator.service';
+import { InvoiceService } from '../orders/invoice.service';
+import { PrismaService } from '../../prisma/prisma.service';
 import { Auth } from '../../common/decorators/auth.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import {
@@ -50,7 +53,80 @@ export class ShippingController {
   constructor(
     private readonly service: ShippingService,
     private readonly labelService: LabelGeneratorService,
+    private readonly invoiceService: InvoiceService,
+    private readonly prisma: PrismaService,
   ) {}
+
+  // ─── Customer Invoice Download (seller view) ───
+
+  @Get('orders/:id/invoice')
+  @ApiOperation({ summary: 'Download the customer-format invoice PDF for an order (seller view)' })
+  async downloadInvoice(
+    @CurrentUser('id') userId: string,
+    @Param('id') orderId: string,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    try {
+      const sellerProfile = await this.prisma.sellerProfile.findUnique({
+        where: { userId },
+        select: { id: true },
+      });
+      if (!sellerProfile) {
+        res.status(403).json({ success: false, message: 'Not a seller' });
+        return;
+      }
+      const pdfBuffer = await this.invoiceService.generateInvoiceForSeller(orderId, sellerProfile.id);
+      res.set({
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename="invoice-${orderId}.pdf"`,
+      });
+      return new StreamableFile(pdfBuffer);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to generate invoice';
+      res.status(err?.['status'] || 500).json({ success: false, message });
+    }
+  }
+
+  /**
+   * Bulk download every customer invoice for a given calendar month as a
+   * single merged PDF (testing observation #23). Falls back to current
+   * month when year/month aren't supplied.
+   */
+  @Get('invoices/monthly')
+  @ApiOperation({ summary: 'Download all customer invoices for a month as one PDF (seller view)' })
+  async downloadMonthlyInvoices(
+    @CurrentUser('id') userId: string,
+    @Query('year') year: string | undefined,
+    @Query('month') month: string | undefined,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    try {
+      const sellerProfile = await this.prisma.sellerProfile.findUnique({
+        where: { userId },
+        select: { id: true },
+      });
+      if (!sellerProfile) {
+        res.status(403).json({ success: false, message: 'Not a seller' });
+        return;
+      }
+      const y = year ? parseInt(year, 10) : undefined;
+      const m = month ? parseInt(month, 10) : undefined;
+      const result = await this.invoiceService.generateMonthlyInvoicesForSeller(
+        sellerProfile.id,
+        { year: Number.isFinite(y as number) ? y : undefined, month: Number.isFinite(m as number) ? m : undefined },
+      );
+      const filename = `invoices-${result.year}-${String(result.month).padStart(2, '0')}.pdf`;
+      res.set({
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename="${filename}"`,
+        'X-Invoice-Count': String(result.orderCount),
+      });
+      return new StreamableFile(result.pdf);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to generate monthly invoices';
+      res.status(err?.['status'] || 500).json({ success: false, message });
+    }
+  }
 
   // ─── Shipment Endpoints ───
 

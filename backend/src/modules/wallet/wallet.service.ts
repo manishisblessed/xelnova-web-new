@@ -4,7 +4,9 @@ import { PrismaService } from '../../prisma/prisma.service';
 import Razorpay from 'razorpay';
 import * as crypto from 'crypto';
 
-const CONVENIENCE_FEE_PERCENT = 2;
+// Wallet top-ups are charged at face value — no convenience fee. Customers pay exactly what they
+// add. If the platform later wants to recover gateway costs, set this back to 2.
+const CONVENIENCE_FEE_PERCENT = 0;
 
 @Injectable()
 export class WalletService {
@@ -451,7 +453,7 @@ export class WalletService {
     };
   }
 
-  async getAllWallets(page = 1, limit = 20) {
+  async getAllWallets(page = 1, limit = 20, ownerType?: 'ADMIN' | 'SELLER' | 'CUSTOMER') {
     // Ensure every verified seller has a wallet row
     const sellers = await this.prisma.sellerProfile.findMany({
       where: { verified: true, userId: { not: null } },
@@ -470,20 +472,25 @@ export class WalletService {
     }
 
     const skip = (page - 1) * limit;
+    const where = ownerType ? { ownerType } : {};
 
     const [wallets, total] = await Promise.all([
       this.prisma.wallet.findMany({
+        where,
         orderBy: { updatedAt: 'desc' },
         skip,
         take: limit,
         include: {
           transactions: {
             orderBy: { createdAt: 'desc' },
-            take: 1,
+            // Pull the most recent few so the admin "Last activity" column
+            // can show genuine recharges (e.g. a ₹47 add-money) instead of
+            // an old MANUAL adjustment.
+            take: 5,
           },
         },
       }),
-      this.prisma.wallet.count(),
+      this.prisma.wallet.count({ where }),
     ]);
 
     const enriched = await Promise.all(
@@ -525,6 +532,34 @@ export class WalletService {
       throw new HttpException('Wallet not found', HttpStatus.NOT_FOUND);
     }
     return wallet;
+  }
+
+  /**
+   * Returns the full paginated transaction history for a single wallet so
+   * the admin can audit recharges, refunds and manual credits. Used by the
+   * admin → Wallets → "View transactions" drawer (e.g. to verify a missing
+   * customer recharge).
+   */
+  async getWalletTransactions(walletId: string, page = 1, limit = 50) {
+    const wallet = await this.prisma.wallet.findUnique({ where: { id: walletId } });
+    if (!wallet) {
+      throw new HttpException('Wallet not found', HttpStatus.NOT_FOUND);
+    }
+    const skip = (page - 1) * limit;
+    const [transactions, total] = await Promise.all([
+      this.prisma.walletTransaction.findMany({
+        where: { walletId },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.walletTransaction.count({ where: { walletId } }),
+    ]);
+    return {
+      wallet,
+      transactions,
+      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    };
   }
 
   // ========== Add Money (2% convenience fee) ==========
@@ -605,10 +640,14 @@ export class WalletService {
       const walletAmount = Number(notes.walletAmount);
       const wallet = await this.getOrCreateWallet(userId, 'CUSTOMER');
 
+      const description = CONVENIENCE_FEE_PERCENT > 0
+        ? `Added ₹${walletAmount} to wallet (incl. ${CONVENIENCE_FEE_PERCENT}% fee)`
+        : `Added ₹${walletAmount} to wallet`;
+
       return this.credit(
         wallet.id,
         walletAmount,
-        `Added ₹${walletAmount} to wallet (incl. ${CONVENIENCE_FEE_PERCENT}% fee)`,
+        description,
         userId,
         'WALLET_TOPUP',
         payload.razorpay_payment_id,

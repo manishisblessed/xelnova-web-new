@@ -1,9 +1,13 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 70 30" role="img" aria-label="UPI">
-  <rect width="70" height="30" rx="3" fill="#fff"/>
-  <text x="6" y="14" font-family="Arial,Helvetica,sans-serif" font-size="9" font-weight="800" fill="#097939">UNIFIED</text>
-  <text x="6" y="22" font-family="Arial,Helvetica,sans-serif" font-size="9" font-weight="800" fill="#097939">PAYMENTS</text>
-  <text x="44" y="13" font-family="Arial,Helvetica,sans-serif" font-size="11" font-weight="900" fill="#FF7723">U</text>
-  <text x="51" y="13" font-family="Arial,Helvetica,sans-serif" font-size="11" font-weight="900" fill="#097939">P</text>
-  <text x="58" y="13" font-family="Arial,Helvetica,sans-serif" font-size="11" font-weight="900" fill="#0061A8">I</text>
-  <text x="44" y="23" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="700" fill="#444">INTERFACE</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 36" role="img" aria-label="UPI">
+  <rect width="120" height="36" rx="4" fill="#fff"/>
+  <g transform="translate(8 6)">
+    <path d="M14 0L0 22h6l3-5h10l3 5h6L14 0zm-3 13l3-6 3 6h-6z" fill="#097939"/>
+  </g>
+  <g transform="translate(40 8)" font-family="'Helvetica Neue',Arial,sans-serif" font-weight="900">
+    <text x="0" y="14" font-size="14" fill="#FF7723">U</text>
+    <text x="11" y="14" font-size="14" fill="#097939">P</text>
+    <text x="22" y="14" font-size="14" fill="#0061A8">I</text>
+    <text x="0" y="22" font-size="5" font-weight="700" fill="#5A5A5A" letter-spacing="0.6">UNIFIED PAYMENTS</text>
+    <text x="0" y="28" font-size="5" font-weight="700" fill="#5A5A5A" letter-spacing="0.6">INTERFACE</text>
+  </g>
 </svg>

@@ -226,12 +226,30 @@ export class WalletController {
   async getAllWallets(
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('ownerType') ownerType?: 'ADMIN' | 'SELLER' | 'CUSTOMER',
   ) {
     const result = await this.walletService.getAllWallets(
       parseInt(page || '1'),
       parseInt(limit || '20'),
+      ownerType,
     );
     return successResponse(result, 'Wallets retrieved');
+  }
+
+  @Get('admin/transactions/:walletId')
+  @Auth('ADMIN')
+  @ApiOperation({ summary: 'Get full transaction history for a wallet (Admin only)' })
+  async getWalletTransactionsAdmin(
+    @Param('walletId') walletId: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const result = await this.walletService.getWalletTransactions(
+      walletId,
+      parseInt(page || '1'),
+      parseInt(limit || '50'),
+    );
+    return successResponse(result, 'Transactions retrieved');
   }
 
   @Post('admin/credit/:walletId')

@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { WalletModule } from '../wallet/wallet.module';
 import { NotificationService } from './notification.service';
 import { LoyaltyService } from './loyalty.service';
 import { AbandonedCartService } from './abandoned-cart.service';
@@ -15,6 +16,7 @@ import {
 } from './notifications.controller';
 
 @Module({
+  imports: [WalletModule],
   controllers: [
     NotificationsController,
     LoyaltyController,

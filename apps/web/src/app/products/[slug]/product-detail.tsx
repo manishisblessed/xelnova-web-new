@@ -37,6 +37,8 @@ export default function ProductDetail() {
   const [sizeChartModal, setSizeChartModal] = useState<{ label: string; rows: SizeChartRow[] } | null>(null);
   const [variantGallery, setVariantGallery] = useState<string[] | null>(null);
   const [hoverPreviewImage, setHoverPreviewImage] = useState<string | null>(null);
+  const [shareCopied, setShareCopied] = useState(false);
+  const [pendingQty, setPendingQty] = useState(1);
 
   /** Pre-select the first SKU per group so PDP/cart use per-option prices instead of only the base price. */
   useEffect(() => {
@@ -174,7 +176,9 @@ export default function ProductDetail() {
 
   const cartQty = product ? getItemQuantity(product.id, variantString || undefined) : 0;
   const isInCart = cartQty > 0;
-  const maxQty = product ? Math.min(effectiveStock, 10) : 10;
+  // Allow up to actual available stock (cap at 50 for sanity); fall back to 50 when stock is unknown
+  const maxQty = product ? Math.max(1, Math.min(effectiveStock || 50, 50)) : 50;
+  const displayQty = isInCart ? cartQty : pendingQty;
 
   const selectedVariantImage = (() => {
     if (!product) return "";
@@ -206,25 +210,64 @@ export default function ProductDetail() {
       router.push("/cart");
       return;
     }
-    setItemQuantity(cartItemPayload, 1);
+    const qty = Math.max(1, Math.min(pendingQty, maxQty));
+    setItemQuantity(cartItemPayload, qty);
     setJustAdded(true);
     setTimeout(() => setJustAdded(false), 2000);
   };
 
   const handleIncrement = () => {
-    if (!cartItemPayload || cartQty >= maxQty) return;
-    setItemQuantity(cartItemPayload, cartQty + 1);
+    if (!cartItemPayload) return;
+    if (isInCart) {
+      if (cartQty >= maxQty) return;
+      setItemQuantity(cartItemPayload, cartQty + 1);
+    } else {
+      setPendingQty((q) => Math.min(q + 1, maxQty));
+    }
   };
 
   const handleDecrement = () => {
-    if (!cartItemPayload || cartQty <= 0) return;
-    setItemQuantity(cartItemPayload, cartQty - 1);
+    if (!cartItemPayload) return;
+    if (isInCart) {
+      if (cartQty <= 0) return;
+      setItemQuantity(cartItemPayload, cartQty - 1);
+    } else {
+      setPendingQty((q) => Math.max(1, q - 1));
+    }
   };
 
   const handleBuyNow = () => {
     if (!cartItemPayload) return;
-    if (!isInCart) setItemQuantity(cartItemPayload, 1);
+    const qty = isInCart ? cartQty : Math.max(1, Math.min(pendingQty, maxQty));
+    setItemQuantity(cartItemPayload, qty);
     router.push("/cart");
+  };
+
+  const handleShare = async () => {
+    if (!product) return;
+    const shareUrl = typeof window !== "undefined" ? window.location.href : "";
+    const shareData = {
+      title: product.name,
+      text: `Check out ${product.name} on Xelnova`,
+      url: shareUrl,
+    };
+    try {
+      if (typeof navigator !== "undefined" && navigator.share) {
+        await navigator.share(shareData);
+        return;
+      }
+    } catch {
+      // user cancelled or share failed — fall through to clipboard
+    }
+    try {
+      if (typeof navigator !== "undefined" && navigator.clipboard) {
+        await navigator.clipboard.writeText(shareUrl);
+        setShareCopied(true);
+        setTimeout(() => setShareCopied(false), 2000);
+      }
+    } catch {
+      // no-op
+    }
   };
 
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -641,30 +684,29 @@ export default function ProductDetail() {
                 <p className="text-sm font-semibold text-danger-600">Out of Stock</p>
               )}
 
-              {/* Quantity — synced with cart */}
+              {/* Quantity — always visible; mirrors cart when item is in cart */}
               <div>
                 <p className="mb-1.5 text-xs font-medium text-text-muted">Quantity</p>
-                {isInCart ? (
-                  <div className="inline-flex items-center rounded-xl border-2 border-primary-200 bg-primary-50/50">
-                    <button
-                      onClick={handleDecrement}
-                      className="rounded-l-xl px-3 py-2 text-primary-600 hover:bg-primary-100 transition-colors"
-                    >
-                      <Minus size={14} />
-                    </button>
-                    <span className="min-w-[40px] text-center text-sm font-bold text-primary-700">{cartQty}</span>
-                    <button
-                      onClick={handleIncrement}
-                      disabled={cartQty >= maxQty}
-                      className="rounded-r-xl px-3 py-2 text-primary-600 hover:bg-primary-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                    >
-                      <Plus size={14} />
-                    </button>
-                  </div>
-                ) : (
-                  <p className="text-sm text-text-secondary">1 (update after adding to cart)</p>
-                )}
-                {effectiveStock < 20 && effectiveInStock && (
+                <div className="inline-flex items-center rounded-xl border-2 border-primary-200 bg-primary-50/50">
+                  <button
+                    onClick={handleDecrement}
+                    disabled={displayQty <= 1}
+                    aria-label="Decrease quantity"
+                    className="rounded-l-xl px-3 py-2 text-primary-600 hover:bg-primary-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <Minus size={14} />
+                  </button>
+                  <span className="min-w-[44px] text-center text-sm font-bold text-primary-700">{displayQty}</span>
+                  <button
+                    onClick={handleIncrement}
+                    disabled={displayQty >= maxQty}
+                    aria-label="Increase quantity"
+                    className="rounded-r-xl px-3 py-2 text-primary-600 hover:bg-primary-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <Plus size={14} />
+                  </button>
+                </div>
+                {effectiveStock > 0 && effectiveStock < 20 && effectiveInStock && (
                   <p className="mt-1.5 text-xs text-danger-600 font-medium">
                     Only {effectiveStock} left in stock — order soon
                   </p>
@@ -716,8 +758,13 @@ export default function ProductDetail() {
                   <Heart size={14} fill={isInWishlist ? "currentColor" : "none"} />
                   {isInWishlist ? "Wishlisted" : "Wishlist"}
                 </button>
-                <button className="flex items-center justify-center gap-1.5 rounded-xl border border-border px-4 py-2.5 text-xs font-medium text-text-secondary hover:text-text-primary hover:bg-gray-50 transition-colors">
-                  <Share2 size={14} /> Share
+                <button
+                  type="button"
+                  onClick={handleShare}
+                  className="flex items-center justify-center gap-1.5 rounded-xl border border-border px-4 py-2.5 text-xs font-medium text-text-secondary hover:text-text-primary hover:bg-gray-50 transition-colors"
+                >
+                  {shareCopied ? <Check size={14} /> : <Share2 size={14} />}
+                  {shareCopied ? "Link Copied" : "Share"}
                 </button>
               </div>
 
@@ -736,15 +783,17 @@ export default function ProductDetail() {
                   <Star size={10} className="fill-accent-400 text-accent-400" />
                   <span>seller rating</span>
                 </div>
-                {product.seller.slug && (
-                  <Link
-                    href={`/stores/${product.seller.slug}`}
-                    className="mt-2 flex items-center justify-center gap-1.5 w-full rounded-lg bg-white border border-border py-2 text-xs font-medium text-primary-600 hover:bg-primary-50 hover:border-primary-200 transition-colors"
-                  >
-                    <Store size={12} />
-                    Visit Store
-                  </Link>
-                )}
+                <Link
+                  href={
+                    product.seller.slug
+                      ? `/stores/${product.seller.slug}`
+                      : `/search?seller=${encodeURIComponent(product.seller.name)}`
+                  }
+                  className="mt-2 flex items-center justify-center gap-1.5 w-full rounded-lg bg-white border border-border py-2 text-xs font-medium text-primary-600 hover:bg-primary-50 hover:border-primary-200 transition-colors"
+                >
+                  <Store size={12} />
+                  Visit the Store
+                </Link>
               </div>
             </div>
           </div>

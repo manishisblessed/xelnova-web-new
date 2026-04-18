@@ -83,6 +83,7 @@ export function mapProduct(p: ApiProduct): Product {
     tags: p.tags || [],
     createdAt: p.createdAt,
     isFeatured: p.isFeatured,
+    isTrending: p.isTrending,
     isFlashDeal: p.isFlashDeal,
     flashDealEndsAt: p.flashDealEndsAt ?? undefined,
     // Amazon-style product information

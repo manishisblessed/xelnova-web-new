@@ -588,7 +588,7 @@ export default function CheckoutPage() {
           name: "Xelnova Wallet",
           description: `Add ₹${wm.walletCredit} to wallet`,
           order_id: wm.razorpayOrderId,
-          theme: { color: "#7c3aed" },
+          theme: { color: "#039855" },
           handler: async (response: {
             razorpay_order_id: string;
             razorpay_payment_id: string;

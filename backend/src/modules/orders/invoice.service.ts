@@ -73,8 +73,85 @@ export class InvoiceService {
   constructor(private readonly prisma: PrismaService) {}
 
   async generateInvoice(orderNumber: string, userId: string): Promise<Buffer> {
-    const order = await this.prisma.order.findUnique({
-      where: { orderNumber },
+    return this.generateInvoiceInternal(orderNumber, { customerUserId: userId });
+  }
+
+  /**
+   * Seller-facing access to the same customer invoice PDF — used on the
+   * order detail "Invoice (PDF)" button (testing observation #7).
+   * Authorisation: caller must be a seller who owns at least one item
+   * in the order (verified by sellerProfileId of the seller user).
+   */
+  async generateInvoiceForSeller(orderId: string, sellerProfileId: string): Promise<Buffer> {
+    return this.generateInvoiceInternal(orderId, { sellerProfileId });
+  }
+
+  /**
+   * Generate a single merged PDF containing every customer invoice for
+   * orders the seller participated in within the requested calendar
+   * month (testing observation #23). If `month` is omitted the current
+   * calendar month is used.
+   */
+  async generateMonthlyInvoicesForSeller(
+    sellerProfileId: string,
+    opts: { year?: number; month?: number } = {},
+  ): Promise<{ pdf: Buffer; orderCount: number; year: number; month: number }> {
+    const now = new Date();
+    const year = opts.year ?? now.getFullYear();
+    const month = opts.month ?? now.getMonth() + 1; // 1-indexed
+    const from = new Date(year, month - 1, 1, 0, 0, 0, 0);
+    const to = new Date(year, month, 1, 0, 0, 0, 0);
+
+    // Find every order in the window where this seller has at least one item.
+    const orders = await this.prisma.order.findMany({
+      where: {
+        createdAt: { gte: from, lt: to },
+        items: { some: { sellerId: sellerProfileId } },
+      },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true },
+    });
+
+    const merged = await PDFDocument.create();
+    let included = 0;
+    for (const o of orders) {
+      try {
+        const buf = await this.generateInvoiceInternal(o.id, { sellerProfileId });
+        const src = await PDFDocument.load(buf);
+        const pages = await merged.copyPages(src, src.getPageIndices());
+        for (const p of pages) merged.addPage(p);
+        included += 1;
+      } catch {
+        // Skip orders that can't be generated (e.g. missing seller info)
+        // so a single bad order doesn't break the whole monthly statement.
+      }
+    }
+
+    if (included === 0) {
+      // Produce an empty placeholder page so the download is still valid
+      const page = merged.addPage([A4_WIDTH, A4_HEIGHT]);
+      const font = await merged.embedFont(StandardFonts.Helvetica);
+      page.drawText(`No invoices for ${month}/${year}`, {
+        x: MARGIN,
+        y: A4_HEIGHT - MARGIN - 20,
+        size: 14,
+        font,
+        color: rgb(0.3, 0.3, 0.3),
+      });
+    }
+
+    const bytes = await merged.save();
+    return { pdf: Buffer.from(bytes), orderCount: included, year, month };
+  }
+
+  private async generateInvoiceInternal(
+    orderIdOrNumber: string,
+    auth: { customerUserId?: string; sellerProfileId?: string },
+  ): Promise<Buffer> {
+    const order = await this.prisma.order.findFirst({
+      where: {
+        OR: [{ orderNumber: orderIdOrNumber }, { id: orderIdOrNumber }],
+      },
       include: {
         items: { include: { product: { select: { name: true, sellerId: true } } } },
         shippingAddress: true,
@@ -82,8 +159,17 @@ export class InvoiceService {
       },
     });
 
-    if (!order || order.userId !== userId) {
+    if (!order) throw new NotFoundException('Order not found');
+
+    if (auth.customerUserId && order.userId !== auth.customerUserId) {
       throw new NotFoundException('Order not found');
+    }
+    if (auth.sellerProfileId) {
+      const owns = order.items.some((it) => {
+        const sid = (it as any).sellerId || (it as any).product?.sellerId;
+        return sid === auth.sellerProfileId;
+      });
+      if (!owns) throw new NotFoundException('Order not found');
     }
 
     // Get seller information for the first item (for multi-seller, we'd need per-item invoices)
@@ -171,31 +257,29 @@ export class InvoiceService {
 
     // ─── Tax Invoice Header ───
     drawText('Tax Invoice', MARGIN, y, { size: 14, bold: true });
-    
-    // Order and Invoice details (left side)
+
+    // GSTIN / PAN block on the far right of the title row.
+    const gstinX = A4_WIDTH - MARGIN - 170;
+    drawText(`GSTIN: ${seller?.gstNumber || 'N/A'}`, gstinX, y, { size: 8 });
+    drawText(`PAN:    ${seller?.panNumber || 'N/A'}`, gstinX, y - 12, { size: 8 });
+
+    // Order and Invoice details (split left + middle so they don't crash into GSTIN/PAN).
     const detailsX = MARGIN;
-    const rightDetailsX = 250;
-    
-    y -= 18;
+    const rightDetailsX = MARGIN + 220;
+
+    y -= 22;
     drawText('Order Id:', detailsX, y, { size: 8, color: gray });
     drawText(order.orderNumber, detailsX + 45, y, { size: 8, bold: true });
-    
+
     drawText('Invoice No:', rightDetailsX, y, { size: 8, color: gray });
-    drawText(`FAXP${order.orderNumber.replace('XN-', '').replace(/-/g, '')}`, rightDetailsX + 55, y, { size: 8, bold: true });
-    
-    // GSTIN & PAN (right side - top)
-    const gstinX = A4_WIDTH - MARGIN - 150;
-    drawText(`GSTIN: ${seller?.gstNumber || 'N/A'}`, gstinX, y + 18, { size: 8 });
-    
+    drawText(`XEL${order.orderNumber.replace('XN-', '').replace(/-/g, '')}`, rightDetailsX + 55, y, { size: 8, bold: true });
+
     y -= 12;
     drawText('Order Date:', detailsX, y, { size: 8, color: gray });
     drawText(formatDate(new Date(order.createdAt)), detailsX + 55, y, { size: 8 });
-    
+
     drawText('Invoice Date:', rightDetailsX, y, { size: 8, color: gray });
     drawText(formatDate(new Date(order.createdAt)), rightDetailsX + 60, y, { size: 8 });
-    
-    // PAN
-    drawText(`PAN: ${seller?.panNumber || 'N/A'}`, gstinX, y + 6, { size: 8 });
 
     // ─── QR Code ───
     try {
@@ -239,23 +323,27 @@ export class InvoiceService {
       `${seller?.businessState || ''} - ${seller?.businessPincode || ''}`.trim(),
     ].filter(Boolean).join(', ');
 
-    drawText(sellerName.toUpperCase(), soldByX, y, { size: 8, bold: true, maxWidth: colWidth - 10 });
-    y -= 10;
-    
-    // Wrap seller address
-    const sellerAddrLines = this.wrapText(sellerAddress || 'Address not available', font, 8, colWidth - 10);
+    // Wrap the seller name itself — long store names used to overflow into the billing column.
+    const sellerNameLines = this.wrapText(sellerName.toUpperCase(), fontBold, 8, colWidth - 10);
+    for (const line of sellerNameLines) {
+      drawText(line, soldByX, y, { size: 8, bold: true });
+      y -= 10;
+    }
+
+    const sellerAddrLines = this.wrapText(sellerAddress || 'Address not available', font, 7, colWidth - 10);
     for (const line of sellerAddrLines) {
       drawText(line, soldByX, y, { size: 7 });
       y -= 9;
     }
-    
+
     if (seller?.gstNumber) {
       drawText(`GST: ${seller.gstNumber}`, soldByX, y, { size: 7, bold: true });
       y -= 9;
     }
 
-    // Reset y for billing/shipping (they start from same line as sold by)
-    let billingY = y + (sellerAddrLines.length * 9) + (seller?.gstNumber ? 9 : 0) + 10;
+    // Billing/shipping start at the top of the row — match where the seller block started.
+    const soldByConsumedHeight = sellerNameLines.length * 10 + sellerAddrLines.length * 9 + (seller?.gstNumber ? 9 : 0);
+    let billingY = y + soldByConsumedHeight - 10;
     let shippingY = billingY;
 
     // Billing address (same as user info for now)
@@ -300,28 +388,31 @@ export class InvoiceService {
     y = Math.min(y, billingY, shippingY) - 15;
 
     // ─── Items Table ───
-    const tableTop = y;
     const tableLeft = MARGIN;
     const tableRight = A4_WIDTH - MARGIN;
     const tableWidth = tableRight - tableLeft;
 
-    // Column positions
+    // Same-state vs inter-state determines whether GST is split (CGST+SGST) or single (IGST).
+    const sellerStateKey = (seller?.businessState || '').trim().toLowerCase();
+    const buyerStateKey = (order.shippingAddress?.state || '').trim().toLowerCase();
+    const isIntraState = sellerStateKey.length > 0 && sellerStateKey === buyerStateKey;
+    const taxLabel = isIntraState ? 'CGST + SGST' : 'IGST';
+
+    // Re-spaced columns so 6-digit numbers no longer overlap with the next column.
     const cols = {
       product: tableLeft + 5,
-      description: tableLeft + 180,
-      qty: tableLeft + 280,
-      grossAmt: tableLeft + 310,
-      discount: tableLeft + 360,
-      taxable: tableLeft + 400,
-      igst: tableLeft + 450,
-      cess: tableLeft + 485,
-      total: tableLeft + 510,
+      description: tableLeft + 175,
+      qty: tableLeft + 270,
+      grossAmt: tableLeft + 300,
+      discount: tableLeft + 350,
+      taxable: tableLeft + 395,
+      tax: tableLeft + 445,
+      total: tableLeft + 495,
     };
 
-    // Table header
-    const headerHeight = 30;
+    const headerHeight = 28;
     drawRect(tableLeft, y - headerHeight, tableWidth, headerHeight);
-    
+
     y -= 10;
     drawText('Product', cols.product, y, { size: 7, bold: true });
     drawText('Description', cols.description, y, { size: 7, bold: true });
@@ -329,96 +420,117 @@ export class InvoiceService {
     drawText('Gross', cols.grossAmt, y, { size: 7, bold: true });
     drawText('Discount', cols.discount, y, { size: 7, bold: true });
     drawText('Taxable', cols.taxable, y, { size: 7, bold: true });
-    drawText('IGST', cols.igst, y, { size: 7, bold: true });
-    drawText('CESS', cols.cess, y, { size: 7, bold: true });
+    drawText(taxLabel, cols.tax, y, { size: 7, bold: true });
     drawText('Total', cols.total, y, { size: 7, bold: true });
-    
-    y -= 10;
-    drawText('', cols.product, y, { size: 6 });
-    drawText('', cols.description, y, { size: 6 });
-    drawText('', cols.qty, y, { size: 6 });
-    drawText('Amount', cols.grossAmt, y, { size: 6 });
-    drawText('', cols.discount, y, { size: 6 });
-    drawText('Value', cols.taxable, y, { size: 6 });
-    drawText('', cols.igst, y, { size: 6 });
-    drawText('', cols.cess, y, { size: 6 });
-    drawText('', cols.total, y, { size: 6 });
+
+    y -= 9;
+    drawText('(incl. GST)', cols.grossAmt, y, { size: 6, color: gray });
+    drawText('Value', cols.taxable, y, { size: 6, color: gray });
 
     y -= 12;
 
-    // Calculate discount ratio for proportional distribution
+    // Subtotal here is GST-EXCLUSIVE (the value stored in the order record). All discount/tax
+    // math is consistent with the storefront — see OrdersService.create.
     const subtotal = toNum(order.subtotal);
     const totalDiscount = toNum(order.discount);
     const discountRatio = subtotal > 0 ? totalDiscount / subtotal : 0;
 
     let totalQty = 0;
     let grandTotal = 0;
+    let summaryGross = 0;
+    let summaryDiscount = 0;
+    let summaryTaxable = 0;
+    let summaryTax = 0;
 
-    // Items
     for (const item of order.items as OrderItemWithDetails[]) {
       const itemPrice = toNum(item.price);
       const itemQty = toNum(item.quantity);
       const gstRate = toNum(item.gstRate) || 18;
-      const grossAmount = itemPrice * itemQty;
-      const itemDiscount = grossAmount * discountRatio;
-      const taxableValue = grossAmount - itemDiscount;
-      const igst = taxableValue * (gstRate / 100);
-      const cess = 0; // CESS is usually 0 for most products
-      const itemTotal = taxableValue + igst + cess;
+
+      // Gross amount on the invoice is now TAX-INCLUSIVE — mirrors what the customer sees in
+      // the cart and on Razorpay so they don't think tax is being added twice.
+      const inclusiveUnit = itemPrice + Math.round((itemPrice * gstRate) / 100);
+      const grossAmount = inclusiveUnit * itemQty;
+
+      // Apportion the order-level discount across items by (exclusive) value.
+      const exclusiveLine = itemPrice * itemQty;
+      const itemDiscount = exclusiveLine * discountRatio;
+      const taxableValue = exclusiveLine - itemDiscount;
+      const taxAmount = taxableValue * (gstRate / 100);
+      const itemTotal = taxableValue + taxAmount;
 
       totalQty += itemQty;
       grandTotal += itemTotal;
+      summaryGross += grossAmount;
+      summaryDiscount += itemDiscount;
+      summaryTaxable += taxableValue;
+      summaryTax += taxAmount;
 
-      const rowHeight = 35;
+      const rowHeight = 38;
       drawRect(tableLeft, y - rowHeight + 10, tableWidth, rowHeight);
 
-      // Product name (wrap if needed)
+      // Wrap product name to a max of 2 lines. `cols.description` starts at +175 from
+      // tableLeft so we cap the product name at 165px to keep a clean gutter.
       const productName = safeStr(item.productName);
-      const productLines = this.wrapText(productName, font, 7, 170);
+      const productLines = this.wrapText(productName, font, 7, 165);
       let productY = y;
       for (const line of productLines.slice(0, 2)) {
         drawText(line, cols.product, productY, { size: 7 });
         productY -= 9;
       }
 
-      // HSN and GST info
+      // Description column also stays inside its band (90px wide).
       const hsnCode = item.hsnCode || 'N/A';
-      const hsnInfo = `HSN: ${hsnCode} | IGST: ${gstRate.toFixed(0)}% | CESS: 0.00%`;
-      drawText(hsnInfo, cols.description, y, { size: 6, color: gray });
-      
-      // IMEI/Serial if available
+      const taxBreakdown = isIntraState
+        ? `CGST: ${(gstRate / 2).toFixed(1)}% | SGST: ${(gstRate / 2).toFixed(1)}%`
+        : `IGST: ${gstRate.toFixed(0)}%`;
+      drawText(`HSN: ${hsnCode}`, cols.description, y, { size: 6, color: gray });
+      drawText(taxBreakdown, cols.description, y - 9, { size: 6, color: gray });
+
       if (item.imeiSerialNo) {
-        drawText(`IMEI/SrNo: [${item.imeiSerialNo}]`, cols.description, y - 10, { size: 6, color: gray });
+        drawText(`SrNo: ${item.imeiSerialNo}`, cols.description, y - 18, { size: 6, color: gray });
       }
 
-      // Numbers
-      drawText(String(itemQty), cols.qty, y - 5, { size: 7 });
-      drawText(grossAmount.toFixed(2), cols.grossAmt, y - 5, { size: 7 });
-      drawText(itemDiscount > 0 ? `-${itemDiscount.toFixed(2)}` : '0', cols.discount, y - 5, { size: 7 });
-      drawText(taxableValue.toFixed(2), cols.taxable, y - 5, { size: 7 });
-      drawText(igst.toFixed(2), cols.igst, y - 5, { size: 7 });
-      drawText(cess.toFixed(2), cols.cess, y - 5, { size: 7 });
-      drawText(itemTotal.toFixed(2), cols.total, y - 5, { size: 7, bold: true });
+      // Numbers — slight x-offset for cleaner right-alignment.
+      drawText(String(itemQty), cols.qty, y - 6, { size: 7 });
+      drawText(grossAmount.toFixed(2), cols.grossAmt, y - 6, { size: 7 });
+      drawText(itemDiscount > 0 ? `-${itemDiscount.toFixed(2)}` : '0.00', cols.discount, y - 6, { size: 7 });
+      drawText(taxableValue.toFixed(2), cols.taxable, y - 6, { size: 7 });
+      drawText(taxAmount.toFixed(2), cols.tax, y - 6, { size: 7 });
+      drawText(itemTotal.toFixed(2), cols.total, y - 6, { size: 7, bold: true });
 
       y -= rowHeight;
     }
 
-    // Handling Fee row (if shipping > 0)
+    // Handling Fee row (if shipping > 0). Shipping is shown as a separate (tax-free) line.
     const shippingCost = toNum(order.shipping);
     if (shippingCost > 0) {
       const rowHeight = 20;
       drawRect(tableLeft, y - rowHeight + 10, tableWidth, rowHeight);
-      drawText('Handling Fee', cols.product, y, { size: 7 });
-      drawText('1', cols.qty, y - 5, { size: 7 });
-      drawText(shippingCost.toFixed(2), cols.grossAmt, y - 5, { size: 7 });
-      drawText('0', cols.discount, y - 5, { size: 7 });
-      drawText(shippingCost.toFixed(2), cols.taxable, y - 5, { size: 7 });
-      drawText('0.00', cols.igst, y - 5, { size: 7 });
-      drawText('0.00', cols.cess, y - 5, { size: 7 });
-      drawText(shippingCost.toFixed(2), cols.total, y - 5, { size: 7 });
+      drawText('Handling Fee', cols.product, y - 4, { size: 7 });
+      drawText('1', cols.qty, y - 6, { size: 7 });
+      drawText(shippingCost.toFixed(2), cols.grossAmt, y - 6, { size: 7 });
+      drawText('0.00', cols.discount, y - 6, { size: 7 });
+      drawText(shippingCost.toFixed(2), cols.taxable, y - 6, { size: 7 });
+      drawText('0.00', cols.tax, y - 6, { size: 7 });
+      drawText(shippingCost.toFixed(2), cols.total, y - 6, { size: 7 });
       y -= rowHeight;
       grandTotal += shippingCost;
+      summaryGross += shippingCost;
+      summaryTaxable += shippingCost;
     }
+
+    // ─── Tax summary row ───
+    y -= 4;
+    drawRect(tableLeft, y - 18, tableWidth, 18, rgb(0.9, 0.9, 0.9));
+    drawText('Total', cols.product, y - 12, { size: 7, bold: true });
+    drawText(String(totalQty), cols.qty, y - 12, { size: 7, bold: true });
+    drawText(summaryGross.toFixed(2), cols.grossAmt, y - 12, { size: 7, bold: true });
+    drawText(summaryDiscount > 0 ? `-${summaryDiscount.toFixed(2)}` : '0.00', cols.discount, y - 12, { size: 7, bold: true });
+    drawText(summaryTaxable.toFixed(2), cols.taxable, y - 12, { size: 7, bold: true });
+    drawText(summaryTax.toFixed(2), cols.tax, y - 12, { size: 7, bold: true });
+    drawText(grandTotal.toFixed(2), cols.total, y - 12, { size: 7, bold: true });
+    y -= 22;
 
     y -= 15;
 

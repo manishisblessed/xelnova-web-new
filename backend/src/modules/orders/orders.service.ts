@@ -160,6 +160,14 @@ export class OrdersService {
       }),
     );
 
+    // GST-inclusive line totals — use the same per-item rounding as the storefront so the
+    // amount on the cart, on Razorpay and on the invoice match to the rupee.
+    const inclusiveLineTotals = orderItems.map((item) => {
+      const gstRate = item.gstRate ?? 18;
+      const inclusiveUnit = item.price + Math.round((item.price * gstRate) / 100);
+      return inclusiveUnit * item.quantity;
+    });
+    const inclusiveSubtotal = inclusiveLineTotals.reduce((s, n) => s + n, 0);
     const subtotal = orderItems.reduce(
       (sum, item) => sum + item.price * item.quantity,
       0,
@@ -176,13 +184,12 @@ export class OrdersService {
         } else {
           if (coupon.discountType === 'PERCENTAGE') {
             discount = Math.min(
-              Math.round((subtotal * coupon.discountValue) / 100),
+              Math.round((inclusiveSubtotal * coupon.discountValue) / 100),
               coupon.maxDiscount || Infinity,
             );
           } else {
-            discount = Math.min(coupon.discountValue, subtotal);
+            discount = Math.min(coupon.discountValue, inclusiveSubtotal);
           }
-          // Increment usage count
           await this.prisma.coupon.update({
             where: { id: coupon.id },
             data: { usedCount: { increment: 1 } },
@@ -191,15 +198,13 @@ export class OrdersService {
       }
     }
 
-    const shipping = await this.getShippingRate(subtotal);
-    const discountRatio = subtotal > 0 ? (subtotal - discount) / subtotal : 1;
-    const tax = Math.round(
-      orderItems.reduce((sum, item) => {
-        const lineTotal = item.price * item.quantity * discountRatio;
-        return sum + lineTotal * ((item.gstRate ?? 18) / 100);
-      }, 0),
-    );
-    const total = subtotal - discount + shipping + tax;
+    // Shipping eligibility uses the inclusive subtotal so it matches the storefront preview.
+    const shipping = await this.getShippingRate(inclusiveSubtotal);
+    // Tax is the difference between inclusive total and exclusive subtotal — same number the
+    // invoice shows, no separate rounding pass needed.
+    const tax = inclusiveSubtotal - subtotal;
+    // The customer-facing total is the inclusive subtotal less any discount, plus shipping.
+    const total = inclusiveSubtotal - discount + shipping;
 
     const orderNumber = `XN-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 999999)).padStart(6, '0')}`;
     const estimatedDelivery = new Date();
@@ -262,9 +267,11 @@ export class OrdersService {
         const wallet = await tx.wallet.findUnique({
           where: { ownerId_ownerType: { ownerId: userId, ownerType: 'CUSTOMER' } },
         });
-        if (!wallet || wallet.balance < total) {
+        // Allow up to ₹1 rounding tolerance so a ₹47.20 wallet can pay a ₹47 cart without failing.
+        const ROUNDING_TOLERANCE = 1;
+        if (!wallet || wallet.balance + ROUNDING_TOLERANCE < total) {
           throw new BadRequestException(
-            `Insufficient wallet balance. Available: ₹${(wallet?.balance ?? 0).toFixed(2)}, required: ₹${total.toFixed(2)}`,
+            `Insufficient wallet balance. Available: ₹${(wallet?.balance ?? 0).toFixed(2)}, required: ₹${total.toFixed(2)}. Please add ₹${(total - (wallet?.balance ?? 0)).toFixed(2)} to continue.`,
           );
         }
         const newBal = wallet.balance - total;

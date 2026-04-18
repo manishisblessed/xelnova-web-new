@@ -23,8 +23,13 @@ export class ContactService {
     return this.config.get<string>('SUPPORT_INBOX') || 'support@xelnova.in';
   }
 
+  /** Newsletter subscriptions go to a dedicated inbox so the marketing team can pick them up. */
+  private get newsletterInbox(): string {
+    return this.config.get<string>('NEWSLETTER_INBOX') || 'info@xelnova.in';
+  }
+
   private get fromAddress(): string {
-    return this.config.get<string>('CONTACT_FROM') || 'Xelnova <seller@xelnova.in>';
+    return this.config.get<string>('CONTACT_FROM') || 'Xelnova <info@xelnova.in>';
   }
 
   async sendContactMessage(input: {
@@ -104,7 +109,7 @@ export class ContactService {
     `;
 
     await this.emailService.sendEmail({
-      to: this.supportInbox,
+      to: this.newsletterInbox,
       from: this.fromAddress,
       subject: '[Xelnova] New Newsletter Subscriber',
       html: adminHtml,

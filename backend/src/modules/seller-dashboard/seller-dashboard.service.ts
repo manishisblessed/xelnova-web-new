@@ -588,6 +588,28 @@ export class SellerDashboardService {
       };
     }
 
+    // Payment-gated transitions (testing observation #5):
+    // sellers must NOT be able to manually flip a PENDING/PROCESSING order to
+    // CONFIRMED unless the customer has actually paid. CONFIRMED is reserved
+    // for the system to set automatically once payment lands (see
+    // payment.service.ts -> finalizeOnlineOrderAfterPayment, and the
+    // wallet/COD branches in orders.service.ts which already create the
+    // order in the right state).
+    if (status === 'CONFIRMED' && order.paymentStatus !== 'PAID') {
+      throw new BadRequestException(
+        'Order cannot be confirmed yet — payment is still pending. ' +
+        'It will move to Confirmed automatically once the customer\'s payment is received.',
+      );
+    }
+
+    // Same gate for SHIPPED — only ship orders that have been paid for
+    // (otherwise sellers can ship before money is in).
+    if (status === 'SHIPPED' && order.paymentStatus !== 'PAID') {
+      throw new BadRequestException(
+        'You can only ship an order after the customer\'s payment has been received.',
+      );
+    }
+
     // Regular status update
     return this.prisma.order.update({
       where: { id: orderId },
@@ -856,18 +878,33 @@ export class SellerDashboardService {
 
   // ─── Brand Proposal ───
 
-  async proposeBrand(userId: string, name: string, logo?: string) {
+  async proposeBrand(userId: string, name: string, logo?: string, authorizationCertificate?: string) {
     const seller = await this.getSellerProfile(userId);
     const slug = this.slugify(name);
 
     const existing = await this.prisma.brand.findUnique({ where: { slug } });
     if (existing) throw new BadRequestException('A brand with this name already exists');
 
+    // ── Brand cap ──
+    // A seller can propose / hold one brand without uploading a brand
+    // authorisation certificate. Any subsequent brand MUST come with a
+    // certificate so admin can verify the seller is authorised to sell
+    // products under that brand. This protects the marketplace from a
+    // single seller hoarding popular brand names.
+    const sellerBrandCount = await this.prisma.brand.count({ where: { proposedBy: seller.id } });
+    const cert = (authorizationCertificate ?? '').trim();
+    if (sellerBrandCount > 0 && !cert) {
+      throw new BadRequestException(
+        'You already have one brand on file. To add another brand, please upload an authorisation certificate that proves you are allowed to sell under that brand.',
+      );
+    }
+
     return this.prisma.brand.create({
       data: {
         name,
         slug,
         logo: logo || null,
+        authorizationCertificate: cert || null,
         proposedBy: seller.id,
         approved: false,
         featured: false,
@@ -905,7 +942,17 @@ export class SellerDashboardService {
         },
       },
       include: {
-        order: { select: { orderNumber: true, createdAt: true, status: true, paymentMethod: true, total: true } },
+        order: {
+          select: {
+            id: true,
+            orderNumber: true,
+            createdAt: true,
+            status: true,
+            paymentMethod: true,
+            total: true,
+            returnRequests: { select: { status: true } },
+          },
+        },
         product: { select: { name: true, sku: true } },
       },
       orderBy: { order: { createdAt: 'desc' } },
@@ -915,8 +962,14 @@ export class SellerDashboardService {
 
     const rows = orderItems.map((oi) => {
       const gross = oi.price * oi.quantity;
-      const commission = gross * commissionRate;
-      const net = gross - commission;
+      // Per testing observation #24: if any return on this order has reached
+      // REFUNDED, the platform waives its commission for that order. We zero
+      // out commission (and net reflects the full refund — gross is returned
+      // to the customer) and surface the "REFUNDED" status so the seller can
+      // see why the commission line is zero.
+      const refunded = (oi.order.returnRequests || []).some((r) => r.status === 'REFUNDED');
+      const commission = refunded ? 0 : gross * commissionRate;
+      const net = refunded ? 0 : gross - commission;
       return {
         orderNumber: oi.order.orderNumber,
         date: oi.order.createdAt.toISOString().split('T')[0],
@@ -924,12 +977,13 @@ export class SellerDashboardService {
         sku: oi.product?.sku || '',
         quantity: oi.quantity,
         unitPrice: oi.price,
-        gross,
-        commissionPercent: seller.commissionRate,
+        gross: refunded ? 0 : gross,
+        commissionPercent: refunded ? 0 : seller.commissionRate,
         commission,
         net,
-        orderStatus: oi.order.status,
+        orderStatus: refunded ? 'REFUNDED' : oi.order.status,
         paymentMethod: oi.order.paymentMethod || '',
+        commissionWaived: refunded,
       };
     });
 

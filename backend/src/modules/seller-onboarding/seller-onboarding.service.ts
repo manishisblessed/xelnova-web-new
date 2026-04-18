@@ -499,6 +499,10 @@ export class SellerOnboardingService {
           name: dto.fullName,
           password: hashedPassword,
           role: 'SELLER',
+          // Backfill phone if missing — sellers were getting blank phone in profile
+          // because legacy users existed without one (testing observation #19).
+          phone: existingUser.phone || dto.phone,
+          phoneVerified: existingUser.phoneVerified || true,
           lastLoginAt: new Date(),
           lastLoginIp: ipAddress,
         },
@@ -1013,9 +1017,11 @@ export class SellerOnboardingService {
 
   /**
    * Generates a unique, sequential sellerCode of the form
-   * `<Prefix>-XEL00001`. Uses a transactional, monotonically increasing
-   * `sellerCodeSequence` column to guarantee uniqueness across concurrent
-   * approvals.
+   * `<Prefix>-XEL1`, `<Prefix>-XEL2`, ... Uses a transactional,
+   * monotonically increasing `sellerCodeSequence` column to guarantee
+   * uniqueness across concurrent approvals. The numeric portion is no
+   * longer zero-padded (per testing observation #17) so existing codes
+   * with leading zeros remain valid but new ones grow naturally.
    */
   private async generateSellerCode(
     storeName: string,
@@ -1032,7 +1038,10 @@ export class SellerOnboardingService {
         select: { sellerCodeSequence: true },
       });
       const sequence = (last?.sellerCodeSequence ?? 0) + 1 + attempt;
-      const code = `${prefix}-XEL${String(sequence).padStart(5, '0')}`;
+      // Per testing observation #17 — start at XEL1 (no zero-padding) so the
+      // numeric portion grows naturally (XEL1, XEL2, … XEL3501, XEL3502).
+      // The seller-app UI further inserts thousands separators for display.
+      const code = `${prefix}-XEL${sequence}`;
 
       const existing = await this.prisma.sellerProfile.findFirst({
         where: { OR: [{ sellerCode: code }, { sellerCodeSequence: sequence }] },
@@ -1046,7 +1055,7 @@ export class SellerOnboardingService {
     // Fallback (extremely unlikely): timestamp-based sequence.
     const fallbackSequence = Math.floor(Date.now() / 1000);
     return {
-      code: `${prefix}-XEL${String(fallbackSequence).padStart(5, '0')}`,
+      code: `${prefix}-XEL${fallbackSequence}`,
       sequence: fallbackSequence,
     };
   }

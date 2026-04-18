@@ -28,6 +28,12 @@ export class AdminUpdateProductDto {
   @ApiPropertyOptional() @IsOptional() @IsBoolean() isActive?: boolean;
   @ApiPropertyOptional({ description: 'Reason for rejection (required when status is REJECTED)' })
   @IsOptional() @IsString() rejectionReason?: string;
+  @ApiPropertyOptional({
+    description:
+      'Independent reason for rejecting only the product images (without rejecting the listing). ' +
+      'Pass an empty string to clear.',
+  })
+  @IsOptional() @IsString() imageRejectionReason?: string;
   @ApiPropertyOptional({ description: 'Commission % charged on this listing (set on approval).' })
   @IsOptional() commissionRate?: number;
   @ApiPropertyOptional({ description: 'Curated bestseller rank (1 = top). null/0 to clear.' })
@@ -105,6 +111,8 @@ export class CreateBrandDto {
   @ApiProperty() @IsString() name: string;
   @ApiPropertyOptional() @IsOptional() @IsString() logo?: string;
   @ApiPropertyOptional() @IsOptional() @IsBoolean() featured?: boolean;
+  @ApiPropertyOptional({ description: 'Brand authorisation certificate URL.' })
+  @IsOptional() @IsString() authorizationCertificate?: string;
 }
 
 export class UpdateBrandDto {
@@ -113,6 +121,10 @@ export class UpdateBrandDto {
   @ApiPropertyOptional() @IsOptional() @IsBoolean() featured?: boolean;
   @ApiPropertyOptional() @IsOptional() @IsBoolean() isActive?: boolean;
   @ApiPropertyOptional() @IsOptional() @IsBoolean() approved?: boolean;
+  @ApiPropertyOptional({ description: 'Brand authorisation certificate URL.' })
+  @IsOptional() @IsString() authorizationCertificate?: string;
+  @ApiPropertyOptional({ description: 'Reason shown to the seller when the brand is rejected.' })
+  @IsOptional() @IsString() rejectionReason?: string;
 }
 
 // ─── Banner CRUD ───

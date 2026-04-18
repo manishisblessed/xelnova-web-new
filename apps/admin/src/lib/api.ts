@@ -106,6 +106,16 @@ export async function apiGetAdminProduct<T = unknown>(id: string): Promise<T> {
   return handleResponse<T>(res);
 }
 
+/**
+ * 360° view of a single customer/seller account — orders, return requests,
+ * support tickets and wallet (with recent transactions). Backed by
+ * GET /admin/customers/:id.
+ */
+export async function apiGetAdminCustomerDetail<T = unknown>(id: string): Promise<T> {
+  const res = await fetch(`${API_URL}/admin/customers/${id}`, { headers: authHeaders() });
+  return handleResponse<T>(res);
+}
+
 export async function apiPost<T = unknown>(path: string, body: Record<string, unknown>): Promise<T> {
   const res = await fetch(`${API_URL}/admin/${path}`, {
     method: 'POST',

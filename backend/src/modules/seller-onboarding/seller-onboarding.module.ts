@@ -19,7 +19,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
       useFactory: (configService: ConfigService) => ({
         secret: configService.get<string>('JWT_ACCESS_SECRET'),
         signOptions: {
-          expiresIn: configService.get('JWT_ACCESS_EXPIRES_IN', '15m'),
+          expiresIn: configService.get('JWT_ACCESS_EXPIRES_IN', '12h'),
         },
       }),
       inject: [ConfigService],

@@ -178,43 +178,84 @@ export class AdminService {
       where: { id },
       include: {
         category: { select: { id: true, name: true } },
-        seller: { select: { storeName: true, email: true, phone: true } },
+        seller: { select: { id: true, storeName: true, email: true, phone: true } },
       },
     });
     if (!product) {
       throw new HttpException('Product not found', HttpStatus.NOT_FOUND);
     }
-    return product;
+
+    // Enrich with the matching Brand record (looked up by name) so admins can
+    // see the brand-authorisation certificate while reviewing a product. The
+    // Product model only stores the brand as a free-text field, so we resolve
+    // it lazily here instead of via a Prisma relation.
+    let brandRecord: any = null;
+    if (product.brand?.trim()) {
+      const found = await this.prisma.brand.findFirst({
+        where: { name: { equals: product.brand.trim(), mode: 'insensitive' } },
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          logo: true,
+          approved: true,
+          isActive: true,
+          authorizationCertificate: true,
+          proposedBy: true,
+        },
+      });
+      if (found) {
+        let proposer: any = null;
+        if (found.proposedBy) {
+          proposer = await this.prisma.sellerProfile.findUnique({
+            where: { id: found.proposedBy },
+            select: { id: true, storeName: true, user: { select: { email: true } } },
+          });
+        }
+        brandRecord = { ...found, proposer };
+      }
+    }
+
+    return { ...product, brandRecord };
   }
 
   async updateProduct(id: string, dto: AdminUpdateProductDto) {
     const data: any = {};
-    
+
     if (dto.status) {
       data.status = dto.status;
-      
+
       // When approving: set isActive to true and clear rejection reason
       if (dto.status === 'ACTIVE') {
         data.isActive = true;
         data.rejectionReason = null;
+        data.imageRejectionReason = null;
       }
-      
+
       // When rejecting: set isActive to false and require rejection reason
       if (dto.status === 'REJECTED') {
-        data.isActive = false;
-        if (dto.rejectionReason) {
-          data.rejectionReason = dto.rejectionReason;
+        const reason = (dto.rejectionReason ?? '').trim();
+        if (!reason) {
+          throw new BadRequestException(
+            'A rejection reason is required when rejecting a product so the seller knows what to fix.',
+          );
         }
+        data.isActive = false;
+        data.rejectionReason = reason;
       }
     }
-    
+
     if (dto.isFeatured !== undefined) data.isFeatured = dto.isFeatured;
     if (dto.isTrending !== undefined) data.isTrending = dto.isTrending;
     if (dto.isFlashDeal !== undefined) data.isFlashDeal = dto.isFlashDeal;
     if (dto.flashDealEndsAt) data.flashDealEndsAt = new Date(dto.flashDealEndsAt);
     if (dto.isActive !== undefined) data.isActive = dto.isActive;
-    if (dto.rejectionReason !== undefined && dto.status !== 'ACTIVE') {
+    if (dto.rejectionReason !== undefined && dto.status !== 'ACTIVE' && dto.status !== 'REJECTED') {
       data.rejectionReason = dto.rejectionReason || null;
+    }
+    if (dto.imageRejectionReason !== undefined) {
+      const trimmed = dto.imageRejectionReason?.trim() ?? '';
+      data.imageRejectionReason = trimmed === '' ? null : trimmed;
     }
     if (dto.commissionRate !== undefined && dto.commissionRate !== null) {
       const rate = Number(dto.commissionRate);
@@ -607,6 +648,134 @@ export class AdminService {
     return { items, total, page, limit };
   }
 
+  /**
+   * Returns the full 360° view of a single user — profile, every order
+   * (with items, seller, payment and shipment status), every return /
+   * refund request, every support ticket, and their wallet balance +
+   * latest transactions. Used by the admin → Customers → "View" drawer
+   * so support agents can answer "what did this user buy and what is the
+   * refund status?" without bouncing between screens.
+   */
+  async getCustomerById(id: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        phone: true,
+        role: true,
+        emailVerified: true,
+        phoneVerified: true,
+        isActive: true,
+        isBanned: true,
+        banReason: true,
+        aadhaarVerified: true,
+        aadhaarVerifiedAt: true,
+        lastLoginAt: true,
+        lastLoginIp: true,
+        loginCount: true,
+        avatar: true,
+        createdAt: true,
+        updatedAt: true,
+        addresses: { orderBy: { isDefault: 'desc' } },
+      },
+    });
+    if (!user) throw new NotFoundException('User not found');
+
+    const [orders, returnRequests, tickets, wallet] = await Promise.all([
+      this.prisma.order.findMany({
+        where: { userId: id },
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+        include: {
+          items: {
+            include: {
+              product: {
+                select: {
+                  id: true,
+                  name: true,
+                  slug: true,
+                  images: true,
+                  seller: { select: { id: true, storeName: true, sellerCode: true } },
+                },
+              },
+            },
+          },
+          shipment: true,
+          shippingAddress: true,
+        },
+      }),
+      this.prisma.returnRequest.findMany({
+        where: { userId: id },
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+        include: {
+          order: {
+            select: {
+              id: true,
+              orderNumber: true,
+              total: true,
+              items: { select: { productName: true, quantity: true, price: true } },
+            },
+          },
+        },
+      }),
+      this.prisma.ticket.findMany({
+        where: { customerId: id },
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+        select: {
+          id: true,
+          ticketNumber: true,
+          subject: true,
+          status: true,
+          priority: true,
+          orderId: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      }),
+      this.prisma.wallet.findUnique({
+        where: { ownerId_ownerType: { ownerId: id, ownerType: 'CUSTOMER' } },
+        include: {
+          transactions: { orderBy: { createdAt: 'desc' }, take: 25 },
+        },
+      }),
+    ]);
+
+    // Pre-compute aggregates so the UI does not have to re-walk the orders.
+    const completedOrders = orders.filter((o) => o.status === 'DELIVERED');
+    const cancelledOrders = orders.filter((o) => o.status === 'CANCELLED');
+    const refundedOrders = orders.filter((o) => o.status === 'REFUNDED');
+    const totalSpent = completedOrders.reduce((sum, o) => sum + o.total, 0);
+
+    return {
+      user,
+      stats: {
+        totalOrders: orders.length,
+        completedOrders: completedOrders.length,
+        cancelledOrders: cancelledOrders.length,
+        refundedOrders: refundedOrders.length,
+        totalSpent,
+        openTickets: tickets.filter((t) => t.status !== 'CLOSED' && t.status !== 'RESOLVED').length,
+        pendingReturns: returnRequests.filter(
+          (r) => r.status !== 'REFUNDED' && r.status !== 'REJECTED',
+        ).length,
+      },
+      orders: orders.map((o) => {
+        // The Order model has no direct seller relation — every line item is
+        // sold by the product's seller. We surface the first item's seller so
+        // the admin can quickly see "who fulfilled this order" in the list.
+        const firstSeller = o.items[0]?.product?.seller ?? null;
+        return { ...o, seller: firstSeller };
+      }),
+      returnRequests,
+      tickets,
+      wallet,
+    };
+  }
+
   async updateCustomer(id: string, dto: AdminUpdateCustomerDto, audit?: AdminAuditContext) {
     const data: any = {};
     if (dto.role) data.role = dto.role;
@@ -714,8 +883,30 @@ export class AdminService {
 
   // ─── Brands ───
 
+  /**
+   * Returns every brand (approved + pending). Pending and recently-added
+   * brands surface first so admins can act on them. Each row is enriched
+   * with the proposing seller's storeName so the brand list page can show
+   * who submitted it.
+   */
   async getBrands() {
-    return this.prisma.brand.findMany({ orderBy: { name: 'asc' } });
+    const brands = await this.prisma.brand.findMany({
+      orderBy: [{ approved: 'asc' }, { createdAt: 'desc' }],
+    });
+
+    const proposerIds = Array.from(new Set(brands.map((b) => b.proposedBy).filter((v): v is string => !!v)));
+    const proposers = proposerIds.length
+      ? await this.prisma.sellerProfile.findMany({
+          where: { id: { in: proposerIds } },
+          select: { id: true, storeName: true, sellerCode: true, email: true },
+        })
+      : [];
+    const byId = new Map(proposers.map((p) => [p.id, p]));
+
+    return brands.map((b) => ({
+      ...b,
+      proposer: b.proposedBy ? byId.get(b.proposedBy) ?? null : null,
+    }));
   }
 
   async getPendingBrands() {
@@ -727,13 +918,51 @@ export class AdminService {
 
   async createBrand(dto: CreateBrandDto) {
     return this.prisma.brand.create({
-      data: { name: dto.name, slug: this.slugify(dto.name), logo: dto.logo, featured: dto.featured },
+      data: {
+        name: dto.name,
+        slug: this.slugify(dto.name),
+        logo: dto.logo,
+        featured: dto.featured,
+        authorizationCertificate: dto.authorizationCertificate,
+        // Admin-created brands are approved by default.
+        approved: true,
+        isActive: true,
+      },
     });
   }
 
   async updateBrand(id: string, dto: UpdateBrandDto) {
-    const data: any = { ...dto };
-    if (dto.name) data.slug = this.slugify(dto.name);
+    const existing = await this.prisma.brand.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException('Brand not found');
+
+    const data: any = {};
+    if (dto.name !== undefined) {
+      data.name = dto.name;
+      data.slug = this.slugify(dto.name);
+    }
+    if (dto.logo !== undefined) data.logo = dto.logo;
+    if (dto.featured !== undefined) data.featured = dto.featured;
+    if (dto.isActive !== undefined) data.isActive = dto.isActive;
+    if (dto.authorizationCertificate !== undefined) {
+      data.authorizationCertificate = dto.authorizationCertificate || null;
+    }
+
+    if (dto.approved !== undefined) {
+      data.approved = dto.approved;
+      // Approving a brand also activates it on the storefront so sellers can
+      // immediately tag products with it. Rejecting leaves it inactive but
+      // keeps the row so the seller can see admin's reason.
+      if (dto.approved === true) {
+        data.isActive = true;
+        data.rejectionReason = null;
+      } else {
+        data.isActive = false;
+      }
+    }
+    if (dto.rejectionReason !== undefined) {
+      data.rejectionReason = dto.rejectionReason?.trim() || null;
+    }
+
     return this.prisma.brand.update({ where: { id }, data });
   }
 

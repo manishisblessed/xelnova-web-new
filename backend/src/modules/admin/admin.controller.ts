@@ -178,6 +178,12 @@ export class AdminController {
     return paginatedResponse(items, total, page, limit, 'Customers fetched');
   }
 
+  @Get('customers/:id')
+  @ApiOperation({ summary: 'Get full 360° view for one customer (orders, returns, tickets, wallet)' })
+  async getCustomerDetail(@Param('id') id: string) {
+    return successResponse(await this.service.getCustomerById(id), 'Customer details fetched');
+  }
+
   @Patch('customers/:id')
   @ApiOperation({ summary: 'Update customer role/status, suspend' })
   async updateCustomer(
