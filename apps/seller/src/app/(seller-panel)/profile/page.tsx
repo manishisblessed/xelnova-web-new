@@ -358,12 +358,19 @@ export default function ProfilePage() {
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 mt-8">
-              <StatCard loading={false} label="Total sales" value={profile.totalSales} icon={TrendingUp} />
+              <StatCard
+                loading={false}
+                label="Total sales"
+                value={profile.totalSales}
+                icon={TrendingUp}
+                href="/analytics"
+              />
               <StatCard
                 loading={false}
                 label="Rating"
                 value={typeof profile.rating === 'number' ? profile.rating.toFixed(1) : '—'}
                 icon={Star}
+                href="/store"
               />
             </div>
           </div>

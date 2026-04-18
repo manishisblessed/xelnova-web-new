@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { motion } from 'framer-motion';
 import {
   IndianRupee, Wallet, Percent, ShoppingCart, Package,
@@ -102,67 +103,91 @@ export default function SellerPayoutsPage() {
         {/* Summary cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
-            <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className="text-sm text-text-muted">Available Balance</p>
-                  <p className="text-3xl font-bold text-emerald-600 mt-1">{loading ? '—' : fmt(deliveredNet)}</p>
-                  <p className="text-xs text-text-muted mt-1">From {deliveredOrders.length} delivered orders</p>
-                </div>
-                <div className="rounded-xl bg-emerald-50 p-2.5">
-                  <Wallet size={20} className="text-emerald-600" />
+            <Link
+              href="/wallet"
+              aria-label="Open wallet"
+              className="block rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40"
+            >
+              <div className="rounded-2xl border border-border bg-white p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-card-hover">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-sm text-text-muted">Available Balance</p>
+                    <p className="text-3xl font-bold text-emerald-600 mt-1">{loading ? '—' : fmt(deliveredNet)}</p>
+                    <p className="text-xs text-text-muted mt-1">From {deliveredOrders.length} delivered orders</p>
+                  </div>
+                  <div className="rounded-xl bg-emerald-50 p-2.5">
+                    <Wallet size={20} className="text-emerald-600" />
+                  </div>
                 </div>
               </div>
-            </div>
+            </Link>
           </motion.div>
 
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.03 }}>
-            <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className="text-sm text-text-muted">Pending Settlement</p>
-                  <p className="text-3xl font-bold text-amber-600 mt-1">{loading ? '—' : fmt(pendingNet)}</p>
-                  <p className="text-xs text-text-muted mt-1">From {pendingSettlement.length} in-transit orders</p>
-                </div>
-                <div className="rounded-xl bg-amber-50 p-2.5">
-                  <Clock size={20} className="text-amber-600" />
+            <Link
+              href="/orders?tab=in_transit"
+              aria-label="Open in-transit orders"
+              className="block rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40"
+            >
+              <div className="rounded-2xl border border-border bg-white p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-card-hover">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-sm text-text-muted">Pending Settlement</p>
+                    <p className="text-3xl font-bold text-amber-600 mt-1">{loading ? '—' : fmt(pendingNet)}</p>
+                    <p className="text-xs text-text-muted mt-1">From {pendingSettlement.length} in-transit orders</p>
+                  </div>
+                  <div className="rounded-xl bg-amber-50 p-2.5">
+                    <Clock size={20} className="text-amber-600" />
+                  </div>
                 </div>
               </div>
-            </div>
+            </Link>
           </motion.div>
 
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.06 }}>
-            <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className="text-sm text-text-muted">Total Earnings</p>
-                  <p className="text-3xl font-bold text-text-primary mt-1">{loading ? '—' : fmt(data?.netRevenue ?? 0)}</p>
-                  <p className="text-xs text-text-muted mt-1">After platform commission (varies per product)</p>
-                </div>
-                <div className="rounded-xl bg-blue-50 p-2.5">
-                  <IndianRupee size={20} className="text-blue-600" />
+            <Link
+              href="/analytics"
+              aria-label="Open analytics"
+              className="block rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40"
+            >
+              <div className="rounded-2xl border border-border bg-white p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-card-hover">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-sm text-text-muted">Total Earnings</p>
+                    <p className="text-3xl font-bold text-text-primary mt-1">{loading ? '—' : fmt(data?.netRevenue ?? 0)}</p>
+                    <p className="text-xs text-text-muted mt-1">After platform commission (varies per product)</p>
+                  </div>
+                  <div className="rounded-xl bg-blue-50 p-2.5">
+                    <IndianRupee size={20} className="text-blue-600" />
+                  </div>
                 </div>
               </div>
-            </div>
+            </Link>
           </motion.div>
 
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.09 }}>
-            <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className="text-sm text-text-muted">Platform Commission</p>
-                  <p className="text-3xl font-bold text-red-500 mt-1">{loading ? '—' : fmt(data?.commission ?? 0)}</p>
-                  <p className="text-xs text-text-muted mt-1">
-                    {commRate > 0
-                      ? `Effective ${commRate.toFixed(2)}% across this period (set per product)`
-                      : 'Set per product when admin approves the listing'}
-                  </p>
-                </div>
-                <div className="rounded-xl bg-red-50 p-2.5">
-                  <Percent size={20} className="text-red-500" />
+            <Link
+              href="/analytics"
+              aria-label="Open commission breakdown"
+              className="block rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40"
+            >
+              <div className="rounded-2xl border border-border bg-white p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-card-hover">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-sm text-text-muted">Platform Commission</p>
+                    <p className="text-3xl font-bold text-red-500 mt-1">{loading ? '—' : fmt(data?.commission ?? 0)}</p>
+                    <p className="text-xs text-text-muted mt-1">
+                      {commRate > 0
+                        ? `Effective ${commRate.toFixed(2)}% across this period (set per product)`
+                        : 'Set per product when admin approves the listing'}
+                    </p>
+                  </div>
+                  <div className="rounded-xl bg-red-50 p-2.5">
+                    <Percent size={20} className="text-red-500" />
+                  </div>
                 </div>
               </div>
-            </div>
+            </Link>
           </motion.div>
         </div>
 

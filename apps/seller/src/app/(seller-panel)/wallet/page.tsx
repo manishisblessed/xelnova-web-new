@@ -199,18 +199,21 @@ export default function WalletPage() {
             value={`₹${balance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`}
             icon={Wallet}
             loading={loading}
+            href="/payouts"
           />
           <StatCard
             label="Total Credits"
             value={`₹${creditTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`}
             icon={ArrowUpCircle}
             loading={loading}
+            href="/wallet?type=CREDIT"
           />
           <StatCard
             label="Total Debits"
             value={`₹${debitTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`}
             icon={ArrowDownCircle}
             loading={loading}
+            href="/wallet?type=DEBIT"
           />
         </div>
 

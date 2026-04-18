@@ -79,13 +79,50 @@ export default function RevenuePage() {
 
   const chartPoints = data?.dailyRevenue?.map((d) => ({ name: d.date, amount: d.amount })) ?? [];
 
+  // Carry the active range into the deep-linked destination so the
+  // sibling pages (orders, commissions) open with the same window applied.
+  const rangeQs =
+    dateFrom || dateTo
+      ? `?${[
+          dateFrom ? `dateFrom=${dateFrom}` : '',
+          dateTo ? `dateTo=${dateTo}` : '',
+        ]
+          .filter(Boolean)
+          .join('&')}`
+      : '';
+
   const kpis = data
     ? [
-        { label: 'Total Revenue', value: `₹${data.totalRevenue.toLocaleString()}`, icon: DollarSign },
-        { label: 'Total Discount', value: `₹${data.totalDiscount.toLocaleString()}`, icon: Percent },
-        { label: 'Shipping Revenue', value: `₹${data.totalShipping.toLocaleString()}`, icon: Truck },
-        { label: 'Tax Collected', value: `₹${data.totalTax.toLocaleString()}`, icon: Receipt },
-        { label: 'Orders', value: data.orderCount.toLocaleString(), icon: ShoppingCart },
+        {
+          label: 'Total Revenue',
+          value: `₹${data.totalRevenue.toLocaleString()}`,
+          icon: DollarSign,
+          href: `/revenue${rangeQs}`,
+        },
+        {
+          label: 'Total Discount',
+          value: `₹${data.totalDiscount.toLocaleString()}`,
+          icon: Percent,
+          href: `/coupons`,
+        },
+        {
+          label: 'Shipping Revenue',
+          value: `₹${data.totalShipping.toLocaleString()}`,
+          icon: Truck,
+          href: `/orders${rangeQs}`,
+        },
+        {
+          label: 'Tax Collected',
+          value: `₹${data.totalTax.toLocaleString()}`,
+          icon: Receipt,
+          href: `/orders${rangeQs}`,
+        },
+        {
+          label: 'Orders',
+          value: data.orderCount.toLocaleString(),
+          icon: ShoppingCart,
+          href: `/orders${rangeQs}`,
+        },
       ]
     : [];
 
@@ -142,7 +179,7 @@ export default function RevenuePage() {
             ? Array.from({ length: 5 }).map((_, i) => <StatCard key={i} label="" value="" loading />)
             : kpis.map((kpi, i) => (
                 <motion.div key={kpi.label} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }}>
-                  <StatCard label={kpi.label} value={kpi.value} icon={kpi.icon} />
+                  <StatCard label={kpi.label} value={kpi.value} icon={kpi.icon} href={kpi.href} />
                 </motion.div>
               ))}
         </div>

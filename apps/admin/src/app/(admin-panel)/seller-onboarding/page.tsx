@@ -184,9 +184,30 @@ export default function SellerOnboardingPage() {
   const [rejectionReason, setRejectionReason] = useState('');
   const [signatureComment, setSignatureComment] = useState('');
   const [signatureLoading, setSignatureLoading] = useState(false);
-  const [statusFilter, setStatusFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState(() => searchParams.get('status') ?? '');
   const [searchQuery, setSearchQuery] = useState('');
   const [pagination, setPagination] = useState({ page: 1, limit: 20, total: 0, totalPages: 0 });
+
+  // Keep `statusFilter` in lock-step with the `?status=` URL param so the
+  // KPI tiles can deep-link straight into the filtered list (and so the
+  // back/forward buttons just work).
+  useEffect(() => {
+    const urlStatus = searchParams.get('status') ?? '';
+    if (urlStatus !== statusFilter) setStatusFilter(urlStatus);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
+  const handleStatusFilterChange = useCallback(
+    (next: string) => {
+      setStatusFilter(next);
+      const params = new URLSearchParams(searchParams.toString());
+      if (next) params.set('status', next);
+      else params.delete('status');
+      const qs = params.toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    },
+    [router, pathname, searchParams],
+  );
   /** Guard so the deep-link effect runs at most once per navigation. */
   const handledDeepLinkRef = useRef(false);
 
@@ -392,6 +413,12 @@ export default function SellerOnboardingPage() {
     (stats.PHONE_VERIFIED || 0) +
     (stats.DOCUMENTS_SUBMITTED || 0);
 
+  // Comma-joined value the backend `getAllSellers` endpoint splits back
+  // into a Prisma `in` filter. Kept as a constant so the KPI card link
+  // and the "In Progress" `<select>` option stay in sync.
+  const IN_PROGRESS_STATUSES =
+    'PENDING_VERIFICATION,EMAIL_VERIFIED,PHONE_VERIFIED,DOCUMENTS_SUBMITTED';
+
   /* ── Table columns ── */
   const columns: Column<SellerProfile>[] = [
     {
@@ -487,10 +514,34 @@ export default function SellerOnboardingPage() {
       <div className="p-6 space-y-6">
         {/* Stats */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <StatCard label="Pending Review" value={pendingCount} icon={Clock} loading={loading} />
-          <StatCard label="Approved" value={approvedCount} icon={CheckCircle} loading={loading} />
-          <StatCard label="Rejected" value={rejectedCount} icon={XCircle} loading={loading} />
-          <StatCard label="In Progress" value={inProgressCount} icon={Store} loading={loading} />
+          <StatCard
+            label="Pending Review"
+            value={pendingCount}
+            icon={Clock}
+            loading={loading}
+            href="/seller-onboarding?status=UNDER_REVIEW"
+          />
+          <StatCard
+            label="Approved"
+            value={approvedCount}
+            icon={CheckCircle}
+            loading={loading}
+            href="/seller-onboarding?status=APPROVED"
+          />
+          <StatCard
+            label="Rejected"
+            value={rejectedCount}
+            icon={XCircle}
+            loading={loading}
+            href="/seller-onboarding?status=REJECTED"
+          />
+          <StatCard
+            label="In Progress"
+            value={inProgressCount}
+            icon={Store}
+            loading={loading}
+            href={`/seller-onboarding?status=${IN_PROGRESS_STATUSES}`}
+          />
         </div>
 
         {/* Toolbar */}
@@ -511,13 +562,14 @@ export default function SellerOnboardingPage() {
           </div>
           <select
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
+            onChange={(e) => handleStatusFilterChange(e.target.value)}
             className="rounded-xl border border-border bg-surface px-3 py-2 text-sm text-text-primary outline-none"
           >
             <option value="">All Statuses</option>
             <option value="UNDER_REVIEW">Under Review</option>
             <option value="APPROVED">Approved</option>
             <option value="REJECTED">Rejected</option>
+            <option value={IN_PROGRESS_STATUSES}>In Progress</option>
             <option value="PENDING_VERIFICATION">Pending Verification</option>
             <option value="EMAIL_VERIFIED">Email Verified</option>
             <option value="PHONE_VERIFIED">Phone Verified</option>

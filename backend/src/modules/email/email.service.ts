@@ -24,26 +24,37 @@ export class EmailService {
    * "From" address used for **every** seller-targeted email (account
    * approval / rejection, new order alerts, product approval / rejection,
    * low-stock alerts, onboarding OTP, etc.). Defaults to
-   * `XelNova Seller <seller@xelnova.in>` per product policy. Override with
-   * `EMAIL_FROM_SELLER`.
+   * `XelNova Seller <seller@xelnova.in>` per product policy.
+   *
+   * IMPORTANT: this MUST NOT silently fall back to `EMAIL_FROM` — the
+   * production deploy sets `EMAIL_FROM=noreply@xelnova.in` for customer
+   * transactional mail, and inheriting from it would route seller mail
+   * through `noreply@` (the bug that surfaced as "Product Approved" being
+   * delivered from `noreply@xelnova.in`). Override with `EMAIL_FROM_SELLER`.
    */
   private readonly sellerFromEmail: string;
   /**
    * Dedicated "From" address for payout-related notifications (seller
    * payouts, payout failures, etc.). Defaults to
    * `XelNova Payments <payments@xelnova.in>`. Override with
-   * `EMAIL_PAYMENT_FROM`.
+   * `EMAIL_PAYMENT_FROM`. Same rule as `sellerFromEmail`: does NOT fall
+   * back to `EMAIL_FROM`.
    */
   private readonly paymentFromEmail: string;
 
   constructor(private readonly config: ConfigService) {
-    this.fromEmail = this.config.get('EMAIL_FROM') || 'XelNova <seller@xelnova.in>';
+    this.fromEmail = this.config.get('EMAIL_FROM') || 'XelNova <noreply@xelnova.in>';
     this.sellerFromEmail =
-      this.config.get('EMAIL_FROM_SELLER') ||
-      this.config.get('EMAIL_FROM') ||
-      'XelNova Seller <seller@xelnova.in>';
+      this.config.get('EMAIL_FROM_SELLER') || 'XelNova Seller <seller@xelnova.in>';
     this.paymentFromEmail =
       this.config.get('EMAIL_PAYMENT_FROM') || 'XelNova Payments <payments@xelnova.in>';
+  }
+
+  /** Public accessor so call sites that build raw `sendEmail` payloads
+   * for a payout email (rare — most go through `sendPayoutNotification`)
+   * can route through the same configured payments address. */
+  getPaymentFromAddress(): string {
+    return this.paymentFromEmail;
   }
 
   /**

@@ -46,9 +46,10 @@ const NAV_SECTIONS: NavSection[] = [
   {
     items: [
       { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+      { href: '/seller-onboarding', label: 'Seller Verification', icon: CheckCircle },
       { href: '/performance', label: 'Performance', icon: Activity },
       { href: '/logs', label: 'System Logs', icon: FileText },
-      { href: '/verifications', label: 'Verifications', icon: CheckCircle },
+      { href: '/verifications', label: 'Verifications', icon: Shield },
       { href: '/feature-flags', label: 'Feature Flags', icon: Flag },
     ],
   },
@@ -72,7 +73,6 @@ const NAV_SECTIONS: NavSection[] = [
       { href: '/tickets', label: 'Support Tickets', icon: MessageSquare },
       { href: '/customers', label: 'Customers', icon: Users },
       { href: '/sellers', label: 'Sellers', icon: Store },
-      { href: '/seller-onboarding', label: 'Seller Onboarding', icon: Store },
     ],
   },
   {

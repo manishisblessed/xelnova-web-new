@@ -41,6 +41,7 @@ function getNotificationHref(n: Notification): string | null {
   const orderNumber = typeof data?.orderNumber === 'string' ? data.orderNumber : null;
   const ticketId = typeof data?.ticketId === 'string' ? data.ticketId : null;
   const sellerId = typeof data?.sellerId === 'string' ? data.sellerId : null;
+  const productSku = typeof data?.sku === 'string' ? data.sku : null;
 
   switch (n.type) {
     case 'ADMIN_NEW_ORDER':
@@ -63,6 +64,12 @@ function getNotificationHref(n: Notification): string | null {
     case 'ADMIN_SUPPORT_TICKET':
     case 'ADMIN_TICKET_CUSTOMER_REPLY':
       return ticketId ? `/tickets?ticketId=${encodeURIComponent(ticketId)}` : '/tickets';
+    case 'ADMIN_PRODUCT_SUBMITTED':
+      // The admin Products list reads `?status=` and `?search=` from the
+      // URL, so prefilling SKU lands the reviewer on the exact pending row.
+      return productSku
+        ? `/products?status=PENDING&search=${encodeURIComponent(productSku)}`
+        : '/products?status=PENDING';
     case 'REVIEW_PENDING':
       return '/reviews';
     default:

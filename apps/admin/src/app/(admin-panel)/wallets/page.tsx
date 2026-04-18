@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
   Wallet,
   ArrowUpCircle,
@@ -81,11 +82,42 @@ function txnBadgeVariant(type: string): 'success' | 'warning' | 'danger' | 'defa
 }
 
 export default function WalletsPage() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [wallets, setWallets] = useState<WalletItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [pagination, setPagination] = useState({ page: 1, limit: 20, total: 0, totalPages: 0 });
-  const [ownerFilter, setOwnerFilter] = useState<'ALL' | OwnerType>('ALL');
+  const initialOwnerParam = (searchParams.get('ownerType') || 'ALL').toUpperCase();
+  const [ownerFilter, setOwnerFilter] = useState<'ALL' | OwnerType>(
+    (['ALL', 'ADMIN', 'SELLER', 'CUSTOMER'] as const).includes(initialOwnerParam as 'ALL' | OwnerType)
+      ? (initialOwnerParam as 'ALL' | OwnerType)
+      : 'ALL',
+  );
+
+  // Keep `ownerFilter` in lock-step with the `?ownerType=` URL param so
+  // the KPI tiles can deep-link straight into a filtered list (and the
+  // back/forward buttons just work).
+  useEffect(() => {
+    const next = (searchParams.get('ownerType') || 'ALL').toUpperCase() as 'ALL' | OwnerType;
+    const valid = (['ALL', 'ADMIN', 'SELLER', 'CUSTOMER'] as const).includes(next);
+    if (valid && next !== ownerFilter) setOwnerFilter(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
+  const setOwnerFilterAndUrl = useCallback(
+    (next: 'ALL' | OwnerType) => {
+      setOwnerFilter(next);
+      setPagination((p) => ({ ...p, page: 1 }));
+      const params = new URLSearchParams(searchParams.toString());
+      if (next === 'ALL') params.delete('ownerType');
+      else params.set('ownerType', next);
+      const qs = params.toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    },
+    [router, pathname, searchParams],
+  );
 
   const [actionModal, setActionModal] = useState<{ type: 'credit' | 'debit'; wallet: WalletItem } | null>(null);
   const [actionAmount, setActionAmount] = useState('');
@@ -218,15 +250,34 @@ export default function WalletsPage() {
 
       <div className="p-6 space-y-6">
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <StatCard label="Total Wallets" value={wallets.length} icon={Wallet} loading={loading} />
+          <StatCard
+            label="Total Wallets"
+            value={wallets.length}
+            icon={Wallet}
+            loading={loading}
+            href="/wallets"
+          />
           <StatCard
             label="Total Balance"
             value={fmtMoney(totalBalance)}
             icon={Wallet}
             loading={loading}
+            href="/revenue"
           />
-          <StatCard label="Customer Wallets" value={customerWallets.length} icon={Wallet} loading={loading} />
-          <StatCard label="Seller Wallets" value={sellerWallets.length} icon={Wallet} loading={loading} />
+          <StatCard
+            label="Customer Wallets"
+            value={customerWallets.length}
+            icon={Wallet}
+            loading={loading}
+            href="/wallets?ownerType=CUSTOMER"
+          />
+          <StatCard
+            label="Seller Wallets"
+            value={sellerWallets.length}
+            icon={Wallet}
+            loading={loading}
+            href="/wallets?ownerType=SELLER"
+          />
         </div>
 
         <motion.div
@@ -249,10 +300,7 @@ export default function WalletsPage() {
               <button
                 key={f.key}
                 type="button"
-                onClick={() => {
-                  setOwnerFilter(f.key);
-                  setPagination((p) => ({ ...p, page: 1 }));
-                }}
+                onClick={() => setOwnerFilterAndUrl(f.key)}
                 className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
                   ownerFilter === f.key
                     ? 'border-primary-500 bg-primary-500 text-white'

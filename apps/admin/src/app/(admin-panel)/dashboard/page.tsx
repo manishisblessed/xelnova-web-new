@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
+// `Link` is still used by the secondary KPI tiles below — they are
+// custom-styled cards (not <StatCard>) so they keep their own wrappers.
 import { DollarSign, ShoppingCart, Users, Store, Package, Clock, Star } from 'lucide-react';
 import { DashboardHeader } from '@/components/dashboard/dashboard-header';
 import { StatCard } from '@/components/dashboard/stat-card';
@@ -82,18 +84,40 @@ export default function DashboardPage() {
       <DashboardHeader title="Admin Dashboard" />
       <div className="p-6 space-y-6">
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <Link href="/revenue" className="block rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 transition-transform hover:-translate-y-0.5" aria-label="Open revenue analytics">
-            <StatCard loading={loading} label="Total Revenue" value={data ? `₹${data.totalRevenue.toLocaleString()}` : '—'} icon={DollarSign} />
-          </Link>
-          <Link href="/orders" className="block rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 transition-transform hover:-translate-y-0.5" aria-label="Open all orders">
-            <StatCard loading={loading} label="Total Orders" value={data?.totalOrders ?? '—'} change={orderChange || undefined} changeLabel="vs last month" icon={ShoppingCart} />
-          </Link>
-          <Link href="/customers" className="block rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 transition-transform hover:-translate-y-0.5" aria-label="Open customers list">
-            <StatCard loading={loading} label="Users" value={data?.totalCustomers ?? '—'} icon={Users} />
-          </Link>
-          <Link href="/sellers" className="block rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 transition-transform hover:-translate-y-0.5" aria-label="Open sellers list">
-            <StatCard loading={loading} label="Sellers" value={data ? `${data.activeSellers} / ${data.totalSellers}` : '—'} icon={Store} />
-          </Link>
+          <StatCard
+            loading={loading}
+            label="Total Revenue"
+            value={data ? `₹${data.totalRevenue.toLocaleString()}` : '—'}
+            icon={DollarSign}
+            href="/revenue"
+            ariaLabel="Open revenue analytics"
+          />
+          <StatCard
+            loading={loading}
+            label="Total Orders"
+            value={data?.totalOrders ?? '—'}
+            change={orderChange || undefined}
+            changeLabel="vs last month"
+            icon={ShoppingCart}
+            href="/orders"
+            ariaLabel="Open all orders"
+          />
+          <StatCard
+            loading={loading}
+            label="Users"
+            value={data?.totalCustomers ?? '—'}
+            icon={Users}
+            href="/customers"
+            ariaLabel="Open customers list"
+          />
+          <StatCard
+            loading={loading}
+            label="Sellers"
+            value={data ? `${data.activeSellers} / ${data.totalSellers}` : '—'}
+            icon={Store}
+            href="/sellers"
+            ariaLabel="Open sellers list"
+          />
         </motion.div>
 
         <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">

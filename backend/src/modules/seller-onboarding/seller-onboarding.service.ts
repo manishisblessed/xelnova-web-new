@@ -189,9 +189,12 @@ export class SellerOnboardingService {
         Authorization: `Bearer ${resendApiKey}`,
       },
       body: JSON.stringify({
+        // Seller-facing OTP must always come from the seller mailbox.
+        // Do NOT fall back to `EMAIL_FROM` — that's the customer/noreply
+        // sender on production and would violate the "sellers only get
+        // mail from seller@" policy.
         from:
           process.env.EMAIL_FROM_SELLER ||
-          process.env.EMAIL_FROM ||
           'XelNova Seller <seller@xelnova.in>',
         to: email,
         subject: 'Verify your email - Xelnova Seller',
@@ -1183,7 +1186,15 @@ export class SellerOnboardingService {
 
     const where: any = {};
 
-    if (status) where.onboardingStatus = status;
+    if (status) {
+      // Support comma-separated lists (e.g. for the admin "In Progress" KPI
+      // tile which fans out to several intermediate onboarding statuses).
+      const statuses = status
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      where.onboardingStatus = statuses.length > 1 ? { in: statuses } : statuses[0];
+    }
     if (verified !== undefined) where.verified = verified;
     if (search) {
       where.OR = [

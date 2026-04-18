@@ -253,7 +253,7 @@ export class SellerDashboardService {
     const sku = dto.sku || await this.generateSku(seller.id, dto.categoryId);
     const returnPolicy = await this.adminService.getMarketplaceReturnPolicy();
 
-    return this.prisma.product.create({
+    const created = await this.prisma.product.create({
       data: {
         name: dto.name,
         slug,
@@ -291,6 +291,27 @@ export class SellerDashboardService {
       },
       include: { category: { select: { name: true } } },
     });
+
+    // Fan out to the admin dashboard bell so reviewers see new submissions
+    // immediately. Fire-and-forget — a failure in the notification side
+    // must not roll back the product itself.
+    this.notificationService
+      .notifyAllAdmins({
+        type: 'ADMIN_PRODUCT_SUBMITTED',
+        title: 'New product submitted for review',
+        body: `${seller.storeName} submitted "${created.name}" for review.`,
+        data: {
+          productId: created.id,
+          productName: created.name,
+          slug: created.slug,
+          sku: created.sku,
+          sellerId: seller.id,
+          storeName: seller.storeName,
+        },
+      })
+      .catch(() => {});
+
+    return created;
   }
 
   async updateProduct(userId: string, productId: string, dto: UpdateProductDto) {
@@ -413,6 +434,24 @@ export class SellerDashboardService {
       this.logger.log(
         `Product ${productId} returned to PENDING review after seller edit (sellerId=${seller.id}).`,
       );
+      // Same fan-out as createProduct — admins should see edits to live
+      // listings in the bell exactly the same way as brand-new ones.
+      this.notificationService
+        .notifyAllAdmins({
+          type: 'ADMIN_PRODUCT_SUBMITTED',
+          title: 'Product edited — re-review required',
+          body: `${seller.storeName} edited "${updated.name}" and it has been pulled back into the review queue.`,
+          data: {
+            productId: updated.id,
+            productName: updated.name,
+            slug: updated.slug,
+            sku: updated.sku,
+            sellerId: seller.id,
+            storeName: seller.storeName,
+            reapproval: true,
+          },
+        })
+        .catch(() => {});
     }
 
     return updated;
@@ -850,9 +889,29 @@ export class SellerDashboardService {
       }
     }
 
+    const successCount = results.filter((r) => r.status === 'ok').length;
+
+    // One consolidated bell notification for the whole batch — emitting one
+    // per row would spam admins for large CSV uploads.
+    if (successCount > 0) {
+      this.notificationService
+        .notifyAllAdmins({
+          type: 'ADMIN_PRODUCT_SUBMITTED',
+          title: 'New products submitted for review',
+          body: `${seller.storeName} submitted ${successCount} product${successCount === 1 ? '' : 's'} via bulk upload.`,
+          data: {
+            sellerId: seller.id,
+            storeName: seller.storeName,
+            count: successCount,
+            bulk: true,
+          },
+        })
+        .catch(() => {});
+    }
+
     return {
       total: rows.length,
-      success: results.filter((r) => r.status === 'ok').length,
+      success: successCount,
       failed: results.filter((r) => r.status === 'error').length,
       results,
     };
