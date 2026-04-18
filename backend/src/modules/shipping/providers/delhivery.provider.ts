@@ -8,6 +8,8 @@ import {
   TrackingResult,
   CancelResult,
   ServiceabilityResult,
+  SchedulePickupOptions,
+  SchedulePickupResult,
 } from './courier-provider.interface';
 
 /**
@@ -341,6 +343,83 @@ export class DelhiveryProvider implements CourierProvider {
     return {
       serviceable: true,
       estimatedDays: deliveryInfo.max_days || deliveryInfo.estimated_delivery_days || 5,
+    };
+  }
+
+  /**
+   * Ask Delhivery to send a rider to the registered warehouse on a given
+   * date/time so the seller never has to log in to Delhivery One just to
+   * book a pickup. Endpoint: `POST {base}/fm/request/new/`.
+   *
+   * Docs: https://delhivery-express-api-doc.readme.io/reference/pickup-request
+   */
+  async schedulePickup(
+    config: SellerCourierConfig,
+    options: SchedulePickupOptions,
+  ): Promise<SchedulePickupResult> {
+    const base = this.getBaseUrl(config);
+    const pickupTime = (options.pickupTime || '14:00:00').slice(0, 8);
+
+    // Delhivery requires the date in YYYY-MM-DD form.
+    const body = {
+      pickup_location: options.pickupLocation || config.warehouseId || '',
+      expected_package_count: Math.max(1, options.expectedPackageCount || 1),
+      pickup_date: options.pickupDate,
+      pickup_time: pickupTime,
+    };
+
+    if (!body.pickup_location) {
+      return {
+        success: false,
+        message:
+          'Pickup location name missing. Please add your warehouse in shipping settings before scheduling a pickup.',
+      };
+    }
+
+    let res: Response;
+    try {
+      res = await fetch(`${base}/fm/request/new/`, {
+        method: 'POST',
+        headers: this.authHeaders(config),
+        body: JSON.stringify(body),
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.error(`Delhivery pickup request transport error: ${message}`);
+      return { success: false, message: `Pickup request failed: ${message}` };
+    }
+
+    const text = await res.text();
+    let parsed: any = null;
+    try {
+      parsed = text ? JSON.parse(text) : null;
+    } catch {
+      parsed = null;
+    }
+
+    if (!res.ok) {
+      this.logger.warn(
+        `Delhivery pickup request failed: ${res.status} ${text.slice(0, 300)}`,
+      );
+      return {
+        success: false,
+        message:
+          parsed?.message ||
+          parsed?.error ||
+          `Delhivery rejected pickup request (HTTP ${res.status}).`,
+      };
+    }
+
+    // Successful responses look like { pr_log: ..., pickup_id: 12345, ... }
+    const pickupId =
+      parsed?.pickup_id ?? parsed?.PickupId ?? parsed?.pr_id ?? undefined;
+    const scheduledFor = `${options.pickupDate}T${pickupTime}+05:30`;
+
+    return {
+      success: true,
+      message: parsed?.message || 'Pickup scheduled successfully',
+      pickupId: pickupId != null ? String(pickupId) : undefined,
+      scheduledFor,
     };
   }
 

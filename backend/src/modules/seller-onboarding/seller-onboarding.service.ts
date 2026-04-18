@@ -189,7 +189,10 @@ export class SellerOnboardingService {
         Authorization: `Bearer ${resendApiKey}`,
       },
       body: JSON.stringify({
-        from: process.env.EMAIL_FROM || 'Xelnova <seller@xelnova.in>',
+        from:
+          process.env.EMAIL_FROM_SELLER ||
+          process.env.EMAIL_FROM ||
+          'XelNova Seller <seller@xelnova.in>',
         to: email,
         subject: 'Verify your email - Xelnova Seller',
         html: `
@@ -857,9 +860,9 @@ export class SellerOnboardingService {
       reviewedAt: new Date(),
     };
 
-    // Commission is no longer set at onboarding — it is set per-product on
-    // product approval. Keep ignoring `dto.commissionRate` for backwards
-    // compatibility with old admin clients.
+    // Commission is set per-product when admin approves each product —
+    // never at onboarding. There is no seller-level commission to capture
+    // here.
 
     if (dto.decision === 'APPROVED') {
       if (!seller.signatureUrl && !seller.signatureData) {

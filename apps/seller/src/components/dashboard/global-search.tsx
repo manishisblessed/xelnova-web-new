@@ -158,7 +158,7 @@ export function GlobalSearch() {
         <div
           role="dialog"
           aria-label="Global search"
-          className="absolute right-0 top-full z-50 mt-2 w-[360px] sm:w-[420px] rounded-2xl border border-border bg-surface shadow-xl overflow-hidden"
+          className="absolute left-0 top-full z-50 mt-2 w-[360px] sm:w-[420px] max-w-[calc(100vw-2rem)] rounded-2xl border border-border bg-surface shadow-xl overflow-hidden"
         >
           <div className="flex items-center gap-2 border-b border-border bg-surface-muted/30 px-3 py-2.5">
             <Search size={16} className="text-text-muted shrink-0" />

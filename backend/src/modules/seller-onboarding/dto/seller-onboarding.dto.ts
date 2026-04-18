@@ -238,11 +238,6 @@ export class AdminReviewDto {
   @IsString()
   @IsOptional()
   notes?: string;
-
-  @ApiPropertyOptional({ description: 'Commission rate percentage (0-100)' })
-  @IsNumber()
-  @IsOptional()
-  commissionRate?: number;
 }
 
 export class AdminVerifySignatureDto {

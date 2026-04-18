@@ -32,7 +32,7 @@ function AuthCallbackContent() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ token, role: 'admin' }),
+        body: JSON.stringify({ token, role: 'admin', refreshToken }),
       }).then(() => {
         setTimeout(() => {
           router.push('/dashboard');

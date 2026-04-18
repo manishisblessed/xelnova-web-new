@@ -638,12 +638,23 @@ export class SellerDashboardService {
           ...(Object.keys(dateFilter).length > 0 ? { createdAt: dateFilter } : {}),
         },
       },
-      include: { order: { select: { createdAt: true, status: true } } },
+      include: {
+        order: { select: { createdAt: true, status: true } },
+        // Per-product commission is the source of truth (set at admin
+        // approval). Falls back to the seller's stored rate for legacy
+        // products, then to 10% so commission can never silently vanish.
+        product: { select: { commissionRate: true } },
+      },
     });
 
     const totalRevenue = orderItems.reduce((s, oi) => s + oi.price * oi.quantity, 0);
     const totalOrders = new Set(orderItems.map((oi) => oi.orderId)).size;
     const totalUnits = orderItems.reduce((s, oi) => s + oi.quantity, 0);
+
+    const commission = orderItems.reduce((s, oi) => {
+      const rate = oi.product?.commissionRate ?? seller.commissionRate ?? 10;
+      return s + oi.price * oi.quantity * (rate / 100);
+    }, 0);
 
     const dailyMap = new Map<string, number>();
     orderItems.forEach((oi) => {
@@ -654,11 +665,22 @@ export class SellerDashboardService {
       .map(([date, amount]) => ({ date, amount }))
       .sort((a, b) => a.date.localeCompare(b.date));
 
-    const commissionRate = seller.commissionRate / 100;
-    const commission = totalRevenue * commissionRate;
     const netRevenue = totalRevenue - commission;
+    // Commission % varies per product, so this is the gross-weighted
+    // effective rate across the requested window; old clients that show
+    // a single "commission rate" still get a sensible number.
+    const effectiveCommissionRate =
+      totalRevenue > 0 ? Number(((commission / totalRevenue) * 100).toFixed(2)) : 0;
 
-    return { totalRevenue, netRevenue, commission, commissionRate: seller.commissionRate, totalOrders, totalUnits, dailyRevenue };
+    return {
+      totalRevenue,
+      netRevenue,
+      commission,
+      commissionRate: effectiveCommissionRate,
+      totalOrders,
+      totalUnits,
+      dailyRevenue,
+    };
   }
 
   async getAnalytics(userId: string) {
@@ -871,6 +893,7 @@ export class SellerDashboardService {
       user.email,
       'Low Stock Alert — Xelnova Seller Dashboard',
       `Hi ${user.name || 'Seller'},\n\nThe following products are running low on stock:\n\n${productList}\n\nPlease restock soon to avoid missed sales.\n\nBest,\nXelnova Team`,
+      this.emailService.getSellerFromAddress(),
     );
 
     return { sent: true, count: lowStockProducts.length };
@@ -953,12 +976,14 @@ export class SellerDashboardService {
             returnRequests: { select: { status: true } },
           },
         },
-        product: { select: { name: true, sku: true } },
+        // Per-product commission is the source of truth — set by admin
+        // when the product is approved. The seller's stored
+        // `commissionRate` is only a legacy fallback for products
+        // approved before per-product commissions existed.
+        product: { select: { name: true, sku: true, commissionRate: true } },
       },
       orderBy: { order: { createdAt: 'desc' } },
     });
-
-    const commissionRate = seller.commissionRate / 100;
 
     const rows = orderItems.map((oi) => {
       const gross = oi.price * oi.quantity;
@@ -968,7 +993,8 @@ export class SellerDashboardService {
       // to the customer) and surface the "REFUNDED" status so the seller can
       // see why the commission line is zero.
       const refunded = (oi.order.returnRequests || []).some((r) => r.status === 'REFUNDED');
-      const commission = refunded ? 0 : gross * commissionRate;
+      const lineRate = oi.product?.commissionRate ?? seller.commissionRate ?? 10;
+      const commission = refunded ? 0 : gross * (lineRate / 100);
       const net = refunded ? 0 : gross - commission;
       return {
         orderNumber: oi.order.orderNumber,
@@ -978,7 +1004,7 @@ export class SellerDashboardService {
         quantity: oi.quantity,
         unitPrice: oi.price,
         gross: refunded ? 0 : gross,
-        commissionPercent: refunded ? 0 : seller.commissionRate,
+        commissionPercent: refunded ? 0 : Number(lineRate.toFixed(2)),
         commission,
         net,
         orderStatus: refunded ? 'REFUNDED' : oi.order.status,
@@ -996,7 +1022,12 @@ export class SellerDashboardService {
       { gross: 0, commission: 0, net: 0 },
     );
 
-    return { rows, totals, commissionRate: seller.commissionRate };
+    // Commission varies per product, so the report-level rate is the
+    // gross-weighted effective rate across the requested window.
+    const effectiveCommissionRate =
+      totals.gross > 0 ? Number(((totals.commission / totals.gross) * 100).toFixed(2)) : 0;
+
+    return { rows, totals, commissionRate: effectiveCommissionRate };
   }
 
   async getSettlementCsv(userId: string, query: SettlementQueryDto): Promise<string> {

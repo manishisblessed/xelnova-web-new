@@ -341,13 +341,26 @@ export class ReportsService {
               ...(createdAt ? { createdAt } : {}),
             },
           },
-          select: { price: true, quantity: true, orderId: true },
+          select: {
+            price: true,
+            quantity: true,
+            orderId: true,
+            // Per-product commission is the source of truth (set at admin
+            // approval). Falls back to seller's stored rate for legacy
+            // products approved before per-product commissions existed.
+            product: { select: { commissionRate: true } },
+          },
         });
 
         const totalRevenue = orderItems.reduce((s, oi) => s + oi.price * oi.quantity, 0);
         const totalOrders = new Set(orderItems.map((oi) => oi.orderId)).size;
         const totalUnits = orderItems.reduce((s, oi) => s + oi.quantity, 0);
-        const commission = totalRevenue * (seller.commissionRate / 100);
+        const commission = orderItems.reduce((s, oi) => {
+          const rate = oi.product?.commissionRate ?? seller.commissionRate ?? 10;
+          return s + oi.price * oi.quantity * (rate / 100);
+        }, 0);
+        const effectiveRate =
+          totalRevenue > 0 ? Number(((commission / totalRevenue) * 100).toFixed(2)) : 0;
 
         return {
           sellerId: seller.id,
@@ -358,7 +371,7 @@ export class ReportsService {
           totalOrders,
           totalUnits,
           totalRevenue,
-          commissionRate: seller.commissionRate,
+          commissionRate: effectiveRate,
           commission,
           netPayout: totalRevenue - commission,
           rating: seller.rating,

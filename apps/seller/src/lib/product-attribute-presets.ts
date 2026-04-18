@@ -3,7 +3,9 @@
  * Sellers pick from lists instead of typing free-form keys/values.
  */
 
-const OTHER = 'Other (specify)';
+/** Label sellers see in value dropdowns to switch into a custom value input. */
+export const OTHER_VALUE_LABEL = 'Other (specify)';
+const OTHER = OTHER_VALUE_LABEL;
 
 /** Shared value lists reused across keys */
 const materials = [

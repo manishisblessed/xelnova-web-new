@@ -673,14 +673,18 @@ export class AuthService {
   private async generateTokens(userId: string, email: string | null, role: string) {
     const payload = { sub: userId, email: email ?? '', role };
 
+    // Default access TTL bumped from 12h → 30d so dashboard users
+    // (sellers / admins) aren't kicked out mid-workday. Production can
+    // override via JWT_ACCESS_EXPIRES_IN env if a tighter policy is
+    // required for customers later.
     const [accessToken, refreshToken] = await Promise.all([
       this.jwtService.signAsync(payload, {
         secret: this.configService.get('JWT_ACCESS_SECRET'),
-        expiresIn: this.configService.get('JWT_ACCESS_EXPIRES_IN', '12h'),
+        expiresIn: this.configService.get('JWT_ACCESS_EXPIRES_IN', '30d'),
       }),
       this.jwtService.signAsync(payload, {
         secret: this.configService.get('JWT_REFRESH_SECRET'),
-        expiresIn: this.configService.get('JWT_REFRESH_EXPIRES_IN', '7d'),
+        expiresIn: this.configService.get('JWT_REFRESH_EXPIRES_IN', '90d'),
       }),
     ]);
 

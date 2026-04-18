@@ -11,6 +11,64 @@ function authHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+/**
+ * Centralized handler for an expired / invalid admin session. Called whenever
+ * the backend returns 401 (or an explicit "Invalid or expired token" message)
+ * so that the admin is sent back to the login screen instead of being left
+ * staring at a dashboard whose API calls all silently fail.
+ *
+ * We use a module-level guard so a burst of parallel requests (the dashboard
+ * fires many on mount) doesn't trigger a flurry of toasts/redirects.
+ */
+let sessionExpiredHandled = false;
+
+function looksLikeExpiredSession(status: number, message?: string): boolean {
+  if (status === 401) return true;
+  if (!message) return false;
+  const lower = message.toLowerCase();
+  return (
+    lower.includes('expired token') ||
+    lower.includes('invalid token') ||
+    lower.includes('jwt expired') ||
+    lower.includes('unauthorized')
+  );
+}
+
+function handleSessionExpired(message?: string) {
+  if (typeof window === 'undefined') return;
+  if (sessionExpiredHandled) return;
+  // If we're already on /login, don't fire the "session expired" toast — a
+  // 401 there means "wrong credentials", which the login form surfaces itself.
+  if (window.location.pathname.startsWith('/login')) return;
+  sessionExpiredHandled = true;
+
+  // Clear client-side state so we don't bounce back into the panel.
+  try {
+    localStorage.removeItem('xelnova-dashboard-user');
+  } catch {
+    // ignore — storage might be disabled
+  }
+
+  // Drop the session cookies via our own session route, then redirect.
+  // Fire-and-forget — we don't want to block the redirect on it.
+  fetch('/api/session', { method: 'DELETE', credentials: 'include' }).catch(() => undefined);
+
+  // Surface a friendly toast if sonner is available.
+  try {
+    // Dynamic import keeps this file dependency-free for SSR.
+    import('sonner').then(({ toast }) => {
+      toast.error(message || 'Your session has expired. Please log in again.');
+    }).catch(() => undefined);
+  } catch {
+    // ignore
+  }
+
+  if (!window.location.pathname.startsWith('/login')) {
+    const next = encodeURIComponent(window.location.pathname + window.location.search);
+    window.location.href = `/login?next=${next}`;
+  }
+}
+
 async function handleResponse<T = unknown>(res: Response): Promise<T> {
   const ct = res.headers.get('content-type') || '';
   let json: { message?: string; data?: T; success?: boolean };
@@ -18,11 +76,16 @@ async function handleResponse<T = unknown>(res: Response): Promise<T> {
     try {
       json = await res.json();
     } catch {
+      if (looksLikeExpiredSession(res.status)) handleSessionExpired();
       throw new Error('Invalid response from server');
     }
   } else {
     const text = await res.text();
     if (!res.ok) {
+      if (looksLikeExpiredSession(res.status, text)) {
+        handleSessionExpired();
+        throw new Error('Your session has expired. Please log in again.');
+      }
       throw new Error(
         res.status === 404
           ? 'API endpoint not found. Ensure the API gateway is deployed with the latest routes.'
@@ -31,7 +94,13 @@ async function handleResponse<T = unknown>(res: Response): Promise<T> {
     }
     throw new Error('Unexpected response from server');
   }
-  if (!res.ok) throw new Error(json.message || 'Request failed');
+  if (!res.ok) {
+    if (looksLikeExpiredSession(res.status, json.message)) {
+      handleSessionExpired(json.message);
+      throw new Error(json.message || 'Your session has expired. Please log in again.');
+    }
+    throw new Error(json.message || 'Request failed');
+  }
   return json.data as T;
 }
 
@@ -59,7 +128,12 @@ export async function apiLogs(type: string, params?: Record<string, string>) {
   const q = params ? `?${new URLSearchParams(params)}` : '';
   const res = await fetch(`${API_URL}/logs/${type}${q}`, { headers: authHeaders() });
   const json = await res.json();
-  if (!res.ok) throw new Error(json.message || 'Request failed');
+  if (!res.ok) {
+    if (looksLikeExpiredSession(res.status, json?.message)) {
+      handleSessionExpired(json?.message);
+    }
+    throw new Error(json.message || 'Request failed');
+  }
   // Some log routes return `{ success, data }`; others spread `{ logs, pagination }` etc.
   if (json.data !== undefined && json.data !== null) return json.data;
   const { success: _s, message: _m, ...rest } = json;

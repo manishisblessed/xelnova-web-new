@@ -1,6 +1,7 @@
 'use client';
 import Image from 'next/image';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Eye, Package, Truck, CheckCircle, XCircle, Clock, Search,
@@ -21,6 +22,7 @@ import {
   apiUpdateShipmentAwb,
   apiUpdateShipmentStatus,
   apiCancelShipment,
+  apiSchedulePickup,
   apiGetCourierConfigs,
   apiDownloadShippingLabel,
   apiDownloadCustomerInvoice,
@@ -157,6 +159,9 @@ const TABS: { id: TabFilter; label: string; statuses: string[] }[] = [
 ];
 
 export default function SellerOrdersPage() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [orders, setOrders] = useState<SellerOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [detail, setDetail] = useState<SellerOrder | null>(null);
@@ -166,6 +171,10 @@ export default function SellerOrdersPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [cancelModal, setCancelModal] = useState<SellerOrder | null>(null);
   const [cancelling, setCancelling] = useState(false);
+  /** Tracks whether a `?orderNumber=` deep link has already been consumed
+   *  so a re-render (or a follow-up `load()` after status change) doesn't
+   *  reopen the modal. */
+  const handledDeepLinkRef = useRef(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -181,6 +190,21 @@ export default function SellerOrdersPage() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  /** Deep-link from the notification bell: `/orders?orderNumber=XN-...`
+   *  finds the order in the loaded list and opens its detail view, then
+   *  scrubs the query so reopening the page lands on the index again. */
+  useEffect(() => {
+    if (handledDeepLinkRef.current) return;
+    if (loading || orders.length === 0) return;
+    const target = searchParams.get('orderNumber');
+    if (!target) return;
+    const match = orders.find((o) => o.orderNumber === target);
+    if (match) setDetail(match);
+    else toast.error(`Order #${target} not found in your recent orders.`);
+    handledDeepLinkRef.current = true;
+    router.replace(pathname, { scroll: false });
+  }, [loading, orders, searchParams, router, pathname]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -517,6 +541,17 @@ function OrderDetail({
   const [awbCarrier, setAwbCarrier] = useState('');
   const [awbTrackingUrl, setAwbTrackingUrl] = useState('');
 
+  // Schedule pickup (Xelgo / integrated couriers)
+  const [pickupModal, setPickupModal] = useState(false);
+  const [pickupSubmitting, setPickupSubmitting] = useState(false);
+  const [pickupDate, setPickupDate] = useState<string>(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    return d.toISOString().slice(0, 10);
+  });
+  const [pickupTime, setPickupTime] = useState<string>('14:00');
+  const [pickupPackages, setPickupPackages] = useState<number>(1);
+
   const cfg = STATUS_CONFIG[order.status] || STATUS_CONFIG.PENDING;
   const isPaid = order.paymentStatus === 'PAID';
   // Per testing observation #5: seller-driven Accept/Confirm only when paid;
@@ -567,6 +602,29 @@ function OrderDetail({
       loadShipment();
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Failed to cancel shipment');
+    }
+  };
+
+  const handleSchedulePickup = async () => {
+    if (!pickupDate) { toast.error('Pick a pickup date'); return; }
+    setPickupSubmitting(true);
+    try {
+      const result = await apiSchedulePickup(order.id, {
+        pickupDate,
+        pickupTime: pickupTime ? `${pickupTime}:00` : undefined,
+        expectedPackageCount: Math.max(1, pickupPackages || 1),
+      });
+      if (result?.success) {
+        toast.success(result.message || 'Pickup scheduled');
+        setPickupModal(false);
+        loadShipment();
+      } else {
+        toast.error(result?.message || 'Failed to schedule pickup');
+      }
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Failed to schedule pickup');
+    } finally {
+      setPickupSubmitting(false);
     }
   };
 
@@ -806,6 +864,7 @@ function OrderDetail({
             trackingLoading={trackingLoading}
             onLiveTrack={handleLiveTrack}
             onCancelShipment={handleCancelShipment}
+            onSchedulePickup={() => setPickupModal(true)}
             onUpdateAwb={() => { setAwbNumber(shipment.awbNumber || ''); setAwbCarrier(shipment.courierProvider || ''); setAwbModal(true); }}
             onUpdateStatus={() => setSelfShipStatusModal(true)}
             onDownloadInvoice={handleDownloadInvoice}
@@ -966,6 +1025,51 @@ function OrderDetail({
         </div>
       </Modal>
 
+      {/* Schedule Pickup Modal — Xelgo / integrated couriers */}
+      <Modal open={pickupModal} onClose={() => setPickupModal(false)} title="Schedule carrier pickup" size="md">
+        <div className="space-y-4">
+          <p className="text-xs text-text-muted">
+            Tell {shipment?.shippingMode === 'XELNOVA_COURIER' ? 'Xelgo' : (shipment?.courierProvider || 'the courier')} when to send a rider to your registered warehouse.
+            You don&apos;t need to log in to the partner dashboard — we&apos;ll book it for you.
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-text-muted mb-1.5">Pickup date *</label>
+              <input
+                type="date"
+                value={pickupDate}
+                min={new Date().toISOString().slice(0, 10)}
+                onChange={(e) => setPickupDate(e.target.value)}
+                className="w-full rounded-xl border border-border bg-surface-raised px-4 py-3 text-sm text-text-primary outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-text-muted mb-1.5">Pickup time (IST)</label>
+              <input
+                type="time"
+                value={pickupTime}
+                onChange={(e) => setPickupTime(e.target.value)}
+                className="w-full rounded-xl border border-border bg-surface-raised px-4 py-3 text-sm text-text-primary outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30"
+              />
+            </div>
+          </div>
+          <Input
+            label="Number of packages"
+            type="number"
+            min={1}
+            value={String(pickupPackages)}
+            onChange={(e) => setPickupPackages(Math.max(1, Number(e.target.value) || 1))}
+          />
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setPickupModal(false)} disabled={pickupSubmitting}>Cancel</Button>
+            <Button onClick={handleSchedulePickup} disabled={pickupSubmitting}>
+              {pickupSubmitting ? <Loader2 size={14} className="animate-spin" /> : <Calendar size={14} />}
+              {pickupSubmitting ? 'Scheduling…' : 'Schedule pickup'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
       {/* Self-Ship Status Update Modal */}
       <Modal open={selfShipStatusModal} onClose={() => setSelfShipStatusModal(false)} title="Update Shipment Status" size="md">
         <div className="space-y-4">
@@ -1027,6 +1131,7 @@ function ShipmentInfoPanel({
   trackingLoading,
   onLiveTrack,
   onCancelShipment,
+  onSchedulePickup,
   onUpdateAwb,
   onUpdateStatus,
   onDownloadInvoice,
@@ -1039,6 +1144,7 @@ function ShipmentInfoPanel({
   trackingLoading: boolean;
   onLiveTrack: () => void;
   onCancelShipment: () => void;
+  onSchedulePickup: () => void;
   onUpdateAwb: () => void;
   onUpdateStatus: () => void;
   onDownloadInvoice: () => void;
@@ -1055,6 +1161,11 @@ function ShipmentInfoPanel({
   // Refresh tracking should also be available for self-ship orders that
   // do have a manually-entered AWB (testing observation #6).
   const canRefreshTracking = !isSelfShip || Boolean(shipment.awbNumber);
+  // Carrier-side pickup booking is only meaningful for integrated couriers
+  // (Xelgo / Delhivery / ShipRocket / etc.) that have an AWB and aren't
+  // already past pickup. Self-ship goes out by the seller themselves.
+  const pickupAlreadyDone = ['PICKED_UP', 'IN_TRANSIT', 'OUT_FOR_DELIVERY', 'DELIVERED', 'RTO_INITIATED', 'RTO_DELIVERED', 'CANCELLED'].includes(shipment.shipmentStatus);
+  const canSchedulePickup = !isSelfShip && Boolean(shipment.awbNumber) && !pickupAlreadyDone;
 
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.07 }}
@@ -1075,6 +1186,16 @@ function ShipmentInfoPanel({
                 Update Status
               </Button>
             </>
+          )}
+          {canSchedulePickup && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
+              onClick={onSchedulePickup}
+            >
+              <Calendar size={12} /> Schedule Pickup
+            </Button>
           )}
           {canRefreshTracking && (
             <Button size="sm" variant="outline" onClick={onLiveTrack} disabled={trackingLoading}>

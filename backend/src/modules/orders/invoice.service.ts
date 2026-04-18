@@ -258,12 +258,13 @@ export class InvoiceService {
     // ─── Tax Invoice Header ───
     drawText('Tax Invoice', MARGIN, y, { size: 14, bold: true });
 
-    // GSTIN / PAN block on the far right of the title row.
+    // GSTIN block on the far right of the title row. PAN intentionally
+    // omitted — GSTIN already encodes the PAN as characters 3-12, so
+    // showing both is redundant on a tax invoice (per client request).
     const gstinX = A4_WIDTH - MARGIN - 170;
     drawText(`GSTIN: ${seller?.gstNumber || 'N/A'}`, gstinX, y, { size: 8 });
-    drawText(`PAN:    ${seller?.panNumber || 'N/A'}`, gstinX, y - 12, { size: 8 });
 
-    // Order and Invoice details (split left + middle so they don't crash into GSTIN/PAN).
+    // Order and Invoice details (split left + middle so they don't crash into GSTIN).
     const detailsX = MARGIN;
     const rightDetailsX = MARGIN + 220;
 
@@ -545,9 +546,15 @@ export class InvoiceService {
     y -= 30;
 
     // ─── Seller Registered Address Box ───
-    const boxHeight = 50;
+    // Comfortable top + bottom padding (~12px each side) inside the box so
+    // the title doesn't kiss the top border and the FSSAI line doesn't kiss
+    // the bottom border (per client review).
+    const sellerBoxPaddingY = 12;
+    const sellerBoxLineCount = 4; // title + store name + address (2 lines avg) + fssai
+    const sellerBoxLineHeight = 11;
+    const boxHeight = sellerBoxPaddingY * 2 + sellerBoxLineCount * sellerBoxLineHeight; // ≈ 68
     const boxY = y - boxHeight;
-    
+
     // Yellow/highlighted background for seller address
     page.drawRectangle({
       x: MARGIN,
@@ -559,22 +566,24 @@ export class InvoiceService {
       borderWidth: 0.5,
     });
 
-    drawText('Seller Registered Address:', MARGIN + 5, y - 10, { size: 8, bold: true });
-    drawText(sellerName.toUpperCase(), MARGIN + 5, y - 22, { size: 7, bold: true });
-    
+    let sellerLineY = y - sellerBoxPaddingY - 8; // first baseline
+    drawText('Seller Registered Address:', MARGIN + 8, sellerLineY, { size: 8, bold: true });
+    sellerLineY -= sellerBoxLineHeight;
+    drawText(sellerName.toUpperCase(), MARGIN + 8, sellerLineY, { size: 7, bold: true });
+    sellerLineY -= sellerBoxLineHeight;
+
     const fullSellerAddr = [
       seller?.businessAddress,
       seller?.businessCity,
       `${seller?.businessState || ''} - ${seller?.businessPincode || ''}`.trim(),
     ].filter(Boolean).join(', ');
-    
-    const addrLines = this.wrapText(fullSellerAddr || 'Address not available', font, 7, tableWidth * 0.6);
-    let addrY = y - 32;
+
+    const addrLines = this.wrapText(fullSellerAddr || 'Address not available', font, 7, tableWidth * 0.6 - 6);
     for (const line of addrLines.slice(0, 2)) {
-      drawText(line, MARGIN + 5, addrY, { size: 7 });
-      addrY -= 9;
+      drawText(line, MARGIN + 8, sellerLineY, { size: 7 });
+      sellerLineY -= sellerBoxLineHeight;
     }
-    drawText('FSSAI License number: null', MARGIN + 5, addrY, { size: 7 });
+    drawText(`FSSAI License number: ${seller?.fssaiLicense || 'N/A'}`, MARGIN + 8, sellerLineY, { size: 7 });
 
     // ─── Signature Box ───
     const sigBoxX = MARGIN + tableWidth * 0.65 + 5;
@@ -589,31 +598,31 @@ export class InvoiceService {
       borderWidth: 0.5,
     });
 
-    // Try to embed signature if available
+    // Vertically center signature inside the (now taller) signature box.
+    const sigImgHeight = 30;
+    const sigImgY = boxY + (boxHeight - sigImgHeight) / 2 + 4; // small bias up to leave room for caption
     if (seller?.signatureData) {
       try {
-        // signatureData is base64 encoded PNG
-        const sigData = seller.signatureData.includes('base64,') 
-          ? seller.signatureData.split(',')[1] 
+        const sigData = seller.signatureData.includes('base64,')
+          ? seller.signatureData.split(',')[1]
           : seller.signatureData;
         const sigBytes = Buffer.from(sigData, 'base64');
         const sigImage = await pdf.embedPng(sigBytes);
         page.drawImage(sigImage, {
           x: sigBoxX + 20,
-          y: boxY + 8,
+          y: sigImgY,
           width: 60,
-          height: 30,
+          height: sigImgHeight,
         });
       } catch {
-        // Signature embedding failed, show placeholder
-        drawText('(Signature)', sigBoxX + 30, boxY + 25, { size: 8, color: gray });
+        drawText('(Signature)', sigBoxX + 30, sigImgY + 12, { size: 8, color: gray });
       }
     } else {
-      drawText('(Signature)', sigBoxX + 30, boxY + 25, { size: 8, color: gray });
+      drawText('(Signature)', sigBoxX + 30, sigImgY + 12, { size: 8, color: gray });
     }
 
-    drawText(sellerName.toUpperCase(), sigBoxX + 10, boxY + 5, { size: 7, bold: true });
-    drawText('Authorized Signature', sigBoxX + 10, boxY - 5, { size: 6, color: gray });
+    drawText(sellerName.toUpperCase(), sigBoxX + 10, boxY + 8, { size: 7, bold: true });
+    drawText('Authorized Signature', sigBoxX + 10, boxY - 8, { size: 6, color: gray });
 
     y = boxY - 25;
 

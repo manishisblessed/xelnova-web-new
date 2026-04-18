@@ -19,9 +19,28 @@ interface LocationState {
 }
 
 export async function lookupPincode(pincode: string): Promise<LocationData> {
-  const res = await fetch(`https://api.postalpincode.in/pincode/${pincode}`);
-  const json = await res.json();
+  // Prefer our server-side proxy: it caches results, retries on transient
+  // failures, and avoids the ERR_CONNECTION_TIMED_OUT we used to get when
+  // calling api.postalpincode.in directly from the browser on flaky networks.
+  try {
+    const res = await fetch(`/api/pincode/${pincode}`, {
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (res.ok) {
+      const json = (await res.json()) as { data?: LocationData };
+      if (json?.data) return json.data;
+    }
+    if (res.status === 404 || res.status === 400) {
+      throw new Error('Invalid pincode or no results found');
+    }
+  } catch (e) {
+    if (e instanceof Error && e.message.startsWith('Invalid pincode')) throw e;
+  }
 
+  const direct = await fetch(`https://api.postalpincode.in/pincode/${pincode}`, {
+    signal: AbortSignal.timeout(8_000),
+  });
+  const json = await direct.json();
   if (
     !Array.isArray(json) ||
     json[0]?.Status !== 'Success' ||
@@ -29,11 +48,10 @@ export async function lookupPincode(pincode: string): Promise<LocationData> {
   ) {
     throw new Error('Invalid pincode or no results found');
   }
-
   const po = json[0].PostOffice[0];
   return {
     pincode,
-    city: po.Block !== 'NA' ? po.Block : po.Division,
+    city: po.Block && po.Block !== 'NA' ? po.Block : po.Division,
     state: po.State,
     district: po.District,
   };

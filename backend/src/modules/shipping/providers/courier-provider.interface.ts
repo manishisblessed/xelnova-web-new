@@ -67,6 +67,28 @@ export interface CancelResult {
   message: string;
 }
 
+export interface SchedulePickupOptions {
+  /** Warehouse / pickup location name registered with the carrier. */
+  pickupLocation: string;
+  /** Number of packages in this pickup batch. */
+  expectedPackageCount: number;
+  /** Local date (YYYY-MM-DD, IST) the carrier should arrive. */
+  pickupDate: string;
+  /** Local time (HH:mm:ss, IST). Defaults to mid-day if omitted. */
+  pickupTime?: string;
+  /** Optional list of waybills to bundle in this pickup. */
+  waybills?: string[];
+}
+
+export interface SchedulePickupResult {
+  success: boolean;
+  message: string;
+  /** Carrier-side pickup id when issued. */
+  pickupId?: string;
+  /** Final scheduled timestamp in ISO. */
+  scheduledFor?: string;
+}
+
 export interface ServiceabilityResult {
   serviceable: boolean;
   estimatedDays?: number;
@@ -101,4 +123,15 @@ export interface CourierProvider {
     deliveryPincode: string,
     config: SellerCourierConfig,
   ): Promise<ServiceabilityResult>;
+
+  /**
+   * Optional: ask the carrier to send a rider to the seller's warehouse
+   * for pickup. Providers that do not support a separate pickup-request
+   * API can leave this unimplemented; the shipping service will treat
+   * the absence as "pickup is auto-scheduled at booking time".
+   */
+  schedulePickup?(
+    config: SellerCourierConfig,
+    options: SchedulePickupOptions,
+  ): Promise<SchedulePickupResult>;
 }

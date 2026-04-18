@@ -10,7 +10,6 @@ import {
   Mail,
   MapPin,
   Phone,
-  Shield,
   Star,
   TrendingUp,
   User,
@@ -156,7 +155,6 @@ interface SellerProfileResponse {
   businessCity?: string | null;
   businessState?: string | null;
   businessPincode?: string | null;
-  commissionRate?: number;
   /** Seller's business phone (kept on SellerProfile, may differ from User.phone). */
   phone?: string | null;
   user: {
@@ -359,19 +357,13 @@ export default function ProfilePage() {
               </Button>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mt-8">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 mt-8">
               <StatCard loading={false} label="Total sales" value={profile.totalSales} icon={TrendingUp} />
               <StatCard
                 loading={false}
                 label="Rating"
                 value={typeof profile.rating === 'number' ? profile.rating.toFixed(1) : '—'}
                 icon={Star}
-              />
-              <StatCard
-                loading={false}
-                label="Commission rate"
-                value={profile.commissionRate != null ? `${profile.commissionRate}%` : '—'}
-                icon={Shield}
               />
             </div>
           </div>

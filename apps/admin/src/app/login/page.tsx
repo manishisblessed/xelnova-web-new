@@ -64,7 +64,7 @@ function LoginFormInner() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ token: data.accessToken, role: 'admin', user: data.user }),
+        body: JSON.stringify({ token: data.accessToken, role: 'admin', user: data.user, refreshToken: data.refreshToken }),
       });
       if (!sessionRes.ok) throw new Error('Session failed');
       router.push(redirectTo);

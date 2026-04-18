@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Badge } from '@xelnova/ui';
 import { AdminListPage } from '@/components/dashboard/admin-list-page';
 import { ActionModal } from '@/components/dashboard/action-modal';
@@ -8,7 +9,7 @@ import { FormField, FormInput, FormSelect } from '@/components/dashboard/form-fi
 import { Eye, Truck } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Column } from '@/components/dashboard/data-table';
-import { apiUpdate, apiUpdateShipment } from '@/lib/api';
+import { apiGet, apiUpdate, apiUpdateShipment } from '@/lib/api';
 
 interface OrderUser {
   name: string;
@@ -84,6 +85,9 @@ function firstImageUrl(images: unknown): string | undefined {
 const SHIPMENT_STATUSES = ['PENDING', 'BOOKED', 'PICKED_UP', 'IN_TRANSIT', 'OUT_FOR_DELIVERY', 'DELIVERED', 'RTO', 'RTO_DELIVERED', 'CANCELLED'] as const;
 
 export default function OrdersPage() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [detailOpen, setDetailOpen] = useState(false);
   const [selected, setSelected] = useState<Order | null>(null);
   const [newStatus, setNewStatus] = useState('');
@@ -95,6 +99,8 @@ export default function OrdersPage() {
   const [shipTrackingUrl, setShipTrackingUrl] = useState('');
   const [shipStatus, setShipStatus] = useState('');
   const [shipmentSaving, setShipmentSaving] = useState(false);
+  /** Guard against the deep-link effect re-firing on subsequent renders. */
+  const handledDeepLinkRef = useRef(false);
 
   const openDetail = (order: Order) => {
     setSelected(order);
@@ -105,6 +111,28 @@ export default function OrdersPage() {
     setShipStatus(order.shipment?.shipmentStatus ?? '');
     setDetailOpen(true);
   };
+
+  /** Deep-link from notification bell: `/orders?orderNumber=XN-...`.
+   *  `AdminListPage` owns its own data, so we make a one-shot search query
+   *  to the backend (which filters by orderNumber) and open whichever order
+   *  comes back. */
+  useEffect(() => {
+    if (handledDeepLinkRef.current) return;
+    const target = searchParams.get('orderNumber');
+    if (!target) return;
+    handledDeepLinkRef.current = true;
+    router.replace(pathname, { scroll: false });
+    void (async () => {
+      try {
+        const rows = await apiGet<Order[]>('orders', { search: target, limit: '5' });
+        const match = Array.isArray(rows) ? rows.find((o) => o.orderNumber === target) : null;
+        if (match) openDetail(match);
+        else toast.error(`Order #${target} not found.`);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'Failed to open order.');
+      }
+    })();
+  }, [searchParams, router, pathname]);
 
   const handleUpdateStatus = async () => {
     if (!selected) return;

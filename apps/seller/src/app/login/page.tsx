@@ -74,6 +74,7 @@ function LoginFormInner() {
     accessToken: string,
     user: { id: string; name: string; email: string; role: string; avatar?: string | null },
     hasSellerProfile?: boolean,
+    refreshToken?: string,
   ) => {
     const dashboardUser = {
       id: user.id,
@@ -88,7 +89,7 @@ function LoginFormInner() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ token: accessToken, role: 'seller', user: dashboardUser }),
+      body: JSON.stringify({ token: accessToken, role: 'seller', user: dashboardUser, refreshToken }),
     });
     if (!sessionRes.ok) throw new Error('Session failed');
 
@@ -129,6 +130,7 @@ function LoginFormInner() {
         message?: string;
         data?: {
           accessToken: string;
+          refreshToken?: string;
           hasSellerProfile?: boolean;
           user: { id: string; name: string; email: string; role: string; avatar?: string | null };
         };
@@ -152,7 +154,7 @@ function LoginFormInner() {
           return;
         }
 
-        await createSessionAndRedirect(payload.accessToken, payload.user, payload.hasSellerProfile);
+        await createSessionAndRedirect(payload.accessToken, payload.user, payload.hasSellerProfile, payload.refreshToken);
         return;
       } else {
         const msg =
@@ -280,7 +282,7 @@ function LoginFormInner() {
       if (!result.accessToken || !result.user) {
         throw new Error('Could not sign you in. Please try again.');
       }
-      await createSessionAndRedirect(result.accessToken, result.user, result.hasSellerProfile);
+      await createSessionAndRedirect(result.accessToken, result.user, result.hasSellerProfile, result.refreshToken);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Invalid OTP');
     } finally {

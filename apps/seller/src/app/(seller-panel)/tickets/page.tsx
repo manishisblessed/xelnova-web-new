@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { motion } from 'framer-motion';
 import {
   MessageSquare,
@@ -61,6 +62,9 @@ function roleIcon(role: string) {
 }
 
 export default function SellerTicketsPage() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -69,6 +73,8 @@ export default function SellerTicketsPage() {
   const [reply, setReply] = useState('');
   const [sending, setSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  /** Guard so re-renders don't re-trigger the deep-link open. */
+  const handledDeepLinkRef = useRef(false);
 
   useEffect(() => {
     apiGetSellerTickets()
@@ -88,6 +94,18 @@ export default function SellerTicketsPage() {
       setDetailLoading(false);
     }
   };
+
+  /** Deep-link from notification bell: `/tickets?ticketId=...` opens that
+   *  ticket's detail panel directly. We can call `openTicket` even before
+   *  the list has loaded because it hits the detail endpoint by id. */
+  useEffect(() => {
+    if (handledDeepLinkRef.current) return;
+    const target = searchParams.get('ticketId');
+    if (!target) return;
+    handledDeepLinkRef.current = true;
+    void openTicket(target);
+    router.replace(pathname, { scroll: false });
+  }, [searchParams, router, pathname]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });

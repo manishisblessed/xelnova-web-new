@@ -1186,6 +1186,7 @@ export default function RegisterPage() {
                 token: loginData.data.accessToken,
                 role: 'seller',
                 user: { id: u.id, name: u.name, email: u.email, role: 'seller', avatar: u.avatar ?? null },
+                refreshToken: loginData.data.refreshToken,
               }),
             });
             if (sessionRes.ok) { window.location.href = '/dashboard'; return; }
@@ -1931,7 +1932,7 @@ export default function RegisterPage() {
                                   <h5 className="font-semibold">2. Product Listings</h5>
                                   <p>All product listings must be accurate, not misleading, and comply with Xelnova&apos;s listing policies. Xelnova reserves the right to remove any listing that violates these policies without prior notice.</p>
                                   <h5 className="font-semibold">3. Pricing & Commission</h5>
-                                  <p>Sellers set their own prices. Xelnova charges a commission on each sale, which varies by category. The commission structure will be communicated during onboarding and may be updated with 30 days&apos; notice.</p>
+                                  <p>Sellers set their own prices. Xelnova charges a commission on each sale that is set per product when the admin approves the listing — it is not a flat seller-wide rate. The applicable commission for a product is shown on its catalogue entry and may be updated with 30 days&apos; notice.</p>
                                   <h5 className="font-semibold">4. Payments & Settlements</h5>
                                   <p>Payments for completed orders will be settled to your registered bank account as per the payment cycle (typically 7-14 business days after delivery). Xelnova deducts applicable commission and fees before settlement.</p>
                                   <h5 className="font-semibold">5. Shipping & Delivery</h5>

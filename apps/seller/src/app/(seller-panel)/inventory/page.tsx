@@ -42,6 +42,7 @@ import {
   BUNDLED_PRODUCT_ATTRIBUTE_PRESETS,
   CUSTOM_ATTRIBUTE_PENDING,
   CUSTOM_VALUE_PENDING,
+  OTHER_VALUE_LABEL,
   getValueOptionsForKey,
   type AttributePreset,
   type ProductAttributePresetsBundle,
@@ -1026,8 +1027,13 @@ function PresetKeyValueEditor({ label, description, preset, items, onChange }: P
             const keyIsCustom = Boolean(item.key) && !keyIsPreset; // includes pending sentinel
             const keySelectValue = keyIsPreset ? item.key : keyIsCustom ? OTHER_KEY_TOKEN : '';
 
-            const valueOpts =
+            const rawValueOpts =
               item.key && item.key !== CUSTOM_ATTRIBUTE_PENDING ? getValueOptionsForKey(preset, item.key) : [];
+            // Hide the literal "Other (specify)" entry from the dropdown — the
+            // dedicated "Custom value…" option below already handles that case
+            // and actually shows an input. Listing both was confusing because
+            // picking the preset OTHER label silently selected a useless value.
+            const valueOpts = rawValueOpts.filter((v) => v !== OTHER_VALUE_LABEL);
             const valueIsListed = Boolean(item.value && valueOpts.includes(item.value));
             const valueIsPendingCustom = item.value === CUSTOM_VALUE_PENDING;
             const valueIsCustom = Boolean(item.value) && !valueIsListed; // includes pending
@@ -1052,8 +1058,11 @@ function PresetKeyValueEditor({ label, description, preset, items, onChange }: P
                         setRow(index, { key: CUSTOM_ATTRIBUTE_PENDING, value: '' });
                         return;
                       }
-                      const opts = getValueOptionsForKey(preset, v);
-                      setRow(index, { key: v, value: opts[0] ?? '' });
+                      // Don't auto-pick a value when the seller chooses an
+                      // attribute — they should pick it themselves. Picking
+                      // the first option used to silently land on
+                      // "Other (specify)" for keys whose only option was OTHER.
+                      setRow(index, { key: v, value: '' });
                     }}
                     className="w-full rounded-lg border border-border bg-surface-raised px-2 py-1.5 text-xs text-text-primary outline-none focus:border-primary-500"
                   >
@@ -1096,9 +1105,10 @@ function PresetKeyValueEditor({ label, description, preset, items, onChange }: P
                             setRow(index, { ...item, value: '' });
                             return;
                           }
-                          if (v === OTHER_VALUE_TOKEN) {
-                            // Mark as pending so the custom input shows immediately
-                            // even though the typed value is still empty.
+                          // Both the dedicated "Custom value…" option and the
+                          // legacy "Other (specify)" preset value should drop
+                          // the seller into a free-form input.
+                          if (v === OTHER_VALUE_TOKEN || v === OTHER_VALUE_LABEL) {
                             setRow(index, { ...item, value: CUSTOM_VALUE_PENDING });
                             return;
                           }
@@ -1677,6 +1687,28 @@ export default function SellerInventoryPage() {
             }
           : r,
       ),
+    );
+  };
+
+  // Swap two adjacent variant images. Mirrors the main-product gallery's
+  // arrow-button reorder UX (testing observation #11) — drag-drop is fragile
+  // on touch / older browsers, so sellers asked for explicit arrows here too.
+  const swapVariantImage = (rowId: string, valId: string, from: number, to: number) => {
+    if (from === to) return;
+    setFormVariantRows((prev) =>
+      prev.map((r) => {
+        if (r.id !== rowId) return r;
+        return {
+          ...r,
+          values: r.values.map((v) => {
+            if (v.id !== valId) return v;
+            if (from < 0 || to < 0 || from >= v.images.length || to >= v.images.length) return v;
+            const next = [...v.images];
+            [next[from], next[to]] = [next[to], next[from]];
+            return { ...v, images: next };
+          }),
+        };
+      }),
     );
   };
 
@@ -2321,6 +2353,35 @@ export default function SellerInventoryPage() {
                                     </button>
                                   </div>
                                   {imgIdx === 0 && <span className="absolute top-0.5 left-0.5 bg-primary-500 text-[9px] font-bold text-white px-1 py-0.5 leading-none rounded shadow-sm">M</span>}
+                                  {/* Reorder arrows — mirrors the main gallery's swap controls so sellers
+                                      can shuffle variant images without drag-and-drop. */}
+                                  {val.images.length > 1 && (
+                                    <div className="absolute bottom-0 inset-x-0 flex items-center justify-between px-0.5 pb-0.5 z-10">
+                                      <button
+                                        type="button"
+                                        disabled={imgIdx === 0}
+                                        onClick={(e) => { e.stopPropagation(); swapVariantImage(row.id, val.id, imgIdx, imgIdx - 1); }}
+                                        className="flex h-4 w-4 items-center justify-center rounded bg-black/55 text-white opacity-0 group-hover/vi:opacity-100 transition-opacity hover:bg-primary-600 disabled:opacity-20 disabled:cursor-not-allowed"
+                                        title="Move left"
+                                        aria-label="Swap with previous image"
+                                      >
+                                        <ChevronLeftIcon className="h-2.5 w-2.5" />
+                                      </button>
+                                      <span className="flex h-4 min-w-[16px] items-center justify-center rounded bg-black/50 px-0.5 text-[9px] font-bold text-white tabular-nums pointer-events-none">
+                                        {imgIdx + 1}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        disabled={imgIdx >= val.images.length - 1}
+                                        onClick={(e) => { e.stopPropagation(); swapVariantImage(row.id, val.id, imgIdx, imgIdx + 1); }}
+                                        className="flex h-4 w-4 items-center justify-center rounded bg-black/55 text-white opacity-0 group-hover/vi:opacity-100 transition-opacity hover:bg-primary-600 disabled:opacity-20 disabled:cursor-not-allowed"
+                                        title="Move right"
+                                        aria-label="Swap with next image"
+                                      >
+                                        <ChevronRightIcon className="h-2.5 w-2.5" />
+                                      </button>
+                                    </div>
+                                  )}
                                 </div>
                               ))}
                               {val.images.length < MAX_VARIANT_IMAGES && (

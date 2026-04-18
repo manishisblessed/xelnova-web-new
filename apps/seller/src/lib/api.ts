@@ -211,6 +211,27 @@ export async function apiCancelShipment(orderId: string) {
   return handleResponse(res);
 }
 
+/**
+ * Ask the carrier (Xelgo → Delhivery) to send a rider on the chosen
+ * date/time. Returns `{ success, message, scheduledFor?, pickupId? }`.
+ */
+export async function apiSchedulePickup(
+  orderId: string,
+  body: { pickupDate: string; pickupTime?: string; expectedPackageCount?: number },
+) {
+  const res = await fetch(`${API_URL}/seller/orders/${orderId}/shipment/schedule-pickup`, {
+    method: 'POST',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return handleResponse<{
+    success: boolean;
+    message: string;
+    pickupId?: string;
+    scheduledFor?: string;
+  }>(res);
+}
+
 export async function apiCheckServiceability(orderId: string) {
   const res = await fetch(`${API_URL}/seller/orders/${orderId}/serviceability`, {
     headers: authHeaders(),

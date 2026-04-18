@@ -73,7 +73,6 @@ export class AdminSellerQueryDto extends PaginationDto {
 
 export class AdminUpdateSellerDto {
   @ApiPropertyOptional() @IsOptional() @IsBoolean() verified?: boolean;
-  @ApiPropertyOptional() @IsOptional() @IsNumber() @Type(() => Number) commissionRate?: number;
   @ApiPropertyOptional() @IsOptional() @IsBoolean() isBanned?: boolean;
   @ApiPropertyOptional() @IsOptional() @IsString() banReason?: string;
 }

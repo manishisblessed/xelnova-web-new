@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { motion } from 'framer-motion';
 import {
   MessageSquare,
@@ -139,6 +140,9 @@ const INTERNAL_REPLY_TEMPLATES: { id: string; label: string; body: string }[] = 
 ];
 
 export default function AdminTicketsPage() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -159,6 +163,8 @@ export default function AdminTicketsPage() {
   const [forwarding, setForwarding] = useState(false);
 
   const bottomRef = useRef<HTMLDivElement>(null);
+  /** Guard so re-renders don't re-open the deep-linked ticket. */
+  const handledDeepLinkRef = useRef(false);
 
   const loadTickets = (status?: string) => {
     setLoading(true);
@@ -183,6 +189,17 @@ export default function AdminTicketsPage() {
       setDetailLoading(false);
     }
   };
+
+  /** Deep-link from the admin notification bell:
+   *  `/tickets?ticketId=...` opens that ticket's detail panel directly. */
+  useEffect(() => {
+    if (handledDeepLinkRef.current) return;
+    const target = searchParams.get('ticketId');
+    if (!target) return;
+    handledDeepLinkRef.current = true;
+    void openTicket(target);
+    router.replace(pathname, { scroll: false });
+  }, [searchParams, router, pathname]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });

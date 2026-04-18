@@ -1157,6 +1157,7 @@ export class NotificationService {
     if (!user?.email) return;
     await this.email.sendEmail({
       to: user.email,
+      from: this.email.getSellerFromAddress(),
       subject: `Xelnova: ${subject}`,
       html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px"><h2 style="color:#7c3aed">${subject}</h2><p>Hi ${user.name},</p><p>${body}</p></div>`,
     });

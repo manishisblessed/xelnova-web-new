@@ -15,23 +15,44 @@ export class EmailService {
   private resend: Resend | null = null;
   private readonly logger = new Logger(EmailService.name);
   /**
-   * Default "From" address for all transactional emails. Defaults to
-   * `XelNova <seller@xelnova.in>` per product policy. Override with
-   * `EMAIL_FROM` env var.
+   * Default "From" address for transactional emails (mostly customer-facing
+   * messages). Defaults to `XelNova <seller@xelnova.in>` for backward
+   * compatibility — override with `EMAIL_FROM`.
    */
   private readonly fromEmail: string;
+  /**
+   * "From" address used for **every** seller-targeted email (account
+   * approval / rejection, new order alerts, product approval / rejection,
+   * low-stock alerts, onboarding OTP, etc.). Defaults to
+   * `XelNova Seller <seller@xelnova.in>` per product policy. Override with
+   * `EMAIL_FROM_SELLER`.
+   */
+  private readonly sellerFromEmail: string;
   /**
    * Dedicated "From" address for payout-related notifications (seller
    * payouts, payout failures, etc.). Defaults to
    * `XelNova Payments <payments@xelnova.in>`. Override with
-   * `EMAIL_PAYMENT_FROM` env var.
+   * `EMAIL_PAYMENT_FROM`.
    */
   private readonly paymentFromEmail: string;
 
   constructor(private readonly config: ConfigService) {
     this.fromEmail = this.config.get('EMAIL_FROM') || 'XelNova <seller@xelnova.in>';
+    this.sellerFromEmail =
+      this.config.get('EMAIL_FROM_SELLER') ||
+      this.config.get('EMAIL_FROM') ||
+      'XelNova Seller <seller@xelnova.in>';
     this.paymentFromEmail =
       this.config.get('EMAIL_PAYMENT_FROM') || 'XelNova Payments <payments@xelnova.in>';
+  }
+
+  /**
+   * Public accessor for the seller "From" address so that other services
+   * (notification.service, seller-dashboard, etc.) can reuse the same
+   * configured address when calling `sendEmail` directly.
+   */
+  getSellerFromAddress(): string {
+    return this.sellerFromEmail;
   }
 
   /**
@@ -178,6 +199,7 @@ export class EmailService {
   async sendSellerApproval(to: string, storeName: string) {
     return this.sendEmail({
       to,
+      from: this.sellerFromEmail,
       subject: 'Your Seller Account is Approved! - XelNova',
       html: `
         <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
@@ -193,14 +215,14 @@ export class EmailService {
     });
   }
 
-  async sendGenericEmail(to: string, subject: string, textBody: string) {
+  async sendGenericEmail(to: string, subject: string, textBody: string, from?: string) {
     const html = `
       <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
         <h1 style="color:#7c3aed">Xelnova</h1>
         ${textBody.split('\n').map((line) => `<p>${line}</p>`).join('')}
       </div>
     `;
-    return this.sendEmail({ to, subject, html });
+    return this.sendEmail({ to, subject, html, ...(from ? { from } : {}) });
   }
 
   async sendPayoutNotification(to: string, name: string, amount: number, status: string) {
@@ -396,6 +418,7 @@ export class EmailService {
   async sendSellerRejection(to: string, storeName: string, reason?: string) {
     return this.sendEmail({
       to,
+      from: this.sellerFromEmail,
       subject: 'Seller Verification Update - XelNova',
       html: `
         <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
@@ -415,6 +438,7 @@ export class EmailService {
   async sendNewOrderToSeller(to: string, sellerName: string, orderNumber: string, amount: number) {
     return this.sendEmail({
       to,
+      from: this.sellerFromEmail,
       subject: `New Order Received - #${orderNumber} - XelNova`,
       html: `
         <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
@@ -436,6 +460,7 @@ export class EmailService {
   async sendProductApproved(to: string, sellerName: string, productName: string) {
     return this.sendEmail({
       to,
+      from: this.sellerFromEmail,
       subject: `Product Approved - ${productName} - XelNova`,
       html: `
         <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
@@ -454,6 +479,7 @@ export class EmailService {
   async sendProductRejected(to: string, sellerName: string, productName: string, reason?: string) {
     return this.sendEmail({
       to,
+      from: this.sellerFromEmail,
       subject: `Product Review Update - ${productName} - XelNova`,
       html: `
         <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">

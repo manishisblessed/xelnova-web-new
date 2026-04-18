@@ -728,6 +728,122 @@ export class ShippingService {
     return tracking;
   }
 
+  // ─── Schedule Pickup ───
+
+  /**
+   * Asks the underlying carrier (Xelgo → Delhivery, or whichever provider
+   * the shipment was booked with) to send a rider on the chosen
+   * date/time. Sellers don't have to log in to the partner dashboard
+   * just to schedule a pickup any more (per client review).
+   */
+  async schedulePickup(
+    userId: string,
+    orderId: string,
+    dto: { pickupDate: string; pickupTime?: string; expectedPackageCount?: number },
+  ) {
+    const seller = await this.getSellerProfile(userId);
+    await this.ensureOrderBelongsToSeller(orderId, seller.id);
+
+    const shipment = await this.prisma.shipment.findUnique({ where: { orderId } });
+    if (!shipment) throw new NotFoundException('Shipment not found');
+    if (!shipment.awbNumber) {
+      throw new BadRequestException('Shipment must be booked (AWB issued) before scheduling a pickup');
+    }
+
+    if (shipment.shippingMode === ShippingMode.SELF_SHIP) {
+      throw new BadRequestException(
+        'Self-ship orders are dispatched by you directly — no carrier pickup to schedule.',
+      );
+    }
+
+    const terminal: ShipmentStatus[] = [
+      ShipmentStatus.DELIVERED,
+      ShipmentStatus.RTO_DELIVERED,
+      ShipmentStatus.CANCELLED,
+    ];
+    if (terminal.includes(shipment.shipmentStatus)) {
+      throw new BadRequestException(
+        `Cannot schedule a pickup for a shipment in ${shipment.shipmentStatus} status`,
+      );
+    }
+
+    let provider: CourierProvider | undefined;
+    let courierConfig: SellerCourierConfig | null = null;
+    let pickupLocation = '';
+
+    if (shipment.shippingMode === ShippingMode.XELNOVA_COURIER) {
+      const resolved = await this.resolveDelhiveryForXelnova();
+      if (resolved.mode !== 'delhivery') {
+        // Stub Xelnova network handles pickup automatically — nothing to ask.
+        return {
+          success: true,
+          message: 'Pickup is auto-scheduled by Xelnova for this shipment. No action needed.',
+          scheduledFor: shipment.pickupDate?.toISOString(),
+        };
+      }
+      provider = this.providers.get(ShippingMode.DELHIVERY);
+      courierConfig = resolved.config;
+      pickupLocation = courierConfig.warehouseId || '';
+    } else {
+      provider = this.providers.get(shipment.shippingMode);
+      if (!provider) {
+        throw new BadRequestException(`Unsupported shipping mode: ${shipment.shippingMode}`);
+      }
+      const cfg = await this.prisma.sellerCourierConfig.findUnique({
+        where: {
+          sellerId_provider: { sellerId: shipment.sellerId, provider: shipment.shippingMode },
+        },
+      });
+      if (!cfg) {
+        throw new BadRequestException('Courier config not found for this shipment');
+      }
+      courierConfig = {
+        ...cfg,
+        apiKey: this.decrypt(cfg.apiKey),
+        apiSecret: cfg.apiSecret ? this.decrypt(cfg.apiSecret) : null,
+      };
+      pickupLocation = cfg.warehouseId || '';
+    }
+
+    if (!provider?.schedulePickup) {
+      return {
+        success: true,
+        message:
+          `${provider?.providerName || 'Carrier'} schedules pickups automatically — nothing to do here.`,
+      };
+    }
+
+    const result = await provider.schedulePickup(courierConfig as SellerCourierConfig, {
+      pickupLocation,
+      expectedPackageCount: dto.expectedPackageCount ?? 1,
+      pickupDate: dto.pickupDate,
+      pickupTime: dto.pickupTime,
+    });
+
+    if (result.success) {
+      const history = (shipment.statusHistory as object[]) || [];
+      const scheduledForIso = result.scheduledFor || new Date(`${dto.pickupDate}T${dto.pickupTime || '14:00:00'}+05:30`).toISOString();
+      history.push({
+        status: ShipmentStatus.PICKUP_SCHEDULED,
+        timestamp: new Date().toISOString(),
+        remark:
+          `Pickup scheduled for ${scheduledForIso}` +
+          (result.pickupId ? ` (ref ${result.pickupId})` : ''),
+      });
+
+      await this.prisma.shipment.update({
+        where: { orderId },
+        data: {
+          shipmentStatus: ShipmentStatus.PICKUP_SCHEDULED,
+          pickupDate: new Date(scheduledForIso),
+          statusHistory: history,
+        },
+      });
+    }
+
+    return result;
+  }
+
   // ─── Cancel Shipment ───
 
   async cancelShipment(userId: string, orderId: string) {

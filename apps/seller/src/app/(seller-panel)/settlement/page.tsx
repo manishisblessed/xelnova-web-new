@@ -183,9 +183,14 @@ export default function SettlementPage() {
                 <div className="text-2xl font-bold text-gray-900">₹{report.totals.gross.toFixed(2)}</div>
               </motion.div>
               <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} className="bg-white rounded-2xl border border-gray-200 p-5">
-                <div className="flex items-center gap-2 text-gray-500 text-sm mb-1"><FileText size={16} />Commission ({report.commissionRate}%)</div>
+                <div className="flex items-center gap-2 text-gray-500 text-sm mb-1">
+                  <FileText size={16} />
+                  Commission{report.commissionRate > 0 ? ` (avg ${report.commissionRate.toFixed(2)}%)` : ''}
+                </div>
                 <div className="text-2xl font-bold text-red-600">-₹{report.totals.commission.toFixed(2)}</div>
-                <div className="text-[11px] text-gray-400 mt-1">Refunded orders are commission-free.</div>
+                <div className="text-[11px] text-gray-400 mt-1">
+                  Commission % is set per product on approval. Refunded orders are commission-free.
+                </div>
               </motion.div>
               <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="bg-violet-50 rounded-2xl border border-violet-200 p-5">
                 <div className="flex items-center gap-2 text-violet-600 text-sm mb-1"><IndianRupee size={16} />Net Earnings</div>
@@ -224,7 +229,10 @@ export default function SettlementPage() {
                             {r.commissionWaived ? (
                               <span title="Commission waived because the order was refunded">₹0.00 (waived)</span>
                             ) : (
-                              <>-₹{r.commission.toFixed(2)}</>
+                              <span title={`Per-product rate ${r.commissionPercent}%`}>
+                                -₹{r.commission.toFixed(2)}
+                                <span className="text-[10px] text-gray-400 ml-1">({r.commissionPercent}%)</span>
+                              </span>
                             )}
                           </td>
                           <td className="px-3 py-2 text-right font-medium">₹{r.net.toFixed(2)}</td>

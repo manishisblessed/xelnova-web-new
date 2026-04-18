@@ -66,7 +66,15 @@ export class SplitPaymentService {
 
   /**
    * After an order is paid, compute seller shares and create pending payouts.
-   * Commission is deducted per seller's commissionRate.
+   *
+   * Commission is per-product: every approved product carries its own
+   * `commissionRate` (set by admin at approval time). For backwards
+   * compatibility with legacy products that pre-date the per-product model
+   * we fall back to the seller's stored `commissionRate`, then to a final
+   * 10% safety net so a missing rate never silently zeros the platform fee.
+   *
+   * The per-seller `commissionRate` reported in the share is the gross-
+   * weighted effective rate across that seller's items in this order.
    */
   async computeSellerShares(orderId: string) {
     const order = await this.prisma.order.findUnique({
@@ -75,7 +83,11 @@ export class SplitPaymentService {
         items: {
           include: {
             product: {
-              select: { sellerId: true, seller: { select: { commissionRate: true, storeName: true } } },
+              select: {
+                sellerId: true,
+                commissionRate: true,
+                seller: { select: { commissionRate: true, storeName: true } },
+              },
             },
           },
         },
@@ -83,28 +95,31 @@ export class SplitPaymentService {
     });
     if (!order) throw new NotFoundException('Order not found');
 
-    const sellerMap = new Map<string, { gross: number; commissionRate: number; storeName: string }>();
+    const sellerMap = new Map<string, { gross: number; commission: number; storeName: string }>();
 
     for (const item of order.items) {
       const sid = item.product.sellerId;
-      const rate = item.product.seller?.commissionRate ?? 10;
+      const rate =
+        item.product.commissionRate ?? item.product.seller?.commissionRate ?? 10;
       const name = item.product.seller?.storeName ?? 'Unknown';
       const itemTotal = item.price * item.quantity;
+      const itemCommission = itemTotal * (rate / 100);
 
-      const existing = sellerMap.get(sid) || { gross: 0, commissionRate: rate, storeName: name };
+      const existing = sellerMap.get(sid) || { gross: 0, commission: 0, storeName: name };
       existing.gross += itemTotal;
+      existing.commission += itemCommission;
       sellerMap.set(sid, existing);
     }
 
     const shares = Array.from(sellerMap.entries()).map(([sellerId, data]) => {
-      const commission = data.gross * (data.commissionRate / 100);
-      const net = data.gross - commission;
+      const net = data.gross - data.commission;
+      const effectiveRate = data.gross > 0 ? (data.commission / data.gross) * 100 : 0;
       return {
         sellerId,
         storeName: data.storeName,
         gross: data.gross,
-        commissionRate: data.commissionRate,
-        commission,
+        commissionRate: Number(effectiveRate.toFixed(2)),
+        commission: data.commission,
         net,
       };
     });

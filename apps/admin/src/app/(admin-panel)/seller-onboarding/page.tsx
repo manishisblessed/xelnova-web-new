@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import {
   Store,
@@ -83,7 +84,6 @@ interface SellerProfile {
   businessCategory?: string;
   shippingMethod?: string;
   offerFreeDelivery: boolean;
-  commissionRate: number;
   createdAt: string;
   user?: {
     id: string;
@@ -172,6 +172,9 @@ function getAuthToken() {
 }
 
 export default function SellerOnboardingPage() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [sellers, setSellers] = useState<SellerProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedSeller, setSelectedSeller] = useState<SellerProfile | null>(null);
@@ -184,6 +187,8 @@ export default function SellerOnboardingPage() {
   const [statusFilter, setStatusFilter] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [pagination, setPagination] = useState({ page: 1, limit: 20, total: 0, totalPages: 0 });
+  /** Guard so the deep-link effect runs at most once per navigation. */
+  const handledDeepLinkRef = useRef(false);
 
   const fetchSellers = useCallback(async () => {
     setLoading(true);
@@ -219,6 +224,50 @@ export default function SellerOnboardingPage() {
   useEffect(() => {
     fetchSellers();
   }, [fetchSellers]);
+
+  /** Deep-link from the admin notification bell:
+   *  `/seller-onboarding?sellerId=...` opens that seller's review modal.
+   *  The list endpoint has no by-id route, so we hit it once with a high
+   *  limit and find the seller — this covers ~all live applications and
+   *  avoids needing the user to be on the right paginated page. */
+  useEffect(() => {
+    if (handledDeepLinkRef.current) return;
+    const target = searchParams.get('sellerId');
+    if (!target) return;
+    handledDeepLinkRef.current = true;
+    router.replace(pathname, { scroll: false });
+    void (async () => {
+      const found = sellers.find((s) => s.id === target);
+      if (found) {
+        setSelectedSeller(found);
+        setDetailOpen(true);
+        return;
+      }
+      try {
+        const token = getAuthToken();
+        const res = await fetch(
+          `${API_BASE}/seller-onboarding/admin/sellers?limit=500`,
+          {
+            headers: {
+              'Content-Type': 'application/json',
+              ...(token ? { Authorization: `Bearer ${decodeURIComponent(token)}` } : {}),
+            },
+          },
+        );
+        const json = await res.json();
+        const list: SellerProfile[] = json?.data?.sellers ?? [];
+        const match = list.find((s) => s.id === target);
+        if (match) {
+          setSelectedSeller(match);
+          setDetailOpen(true);
+        } else {
+          toast.error('Seller not found.');
+        }
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'Failed to open seller.');
+      }
+    })();
+  }, [searchParams, router, pathname, sellers]);
 
   const handleReview = async (decision: 'APPROVED' | 'REJECTED') => {
     if (!selectedSeller) return;
@@ -543,7 +592,6 @@ export default function SellerOnboardingPage() {
             <DetailSection title="Store Information">
               <DetailGrid>
                 <DetailItem label="Store Name" value={selectedSeller.storeName} />
-                <DetailItem label="Commission Rate" value={`${selectedSeller.commissionRate}%`} />
               </DetailGrid>
             </DetailSection>
 

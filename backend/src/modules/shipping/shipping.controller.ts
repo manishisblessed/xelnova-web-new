@@ -205,6 +205,20 @@ export class ShippingController {
     );
   }
 
+  @Post('orders/:id/shipment/schedule-pickup')
+  @ApiOperation({ summary: 'Schedule a carrier pickup for the shipment' })
+  async schedulePickup(
+    @CurrentUser('id') userId: string,
+    @Param('id') orderId: string,
+    @Body()
+    dto: { pickupDate: string; pickupTime?: string; expectedPackageCount?: number },
+  ) {
+    return successResponse(
+      await this.service.schedulePickup(userId, orderId, dto),
+      'Pickup scheduling processed',
+    );
+  }
+
   @Get('orders/:id/serviceability')
   @ApiOperation({ summary: 'Check courier serviceability for an order' })
   async checkServiceability(

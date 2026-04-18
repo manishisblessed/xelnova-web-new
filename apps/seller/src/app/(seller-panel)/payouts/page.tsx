@@ -85,7 +85,11 @@ export default function SellerPayoutsPage() {
   const deliveredTotal = deliveredOrders.reduce((s, o) => s + o.total, 0);
   const pendingTotal = pendingSettlement.reduce((s, o) => s + o.total, 0);
 
-  const commRate = data?.commissionRate ?? 10;
+  // Commission is set per-product on the listing. The API returns the
+  // gross-weighted effective rate across this seller's revenue window
+  // — useful as a display average, but per-cycle math should still use
+  // it because we don't have line-level commission on the orders list.
+  const commRate = data?.commissionRate ?? 0;
   const deliveredNet = deliveredTotal - (deliveredTotal * commRate / 100);
   const pendingNet = pendingTotal - (pendingTotal * commRate / 100);
 
@@ -133,7 +137,7 @@ export default function SellerPayoutsPage() {
                 <div>
                   <p className="text-sm text-text-muted">Total Earnings</p>
                   <p className="text-3xl font-bold text-text-primary mt-1">{loading ? '—' : fmt(data?.netRevenue ?? 0)}</p>
-                  <p className="text-xs text-text-muted mt-1">After {commRate}% platform commission</p>
+                  <p className="text-xs text-text-muted mt-1">After platform commission (varies per product)</p>
                 </div>
                 <div className="rounded-xl bg-blue-50 p-2.5">
                   <IndianRupee size={20} className="text-blue-600" />
@@ -148,7 +152,11 @@ export default function SellerPayoutsPage() {
                 <div>
                   <p className="text-sm text-text-muted">Platform Commission</p>
                   <p className="text-3xl font-bold text-red-500 mt-1">{loading ? '—' : fmt(data?.commission ?? 0)}</p>
-                  <p className="text-xs text-text-muted mt-1">{commRate}% of gross sales</p>
+                  <p className="text-xs text-text-muted mt-1">
+                    {commRate > 0
+                      ? `Effective ${commRate.toFixed(2)}% across this period (set per product)`
+                      : 'Set per product when admin approves the listing'}
+                  </p>
                 </div>
                 <div className="rounded-xl bg-red-50 p-2.5">
                   <Percent size={20} className="text-red-500" />
@@ -184,11 +192,16 @@ export default function SellerPayoutsPage() {
               </div>
               <div>
                 <div className="flex justify-between text-sm mb-1">
-                  <span className="text-text-muted">Commission ({commRate}%)</span>
+                  <span className="text-text-muted">
+                    Commission{commRate > 0 ? ` (avg ${commRate.toFixed(2)}%)` : ''}
+                  </span>
                   <span className="font-semibold text-red-500">-{fmt(data?.commission ?? 0)}</span>
                 </div>
                 <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
-                  <div className="h-full bg-red-400 rounded-full" style={{ width: `${commRate}%` }} />
+                  <div
+                    className="h-full bg-red-400 rounded-full"
+                    style={{ width: `${Math.min(100, commRate)}%` }}
+                  />
                 </div>
               </div>
               <div className="pt-3 border-t border-border">

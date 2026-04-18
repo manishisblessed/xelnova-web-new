@@ -492,7 +492,10 @@ export class AdminService {
 
     const data: any = {};
     if (dto.verified !== undefined) data.verified = dto.verified;
-    if (dto.commissionRate !== undefined) data.commissionRate = dto.commissionRate;
+    // Commission is set per-product on approval — admins no longer touch
+    // a seller-level rate. Legacy `SellerProfile.commissionRate` is kept
+    // in the schema only as a silent fallback for products approved
+    // before the per-product model existed.
     if (Object.keys(data).length) {
       await this.prisma.sellerProfile.update({ where: { id }, data });
     }

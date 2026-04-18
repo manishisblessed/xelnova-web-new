@@ -5,7 +5,7 @@ import { Badge } from '@xelnova/ui';
 import { AdminListPage } from '@/components/dashboard/admin-list-page';
 import { ActionModal } from '@/components/dashboard/action-modal';
 import { AdminActionsDropdown } from '@/components/dashboard/admin-actions-dropdown';
-import { FormField, FormInput, FormSelect } from '@/components/dashboard/form-field';
+import { FormField, FormSelect } from '@/components/dashboard/form-field';
 import { Ban, Pencil, Trash2, UserCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiUpdate, apiDelete } from '@/lib/api';
@@ -17,7 +17,6 @@ interface Seller {
   email?: string | null;
   phone?: string | null;
   verified: boolean;
-  commissionRate: number;
   rating: number;
   totalSales: number;
   createdAt: string;
@@ -40,34 +39,25 @@ export default function SellersPage() {
   const [deleting, setDeleting] = useState(false);
   const [selected, setSelected] = useState<Seller | null>(null);
   const [formVerified, setFormVerified] = useState('true');
-  const [formCommissionRate, setFormCommissionRate] = useState('');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!selected || !editOpen) return;
     setFormVerified(String(selected.verified));
-    setFormCommissionRate(String(selected.commissionRate));
   }, [selected, editOpen]);
 
   const openEdit = (s: Seller) => {
     setSelected(s);
     setFormVerified(String(s.verified));
-    setFormCommissionRate(String(s.commissionRate));
     setEditOpen(true);
   };
 
   const handleSave = async () => {
     if (!selected) return;
-    const rate = Number(formCommissionRate);
-    if (Number.isNaN(rate) || rate < 0) {
-      toast.error('Enter a valid commission rate');
-      return;
-    }
     setSaving(true);
     try {
       await apiUpdate('sellers', selected.id, {
         verified: formVerified === 'true',
-        commissionRate: rate,
       });
       toast.success('Seller updated');
       setEditOpen(false);
@@ -178,7 +168,6 @@ export default function SellersPage() {
     },
     { key: '_count', header: 'Products', className: 'whitespace-nowrap text-right tabular-nums w-16', render: (r) => r._count.products },
     { key: 'totalSales', header: 'Sales', className: 'whitespace-nowrap tabular-nums min-w-[6rem]', render: (r) => `₹${r.totalSales.toLocaleString()}` },
-    { key: 'commissionRate', header: 'Comm %', className: 'whitespace-nowrap text-right tabular-nums w-16', render: (r) => `${r.commissionRate}%` },
     {
       key: 'verified',
       header: 'Verified',
@@ -281,17 +270,11 @@ export default function SellersPage() {
                   <option value="false">No</option>
                 </FormSelect>
               </FormField>
-              <FormField label="Commission rate (%)">
-                <FormInput
-                  type="number"
-                  min={0}
-                  step={0.1}
-                  value={formCommissionRate}
-                  onChange={(e) => setFormCommissionRate(e.target.value)}
-                  placeholder="e.g. 10"
-                />
-              </FormField>
             </div>
+            <p className="text-xs text-text-muted leading-relaxed rounded-lg border border-border/60 bg-surface-muted/40 px-3 py-2">
+              Commission is set per product when you approve it from the
+              Products page — it&apos;s no longer a seller-level setting.
+            </p>
           </div>
         )}
       </ActionModal>
