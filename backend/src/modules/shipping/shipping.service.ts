@@ -452,9 +452,45 @@ export class ShippingService {
 
   // ─── Seller profile helper ───
 
+  /**
+   * Loads the seller's profile plus their User record so we can fall back
+   * to `User.phone` (which is OTP-verified at signup) when the
+   * `SellerProfile.phone` column is blank — common for Google sign-in
+   * sellers and anyone who verified phone at login rather than during
+   * the dedicated onboarding flow.
+   *
+   * Also lazily backfills `SellerProfile.phone` so the next call (and the
+   * downstream Delhivery/ShipRocket payload) sees a populated value
+   * without the seller having to re-enter anything.
+   */
   private async getSellerProfile(userId: string) {
-    const profile = await this.prisma.sellerProfile.findUnique({ where: { userId } });
+    const profile = await this.prisma.sellerProfile.findUnique({
+      where: { userId },
+      include: { user: { select: { phone: true } } },
+    });
     if (!profile) throw new NotFoundException('Seller profile not found');
+
+    const sellerPhone = profile.phone?.trim();
+    const userPhone = profile.user?.phone?.trim();
+    if (!sellerPhone && userPhone) {
+      try {
+        await this.prisma.sellerProfile.update({
+          where: { id: profile.id },
+          data: { phone: userPhone },
+        });
+        profile.phone = userPhone;
+      } catch (err) {
+        this.logger.warn(
+          `Failed to backfill SellerProfile.phone from User.phone for seller ${profile.id}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+        // Keep the in-memory copy in sync so the rest of the request
+        // still succeeds even if the persist failed.
+        profile.phone = userPhone;
+      }
+    }
+
     return profile;
   }
 
@@ -631,15 +667,23 @@ export class ShippingService {
     // upstream API typically responds with a useless generic error
     // ("An internal Error has occurred…") which the seller has no way to
     // act on. Fail early with a clear, actionable message instead.
+    //
+    // Phone is checked against both SellerProfile.phone and the parent
+    // User.phone — sellers who completed phone OTP at signup/login but
+    // never re-typed it on the onboarding form already have a verified
+    // mobile on User.phone, and that's the number we'll send to the
+    // carrier as the pickup contact.
+    const pickupPhone =
+      seller.phone?.trim() || (seller as { user?: { phone?: string | null } }).user?.phone?.trim() || '';
     const missingSellerFields: string[] = [];
     if (!seller.businessAddress?.trim()) missingSellerFields.push('Address line');
     if (!seller.businessCity?.trim()) missingSellerFields.push('City');
     if (!seller.businessState?.trim()) missingSellerFields.push('State');
     if (!seller.businessPincode?.trim()) missingSellerFields.push('Pincode');
-    if (!seller.phone?.trim()) missingSellerFields.push('Pickup phone number');
+    if (!pickupPhone) missingSellerFields.push('Pickup phone number');
     if (missingSellerFields.length > 0) {
       throw new BadRequestException(
-        `Your pickup address is incomplete. Please add ${missingSellerFields.join(', ')} on your Profile → Business Address before booking a shipment.`,
+        `Your pickup address is incomplete. Please add ${missingSellerFields.join(', ')} on your Profile before booking a shipment.`,
       );
     }
 
@@ -662,7 +706,7 @@ export class ShippingService {
         city: seller.businessCity || '',
         state: seller.businessState || '',
         pincode: seller.businessPincode || '',
-        phone: seller.phone || '',
+        phone: pickupPhone,
         name: seller.storeName,
       },
       orderNumber: order.orderNumber,
