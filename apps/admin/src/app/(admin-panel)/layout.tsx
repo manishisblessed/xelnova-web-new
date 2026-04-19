@@ -1,6 +1,5 @@
 import { DashboardAuthProvider } from '@/lib/auth-context';
 import { DashboardSidebar } from '@/components/dashboard/dashboard-sidebar';
-import { SessionTimer } from '@/components/dashboard/session-timer';
 import { NotificationBell } from '@/components/dashboard/notification-bell';
 import { GlobalSearch } from '@/components/dashboard/global-search';
 
@@ -14,7 +13,6 @@ export default function AdminPanelLayout({ children }: { children: React.ReactNo
             <GlobalSearch />
             <div className="flex-1" />
             <NotificationBell />
-            <SessionTimer />
           </div>
           {children}
         </div>

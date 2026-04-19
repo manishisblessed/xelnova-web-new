@@ -1550,14 +1550,16 @@ export class AdminService {
           s.platformLogistics && typeof s.platformLogistics === 'object'
             ? (s.platformLogistics as Record<string, unknown>)
             : {};
-        const d = pl.delhivery && typeof pl.delhivery === 'object' ? (pl.delhivery as Record<string, unknown>) : {};
+        const obj = (k: string): Record<string, unknown> =>
+          pl[k] && typeof pl[k] === 'object' ? (pl[k] as Record<string, unknown>) : {};
+        const def = this.defaultSiteSettings.platformLogistics;
         return {
-          ...this.defaultSiteSettings.platformLogistics,
+          ...def,
           ...pl,
-          delhivery: {
-            ...this.defaultSiteSettings.platformLogistics.delhivery,
-            ...d,
-          },
+          delhivery: { ...def.delhivery, ...obj('delhivery') },
+          shiprocket: { ...def.shiprocket, ...obj('shiprocket') },
+          xpressbees: { ...def.xpressbees, ...obj('xpressbees') },
+          ekart: { ...def.ekart, ...obj('ekart') },
         };
       })(),
     };

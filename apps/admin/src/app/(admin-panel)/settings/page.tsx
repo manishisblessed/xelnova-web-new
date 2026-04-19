@@ -31,7 +31,7 @@ interface Settings {
     { id: string; keys: string[]; valuesByKey: Record<string, string[]>; defaultValues: string[] }
   >;
   platformLogistics?: {
-    xelnovaBackend?: 'delhivery' | 'stub';
+    xelnovaBackend?: XelgoBackend;
     delhivery?: {
       clientName?: string;
       warehouseName?: string;
@@ -41,8 +41,37 @@ interface Settings {
       apiToken?: string;
       apiTokenHint?: string;
     };
+    shiprocket?: {
+      email?: string;
+      pickupLocation?: string;
+      password?: string;
+      passwordHint?: string;
+    };
+    xpressbees?: {
+      email?: string;
+      warehouseName?: string;
+      businessName?: string;
+      password?: string;
+      passwordHint?: string;
+    };
+    ekart?: {
+      clientId?: string;
+      username?: string;
+      pickupAlias?: string;
+      password?: string;
+      passwordHint?: string;
+    };
   };
 }
+
+type XelgoBackend = 'delhivery' | 'shiprocket' | 'xpressbees' | 'ekart';
+
+const XELGO_BACKENDS: { value: XelgoBackend; label: string; tagline: string }[] = [
+  { value: 'delhivery', label: 'Delhivery', tagline: 'Recommended — pan-India coverage, prepaid + COD' },
+  { value: 'ekart', label: 'Ekart Logistics', tagline: 'Flipkart\u2019s logistics arm — strong in metros & tier-2' },
+  { value: 'xpressbees', label: 'XpressBees', tagline: 'Same-day & next-day in 50+ cities' },
+  { value: 'shiprocket', label: 'ShipRocket', tagline: 'Aggregator with 17+ courier partners' },
+];
 
 function SettingsSection({ title, delay, children }: { title: string; delay: number; children: React.ReactNode }) {
   return (
@@ -89,7 +118,7 @@ export default function SettingsPage() {
       const platformLogistics =
         pl != null
           ? {
-              xelnovaBackend: pl.xelnovaBackend ?? 'delhivery',
+              xelnovaBackend: (pl.xelnovaBackend ?? 'delhivery') as XelgoBackend,
               delhivery: {
                 clientName: pl.delhivery?.clientName ?? '',
                 warehouseName: pl.delhivery?.warehouseName ?? '',
@@ -97,6 +126,23 @@ export default function SettingsPage() {
                 sellerGstin: pl.delhivery?.sellerGstin ?? '',
                 shippingMode: pl.delhivery?.shippingMode ?? 'Surface',
                 ...(pl.delhivery?.apiToken?.trim() ? { apiToken: pl.delhivery.apiToken.trim() } : {}),
+              },
+              shiprocket: {
+                email: pl.shiprocket?.email ?? '',
+                pickupLocation: pl.shiprocket?.pickupLocation ?? '',
+                ...(pl.shiprocket?.password?.trim() ? { password: pl.shiprocket.password.trim() } : {}),
+              },
+              xpressbees: {
+                email: pl.xpressbees?.email ?? '',
+                warehouseName: pl.xpressbees?.warehouseName ?? '',
+                businessName: pl.xpressbees?.businessName ?? '',
+                ...(pl.xpressbees?.password?.trim() ? { password: pl.xpressbees.password.trim() } : {}),
+              },
+              ekart: {
+                clientId: pl.ekart?.clientId ?? '',
+                username: pl.ekart?.username ?? '',
+                pickupAlias: pl.ekart?.pickupAlias ?? '',
+                ...(pl.ekart?.password?.trim() ? { password: pl.ekart.password.trim() } : {}),
               },
             }
           : undefined;
@@ -154,19 +200,14 @@ export default function SettingsPage() {
           </div>
         </SettingsSection>
 
-        <SettingsSection title="Platform logistics (Xelgo — internal)" delay={0.12}>
+        <SettingsSection title="Platform logistics (Xelgo — Ship with Xelnova)" delay={0.12}>
           <p className="text-xs text-text-muted -mt-2 mb-3">
-            Default booking for <strong>Ship with Xelnova</strong> uses Delhivery Live API when credentials are complete.
-            Server env (optional):{' '}
-            <code className="text-[11px] bg-gray-100 px-1 rounded">DELHIVERY_API_TOKEN</code>,{' '}
-            <code className="text-[11px] bg-gray-100 px-1 rounded">DELHIVERY_CLIENT_NAME</code>,{' '}
-            <code className="text-[11px] bg-gray-100 px-1 rounded">DELHIVERY_WAREHOUSE_NAME</code>,{' '}
-            <code className="text-[11px] bg-gray-100 px-1 rounded">DELHIVERY_ENV</code>,{' '}
-            <code className="text-[11px] bg-gray-100 px-1 rounded">DELHIVERY_SELLER_GSTIN</code>,{' '}
-            <code className="text-[11px] bg-gray-100 px-1 rounded">DELHIVERY_SHIPPING_MODE</code>.
+            Pick which carrier handles shipments booked through <strong>Ship with Xelnova</strong> and
+            paste the credentials below. Sellers won&apos;t need to wire up their own courier accounts to use
+            Xelgo — the platform fronts the booking.
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <FormField label="Xelnova fulfilment backend">
+            <FormField label="Xelgo fulfilment backend">
               <FormSelect
                 value={data.platformLogistics?.xelnovaBackend ?? 'delhivery'}
                 onChange={(e) =>
@@ -176,151 +217,37 @@ export default function SettingsPage() {
                           ...d,
                           platformLogistics: {
                             ...d.platformLogistics,
-                            xelnovaBackend: e.target.value as 'delhivery' | 'stub',
-                            delhivery: { ...d.platformLogistics?.delhivery },
+                            xelnovaBackend: e.target.value as XelgoBackend,
                           },
                         }
                       : null,
                   )
                 }
               >
-                <option value="delhivery">Delhivery (recommended)</option>
-                <option value="stub">Internal stub only (testing)</option>
+                {XELGO_BACKENDS.map((b) => (
+                  <option key={b.value} value={b.value}>{b.label}</option>
+                ))}
               </FormSelect>
             </FormField>
-            <div className="sm:col-span-2 text-xs text-text-muted rounded-lg bg-info-50 border border-info-100 px-3 py-2">
-              {(data.platformLogistics?.delhivery as { apiTokenHint?: string })?.apiTokenHint ||
-                'Token status will appear after save/load.'}
-            </div>
-            <FormField label="Delhivery client name (registered)">
-              <FormInput
-                value={data.platformLogistics?.delhivery?.clientName ?? ''}
-                onChange={(e) =>
-                  setData((d) =>
-                    d
-                      ? {
-                          ...d,
-                          platformLogistics: {
-                            ...d.platformLogistics,
-                            delhivery: { ...d.platformLogistics?.delhivery, clientName: e.target.value },
-                          },
-                        }
-                      : null,
-                  )
-                }
-                placeholder="e.g. XELNOVA PRIVATE LIMITED"
-              />
-            </FormField>
-            <FormField label="Pickup location / warehouse name">
-              <FormInput
-                value={data.platformLogistics?.delhivery?.warehouseName ?? ''}
-                onChange={(e) =>
-                  setData((d) =>
-                    d
-                      ? {
-                          ...d,
-                          platformLogistics: {
-                            ...d.platformLogistics,
-                            delhivery: { ...d.platformLogistics?.delhivery, warehouseName: e.target.value },
-                          },
-                        }
-                      : null,
-                  )
-                }
-                placeholder="Exact name in Delhivery One → Warehouses"
-              />
-            </FormField>
-            <FormField label="Delhivery API environment">
-              <FormSelect
-                value={data.platformLogistics?.delhivery?.environment ?? 'production'}
-                onChange={(e) =>
-                  setData((d) =>
-                    d
-                      ? {
-                          ...d,
-                          platformLogistics: {
-                            ...d.platformLogistics,
-                            delhivery: {
-                              ...d.platformLogistics?.delhivery,
-                              environment: e.target.value as 'production' | 'staging',
-                            },
-                          },
-                        }
-                      : null,
-                  )
-                }
-              >
-                <option value="production">Production (Live — track.delhivery.com)</option>
-                <option value="staging">Staging (sandbox — staging-express.delhivery.com)</option>
-              </FormSelect>
-            </FormField>
-            <FormField label="Registered GSTIN (for shipment / labels)">
-              <FormInput
-                value={data.platformLogistics?.delhivery?.sellerGstin ?? ''}
-                onChange={(e) =>
-                  setData((d) =>
-                    d
-                      ? {
-                          ...d,
-                          platformLogistics: {
-                            ...d.platformLogistics,
-                            delhivery: { ...d.platformLogistics?.delhivery, sellerGstin: e.target.value },
-                          },
-                        }
-                      : null,
-                  )
-                }
-                placeholder="15-character GSTIN if required for your account"
-              />
-            </FormField>
-            <FormField label="Default shipping mode (Delhivery)">
-              <FormSelect
-                value={data.platformLogistics?.delhivery?.shippingMode ?? 'Surface'}
-                onChange={(e) =>
-                  setData((d) =>
-                    d
-                      ? {
-                          ...d,
-                          platformLogistics: {
-                            ...d.platformLogistics,
-                            delhivery: {
-                              ...d.platformLogistics?.delhivery,
-                              shippingMode: e.target.value as 'Surface' | 'Express',
-                            },
-                          },
-                        }
-                      : null,
-                  )
-                }
-              >
-                <option value="Surface">Surface</option>
-                <option value="Express">Express</option>
-              </FormSelect>
-            </FormField>
-            <div className="sm:col-span-2">
-              <FormField label="Delhivery Live API token (leave blank to keep existing)">
-                <FormInput
-                  type="password"
-                  autoComplete="off"
-                  value={data.platformLogistics?.delhivery?.apiToken ?? ''}
-                  onChange={(e) =>
-                    setData((d) =>
-                      d
-                        ? {
-                            ...d,
-                            platformLogistics: {
-                              ...d.platformLogistics,
-                              delhivery: { ...d.platformLogistics?.delhivery, apiToken: e.target.value },
-                            },
-                          }
-                        : null,
-                    )
-                  }
-                  placeholder="Paste new token only when rotating"
-                />
-              </FormField>
+            <div className="self-end pb-1">
+              <p className="text-xs text-text-muted">
+                {XELGO_BACKENDS.find((b) => b.value === (data.platformLogistics?.xelnovaBackend ?? 'delhivery'))?.tagline}
+              </p>
             </div>
           </div>
+
+          {(data.platformLogistics?.xelnovaBackend ?? 'delhivery') === 'delhivery' && (
+            <PlatformLogisticsDelhivery data={data} setData={setData} />
+          )}
+          {data.platformLogistics?.xelnovaBackend === 'shiprocket' && (
+            <PlatformLogisticsShipRocket data={data} setData={setData} />
+          )}
+          {data.platformLogistics?.xelnovaBackend === 'xpressbees' && (
+            <PlatformLogisticsXpressBees data={data} setData={setData} />
+          )}
+          {data.platformLogistics?.xelnovaBackend === 'ekart' && (
+            <PlatformLogisticsEkart data={data} setData={setData} />
+          )}
         </SettingsSection>
 
         <SettingsSection title="Payment Methods" delay={0.15}>
@@ -634,5 +561,285 @@ export default function SettingsPage() {
         </div>
       </div>
     </>
+  );
+}
+
+// ───────────────────────── Xelgo provider sub-forms ─────────────────────────
+
+type SetData = React.Dispatch<React.SetStateAction<Settings | null>>;
+type ProviderProps = { data: Settings; setData: SetData };
+
+/** Small banner shown above each provider's credential form. */
+function ProviderHelp({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="text-xs text-text-muted rounded-lg bg-info-50 border border-info-100 px-3 py-2">
+      {children}
+    </div>
+  );
+}
+
+/** Hint line below a secret input (e.g. "Saved password ends with ••92"). */
+function SecretHint({ hint }: { hint?: string }) {
+  return (
+    <p className="text-[11px] text-text-muted mt-1">{hint || 'Status will appear after save/reload.'}</p>
+  );
+}
+
+function PlatformLogisticsDelhivery({ data, setData }: ProviderProps) {
+  const d = data.platformLogistics?.delhivery ?? {};
+  const patch = (k: string, v: unknown) =>
+    setData((s) =>
+      s
+        ? {
+            ...s,
+            platformLogistics: {
+              ...s.platformLogistics,
+              delhivery: { ...s.platformLogistics?.delhivery, [k]: v },
+            },
+          }
+        : null,
+    );
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
+      <div className="sm:col-span-2">
+        <ProviderHelp>
+          From <strong>Delhivery One</strong>: copy your <em>API Token</em> (Settings → API Setup) and
+          the exact <em>Warehouse Name</em> (Settings → Warehouses). Server env still works as a
+          fallback: <code className="text-[11px] bg-gray-100 px-1 rounded">DELHIVERY_API_TOKEN</code>,{' '}
+          <code className="text-[11px] bg-gray-100 px-1 rounded">DELHIVERY_CLIENT_NAME</code>,{' '}
+          <code className="text-[11px] bg-gray-100 px-1 rounded">DELHIVERY_WAREHOUSE_NAME</code>.
+        </ProviderHelp>
+      </div>
+      <FormField label="Client name (registered with Delhivery)">
+        <FormInput
+          value={d.clientName ?? ''}
+          onChange={(e) => patch('clientName', e.target.value)}
+          placeholder="e.g. XELNOVA PRIVATE LIMITED"
+        />
+      </FormField>
+      <FormField label="Pickup location / warehouse name">
+        <FormInput
+          value={d.warehouseName ?? ''}
+          onChange={(e) => patch('warehouseName', e.target.value)}
+          placeholder="Exact name in Delhivery One → Warehouses"
+        />
+      </FormField>
+      <FormField label="API environment">
+        <FormSelect
+          value={d.environment ?? 'production'}
+          onChange={(e) => patch('environment', e.target.value)}
+        >
+          <option value="production">Production (Live — track.delhivery.com)</option>
+          <option value="staging">Staging (sandbox — staging-express.delhivery.com)</option>
+        </FormSelect>
+      </FormField>
+      <FormField label="Default service mode">
+        <FormSelect
+          value={d.shippingMode ?? 'Surface'}
+          onChange={(e) => patch('shippingMode', e.target.value)}
+        >
+          <option value="Surface">Surface</option>
+          <option value="Express">Express</option>
+        </FormSelect>
+      </FormField>
+      <div className="sm:col-span-2">
+        <FormField label="Registered GSTIN (optional, for B2B labels)">
+          <FormInput
+            value={d.sellerGstin ?? ''}
+            onChange={(e) => patch('sellerGstin', e.target.value)}
+            placeholder="15-character GSTIN if required for your account"
+          />
+        </FormField>
+      </div>
+      <div className="sm:col-span-2">
+        <FormField label="Live API token (leave blank to keep existing)">
+          <FormInput
+            type="password"
+            autoComplete="off"
+            value={d.apiToken ?? ''}
+            onChange={(e) => patch('apiToken', e.target.value)}
+            placeholder="Paste new token only when rotating"
+          />
+          <SecretHint hint={d.apiTokenHint} />
+        </FormField>
+      </div>
+    </div>
+  );
+}
+
+function PlatformLogisticsShipRocket({ data, setData }: ProviderProps) {
+  const d = data.platformLogistics?.shiprocket ?? {};
+  const patch = (k: string, v: unknown) =>
+    setData((s) =>
+      s
+        ? {
+            ...s,
+            platformLogistics: {
+              ...s.platformLogistics,
+              shiprocket: { ...s.platformLogistics?.shiprocket, [k]: v },
+            },
+          }
+        : null,
+    );
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
+      <div className="sm:col-span-2">
+        <ProviderHelp>
+          In <strong>ShipRocket → Settings → API</strong>, create a dedicated <em>API User</em> (use a
+          fresh email, not your dashboard login). Paste that user&apos;s email and password below. The
+          pickup location must already exist under <em>Settings → Pickup Addresses</em>.
+        </ProviderHelp>
+      </div>
+      <FormField label="API User email">
+        <FormInput
+          value={d.email ?? ''}
+          onChange={(e) => patch('email', e.target.value)}
+          placeholder="e.g. api@xelnova.in"
+        />
+      </FormField>
+      <FormField label="Pickup location name">
+        <FormInput
+          value={d.pickupLocation ?? ''}
+          onChange={(e) => patch('pickupLocation', e.target.value)}
+          placeholder='Defaults to "Primary"'
+        />
+      </FormField>
+      <div className="sm:col-span-2">
+        <FormField label="API User password (leave blank to keep existing)">
+          <FormInput
+            type="password"
+            autoComplete="off"
+            value={d.password ?? ''}
+            onChange={(e) => patch('password', e.target.value)}
+            placeholder="Paste only when rotating"
+          />
+          <SecretHint hint={d.passwordHint} />
+        </FormField>
+      </div>
+    </div>
+  );
+}
+
+function PlatformLogisticsXpressBees({ data, setData }: ProviderProps) {
+  const d = data.platformLogistics?.xpressbees ?? {};
+  const patch = (k: string, v: unknown) =>
+    setData((s) =>
+      s
+        ? {
+            ...s,
+            platformLogistics: {
+              ...s.platformLogistics,
+              xpressbees: { ...s.platformLogistics?.xpressbees, [k]: v },
+            },
+          }
+        : null,
+    );
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
+      <div className="sm:col-span-2">
+        <ProviderHelp>
+          Use the same login you use at <strong>shipment.xpressbees.com</strong>. We exchange it for a
+          24-hour Bearer token at booking time — the password is stored encrypted, never in plain text.
+          Make sure the warehouse name matches <em>Settings → Warehouse</em> exactly.
+        </ProviderHelp>
+      </div>
+      <FormField label="Login email / Enterprise ID">
+        <FormInput
+          value={d.email ?? ''}
+          onChange={(e) => patch('email', e.target.value)}
+          placeholder="Your XpressBees login email"
+        />
+      </FormField>
+      <FormField label="Pickup warehouse name">
+        <FormInput
+          value={d.warehouseName ?? ''}
+          onChange={(e) => patch('warehouseName', e.target.value)}
+          placeholder="Exact warehouse name from XpressBees portal"
+        />
+      </FormField>
+      <div className="sm:col-span-2">
+        <FormField label="Business name on label (optional)">
+          <FormInput
+            value={d.businessName ?? ''}
+            onChange={(e) => patch('businessName', e.target.value)}
+            placeholder="e.g. Xelnova Private Limited"
+          />
+        </FormField>
+      </div>
+      <div className="sm:col-span-2">
+        <FormField label="Login password (leave blank to keep existing)">
+          <FormInput
+            type="password"
+            autoComplete="off"
+            value={d.password ?? ''}
+            onChange={(e) => patch('password', e.target.value)}
+            placeholder="Paste only when rotating"
+          />
+          <SecretHint hint={d.passwordHint} />
+        </FormField>
+      </div>
+    </div>
+  );
+}
+
+function PlatformLogisticsEkart({ data, setData }: ProviderProps) {
+  const d = data.platformLogistics?.ekart ?? {};
+  const patch = (k: string, v: unknown) =>
+    setData((s) =>
+      s
+        ? {
+            ...s,
+            platformLogistics: {
+              ...s.platformLogistics,
+              ekart: { ...s.platformLogistics?.ekart, [k]: v },
+            },
+          }
+        : null,
+    );
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
+      <div className="sm:col-span-2">
+        <ProviderHelp>
+          From <strong>Ekart Elite → Settings → API Documentation</strong>, copy the <em>Client ID</em>,
+          <em> API Username</em>, and <em>API Password</em>. The pickup alias is the registered
+          warehouse code (often shown as <em>Pickup Location</em> on the dashboard).
+        </ProviderHelp>
+      </div>
+      <FormField label="Client ID">
+        <FormInput
+          value={d.clientId ?? ''}
+          onChange={(e) => patch('clientId', e.target.value)}
+          placeholder="e.g. EKART_698317571ff77a997480dcce"
+        />
+      </FormField>
+      <FormField label="API username">
+        <FormInput
+          value={d.username ?? ''}
+          onChange={(e) => patch('username', e.target.value)}
+          placeholder="API username from Ekart Elite"
+        />
+      </FormField>
+      <div className="sm:col-span-2">
+        <FormField label="Pickup location alias (optional)">
+          <FormInput
+            value={d.pickupAlias ?? ''}
+            onChange={(e) => patch('pickupAlias', e.target.value)}
+            placeholder="e.g. Delhi-Warehouse"
+          />
+        </FormField>
+      </div>
+      <div className="sm:col-span-2">
+        <FormField label="API password (leave blank to keep existing)">
+          <FormInput
+            type="password"
+            autoComplete="off"
+            value={d.password ?? ''}
+            onChange={(e) => patch('password', e.target.value)}
+            placeholder="Paste only when rotating"
+          />
+          <SecretHint hint={d.passwordHint} />
+        </FormField>
+      </div>
+    </div>
   );
 }

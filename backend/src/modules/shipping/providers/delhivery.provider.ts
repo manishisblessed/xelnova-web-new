@@ -84,6 +84,33 @@ export class DelhiveryProvider implements CourierProvider {
     };
   }
 
+  /**
+   * Strip everything that isn't a digit and return the last 10 characters.
+   * Delhivery's CMU validator rejects phone numbers that aren't exactly
+   * 10 digits (e.g. `+91 92591 31155` or `09259131155`) with a generic
+   * "internal Error" — far easier to debug if we always send the canonical
+   * 10-digit form.
+   */
+  private normalizePhone(raw: string | undefined | null): string {
+    const digits = String(raw ?? '').replace(/\D+/g, '');
+    return digits.slice(-10);
+  }
+
+  /**
+   * Delhivery expects `order_date` as `YYYY-MM-DD HH:mm:ss` in IST.
+   * Sending an ISO-8601 string with a `Z` suffix occasionally trips
+   * their parser and surfaces as the same generic "internal Error".
+   */
+  private formatOrderDate(now: Date = new Date()): string {
+    const istMs = now.getTime() + 5.5 * 60 * 60 * 1000;
+    const ist = new Date(istMs);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return (
+      `${ist.getUTCFullYear()}-${pad(ist.getUTCMonth() + 1)}-${pad(ist.getUTCDate())} ` +
+      `${pad(ist.getUTCHours())}:${pad(ist.getUTCMinutes())}:${pad(ist.getUTCSeconds())}`
+    );
+  }
+
   async createShipment(
     config: SellerCourierConfig,
     details: ShipmentDetails,
@@ -153,47 +180,71 @@ export class DelhiveryProvider implements CourierProvider {
     const widthCm = dims[1] || '10';
     const heightCm = dims[2] || '10';
 
+    const buyerPhone = this.normalizePhone(details.deliveryAddress.phone);
+    const sellerPhone = this.normalizePhone(details.sellerAddress.phone);
+
+    // Delhivery silently rejects shipments whose phone numbers aren't
+    // exactly 10 digits. Surface the issue with an actionable message
+    // instead of leaving the seller staring at "internal Error".
+    if (buyerPhone.length !== 10) {
+      throw new Error(
+        `Buyer phone number must be a 10-digit Indian mobile number (got "${details.deliveryAddress.phone}"). Please ask the customer to update their delivery phone.`,
+      );
+    }
+    if (sellerPhone.length !== 10) {
+      throw new Error(
+        `Pickup phone number must be a 10-digit Indian mobile number (got "${details.sellerAddress.phone}"). Please update your seller profile phone before booking a shipment.`,
+      );
+    }
+
+    const shipment: Record<string, unknown> = {
+      name: details.deliveryAddress.fullName,
+      add: [
+        details.deliveryAddress.addressLine1,
+        details.deliveryAddress.addressLine2,
+      ]
+        .filter(Boolean)
+        .join(', '),
+      pin: details.deliveryAddress.pincode,
+      city: details.deliveryAddress.city,
+      state: details.deliveryAddress.state,
+      country: 'India',
+      phone: buyerPhone,
+      order: details.orderNumber,
+      payment_mode: isCod ? 'COD' : 'Pre-paid',
+      return_pin: details.sellerAddress.pincode,
+      return_city: details.sellerAddress.city,
+      return_phone: sellerPhone,
+      return_add: details.sellerAddress.address,
+      return_state: details.sellerAddress.state,
+      return_country: 'India',
+      return_name: details.sellerAddress.name,
+      products_desc:
+        details.items.map((i) => i.name).join(', ').slice(0, 200) || 'Products',
+      cod_amount: isCod ? String(details.totalAmount || 0) : '0',
+      order_date: this.formatOrderDate(),
+      total_amount: String(details.totalAmount || 0),
+      seller_add: details.sellerAddress.address,
+      seller_name: details.sellerAddress.name,
+      seller_inv: details.orderNumber,
+      quantity: String(
+        details.items.reduce((sum, i) => sum + i.quantity, 0) || 1,
+      ),
+      shipment_length: lengthCm,
+      shipment_width: widthCm,
+      shipment_height: heightCm,
+      weight: String(Math.round((details.weight || 0.5) * 1000)),
+      shipping_mode: shippingMode,
+      address_type: 'home',
+    };
+
+    // Only include optional/secret fields when actually present —
+    // Delhivery's validators sometimes choke on empty-string keys.
+    if (awb) shipment.waybill = awb;
+    if (sellerGstin) shipment.seller_gst_tin = sellerGstin;
+
     const shipmentPayload = {
-      shipments: [
-        {
-          name: details.deliveryAddress.fullName,
-          add: [
-            details.deliveryAddress.addressLine1,
-            details.deliveryAddress.addressLine2,
-          ].filter(Boolean).join(', '),
-          pin: details.deliveryAddress.pincode,
-          city: details.deliveryAddress.city,
-          state: details.deliveryAddress.state,
-          country: 'India',
-          phone: details.deliveryAddress.phone,
-          order: details.orderNumber,
-          payment_mode: isCod ? 'COD' : 'Pre-paid',
-          return_pin: details.sellerAddress.pincode,
-          return_city: details.sellerAddress.city,
-          return_phone: details.sellerAddress.phone,
-          return_add: details.sellerAddress.address,
-          return_state: details.sellerAddress.state,
-          return_country: 'India',
-          return_name: details.sellerAddress.name,
-          products_desc: details.items.map((i) => i.name).join(', ').slice(0, 200) || 'Products',
-          hsn_code: '',
-          cod_amount: isCod ? String(details.totalAmount || 0) : '0',
-          order_date: new Date().toISOString(),
-          total_amount: String(details.totalAmount || 0),
-          seller_add: details.sellerAddress.address,
-          seller_name: details.sellerAddress.name,
-          seller_inv: details.orderNumber,
-          quantity: String(details.items.reduce((sum, i) => sum + i.quantity, 0) || 1),
-          waybill: awb || '',
-          shipment_length: lengthCm,
-          shipment_width: widthCm,
-          shipment_height: heightCm,
-          weight: String(Math.round((details.weight || 0.5) * 1000)),
-          seller_gst_tin: sellerGstin,
-          shipping_mode: shippingMode,
-          address_type: 'home',
-        },
-      ],
+      shipments: [shipment],
       pickup_location: {
         name: pickupName,
       },
@@ -211,18 +262,48 @@ export class DelhiveryProvider implements CourierProvider {
 
     if (!createRes.ok) {
       const errText = await createRes.text();
-      this.logger.error(`Delhivery create shipment failed: ${createRes.status} ${errText}`);
+      this.logger.error(
+        `Delhivery create shipment HTTP ${createRes.status}. Payload=${JSON.stringify(
+          shipmentPayload,
+        )}. Response=${errText.slice(0, 800)}`,
+      );
       throw new Error(`Failed to create Delhivery shipment: ${errText}`);
     }
 
     const createData = await createRes.json();
 
     if (!createData.success) {
-      const rawMsg = createData.rmk || createData.packages?.[0]?.remarks?.[0] || 'Unknown error';
-      let errMsg = rawMsg;
+      // Always log the full Delhivery response + the (sanitized) payload
+      // we sent so we can diagnose recurring rejections from server logs
+      // without needing to reproduce the booking.
+      this.logger.error(
+        `Delhivery rejected shipment. Payload=${JSON.stringify(
+          shipmentPayload,
+        )}. Response=${JSON.stringify(createData).slice(0, 1500)}`,
+      );
 
-      if (rawMsg.includes('ClientWarehouse matching query does not exist')) {
+      const rawMsg =
+        createData.rmk ||
+        createData.packages?.[0]?.remarks?.[0] ||
+        (Array.isArray(createData.packages?.[0]?.remarks)
+          ? createData.packages[0].remarks.join('; ')
+          : '') ||
+        'Unknown error';
+      let errMsg = String(rawMsg).trim();
+
+      if (errMsg.includes('ClientWarehouse matching query does not exist')) {
         errMsg = `Invalid Pickup Location Name. Please check your Delhivery Settings → Warehouses and enter the exact warehouse name in your shipping settings.`;
+      } else if (/internal\s*Error/i.test(errMsg)) {
+        // Delhivery's catch-all rejection. Hand the seller something
+        // they can actually act on rather than a dead-end "contact
+        // client.support@delhivery.com" message.
+        errMsg =
+          `Delhivery couldn't process this shipment. The most common causes are: ` +
+          `(1) Pickup Location Name in shipping settings doesn't match any warehouse registered in your Delhivery One dashboard, ` +
+          `(2) the buyer or pickup phone isn't a valid 10-digit Indian mobile number, ` +
+          `(3) the pickup or delivery pincode isn't serviceable on your Delhivery contract, or ` +
+          `(4) your Delhivery account doesn't have a waybill block allocated yet. ` +
+          `Please re-check your shipping settings and the customer's address, then try again.`;
       }
 
       throw new Error(`Delhivery rejected shipment: ${errMsg}`);

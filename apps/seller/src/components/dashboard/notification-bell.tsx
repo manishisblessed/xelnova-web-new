@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Bell, ChevronRight } from 'lucide-react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { useDashboardAuth } from '@/lib/auth-context';
 import { publicApiBase } from '@/lib/public-api-base';
 
@@ -75,6 +75,7 @@ function getNotificationHref(n: Notification): string | null {
 export function NotificationBell() {
   const { isAuthenticated } = useDashboardAuth();
   const router = useRouter();
+  const pathname = usePathname();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unread, setUnread] = useState(0);
   const [open, setOpen] = useState(false);
@@ -147,9 +148,23 @@ export function NotificationBell() {
         void markOneRead(n.id);
       }
       setOpen(false);
-      if (href) router.push(href);
+      if (!href) return;
+
+      // Compare just the pathname (ignore query) — if we're already on the
+      // target route, `router.push` is a no-op and the user sees nothing
+      // happen. Force a full reload so client-fetched data (e.g. the
+      // verification banner / stat cards) re-fetches and reflects the new
+      // state implied by the notification.
+      const targetPath = href.split('?')[0] ?? href;
+      if (pathname === targetPath) {
+        if (typeof window !== 'undefined') window.location.assign(href);
+        return;
+      }
+
+      router.push(href);
+      router.refresh();
     },
-    [markOneRead, router],
+    [markOneRead, router, pathname],
   );
 
   const handleToggle = () => {

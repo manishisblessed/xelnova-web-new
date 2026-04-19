@@ -23,6 +23,7 @@ import { XelnovaCourierProvider } from './providers/xelnova-courier.provider';
 import {
   DEFAULT_PLATFORM_LOGISTICS,
   PlatformLogisticsSettings,
+  XelnovaCourierBackend,
 } from '../../common/platform-logistics';
 import * as crypto from 'crypto';
 
@@ -91,123 +92,277 @@ export class ShippingService {
     return {
       ...DEFAULT_PLATFORM_LOGISTICS,
       ...p,
-      delhivery: {
-        ...DEFAULT_PLATFORM_LOGISTICS.delhivery,
-        ...p.delhivery,
-      },
+      delhivery: { ...DEFAULT_PLATFORM_LOGISTICS.delhivery, ...p.delhivery },
+      shiprocket: { ...DEFAULT_PLATFORM_LOGISTICS.shiprocket, ...p.shiprocket },
+      xpressbees: { ...DEFAULT_PLATFORM_LOGISTICS.xpressbees, ...p.xpressbees },
+      ekart: { ...DEFAULT_PLATFORM_LOGISTICS.ekart, ...p.ekart },
     };
   }
 
-  private async resolveDelhiveryForXelnova(): Promise<
-    { mode: 'delhivery'; config: SellerCourierConfig } | { mode: 'stub' }
+  /** Best-effort decrypt; tolerates legacy plain-text values. */
+  private safeDecrypt(value: string | undefined | null): string {
+    if (!value) return '';
+    try {
+      return this.decrypt(value);
+    } catch {
+      return value;
+    }
+  }
+
+  /**
+   * Resolve which carrier handles a "Ship with Xelnova" / Xelgo booking.
+   * Returns a synthetic SellerCourierConfig matching the provider so the
+   * rest of the booking pipeline can stay generic.
+   *
+   * Falls back to Delhivery env credentials only — other carriers must be
+   * fully configured by the admin via Settings.
+   */
+  private async resolveXelgoBackend(): Promise<
+    | {
+        mode: Extract<
+          ShippingMode,
+          'DELHIVERY' | 'SHIPROCKET' | 'XPRESSBEES' | 'EKART'
+        >;
+        config: SellerCourierConfig;
+        displayName: string;
+      }
+    | { mode: 'unconfigured'; reason: string }
   > {
     const pl = await this.getMergedPlatformLogistics();
-    const backend = pl.xelnovaBackend || 'delhivery';
+    const rawBackend = (pl.xelnovaBackend ?? 'delhivery') as XelnovaCourierBackend | 'stub';
+    // 'stub' is a legacy testing value — promote to delhivery.
+    const backend: XelnovaCourierBackend =
+      rawBackend === 'shiprocket' || rawBackend === 'xpressbees' || rawBackend === 'ekart'
+        ? rawBackend
+        : 'delhivery';
 
-    const envToken =
-      this.config.get<string>('DELHIVERY_API_TOKEN')?.trim() ||
-      this.config.get<string>('DELHIVERY_TOKEN')?.trim() ||
-      '';
-    const envClient = this.config.get<string>('DELHIVERY_CLIENT_NAME')?.trim() || '';
-    const envWh = this.config.get<string>('DELHIVERY_WAREHOUSE_NAME')?.trim() || '';
+    const synthetic = (
+      provider: ShippingMode,
+      patch: Partial<SellerCourierConfig> & { apiKey: string },
+    ): SellerCourierConfig =>
+      ({
+        id: `platform-${provider.toLowerCase()}`,
+        sellerId: 'platform',
+        provider,
+        apiSecret: null,
+        accountId: null,
+        warehouseId: null,
+        isActive: true,
+        metadata: {},
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        ...patch,
+      }) as unknown as SellerCourierConfig;
 
-    let apiKey = envToken;
-    const dbTok = pl.delhivery?.apiTokenEnc;
-    if (dbTok?.trim()) {
-      try {
-        apiKey = this.decrypt(dbTok);
-      } catch {
-        apiKey = dbTok;
+    if (backend === 'delhivery') {
+      const envToken =
+        this.config.get<string>('DELHIVERY_API_TOKEN')?.trim() ||
+        this.config.get<string>('DELHIVERY_TOKEN')?.trim() ||
+        '';
+      const envClient = this.config.get<string>('DELHIVERY_CLIENT_NAME')?.trim() || '';
+      const envWh = this.config.get<string>('DELHIVERY_WAREHOUSE_NAME')?.trim() || '';
+      const apiKey = this.safeDecrypt(pl.delhivery?.apiTokenEnc) || envToken;
+      const clientName = pl.delhivery?.clientName?.trim() || envClient;
+      const warehouseName = pl.delhivery?.warehouseName?.trim() || envWh;
+      if (!apiKey || !clientName || !warehouseName) {
+        return {
+          mode: 'unconfigured',
+          reason:
+            'Delhivery is the active Xelgo backend but the API token, client name, or warehouse name is missing in admin Settings.',
+        };
       }
+      const envDelhiveryEnv = this.config.get<string>('DELHIVERY_ENV')?.trim().toLowerCase();
+      const delhiveryEnvironment =
+        pl.delhivery?.environment === 'staging' || pl.delhivery?.environment === 'production'
+          ? pl.delhivery.environment
+          : envDelhiveryEnv === 'staging'
+            ? 'staging'
+            : 'production';
+      const sellerGstin =
+        pl.delhivery?.sellerGstin?.trim() ||
+        this.config.get<string>('DELHIVERY_SELLER_GSTIN')?.trim() ||
+        '';
+      const shippingModeRaw =
+        pl.delhivery?.shippingMode?.trim() ||
+        this.config.get<string>('DELHIVERY_SHIPPING_MODE')?.trim() ||
+        'Surface';
+      const delhiveryShippingMode =
+        shippingModeRaw.toLowerCase() === 'express' ? 'Express' : 'Surface';
+      return {
+        mode: ShippingMode.DELHIVERY,
+        displayName: 'Xelnova · Delhivery',
+        config: synthetic(ShippingMode.DELHIVERY, {
+          apiKey,
+          accountId: clientName,
+          warehouseId: warehouseName,
+          metadata: { delhiveryEnvironment, sellerGstin, delhiveryShippingMode },
+        }),
+      };
     }
 
-    const clientName = pl.delhivery?.clientName?.trim() || envClient;
-    const warehouseName = pl.delhivery?.warehouseName?.trim() || envWh;
-
-    const envDelhiveryEnv = this.config.get<string>('DELHIVERY_ENV')?.trim().toLowerCase();
-    const delhiveryEnvironment =
-      pl.delhivery?.environment === 'staging' || pl.delhivery?.environment === 'production'
-        ? pl.delhivery.environment
-        : envDelhiveryEnv === 'staging'
-          ? 'staging'
-          : 'production';
-
-    const sellerGstin =
-      pl.delhivery?.sellerGstin?.trim() ||
-      this.config.get<string>('DELHIVERY_SELLER_GSTIN')?.trim() ||
-      '';
-    const shippingModeRaw =
-      pl.delhivery?.shippingMode?.trim() ||
-      this.config.get<string>('DELHIVERY_SHIPPING_MODE')?.trim() ||
-      'Surface';
-    const delhiveryShippingMode =
-      shippingModeRaw.toLowerCase() === 'express' ? 'Express' : 'Surface';
-
-    if (backend === 'stub') {
-      return { mode: 'stub' };
-    }
-    if (!apiKey || !clientName || !warehouseName) {
-      this.logger.warn(
-        'Xelnova→Delhivery: incomplete credentials (token, client name, warehouse). Falling back to stub AWB.',
-      );
-      return { mode: 'stub' };
+    if (backend === 'shiprocket') {
+      const email = pl.shiprocket?.email?.trim() || '';
+      const password = this.safeDecrypt(pl.shiprocket?.passwordEnc);
+      if (!email || !password) {
+        return {
+          mode: 'unconfigured',
+          reason: 'ShipRocket is the active Xelgo backend but the API user email or password is missing.',
+        };
+      }
+      // ShipRocket provider expects accountId=email, apiKey=password.
+      return {
+        mode: ShippingMode.SHIPROCKET,
+        displayName: 'Xelnova · ShipRocket',
+        config: synthetic(ShippingMode.SHIPROCKET, {
+          apiKey: password,
+          accountId: email,
+          warehouseId: pl.shiprocket?.pickupLocation?.trim() || 'Primary',
+        }),
+      };
     }
 
-    const synthetic = {
-      id: 'platform-delhivery',
-      sellerId: 'platform',
-      provider: ShippingMode.DELHIVERY,
-      apiKey,
-      apiSecret: null,
-      accountId: clientName,
-      warehouseId: warehouseName,
-      isActive: true,
-      metadata: {
-        delhiveryEnvironment,
-        sellerGstin,
-        delhiveryShippingMode,
-      },
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    } as unknown as SellerCourierConfig;
+    if (backend === 'xpressbees') {
+      const email = pl.xpressbees?.email?.trim() || '';
+      const password = this.safeDecrypt(pl.xpressbees?.passwordEnc);
+      if (!email || !password) {
+        return {
+          mode: 'unconfigured',
+          reason: 'XpressBees is the active Xelgo backend but the login email or password is missing.',
+        };
+      }
+      // XpressBees provider expects accountId=email, apiSecret=password (NEW-auth path).
+      return {
+        mode: ShippingMode.XPRESSBEES,
+        displayName: 'Xelnova · XpressBees',
+        config: synthetic(ShippingMode.XPRESSBEES, {
+          apiKey: '',
+          accountId: email,
+          apiSecret: password,
+          warehouseId: pl.xpressbees?.warehouseName?.trim() || 'default',
+          metadata: {
+            authType: 'NEW',
+            businessName: pl.xpressbees?.businessName?.trim() || '',
+          },
+        }),
+      };
+    }
 
-    return { mode: 'delhivery', config: synthetic };
+    // ekart
+    const clientId = pl.ekart?.clientId?.trim() || '';
+    const username = pl.ekart?.username?.trim() || '';
+    const password = this.safeDecrypt(pl.ekart?.passwordEnc);
+    if (!clientId || !username || !password) {
+      return {
+        mode: 'unconfigured',
+        reason:
+          'Ekart is the active Xelgo backend but the Client ID, API username, or API password is missing.',
+      };
+    }
+    // Ekart provider expects accountId=clientId, apiKey=username, apiSecret=password.
+    return {
+      mode: ShippingMode.EKART,
+      displayName: 'Xelnova · Ekart',
+      config: synthetic(ShippingMode.EKART, {
+        apiKey: username,
+        accountId: clientId,
+        apiSecret: password,
+        warehouseId: pl.ekart?.pickupAlias?.trim() || null,
+      }),
+    };
+  }
+
+  /**
+   * Build a "secret hint" string for the admin UI: e.g.
+   *   "Server env has DELHIVERY_API_TOKEN · Saved password ends with ••92"
+   * Never returns the actual secret.
+   */
+  private secretHint(opts: {
+    envName?: string;
+    envValue?: string;
+    savedEnc?: string;
+    savedLabel: string;
+    emptyMessage: string;
+  }): string {
+    const parts: string[] = [];
+    if (opts.envValue) parts.push(`Server env has ${opts.envName}`);
+    if (opts.savedEnc) {
+      const d = this.safeDecrypt(opts.savedEnc);
+      if (d && d.length > 4) parts.push(`${opts.savedLabel} ends with ${d.slice(-4)}`);
+      else if (d) parts.push(`${opts.savedLabel} stored`);
+    }
+    if (parts.length === 0) parts.push(opts.emptyMessage);
+    return parts.join(' · ');
   }
 
   sanitizePlatformLogisticsForResponse(
     raw: PlatformLogisticsSettings | undefined,
   ): PlatformLogisticsSettings & {
     delhivery?: PlatformLogisticsSettings['delhivery'] & { apiTokenHint?: string };
+    shiprocket?: PlatformLogisticsSettings['shiprocket'] & { passwordHint?: string };
+    xpressbees?: PlatformLogisticsSettings['xpressbees'] & { passwordHint?: string };
+    ekart?: PlatformLogisticsSettings['ekart'] & { passwordHint?: string };
   } {
-    const pl = {
+    const pl: PlatformLogisticsSettings = {
       ...DEFAULT_PLATFORM_LOGISTICS,
       ...raw,
       delhivery: { ...DEFAULT_PLATFORM_LOGISTICS.delhivery, ...raw?.delhivery },
+      shiprocket: { ...DEFAULT_PLATFORM_LOGISTICS.shiprocket, ...raw?.shiprocket },
+      xpressbees: { ...DEFAULT_PLATFORM_LOGISTICS.xpressbees, ...raw?.xpressbees },
+      ekart: { ...DEFAULT_PLATFORM_LOGISTICS.ekart, ...raw?.ekart },
     };
-    const envToken = this.config.get('DELHIVERY_API_TOKEN')?.trim();
-    const parts: string[] = [];
-    if (envToken) parts.push('Server env has DELHIVERY_API_TOKEN');
-    const enc = pl.delhivery?.apiTokenEnc;
-    if (enc) {
-      try {
-        const d = this.decrypt(enc);
-        if (d && d.length > 4) parts.push(`Saved API token ends with ${d.slice(-4)}`);
-        else parts.push('Saved API token in database');
-      } catch {
-        parts.push('Saved API token in database');
-      }
-    }
-    if (parts.length === 0) parts.push('No token yet — paste Live API Token below or set DELHIVERY_API_TOKEN on the server');
 
-    const { apiTokenEnc: _omit, ...delWithoutSecret } = pl.delhivery || {};
+    // Legacy migration: the old UI offered 'stub' as a testing backend.
+    // Treat it as 'delhivery' so the dropdown never lands on a removed value.
+    const backend = (pl.xelnovaBackend as string) === 'stub' ? 'delhivery' : pl.xelnovaBackend;
+
+    const { apiTokenEnc: _delEnc, ...delSafe } = pl.delhivery || {};
+    const { passwordEnc: _srEnc, ...srSafe } = pl.shiprocket || {};
+    const { passwordEnc: _xbEnc, ...xbSafe } = pl.xpressbees || {};
+    const { passwordEnc: _ekEnc, ...ekSafe } = pl.ekart || {};
+
     return {
       ...pl,
+      xelnovaBackend: backend as XelnovaCourierBackend,
       delhivery: {
-        ...delWithoutSecret,
+        ...delSafe,
         environment: pl.delhivery?.environment ?? 'production',
         sellerGstin: pl.delhivery?.sellerGstin ?? '',
         shippingMode: pl.delhivery?.shippingMode ?? 'Surface',
-        apiTokenHint: parts.join(' · '),
+        apiTokenHint: this.secretHint({
+          envName: 'DELHIVERY_API_TOKEN',
+          envValue: this.config.get<string>('DELHIVERY_API_TOKEN')?.trim(),
+          savedEnc: pl.delhivery?.apiTokenEnc,
+          savedLabel: 'Saved API token',
+          emptyMessage:
+            'No token yet — paste your Live API Token below or set DELHIVERY_API_TOKEN on the server.',
+        }),
+      },
+      shiprocket: {
+        ...srSafe,
+        passwordHint: this.secretHint({
+          savedEnc: pl.shiprocket?.passwordEnc,
+          savedLabel: 'Saved password',
+          emptyMessage:
+            'No password yet — paste the API User password from ShipRocket → Settings → API.',
+        }),
+      },
+      xpressbees: {
+        ...xbSafe,
+        passwordHint: this.secretHint({
+          savedEnc: pl.xpressbees?.passwordEnc,
+          savedLabel: 'Saved password',
+          emptyMessage:
+            'No password yet — paste your XpressBees login password (used to mint a 24h auth token).',
+        }),
+      },
+      ekart: {
+        ...ekSafe,
+        passwordHint: this.secretHint({
+          savedEnc: pl.ekart?.passwordEnc,
+          savedLabel: 'Saved password',
+          emptyMessage:
+            'No password yet — paste the API password from Ekart Elite → Settings → API Documentation.',
+        }),
       },
     };
   }
@@ -216,28 +371,81 @@ export class ShippingService {
     current: PlatformLogisticsSettings | undefined,
     incoming: Partial<PlatformLogisticsSettings> & {
       delhivery?: Partial<NonNullable<PlatformLogisticsSettings['delhivery']>> & { apiToken?: string };
+      shiprocket?: Partial<NonNullable<PlatformLogisticsSettings['shiprocket']>> & { password?: string };
+      xpressbees?: Partial<NonNullable<PlatformLogisticsSettings['xpressbees']>> & { password?: string };
+      ekart?: Partial<NonNullable<PlatformLogisticsSettings['ekart']>> & { password?: string };
     },
   ): PlatformLogisticsSettings {
-    const cur = {
+    const cur: PlatformLogisticsSettings = {
       ...DEFAULT_PLATFORM_LOGISTICS,
       ...current,
       delhivery: { ...DEFAULT_PLATFORM_LOGISTICS.delhivery, ...current?.delhivery },
+      shiprocket: { ...DEFAULT_PLATFORM_LOGISTICS.shiprocket, ...current?.shiprocket },
+      xpressbees: { ...DEFAULT_PLATFORM_LOGISTICS.xpressbees, ...current?.xpressbees },
+      ekart: { ...DEFAULT_PLATFORM_LOGISTICS.ekart, ...current?.ekart },
     };
-    const incDel = incoming.delhivery || {};
-    const plainTok = (incDel as { apiToken?: string }).apiToken;
-    const { apiToken: _dropTok, ...incDelSafe } = incDel as { apiToken?: string };
+
+    // Strip plaintext "apiToken"/"password" before merging — they're never persisted.
+    const incDel = (incoming.delhivery || {}) as Record<string, unknown> & { apiToken?: string };
+    const incSr = (incoming.shiprocket || {}) as Record<string, unknown> & { password?: string };
+    const incXb = (incoming.xpressbees || {}) as Record<string, unknown> & { password?: string };
+    const incEk = (incoming.ekart || {}) as Record<string, unknown> & { password?: string };
+    const { apiToken: _delTok, apiTokenHint: _delHint, ...delSafe } = incDel as {
+      apiToken?: string;
+      apiTokenHint?: string;
+    };
+    const { password: _srPwd, passwordHint: _srHint, ...srSafe } = incSr as {
+      password?: string;
+      passwordHint?: string;
+    };
+    const { password: _xbPwd, passwordHint: _xbHint, ...xbSafe } = incXb as {
+      password?: string;
+      passwordHint?: string;
+    };
+    const { password: _ekPwd, passwordHint: _ekHint, ...ekSafe } = incEk as {
+      password?: string;
+      passwordHint?: string;
+    };
+
+    // Drop nested objects from the top-level spread so the spread above doesn't
+    // wipe out a freshly-encrypted secret on the next provider's pass.
+    const {
+      delhivery: _d,
+      shiprocket: _s,
+      xpressbees: _x,
+      ekart: _e,
+      ...incomingTop
+    } = incoming;
+
+    const rawBackend = (incoming.xelnovaBackend ?? cur.xelnovaBackend ?? 'delhivery') as
+      | XelnovaCourierBackend
+      | 'stub';
+    const xelnovaBackend: XelnovaCourierBackend =
+      rawBackend === 'shiprocket' || rawBackend === 'xpressbees' || rawBackend === 'ekart'
+        ? rawBackend
+        : 'delhivery';
 
     const next: PlatformLogisticsSettings = {
       ...cur,
-      ...incoming,
-      delhivery: {
-        ...cur.delhivery,
-        ...incDelSafe,
-      },
+      ...incomingTop,
+      xelnovaBackend,
+      delhivery: { ...cur.delhivery, ...delSafe },
+      shiprocket: { ...cur.shiprocket, ...srSafe },
+      xpressbees: { ...cur.xpressbees, ...xbSafe },
+      ekart: { ...cur.ekart, ...ekSafe },
     };
 
-    if (plainTok !== undefined && String(plainTok).trim()) {
-      next.delhivery!.apiTokenEnc = this.encrypt(String(plainTok).trim());
+    if (incDel.apiToken !== undefined && String(incDel.apiToken).trim()) {
+      next.delhivery!.apiTokenEnc = this.encrypt(String(incDel.apiToken).trim());
+    }
+    if (incSr.password !== undefined && String(incSr.password).trim()) {
+      next.shiprocket!.passwordEnc = this.encrypt(String(incSr.password).trim());
+    }
+    if (incXb.password !== undefined && String(incXb.password).trim()) {
+      next.xpressbees!.passwordEnc = this.encrypt(String(incXb.password).trim());
+    }
+    if (incEk.password !== undefined && String(incEk.password).trim()) {
+      next.ekart!.passwordEnc = this.encrypt(String(incEk.password).trim());
     }
     return next;
   }
@@ -381,17 +589,18 @@ export class ShippingService {
     }
 
     let courierConfig: SellerCourierConfig | null = null;
-    let usedDelhiveryForXelnova = false;
+    let xelgoDisplayName: string | null = null;
 
     if (shippingMode === ShippingMode.XELNOVA_COURIER) {
-      const resolved = await this.resolveDelhiveryForXelnova();
-      if (resolved.mode === 'delhivery') {
-        provider = this.providers.get(ShippingMode.DELHIVERY)!;
-        courierConfig = resolved.config;
-        usedDelhiveryForXelnova = true;
-      } else {
+      const resolved = await this.resolveXelgoBackend();
+      if (resolved.mode === 'unconfigured') {
+        this.logger.warn(`Xelgo unconfigured: ${resolved.reason}. Falling back to internal stub AWB.`);
         provider = this.xelnovaCourier;
         courierConfig = null;
+      } else {
+        provider = this.providers.get(resolved.mode)!;
+        courierConfig = resolved.config;
+        xelgoDisplayName = resolved.displayName;
       }
     } else {
       courierConfig = await this.prisma.sellerCourierConfig.findUnique({
@@ -415,6 +624,23 @@ export class ShippingService {
     const addr = order.shippingAddress;
     if (!addr) {
       throw new BadRequestException('Order has no shipping address');
+    }
+
+    // Pre-flight: every courier (Delhivery, ShipRocket, XpressBees, Ekart)
+    // requires a complete seller pickup/return address. Without it the
+    // upstream API typically responds with a useless generic error
+    // ("An internal Error has occurred…") which the seller has no way to
+    // act on. Fail early with a clear, actionable message instead.
+    const missingSellerFields: string[] = [];
+    if (!seller.businessAddress?.trim()) missingSellerFields.push('Address line');
+    if (!seller.businessCity?.trim()) missingSellerFields.push('City');
+    if (!seller.businessState?.trim()) missingSellerFields.push('State');
+    if (!seller.businessPincode?.trim()) missingSellerFields.push('Pincode');
+    if (!seller.phone?.trim()) missingSellerFields.push('Pickup phone number');
+    if (missingSellerFields.length > 0) {
+      throw new BadRequestException(
+        `Your pickup address is incomplete. Please add ${missingSellerFields.join(', ')} on your Profile → Business Address before booking a shipment.`,
+      );
     }
 
     const shipmentDetails: ShipmentDetails = {
@@ -460,8 +686,8 @@ export class ShippingService {
 
     let pickupAt = result.pickupScheduledAt;
     let carrierLine = result.displayCourierLine || provider.providerName;
-    if (usedDelhiveryForXelnova) {
-      carrierLine = 'Xelnova · Delhivery';
+    if (xelgoDisplayName) {
+      carrierLine = xelgoDisplayName;
       pickupAt = pickupAt ?? this.xelnovaCourier.getNextPickupDate();
     }
     const bookedAtIso = new Date().toISOString();
@@ -647,10 +873,10 @@ export class ShippingService {
     }
 
     if (shipment.shippingMode === ShippingMode.XELNOVA_COURIER) {
-      const resolved = await this.resolveDelhiveryForXelnova();
-      if (resolved.mode === 'delhivery' && resolved.config) {
-        const del = this.providers.get(ShippingMode.DELHIVERY)!;
-        const tracking = await del.trackShipment(shipment.awbNumber, resolved.config);
+      const resolved = await this.resolveXelgoBackend();
+      if (resolved.mode !== 'unconfigured') {
+        const xprov = this.providers.get(resolved.mode)!;
+        const tracking = await xprov.trackShipment(shipment.awbNumber, resolved.config);
         if (tracking.status && tracking.status !== 'UNKNOWN') {
           const mappedStatus = tracking.status as ShipmentStatus;
           if (Object.values(ShipmentStatus).includes(mappedStatus) && mappedStatus !== shipment.shipmentStatus) {
@@ -772,16 +998,16 @@ export class ShippingService {
     let pickupLocation = '';
 
     if (shipment.shippingMode === ShippingMode.XELNOVA_COURIER) {
-      const resolved = await this.resolveDelhiveryForXelnova();
-      if (resolved.mode !== 'delhivery') {
-        // Stub Xelnova network handles pickup automatically — nothing to ask.
+      const resolved = await this.resolveXelgoBackend();
+      if (resolved.mode === 'unconfigured') {
+        // No live carrier configured — Xelnova stub handles pickup automatically.
         return {
           success: true,
           message: 'Pickup is auto-scheduled by Xelnova for this shipment. No action needed.',
           scheduledFor: shipment.pickupDate?.toISOString(),
         };
       }
-      provider = this.providers.get(ShippingMode.DELHIVERY);
+      provider = this.providers.get(resolved.mode);
       courierConfig = resolved.config;
       pickupLocation = courierConfig.warehouseId || '';
     } else {
@@ -872,10 +1098,10 @@ export class ShippingService {
     }
 
     if (shipment.shippingMode === ShippingMode.XELNOVA_COURIER) {
-      const resolved = await this.resolveDelhiveryForXelnova();
-      if (resolved.mode === 'delhivery' && resolved.config && shipment.awbNumber) {
-        const del = this.providers.get(ShippingMode.DELHIVERY)!;
-        const result = await del.cancelShipment(shipment.awbNumber, resolved.config);
+      const resolved = await this.resolveXelgoBackend();
+      if (resolved.mode !== 'unconfigured' && shipment.awbNumber) {
+        const xprov = this.providers.get(resolved.mode)!;
+        const result = await xprov.cancelShipment(shipment.awbNumber, resolved.config);
         if (result.success) await this.cancelShipmentLocally(shipment);
         return result;
       }

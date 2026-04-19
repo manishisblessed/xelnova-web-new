@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Bell, ChevronRight } from 'lucide-react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { useDashboardAuth } from '@/lib/auth-context';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL?.trim().replace(/\/$/, '') || '/api/v1';
@@ -86,6 +86,7 @@ function getNotificationHref(n: Notification): string | null {
 export function NotificationBell() {
   const { isAuthenticated } = useDashboardAuth();
   const router = useRouter();
+  const pathname = usePathname();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unread, setUnread] = useState(0);
   const [open, setOpen] = useState(false);
@@ -160,9 +161,21 @@ export function NotificationBell() {
         void markOneRead(n.id);
       }
       setOpen(false);
-      if (href) router.push(href);
+      if (!href) return;
+
+      // If we're already on the destination route, `router.push` is a silent
+      // no-op. Force a hard reload so client-fetched data (lists, banners,
+      // stat cards) re-renders with the latest state.
+      const targetPath = href.split('?')[0] ?? href;
+      if (pathname === targetPath) {
+        if (typeof window !== 'undefined') window.location.assign(href);
+        return;
+      }
+
+      router.push(href);
+      router.refresh();
     },
-    [markOneRead, router],
+    [markOneRead, router, pathname],
   );
 
   if (!isAuthenticated) return null;
