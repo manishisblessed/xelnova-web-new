@@ -673,8 +673,11 @@ export class ShippingService {
     // never re-typed it on the onboarding form already have a verified
     // mobile on User.phone, and that's the number we'll send to the
     // carrier as the pickup contact.
-    const pickupPhone =
+    const rawPickupPhone =
       seller.phone?.trim() || (seller as { user?: { phone?: string | null } }).user?.phone?.trim() || '';
+    // Couriers (Delhivery in particular) reject formatted strings — keep
+    // digits only, plus a leading "+" if present.
+    const pickupPhone = rawPickupPhone.replace(/(?!^\+)\D/g, '');
     const missingSellerFields: string[] = [];
     if (!seller.businessAddress?.trim()) missingSellerFields.push('Address line');
     if (!seller.businessCity?.trim()) missingSellerFields.push('City');

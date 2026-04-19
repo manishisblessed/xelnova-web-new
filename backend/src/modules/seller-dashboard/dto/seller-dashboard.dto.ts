@@ -129,6 +129,12 @@ export class UpdateSellerProfileDto {
   @ApiPropertyOptional() @IsOptional() @IsString() businessCity?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() businessState?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() businessPincode?: string;
+  // Pickup contact number sent to the courier as the warehouse phone.
+  // Sellers who signed up via Google (no User.phone on file) MUST be
+  // able to set this here, otherwise every Xelgo / Delhivery booking
+  // fails with "pickup address is incomplete".
+  @ApiPropertyOptional({ description: 'Pickup contact / warehouse phone number sent to couriers' })
+  @IsOptional() @IsString() phone?: string;
 }
 
 export class RevenueQueryDto {

@@ -27,6 +27,7 @@ import {
   apiDownloadShippingLabel,
   apiDownloadCustomerInvoice,
   apiGetShippingRates,
+  apiUpdateProfile,
   type ShippingRates,
 } from '@/lib/api';
 
@@ -1370,7 +1371,9 @@ function ShipOrderModal({
   orderItems?: SellerOrderItem[];
   onSuccess: () => void;
 }) {
-  const [step, setStep] = useState<'loading' | 'select' | 'details' | 'selfship' | 'result'>('loading');
+  const [step, setStep] = useState<
+    'loading' | 'select' | 'details' | 'selfship' | 'add-phone' | 'result'
+  >('loading');
   const [selectedCourier, setSelectedCourier] = useState<string>('');
   const [weight, setWeight] = useState('');
   const [dimensions, setDimensions] = useState('');
@@ -1381,6 +1384,17 @@ function ShipOrderModal({
   const [configuredProviders, setConfiguredProviders] = useState<string[]>([]);
   const [loadingConfigs, setLoadingConfigs] = useState(true);
   const [shippingRates, setShippingRates] = useState<ShippingRates | null>(null);
+  // Inline pickup-phone capture — when the backend rejects the booking
+  // because the seller's pickup phone is missing, we collect it right
+  // here instead of pushing the user to the Profile page (per UX feedback
+  // — the seller is already on the "Ship Order" task and shouldn't have
+  // to switch context just to type 10 digits).
+  const [pickupPhone, setPickupPhone] = useState('');
+  const [phoneSaving, setPhoneSaving] = useState(false);
+  const [phoneError, setPhoneError] = useState<string | null>(null);
+  // Remember which step we came from so the "Back" affordance returns
+  // the seller to the right form (regular courier vs self-ship).
+  const [phoneReturnStep, setPhoneReturnStep] = useState<'details' | 'selfship'>('details');
 
   const getDefaultShippingInfo = useCallback(() => {
     if (!orderItems?.length) return { weight: '', dimensions: '' };
@@ -1438,7 +1452,10 @@ function ShipOrderModal({
       setAwbNumber('');
       setCarrierName('');
       setResult(null);
-      
+      setPickupPhone('');
+      setPhoneError(null);
+      setPhoneReturnStep('details');
+
       loadConfigs().then((providers) => {
         if (providers.length > 0) {
           setSelectedCourier(providers[0]);
@@ -1495,27 +1512,84 @@ function ShipOrderModal({
     }
   };
 
-  const handleShip = async () => {
-    setSaving(true);
-    try {
+  /** Builds the booking payload from the current modal state. Pulled
+   *  out of `handleShip` so we can replay the request after the seller
+   *  fills in their pickup phone in the inline rescue step. */
+  const buildShipBody = useCallback(
+    (mode: 'details' | 'selfship') => {
       const body: any = {
-        shippingMode: step === 'selfship' ? 'SELF_SHIP' : selectedCourier,
+        shippingMode: mode === 'selfship' ? 'SELF_SHIP' : selectedCourier,
       };
-      if (step === 'selfship') {
+      if (mode === 'selfship') {
         body.carrierName = carrierName.trim() || undefined;
         body.awbNumber = awbNumber.trim() || undefined;
       } else {
         body.weight = weight ? parseFloat(weight) : undefined;
         body.dimensions = dimensions.trim() || undefined;
       }
+      return body;
+    },
+    [selectedCourier, carrierName, awbNumber, weight, dimensions],
+  );
 
+  /** Heuristic: backend currently throws this exact "Pickup phone number"
+   *  string from `ShippingService.createCourierShipment`. We match on
+   *  the substring rather than the whole sentence so wording tweaks
+   *  on the server don't silently break this rescue flow. */
+  const isPickupPhoneError = (err: unknown): boolean => {
+    if (!(err instanceof Error)) return false;
+    const m = err.message.toLowerCase();
+    return m.includes('pickup phone') || m.includes('pickup contact');
+  };
+
+  const submitShipment = async (mode: 'details' | 'selfship') => {
+    setSaving(true);
+    try {
+      const body = buildShipBody(mode);
       const res = await apiShipOrder(orderId, body);
       setResult(res);
       setStep('result');
     } catch (err: unknown) {
+      if (isPickupPhoneError(err) && mode !== 'selfship') {
+        // Self-ship doesn't actually call the courier, so the only way
+        // to land in the phone-rescue is via an integrated courier.
+        setPhoneReturnStep(mode);
+        setPhoneError(null);
+        setStep('add-phone');
+        return;
+      }
       toast.error(err instanceof Error ? err.message : 'Failed to ship order');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleShip = async () => {
+    await submitShipment(step === 'selfship' ? 'selfship' : 'details');
+  };
+
+  /** Save the typed pickup phone to the seller profile and immediately
+   *  retry the original booking, so the seller goes from "missing phone"
+   *  to "shipment booked" with a single click. */
+  const handleSavePhoneAndShip = async () => {
+    const digits = pickupPhone.replace(/[^\d+]/g, '');
+    const cleanLen = digits.replace(/[^\d]/g, '').length;
+    if (cleanLen < 10) {
+      setPhoneError('Enter a valid mobile number (at least 10 digits).');
+      return;
+    }
+    setPhoneError(null);
+    setPhoneSaving(true);
+    try {
+      await apiUpdateProfile({ phone: digits });
+      toast.success('Pickup phone saved');
+      // Replay the original booking in the same modal.
+      await submitShipment(phoneReturnStep);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to save phone';
+      setPhoneError(msg);
+    } finally {
+      setPhoneSaving(false);
     }
   };
 
@@ -1686,6 +1760,88 @@ function ShipOrderModal({
               <Button onClick={handleShip} loading={saving}>
                 <PackageCheck size={14} />
                 Confirm Self-Ship
+              </Button>
+            </div>
+          </motion.div>
+        )}
+
+        {step === 'add-phone' && (
+          <motion.div
+            key="add-phone"
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -20 }}
+            className="space-y-4"
+          >
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setStep(phoneReturnStep)}
+                disabled={phoneSaving || saving}
+                className="p-1 rounded hover:bg-gray-100 text-text-muted disabled:opacity-50"
+                aria-label="Back"
+              >
+                <ChevronLeft size={16} />
+              </button>
+              <p className="text-sm font-semibold text-text-primary">One last thing</p>
+            </div>
+
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+              <div className="flex items-start gap-3">
+                <div className="rounded-lg bg-amber-100 p-2 shrink-0">
+                  <Phone size={16} className="text-amber-700" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-amber-900">
+                    Add a pickup phone number
+                  </p>
+                  <p className="text-xs text-amber-800/90 mt-1 leading-relaxed">
+                    Our courier partner needs a contact number for the rider who
+                    picks up your shipment. Add it once here and we&apos;ll book
+                    this shipment right away — you won&apos;t be asked again.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <Input
+                label="Pickup phone number"
+                value={pickupPhone}
+                onChange={(e) => {
+                  setPickupPhone(e.target.value);
+                  if (phoneError) setPhoneError(null);
+                }}
+                placeholder="10-digit mobile, e.g. 9876543210"
+                type="tel"
+                inputMode="tel"
+                icon={<Phone size={14} />}
+                autoFocus
+              />
+              {phoneError ? (
+                <p className="mt-1.5 text-xs text-red-600">{phoneError}</p>
+              ) : (
+                <p className="mt-1.5 text-[11px] text-text-muted">
+                  Saved to your profile so future shipments book in one click.
+                  Use a number the rider can actually reach during pickup hours.
+                </p>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button
+                variant="outline"
+                onClick={() => setStep(phoneReturnStep)}
+                disabled={phoneSaving || saving}
+              >
+                Back
+              </Button>
+              <Button
+                onClick={handleSavePhoneAndShip}
+                loading={phoneSaving || saving}
+                disabled={phoneSaving || saving}
+              >
+                <Truck size={14} />
+                Save &amp; book shipment
               </Button>
             </div>
           </motion.div>

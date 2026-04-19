@@ -781,9 +781,37 @@ export class SellerDashboardService {
 
   async updateProfile(userId: string, dto: UpdateSellerProfileDto) {
     const seller = await this.getSellerProfile(userId);
+
+    // Normalise pickup phone — strip spaces / dashes so the carrier
+    // payload always contains digits-only (Delhivery in particular
+    // rejects formatted strings).
+    const data: Record<string, unknown> = { ...dto };
+    if (dto.phone !== undefined) {
+      const normalised = dto.phone.replace(/[^\d+]/g, '').trim();
+      data.phone = normalised || null;
+
+      // If the parent User has no phone yet (common for Google
+      // sign-up sellers), copy the pickup phone there too so the
+      // rest of the platform — OTP fallbacks, invoices, support
+      // tooling — can rely on a single source of truth.
+      if (normalised) {
+        try {
+          await this.prisma.user.updateMany({
+            where: { id: userId, OR: [{ phone: null }, { phone: '' }] },
+            data: { phone: normalised },
+          });
+        } catch (err) {
+          // Uniqueness conflict (someone else already owns this number)
+          // is not fatal here — the seller's pickup phone is still saved.
+          // eslint-disable-next-line no-console
+          console.warn('[seller-dashboard] failed to backfill User.phone:', err);
+        }
+      }
+    }
+
     return this.prisma.sellerProfile.update({
       where: { id: seller.id },
-      data: dto,
+      data,
       include: { user: { select: { name: true, email: true, phone: true } } },
     });
   }

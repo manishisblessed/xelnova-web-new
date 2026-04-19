@@ -180,6 +180,7 @@ export default function ProfilePage() {
   const [bankAccountName, setBankAccountName] = useState('');
   const [bankAccountNumber, setBankAccountNumber] = useState('');
   const [bankIfscCode, setBankIfscCode] = useState('');
+  const [pickupPhone, setPickupPhone] = useState('');
   const [logoUploading, setLogoUploading] = useState(false);
   const logoFileRef = useRef<HTMLInputElement>(null);
 
@@ -198,6 +199,7 @@ export default function ProfilePage() {
         setBankAccountName(p.bankAccountName ?? '');
         setBankAccountNumber(p.bankAccountNumber ?? '');
         setBankIfscCode(p.bankIfscCode ?? '');
+        setPickupPhone(p.phone ?? p.user?.phone ?? '');
       })
       .catch((err: Error) => {
         toast.error(err.message || 'Failed to load profile');
@@ -230,12 +232,18 @@ export default function ProfilePage() {
     setBankAccountName(profile.bankAccountName ?? '');
     setBankAccountNumber(profile.bankAccountNumber ?? '');
     setBankIfscCode(profile.bankIfscCode ?? '');
+    setPickupPhone(profile.phone ?? profile.user?.phone ?? '');
     setEditOpen(true);
   };
 
   const save = async () => {
     if (!storeName.trim()) {
       toast.error('Store name is required');
+      return;
+    }
+    const phoneDigits = pickupPhone.replace(/[^\d+]/g, '');
+    if (phoneDigits && phoneDigits.replace(/[^\d]/g, '').length < 10) {
+      toast.error('Pickup phone must be at least 10 digits');
       return;
     }
     setSaving(true);
@@ -250,6 +258,7 @@ export default function ProfilePage() {
         bankAccountName: bankAccountName.trim() || undefined,
         bankAccountNumber: bankAccountNumber.trim() || undefined,
         bankIfscCode: bankIfscCode.trim() || undefined,
+        phone: phoneDigits || undefined,
       });
       setProfile(updated as SellerProfileResponse);
       toast.success('Profile updated');
@@ -405,12 +414,35 @@ export default function ProfilePage() {
                   <p className="text-text-primary mt-0.5 break-all">{profile.user?.email}</p>
                 </div>
               </div>
-              <div className="flex items-start gap-3 py-3">
+              <div className="flex items-start gap-3 py-3 border-b border-border">
                 <div className="min-w-0 flex-1">
                   <p className="text-xs font-medium text-text-muted uppercase tracking-wide">Phone</p>
                   <p className="text-text-primary mt-0.5">
                     {profile.user?.phone || profile.phone || '—'}
                   </p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3 py-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-medium text-text-muted uppercase tracking-wide flex items-center gap-2">
+                    <Phone className="h-3 w-3 opacity-70" />
+                    Pickup phone
+                  </p>
+                  {profile.phone || profile.user?.phone ? (
+                    <p className="text-text-primary mt-0.5">{profile.phone || profile.user?.phone}</p>
+                  ) : (
+                    <p className="text-warning-700 mt-0.5 text-xs">
+                      Required to book shipments — add it from{' '}
+                      <button
+                        type="button"
+                        onClick={openEdit}
+                        className="underline font-semibold hover:text-warning-800"
+                      >
+                        Edit profile
+                      </button>
+                      .
+                    </p>
+                  )}
                 </div>
               </div>
             </div>
@@ -577,6 +609,20 @@ export default function ProfilePage() {
                 onChange={(e) => setLocation(e.target.value)}
                 placeholder="e.g. New Delhi warehouse"
               />
+              <div>
+                <Input
+                  label="Pickup phone (sent to courier)"
+                  value={pickupPhone}
+                  onChange={(e) => setPickupPhone(e.target.value)}
+                  placeholder="10-digit mobile, e.g. 9876543210"
+                  inputMode="tel"
+                  type="tel"
+                />
+                <p className="mt-1 text-[11px] text-text-muted">
+                  This is the number our courier partner calls when they arrive
+                  to pick up your shipment. It can differ from your login phone.
+                </p>
+              </div>
               <p className="text-xs text-text-muted leading-relaxed rounded-lg bg-surface-muted/60 px-3 py-2 border border-border/60">
                 Street address and PIN are set during onboarding. Contact support if they need to change.
               </p>
