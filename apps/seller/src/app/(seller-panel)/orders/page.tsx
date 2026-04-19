@@ -1542,13 +1542,14 @@ function ShipOrderModal({
     return m.includes('pickup phone') || m.includes('pickup contact');
   };
 
-  const submitShipment = async (mode: 'details' | 'selfship') => {
+  const submitShipment = async (mode: 'details' | 'selfship'): Promise<boolean> => {
     setSaving(true);
     try {
       const body = buildShipBody(mode);
       const res = await apiShipOrder(orderId, body);
       setResult(res);
       setStep('result');
+      return true;
     } catch (err: unknown) {
       if (isPickupPhoneError(err) && mode !== 'selfship') {
         // Self-ship doesn't actually call the courier, so the only way
@@ -1556,9 +1557,10 @@ function ShipOrderModal({
         setPhoneReturnStep(mode);
         setPhoneError(null);
         setStep('add-phone');
-        return;
+        return false;
       }
       toast.error(err instanceof Error ? err.message : 'Failed to ship order');
+      return false;
     } finally {
       setSaving(false);
     }
@@ -1584,7 +1586,12 @@ function ShipOrderModal({
       await apiUpdateProfile({ phone: digits });
       toast.success('Pickup phone saved');
       // Replay the original booking in the same modal.
-      await submitShipment(phoneReturnStep);
+      const success = await submitShipment(phoneReturnStep);
+      if (!success) {
+        // Phone was saved but shipment still failed (e.g., courier API error).
+        // Navigate back to details step so user can see the error and retry.
+        setStep(phoneReturnStep);
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to save phone';
       setPhoneError(msg);

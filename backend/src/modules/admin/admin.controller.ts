@@ -9,6 +9,7 @@ import { DuplicateListingService } from './duplicate-listing.service';
 import { PricingCheckService } from './pricing-check.service';
 import { SplitPaymentService } from '../payment/split-payment.service';
 import { ReviewsService } from '../reviews/reviews.service';
+import { ShippingService } from '../shipping/shipping.service';
 import { Auth } from '../../common/decorators/auth.decorator';
 import { successResponse, paginatedResponse } from '../../common/helpers/response.helper';
 import { getClientIp } from '../../common/helpers/client-ip';
@@ -40,6 +41,7 @@ export class AdminController {
     private readonly pricing: PricingCheckService,
     private readonly splitPayment: SplitPaymentService,
     private readonly reviewsService: ReviewsService,
+    private readonly shippingService: ShippingService,
   ) {}
 
   @Get('dashboard')
@@ -730,5 +732,16 @@ export class AdminController {
   @ApiOperation({ summary: 'Reject and delete a review' })
   async rejectReview(@Param('id') id: string) {
     return successResponse(await this.reviewsService.rejectReview(id), 'Review rejected');
+  }
+
+  // ─── Shipping / Xelgo ───
+
+  @Get('shipping/test-xelgo')
+  @ApiOperation({ summary: 'Test Xelgo (Delhivery) connection and configuration' })
+  async testXelgoConnection() {
+    return successResponse(
+      await this.shippingService.testXelgoConnection(),
+      'Xelgo connection test completed',
+    );
   }
 }
