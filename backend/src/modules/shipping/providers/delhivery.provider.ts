@@ -485,9 +485,33 @@ export class DelhiveryProvider implements CourierProvider {
     options: SchedulePickupOptions,
   ): Promise<SchedulePickupResult> {
     const base = this.getBaseUrl(config);
-    const pickupTime = (options.pickupTime || '14:00:00').slice(0, 8);
 
-    // Delhivery requires the date in YYYY-MM-DD form.
+    // Delhivery's pickup API accepts time as either HH:MM or HH:MM:SS.
+    // Strip seconds for safety — some accounts validate strictly.
+    let pickupTime = (options.pickupTime || '14:00:00').slice(0, 8);
+    // Ensure HH:MM:SS form (some endpoints reject HH:MM only).
+    if (/^\d{2}:\d{2}$/.test(pickupTime)) pickupTime += ':00';
+
+    // Sanity-check the date — Delhivery rejects past dates and Sundays
+    // for most pincodes, both with the same generic "internal Error".
+    const requestedDate = new Date(`${options.pickupDate}T${pickupTime}+05:30`);
+    if (Number.isNaN(requestedDate.getTime())) {
+      return {
+        success: false,
+        message: `Invalid pickup date/time: ${options.pickupDate} ${pickupTime}. Use YYYY-MM-DD and HH:MM:SS.`,
+      };
+    }
+    const todayIst = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+    todayIst.setUTCHours(0, 0, 0, 0);
+    const reqIst = new Date(requestedDate.getTime() + 5.5 * 60 * 60 * 1000);
+    reqIst.setUTCHours(0, 0, 0, 0);
+    if (reqIst < todayIst) {
+      return {
+        success: false,
+        message: 'Pickup date is in the past. Please choose today or a future date.',
+      };
+    }
+
     const body = {
       pickup_location: options.pickupLocation || config.warehouseId || '',
       expected_package_count: Math.max(1, options.expectedPackageCount || 1),
@@ -502,6 +526,10 @@ export class DelhiveryProvider implements CourierProvider {
           'Pickup location name missing. Please add your warehouse in shipping settings before scheduling a pickup.',
       };
     }
+
+    this.logger.log(
+      `Delhivery pickup request: ${JSON.stringify(body)} → POST ${base}/fm/request/new/`,
+    );
 
     let res: Response;
     try {
@@ -524,30 +552,77 @@ export class DelhiveryProvider implements CourierProvider {
       parsed = null;
     }
 
+    this.logger.log(
+      `Delhivery pickup response: HTTP ${res.status} → ${text.slice(0, 500)}`,
+    );
+
     if (!res.ok) {
       this.logger.warn(
         `Delhivery pickup request failed: ${res.status} ${text.slice(0, 300)}`,
       );
+      const rawErr =
+        parsed?.message ||
+        parsed?.error ||
+        parsed?.detail ||
+        text.slice(0, 200) ||
+        `HTTP ${res.status}`;
       return {
         success: false,
-        message:
-          parsed?.message ||
-          parsed?.error ||
-          `Delhivery rejected pickup request (HTTP ${res.status}).`,
+        message: this.humanizePickupError(String(rawErr)),
       };
     }
 
-    // Successful responses look like { pr_log: ..., pickup_id: 12345, ... }
+    // Delhivery returns 200 even for some errors. The hallmark of a
+    // successful pickup request is a numeric `pickup_id` in the body.
     const pickupId =
-      parsed?.pickup_id ?? parsed?.PickupId ?? parsed?.pr_id ?? undefined;
+      parsed?.pickup_id ??
+      parsed?.PickupId ??
+      parsed?.pr_id ??
+      parsed?.id ??
+      undefined;
+
+    if (pickupId == null || pickupId === '' || pickupId === 0) {
+      const rawMsg = parsed?.pr_log || parsed?.message || parsed?.error || text.slice(0, 200);
+      this.logger.warn(
+        `Delhivery pickup response missing pickup_id. Body: ${text.slice(0, 500)}`,
+      );
+      return {
+        success: false,
+        message: this.humanizePickupError(
+          rawMsg || 'Delhivery accepted the request but did not return a pickup ID.',
+        ),
+      };
+    }
+
     const scheduledFor = `${options.pickupDate}T${pickupTime}+05:30`;
 
     return {
       success: true,
-      message: parsed?.message || 'Pickup scheduled successfully',
-      pickupId: pickupId != null ? String(pickupId) : undefined,
+      message: parsed?.pr_log || parsed?.message || 'Pickup scheduled successfully',
+      pickupId: String(pickupId),
       scheduledFor,
     };
+  }
+
+  /**
+   * Delhivery returns several stock messages that don't tell sellers
+   * what to do. Translate the common ones into actionable instructions.
+   */
+  private humanizePickupError(rawMsg: string): string {
+    const msg = rawMsg.toLowerCase();
+    if (msg.includes('clientwarehouse') || msg.includes('warehouse not found') || msg.includes('invalid pickup_location')) {
+      return `Delhivery doesn't recognise the warehouse name "${rawMsg.match(/['"]([^'"]+)['"]/)?.[1] || ''}". Please check Settings → Shipping → Delhivery → Warehouse Name matches your registered warehouse exactly (case-sensitive).`;
+    }
+    if (msg.includes('pickup time') || msg.includes('cut-off') || msg.includes('cutoff')) {
+      return `Delhivery's pickup window has closed for that date/time. Please pick a later slot (next business day) — most regions have a ~5–6 PM cutoff for next-day pickup.`;
+    }
+    if (msg.includes('sunday') || msg.includes('holiday')) {
+      return `Delhivery doesn't pick up on Sundays/holidays at this warehouse. Please choose a working day.`;
+    }
+    if (/internal\s*error/i.test(rawMsg)) {
+      return `Delhivery couldn't process the pickup request. Common causes: (1) warehouse name mismatch, (2) Sunday/holiday, (3) past cutoff time, or (4) duplicate pickup request for the same date. Please verify and try again.`;
+    }
+    return rawMsg;
   }
 
   async downloadLabel(

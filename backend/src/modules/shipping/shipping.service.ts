@@ -463,6 +463,39 @@ export class ShippingService {
    * downstream Delhivery/ShipRocket payload) sees a populated value
    * without the seller having to re-enter anything.
    */
+  /**
+   * Computes the next sensible pickup slot in IST.
+   *
+   * Logic:
+   *   - If it's before 16:00 IST and today is a working day → today @ 17:00
+   *   - Otherwise → next working day @ 14:00
+   *   - Sundays are skipped (Delhivery doesn't run pickups on Sunday)
+   */
+  private computeNextPickupSlot(): { date: string; time: string } {
+    const nowIst = new Date(Date.now() + 5.5 * 60 * 60 * 1000); // shift to IST wall clock
+    const hour = nowIst.getUTCHours();
+    let slot = new Date(nowIst);
+
+    if (hour < 16 && slot.getUTCDay() !== 0) {
+      // schedule today @ 17:00 IST
+      slot.setUTCHours(17, 0, 0, 0);
+    } else {
+      // next working day @ 14:00 IST
+      slot.setUTCDate(slot.getUTCDate() + 1);
+      while (slot.getUTCDay() === 0) {
+        slot.setUTCDate(slot.getUTCDate() + 1);
+      }
+      slot.setUTCHours(14, 0, 0, 0);
+    }
+
+    const yyyy = slot.getUTCFullYear();
+    const mm = String(slot.getUTCMonth() + 1).padStart(2, '0');
+    const dd = String(slot.getUTCDate()).padStart(2, '0');
+    const hh = String(slot.getUTCHours()).padStart(2, '0');
+    const mi = String(slot.getUTCMinutes()).padStart(2, '0');
+    return { date: `${yyyy}-${mm}-${dd}`, time: `${hh}:${mi}:00` };
+  }
+
   private async getSellerProfile(userId: string) {
     const profile = await this.prisma.sellerProfile.findUnique({
       where: { userId },
@@ -757,10 +790,53 @@ export class ShippingService {
       carrierLine = xelgoDisplayName;
       pickupAt = pickupAt ?? this.xelnovaCourier.getNextPickupDate();
     }
+
+    // Auto-schedule pickup with the live carrier so the seller never has to
+    // log in to Delhivery One (or any partner dashboard) just to book a
+    // rider. If this fails for any reason we still create the shipment —
+    // the seller can retry from the orders page using "Schedule Pickup".
+    let autoPickupRef: string | undefined;
+    let autoPickupNote: string | undefined;
+    if (provider.schedulePickup && courierConfig) {
+      const nextSlot = this.computeNextPickupSlot();
+      try {
+        const pickupRes = await provider.schedulePickup(
+          courierConfig as SellerCourierConfig,
+          {
+            pickupLocation: courierConfig.warehouseId || '',
+            expectedPackageCount: 1,
+            pickupDate: nextSlot.date,
+            pickupTime: nextSlot.time,
+          },
+        );
+        if (pickupRes.success) {
+          pickupAt = pickupRes.scheduledFor
+            ? new Date(pickupRes.scheduledFor)
+            : new Date(`${nextSlot.date}T${nextSlot.time}+05:30`);
+          autoPickupRef = pickupRes.pickupId;
+          this.logger.log(
+            `Auto pickup scheduled for ${result.awbNumber}: ${pickupAt.toISOString()} (ref ${pickupRes.pickupId || '—'})`,
+          );
+        } else {
+          autoPickupNote = pickupRes.message;
+          this.logger.warn(
+            `Auto pickup scheduling failed for ${result.awbNumber}: ${pickupRes.message}`,
+          );
+        }
+      } catch (pickupErr) {
+        const msg = pickupErr instanceof Error ? pickupErr.message : String(pickupErr);
+        autoPickupNote = msg;
+        this.logger.warn(`Auto pickup scheduling threw for ${result.awbNumber}: ${msg}`);
+      }
+    }
+
     const bookedAtIso = new Date().toISOString();
     let bookRemark = `Shipment booked via ${carrierLine}`;
     if (pickupAt) {
       bookRemark += `. Pickup scheduled: ${pickupAt.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' })}`;
+      if (autoPickupRef) bookRemark += ` (ref ${autoPickupRef})`;
+    } else if (autoPickupNote) {
+      bookRemark += `. Pickup not auto-scheduled: ${autoPickupNote}`;
     }
 
     // Create shipment record
@@ -772,20 +848,27 @@ export class ShippingService {
         courierProvider: carrierLine,
         awbNumber: result.awbNumber,
         trackingUrl: result.trackingUrl,
-        shipmentStatus: ShipmentStatus.BOOKED,
+        shipmentStatus: pickupAt ? ShipmentStatus.PICKUP_SCHEDULED : ShipmentStatus.BOOKED,
         courierOrderId: result.courierOrderId,
         labelUrl: result.labelUrl,
         pickupDate: pickupAt ?? null,
         weight: dto.weight,
         dimensions: dto.dimensions,
         courierCharges: result.charges,
-        statusHistory: [
-          {
-            status: 'BOOKED',
-            timestamp: bookedAtIso,
-            remark: bookRemark,
-          },
-        ],
+        statusHistory: pickupAt
+          ? [
+              { status: 'BOOKED', timestamp: bookedAtIso, remark: bookRemark },
+              {
+                status: 'PICKUP_SCHEDULED',
+                timestamp: bookedAtIso,
+                remark:
+                  `Pickup scheduled for ${pickupAt.toISOString()}` +
+                  (autoPickupRef ? ` (ref ${autoPickupRef})` : ''),
+              },
+            ]
+          : [
+              { status: 'BOOKED', timestamp: bookedAtIso, remark: bookRemark },
+            ],
       },
     });
 
@@ -1113,26 +1196,32 @@ export class ShippingService {
       pickupTime: dto.pickupTime,
     });
 
-    if (result.success) {
-      const history = (shipment.statusHistory as object[]) || [];
-      const scheduledForIso = result.scheduledFor || new Date(`${dto.pickupDate}T${dto.pickupTime || '14:00:00'}+05:30`).toISOString();
-      history.push({
-        status: ShipmentStatus.PICKUP_SCHEDULED,
-        timestamp: new Date().toISOString(),
-        remark:
-          `Pickup scheduled for ${scheduledForIso}` +
-          (result.pickupId ? ` (ref ${result.pickupId})` : ''),
-      });
-
-      await this.prisma.shipment.update({
-        where: { orderId },
-        data: {
-          shipmentStatus: ShipmentStatus.PICKUP_SCHEDULED,
-          pickupDate: new Date(scheduledForIso),
-          statusHistory: history,
-        },
-      });
+    if (!result.success) {
+      // Surface as a 400 so the seller sees a toast with the carrier's
+      // actual reason (warehouse mismatch, cutoff, Sunday, etc.).
+      throw new BadRequestException(
+        result.message || 'Carrier rejected the pickup request',
+      );
     }
+
+    const history = (shipment.statusHistory as object[]) || [];
+    const scheduledForIso = result.scheduledFor || new Date(`${dto.pickupDate}T${dto.pickupTime || '14:00:00'}+05:30`).toISOString();
+    history.push({
+      status: ShipmentStatus.PICKUP_SCHEDULED,
+      timestamp: new Date().toISOString(),
+      remark:
+        `Pickup scheduled for ${scheduledForIso}` +
+        (result.pickupId ? ` (ref ${result.pickupId})` : ''),
+    });
+
+    await this.prisma.shipment.update({
+      where: { orderId },
+      data: {
+        shipmentStatus: ShipmentStatus.PICKUP_SCHEDULED,
+        pickupDate: new Date(scheduledForIso),
+        statusHistory: history,
+      },
+    });
 
     return result;
   }
@@ -1786,7 +1875,42 @@ export class ShippingService {
         });
       }
 
-      // Test 2: Check pincode serviceability (validates warehouse indirectly)
+      // Test 2: Verify the warehouse name is registered with Delhivery.
+      // Pickup scheduling silently fails when the name doesn't match.
+      if (warehouseName) {
+        try {
+          const whUrl = `${baseUrl}/api/backend/clientwarehouse/get/?name=${encodeURIComponent(warehouseName)}`;
+          const whRes = await fetch(whUrl, {
+            headers: { Authorization: `Token ${config.apiKey}` },
+          });
+          const whText = await whRes.text();
+          let whParsed: any = null;
+          try { whParsed = JSON.parse(whText); } catch { /* noop */ }
+
+          const whFound = !!(whParsed?.data?.length || whParsed?.name || whParsed?.client);
+          if (whRes.ok && whFound) {
+            checks.push({
+              name: 'Warehouse Registered',
+              status: 'pass',
+              message: `"${warehouseName}" is registered with Delhivery and ready for pickups.`,
+            });
+          } else {
+            checks.push({
+              name: 'Warehouse Registered',
+              status: 'fail',
+              message: `Delhivery does NOT recognise warehouse "${warehouseName}". Pickups will fail. Add/rename the warehouse in Delhivery One → Settings → Pickup Locations to match exactly (case-sensitive).`,
+            });
+          }
+        } catch (err) {
+          checks.push({
+            name: 'Warehouse Registered',
+            status: 'skip',
+            message: `Could not verify warehouse: ${err instanceof Error ? err.message : String(err)}`,
+          });
+        }
+      }
+
+      // Test 3: Check pincode serviceability (validates warehouse indirectly)
       try {
         const pincodeUrl = `${baseUrl}/c/api/pin-codes/json/?token=${config.apiKey}&filter_codes=110001`;
         const pincodeRes = await fetch(pincodeUrl, {
@@ -1827,6 +1951,63 @@ export class ShippingService {
       backend: resolved.mode,
       checks,
       summary,
+    };
+  }
+
+  /**
+   * Live-test pickup scheduling against the active Xelgo backend.
+   * Creates a real pickup request with Delhivery for the next sensible
+   * slot — useful as an admin diagnostic when the seller flow seems
+   * to "succeed" but nothing shows up on the partner dashboard.
+   */
+  async testXelgoPickup(): Promise<{
+    success: boolean;
+    backend: string;
+    pickupId?: string;
+    scheduledFor?: string;
+    request: { date: string; time: string; warehouse: string };
+    message: string;
+  }> {
+    const resolved = await this.resolveXelgoBackend();
+    if (resolved.mode === 'unconfigured') {
+      return {
+        success: false,
+        backend: 'none',
+        request: { date: '', time: '', warehouse: '' },
+        message: `Xelgo is not configured: ${resolved.reason}`,
+      };
+    }
+
+    const provider = this.providers.get(resolved.mode);
+    if (!provider?.schedulePickup) {
+      return {
+        success: false,
+        backend: resolved.mode,
+        request: { date: '', time: '', warehouse: '' },
+        message: `${provider?.providerName || resolved.mode} does not support pickup scheduling.`,
+      };
+    }
+
+    const slot = this.computeNextPickupSlot();
+    const warehouse = resolved.config.warehouseId || '';
+
+    const result = await provider.schedulePickup(
+      resolved.config as SellerCourierConfig,
+      {
+        pickupLocation: warehouse,
+        expectedPackageCount: 1,
+        pickupDate: slot.date,
+        pickupTime: slot.time,
+      },
+    );
+
+    return {
+      success: result.success,
+      backend: resolved.mode,
+      pickupId: result.pickupId,
+      scheduledFor: result.scheduledFor,
+      request: { date: slot.date, time: slot.time, warehouse },
+      message: result.message,
     };
   }
 }

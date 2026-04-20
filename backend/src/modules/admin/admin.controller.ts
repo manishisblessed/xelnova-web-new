@@ -744,4 +744,16 @@ export class AdminController {
       'Xelgo connection test completed',
     );
   }
+
+  @Get('shipping/test-pickup')
+  @ApiOperation({
+    summary:
+      'Test Xelgo (Delhivery) pickup scheduling for next business day at the configured warehouse',
+  })
+  async testXelgoPickup() {
+    return successResponse(
+      await this.shippingService.testXelgoPickup(),
+      'Pickup test completed',
+    );
+  }
 }
