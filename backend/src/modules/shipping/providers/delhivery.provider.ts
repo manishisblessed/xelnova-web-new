@@ -512,22 +512,29 @@ export class DelhiveryProvider implements CourierProvider {
       };
     }
 
+    // Delhivery's official B2C "Pickup Request Creation" API
+    // (POST /fm/request/new/) accepts ONLY four parameters per their
+    // documentation (Apr 2026): pickup_location, expected_package_count,
+    // pickup_date, pickup_time. There is intentionally no per-package /
+    // per-waybill field — pickups are scheduled at the warehouse level
+    // and the agent collects every manifested shipment from that
+    // warehouse on the slot.
+    //
+    // To get manifested orders to flip from "Ready to Ship" →
+    // "Ready For Pickup" on Delhivery One automatically, the seller's
+    // Delhivery account POC must enable the optional **auto-pickup**
+    // feature (also documented on the same page). Until that is on,
+    // each shipment shows up under "Ready to Ship" and the warehouse
+    // operator must use Delhivery One's "Add to Pickup" button — which
+    // is *not* exposed via any public API. We therefore stop sending
+    // the `packages` array (it was being silently ignored anyway) and
+    // surface a clearer success message below.
     const body: Record<string, unknown> = {
       pickup_location: options.pickupLocation || config.warehouseId || '',
       expected_package_count: Math.max(1, options.expectedPackageCount || 1),
       pickup_date: options.pickupDate,
       pickup_time: pickupTime,
     };
-
-    // Delhivery's /fm/request/new/ accepts a `packages` array of waybill
-    // strings. When present, the manifested orders matching those waybills
-    // move from "Ready to Ship" → "Ready for Pickup" on Delhivery One,
-    // which ensures the pickup agent's run-sheet includes the specific
-    // shipments. Without this, the pickup request is warehouse-level and
-    // orders sit in "Ready to Ship" even though a pickup slot exists.
-    if (options.waybills?.length) {
-      body.packages = options.waybills;
-    }
 
     if (!body.pickup_location) {
       return {
@@ -583,7 +590,9 @@ export class DelhiveryProvider implements CourierProvider {
       const scheduledFor = `${options.pickupDate}T${pickupTime}+05:30`;
       return {
         success: true,
-        message: `Pickup already scheduled (ref ${existingId}). The Delhivery agent will collect all manifested packages from this warehouse.`,
+        message:
+          `Pickup already scheduled for this warehouse on ${options.pickupDate} (ref ${existingId}). ` +
+          `The Delhivery agent will collect every manifested package on this slot — your new shipment is included automatically.`,
         pickupId: String(existingId),
         scheduledFor,
       };
@@ -651,7 +660,10 @@ export class DelhiveryProvider implements CourierProvider {
 
     return {
       success: true,
-      message: parsed?.pr_log || parsed?.message || 'Pickup scheduled successfully',
+      message:
+        parsed?.pr_log ||
+        parsed?.message ||
+        `Pickup scheduled for ${options.pickupDate} at ${pickupTime} (ref ${pickupId}). The Delhivery agent will collect every manifested package from this warehouse on this slot.`,
       pickupId: String(pickupId),
       scheduledFor,
     };
@@ -696,24 +708,72 @@ export class DelhiveryProvider implements CourierProvider {
     return res.json();
   }
 
+  /**
+   * Maps every Delhivery `Status.Status` / scan string we've seen in the
+   * wild into our internal `ShipmentStatus` enum. Delhivery is loose
+   * about casing/spacing across endpoints (sometimes "In Transit",
+   * sometimes "INTRANSIT", sometimes "In-transit"), so we normalise
+   * before lookup and fall back to substring detection for everything
+   * outside the explicit table.
+   */
   private mapDelhiveryStatus(status: string): string {
-    const map: Record<string, string> = {
-      Manifested: 'BOOKED',
-      Dispatched: 'IN_TRANSIT',
-      'In Transit': 'IN_TRANSIT',
-      Pending: 'PENDING',
-      'Reached Destination Hub': 'IN_TRANSIT',
-      'Out For Delivery': 'OUT_FOR_DELIVERY',
-      Delivered: 'DELIVERED',
-      'Picked Up': 'PICKED_UP',
-      'Not Picked': 'BOOKED',
-      'RTO Initiated': 'RTO_INITIATED',
-      'RTO In Transit': 'RTO_INITIATED',
-      'RTO Delivered': 'RTO_DELIVERED',
-      Returned: 'RTO_DELIVERED',
-      Cancelled: 'CANCELLED',
-      Undelivered: 'IN_TRANSIT',
+    const raw = (status || '').trim();
+    if (!raw) return 'IN_TRANSIT';
+
+    const normalised = raw.toLowerCase().replace(/[\s_-]+/g, ' ').trim();
+
+    const exact: Record<string, string> = {
+      'manifested': 'BOOKED',
+      'ready to ship': 'BOOKED',
+      'order placed': 'BOOKED',
+      'pickup pending': 'BOOKED',
+      'not picked': 'BOOKED',
+      'pickup awaited': 'PICKUP_SCHEDULED',
+      'pickup scheduled': 'PICKUP_SCHEDULED',
+      'pickup generated': 'PICKUP_SCHEDULED',
+      'ready for pickup': 'PICKUP_SCHEDULED',
+      'added to pickup': 'PICKUP_SCHEDULED',
+      'picked up': 'PICKED_UP',
+      'pickup done': 'PICKED_UP',
+      'pickup complete': 'PICKED_UP',
+      'shipped': 'IN_TRANSIT',
+      'dispatched': 'IN_TRANSIT',
+      'in transit': 'IN_TRANSIT',
+      'intransit': 'IN_TRANSIT',
+      'reached destination hub': 'IN_TRANSIT',
+      'reached destination': 'IN_TRANSIT',
+      'reached': 'IN_TRANSIT',
+      'undelivered': 'IN_TRANSIT',
+      'pending': 'IN_TRANSIT',
+      'misrouted': 'IN_TRANSIT',
+      'out for delivery': 'OUT_FOR_DELIVERY',
+      'ofd': 'OUT_FOR_DELIVERY',
+      'delivered': 'DELIVERED',
+      'delivery successful': 'DELIVERED',
+      'rto initiated': 'RTO_INITIATED',
+      'rto requested': 'RTO_INITIATED',
+      'rto in transit': 'RTO_INITIATED',
+      'rto out for delivery': 'RTO_INITIATED',
+      'rto delivered': 'RTO_DELIVERED',
+      'returned': 'RTO_DELIVERED',
+      'cancelled': 'CANCELLED',
+      'canceled': 'CANCELLED',
+      'lost': 'CANCELLED',
+      'damaged': 'CANCELLED',
     };
-    return map[status] || 'IN_TRANSIT';
+
+    if (exact[normalised]) return exact[normalised];
+
+    if (normalised.includes('delivered') && !normalised.includes('rto')) return 'DELIVERED';
+    if (normalised.includes('rto delivered')) return 'RTO_DELIVERED';
+    if (normalised.includes('rto')) return 'RTO_INITIATED';
+    if (normalised.includes('out for delivery')) return 'OUT_FOR_DELIVERY';
+    if (normalised.includes('picked')) return 'PICKED_UP';
+    if (normalised.includes('pickup')) return 'PICKUP_SCHEDULED';
+    if (normalised.includes('cancel') || normalised.includes('lost') || normalised.includes('damaged')) return 'CANCELLED';
+    if (normalised.includes('manifest')) return 'BOOKED';
+    if (normalised.includes('transit') || normalised.includes('reached') || normalised.includes('dispatch')) return 'IN_TRANSIT';
+
+    return 'IN_TRANSIT';
   }
 }

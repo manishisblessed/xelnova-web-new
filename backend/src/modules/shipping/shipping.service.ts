@@ -838,7 +838,6 @@ export class ShippingService {
             expectedPackageCount: Math.max(1, dto.expectedPackageCount || 1),
             pickupDate: dto.pickupDate as string,
             pickupTime: requestedTime,
-            waybills: result.awbNumber ? [result.awbNumber] : undefined,
           },
         );
         if (pickupRes.success) {
@@ -1260,7 +1259,6 @@ export class ShippingService {
       expectedPackageCount: dto.expectedPackageCount ?? 1,
       pickupDate: dto.pickupDate,
       pickupTime: dto.pickupTime,
-      waybills: shipment.awbNumber ? [shipment.awbNumber] : undefined,
     });
 
     if (!result.success) {

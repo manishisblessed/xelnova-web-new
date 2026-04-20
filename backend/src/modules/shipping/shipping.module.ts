@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { ShippingController, ShippingRateController } from './shipping.controller';
 import { ShippingWebhookController } from './shipping-webhook.controller';
 import { ShippingService } from './shipping.service';
+import { ShipmentTrackerService } from './shipment-tracker.service';
 import { LabelGeneratorService } from './label-generator.service';
 import { DelhiveryProvider } from './providers/delhivery.provider';
 import { ShipRocketProvider } from './providers/shiprocket.provider';
@@ -17,6 +18,7 @@ import { InvoiceService } from '../orders/invoice.service';
   controllers: [ShippingController, ShippingRateController, ShippingWebhookController],
   providers: [
     ShippingService,
+    ShipmentTrackerService,
     LabelGeneratorService,
     DelhiveryProvider,
     ShipRocketProvider,
