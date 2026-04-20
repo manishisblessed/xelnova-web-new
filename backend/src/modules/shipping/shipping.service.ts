@@ -784,17 +784,24 @@ export class ShippingService {
       }
     }
 
-    let pickupAt = result.pickupScheduledAt;
     let carrierLine = result.displayCourierLine || provider.providerName;
     if (xelgoDisplayName) {
       carrierLine = xelgoDisplayName;
-      pickupAt = pickupAt ?? this.xelnovaCourier.getNextPickupDate();
     }
+
+    // `pickupAt` is the source of truth for whether this shipment is
+    // PICKUP_SCHEDULED vs just BOOKED. We must NOT set it from a stub /
+    // fallback date when there's a real carrier in play — otherwise we'd
+    // tell the seller "Pickup Scheduled" while Delhivery's dashboard
+    // shows nothing under "Ready For Pickup" (exactly the bug we just
+    // saw with AWB 47919210000140).
+    let pickupAt: Date | undefined = result.pickupScheduledAt;
 
     // Auto-schedule pickup with the live carrier so the seller never has to
     // log in to Delhivery One (or any partner dashboard) just to book a
-    // rider. If this fails for any reason we still create the shipment —
-    // the seller can retry from the orders page using "Schedule Pickup".
+    // rider. We only treat the shipment as PICKUP_SCHEDULED if the real
+    // carrier returns a pickup_id — otherwise we keep it as BOOKED and
+    // surface the carrier's reason in the status history.
     let autoPickupRef: string | undefined;
     let autoPickupNote: string | undefined;
     if (provider.schedulePickup && courierConfig) {
@@ -828,6 +835,10 @@ export class ShippingService {
         autoPickupNote = msg;
         this.logger.warn(`Auto pickup scheduling threw for ${result.awbNumber}: ${msg}`);
       }
+    } else if (provider === this.xelnovaCourier) {
+      // Pure stub mode (no real carrier configured) — the stub computes
+      // its own pickup date and that's all we can promise the seller.
+      pickupAt = pickupAt ?? this.xelnovaCourier.getNextPickupDate();
     }
 
     const bookedAtIso = new Date().toISOString();
@@ -836,7 +847,7 @@ export class ShippingService {
       bookRemark += `. Pickup scheduled: ${pickupAt.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' })}`;
       if (autoPickupRef) bookRemark += ` (ref ${autoPickupRef})`;
     } else if (autoPickupNote) {
-      bookRemark += `. Pickup not auto-scheduled: ${autoPickupNote}`;
+      bookRemark += `. Pickup NOT scheduled with carrier: ${autoPickupNote}. Use "Schedule Pickup" once the issue is resolved.`;
     }
 
     // Create shipment record
@@ -866,9 +877,18 @@ export class ShippingService {
                   (autoPickupRef ? ` (ref ${autoPickupRef})` : ''),
               },
             ]
-          : [
-              { status: 'BOOKED', timestamp: bookedAtIso, remark: bookRemark },
-            ],
+          : autoPickupNote
+            ? [
+                { status: 'BOOKED', timestamp: bookedAtIso, remark: bookRemark },
+                {
+                  status: 'BOOKED',
+                  timestamp: bookedAtIso,
+                  remark: `Carrier rejected pickup auto-schedule — please retry: ${autoPickupNote}`,
+                },
+              ]
+            : [
+                { status: 'BOOKED', timestamp: bookedAtIso, remark: bookRemark },
+              ],
       },
     });
 
