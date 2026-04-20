@@ -146,11 +146,46 @@ export class DelhiveryProvider implements CourierProvider {
       );
       if (waybillRes.ok) {
         const waybillData = await waybillRes.text();
+        let candidate = '';
         try {
           const parsed = JSON.parse(waybillData);
-          awb = String(parsed?.waybill || parsed?.[0] || '').trim();
+          // Delhivery's waybill fetch can return various shapes:
+          //   - Plain string: "1234567890"
+          //   - Object: {"waybill": "1234567890"}
+          //   - Array: ["1234567890", ...]
+          //   - Packages wrapper: {"packages": ["1234567890"]}
+          // We also need to avoid treating small numbers (like counts /
+          // quota values) as waybills, which is what caused a
+          // "waybill: 4" to be rejected with "Unable to consume
+          // waybill 4".
+          if (typeof parsed === 'string') {
+            candidate = parsed.trim();
+          } else if (typeof parsed === 'number') {
+            candidate = String(parsed);
+          } else if (Array.isArray(parsed)) {
+            candidate = String(parsed[0] || '').trim();
+          } else if (parsed && typeof parsed === 'object') {
+            const w = parsed.waybill;
+            if (Array.isArray(w)) candidate = String(w[0] || '').trim();
+            else if (typeof w === 'string') candidate = w.trim();
+            else if (Array.isArray(parsed.packages)) candidate = String(parsed.packages[0] || '').trim();
+          }
         } catch {
-          awb = waybillData.trim();
+          candidate = waybillData.trim();
+        }
+
+        // A valid Delhivery waybill is typically 10-14 digits. Anything
+        // shorter (like "4" or "0") is almost certainly a quota / count /
+        // error code, not a real waybill — passing it to the CMU endpoint
+        // will cause "Unable to consume waybill" rejections.
+        if (/^\d{8,}$/.test(candidate)) {
+          awb = candidate;
+        } else if (candidate) {
+          this.logger.warn(
+            `Delhivery waybill pre-fetch returned an unusable value "${candidate}" (expected 8+ digit number). ` +
+              `Will let CMU auto-assign. This usually means your account has no waybill block allocated yet — ` +
+              `contact Delhivery support if CMU create also fails.`,
+          );
         }
       } else {
         const errBody = await waybillRes.text().catch(() => '');
@@ -241,7 +276,18 @@ export class DelhiveryProvider implements CourierProvider {
     // Only include optional/secret fields when actually present —
     // Delhivery's validators sometimes choke on empty-string keys.
     if (awb) shipment.waybill = awb;
-    if (sellerGstin) shipment.seller_gst_tin = sellerGstin;
+    // Indian GSTIN is exactly 15 alphanumeric chars. If the admin
+    // accidentally pasted an email or other junk into the GSTIN field,
+    // skip the attribute rather than sending garbage to Delhivery
+    // (which fails shipment validation with a generic "internal Error").
+    if (sellerGstin && /^[0-9A-Z]{15}$/i.test(sellerGstin.trim())) {
+      shipment.seller_gst_tin = sellerGstin.trim().toUpperCase();
+    } else if (sellerGstin) {
+      this.logger.warn(
+        `Ignoring invalid GSTIN "${sellerGstin}" — expected 15 alphanumeric characters. ` +
+          `Fix this in admin Shipping Settings → Delhivery → Seller GSTIN.`,
+      );
+    }
 
     const shipmentPayload = {
       shipments: [shipment],
