@@ -35,6 +35,29 @@ export class ShipOrderDto {
   @IsString()
   @IsOptional()
   dimensions?: string;
+
+  // ─── Pickup scheduling (Delhivery / integrated couriers) ───
+  // Per Delhivery's documented flow, manifest creation and pickup
+  // request are TWO separate API calls. We let the seller decide the
+  // pickup date/time in the same UI flow as booking — but only call
+  // the pickup API if these fields are supplied. Otherwise the
+  // shipment sits at BOOKED until the seller schedules separately.
+
+  @ApiPropertyOptional({ description: 'Pickup date in IST (YYYY-MM-DD).' })
+  @IsString()
+  @IsOptional()
+  pickupDate?: string;
+
+  @ApiPropertyOptional({ description: 'Pickup time in IST (HH:mm or HH:mm:ss).' })
+  @IsString()
+  @IsOptional()
+  pickupTime?: string;
+
+  @ApiPropertyOptional({ description: 'Number of packages in this pickup batch (defaults to 1).' })
+  @IsNumber()
+  @IsOptional()
+  @Min(1)
+  expectedPackageCount?: number;
 }
 
 export class UpdateAwbDto {

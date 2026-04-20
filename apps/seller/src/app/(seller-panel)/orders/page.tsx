@@ -1373,7 +1373,7 @@ function ShipOrderModal({
   onSuccess: () => void;
 }) {
   const [step, setStep] = useState<
-    'loading' | 'select' | 'details' | 'selfship' | 'add-phone' | 'result'
+    'loading' | 'select' | 'details' | 'pickup' | 'selfship' | 'add-phone' | 'result'
   >('loading');
   const [selectedCourier, setSelectedCourier] = useState<string>('');
   const [weight, setWeight] = useState('');
@@ -1385,6 +1385,17 @@ function ShipOrderModal({
   const [configuredProviders, setConfiguredProviders] = useState<string[]>([]);
   const [loadingConfigs, setLoadingConfigs] = useState(true);
   const [shippingRates, setShippingRates] = useState<ShippingRates | null>(null);
+
+  // ─── Pickup scheduling (per Delhivery B2B docs) ───
+  // Per https://one.delhivery.com/developer-portal/documents/b2b/, the
+  // manifest creation and pickup request are TWO separate API calls. The
+  // seller must own the pickup slot — Delhivery's same-day cutoff is
+  // ~2 PM IST, so the safe default is "today @ 4 PM" before 1 PM IST,
+  // otherwise "next working day @ 11 AM IST".
+  const [shipPickupDate, setShipPickupDate] = useState<string>('');
+  const [shipPickupTime, setShipPickupTime] = useState<string>('');
+  const [shipPickupPackages, setShipPickupPackages] = useState<number>(1);
+  const [skipPickupAtBooking, setSkipPickupAtBooking] = useState(false);
   // Inline pickup-phone capture — when the backend rejects the booking
   // because the seller's pickup phone is missing, we collect it right
   // here instead of pushing the user to the Profile page (per UX feedback
@@ -1394,8 +1405,11 @@ function ShipOrderModal({
   const [phoneSaving, setPhoneSaving] = useState(false);
   const [phoneError, setPhoneError] = useState<string | null>(null);
   // Remember which step we came from so the "Back" affordance returns
-  // the seller to the right form (regular courier vs self-ship).
-  const [phoneReturnStep, setPhoneReturnStep] = useState<'details' | 'selfship'>('details');
+  // the seller to the right form (regular courier vs self-ship). For
+  // courier bookings the seller triggers the API call from the
+  // "pickup" step, so we send them back there — not to "details".
+  const [phoneReturnStep, setPhoneReturnStep] =
+    useState<'details' | 'pickup' | 'selfship'>('pickup');
 
   const getDefaultShippingInfo = useCallback(() => {
     if (!orderItems?.length) return { weight: '', dimensions: '' };
@@ -1455,7 +1469,32 @@ function ShipOrderModal({
       setResult(null);
       setPickupPhone('');
       setPhoneError(null);
-      setPhoneReturnStep('details');
+      setPhoneReturnStep('pickup');
+
+      // Default pickup slot: today @ 16:00 IST if it's still before 1 PM
+      // IST (gives the rider plenty of room before the ~2 PM Delhivery
+      // cutoff), otherwise the next working day at 11:00. We deliberately
+      // surface this to the seller so they can override it.
+      const nowIst = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+      const istHour = nowIst.getUTCHours();
+      const istDay = nowIst.getUTCDay();
+      const slot = new Date(nowIst);
+      if (istHour < 13 && istDay !== 0) {
+        slot.setUTCHours(16, 0, 0, 0);
+      } else {
+        slot.setUTCDate(slot.getUTCDate() + 1);
+        while (slot.getUTCDay() === 0) slot.setUTCDate(slot.getUTCDate() + 1);
+        slot.setUTCHours(11, 0, 0, 0);
+      }
+      const yyyy = slot.getUTCFullYear();
+      const mm = String(slot.getUTCMonth() + 1).padStart(2, '0');
+      const dd = String(slot.getUTCDate()).padStart(2, '0');
+      const hh = String(slot.getUTCHours()).padStart(2, '0');
+      const mi = String(slot.getUTCMinutes()).padStart(2, '0');
+      setShipPickupDate(`${yyyy}-${mm}-${dd}`);
+      setShipPickupTime(`${hh}:${mi}`);
+      setShipPickupPackages(1);
+      setSkipPickupAtBooking(false);
 
       loadConfigs().then((providers) => {
         if (providers.length > 0) {
@@ -1527,10 +1566,31 @@ function ShipOrderModal({
       } else {
         body.weight = weight ? parseFloat(weight) : undefined;
         body.dimensions = dimensions.trim() || undefined;
+        // Per Delhivery's two-call flow, only ask the backend to schedule
+        // a pickup if the seller actually confirmed a date. If they
+        // chose "Skip" we send no pickup fields and the shipment lands
+        // at status BOOKED — they can schedule from order details later.
+        if (!skipPickupAtBooking && shipPickupDate) {
+          body.pickupDate = shipPickupDate;
+          body.pickupTime = shipPickupTime
+            ? `${shipPickupTime}${shipPickupTime.length === 5 ? ':00' : ''}`
+            : undefined;
+          body.expectedPackageCount = Math.max(1, shipPickupPackages || 1);
+        }
       }
       return body;
     },
-    [selectedCourier, carrierName, awbNumber, weight, dimensions],
+    [
+      selectedCourier,
+      carrierName,
+      awbNumber,
+      weight,
+      dimensions,
+      skipPickupAtBooking,
+      shipPickupDate,
+      shipPickupTime,
+      shipPickupPackages,
+    ],
   );
 
   /** Heuristic: backend currently throws this exact "Pickup phone number"
@@ -1555,7 +1615,10 @@ function ShipOrderModal({
       if (isPickupPhoneError(err) && mode !== 'selfship') {
         // Self-ship doesn't actually call the courier, so the only way
         // to land in the phone-rescue is via an integrated courier.
-        setPhoneReturnStep(mode);
+        // Couriers are submitted from the "pickup" step now, so that's
+        // where the seller should return to retry once the phone is
+        // saved.
+        setPhoneReturnStep('pickup');
         setPhoneError(null);
         setStep('add-phone');
         return false;
@@ -1569,6 +1632,31 @@ function ShipOrderModal({
 
   const handleShip = async () => {
     await submitShipment(step === 'selfship' ? 'selfship' : 'details');
+  };
+
+  /** Validates the weight/dimensions inputs on the "details" step and
+   *  advances to the pickup-scheduling step. Pulled out so the button
+   *  handler stays small and we surface validation errors as toasts. */
+  const handleDetailsContinue = () => {
+    if (!selectedCourier) {
+      toast.error('Pick a courier to continue');
+      return;
+    }
+    const w = parseFloat(weight);
+    if (!weight || Number.isNaN(w) || w <= 0) {
+      toast.error('Enter the package weight in kg');
+      return;
+    }
+    const dims = dimensions
+      .trim()
+      .split(/[x×X]/i)
+      .map((s) => Number(s.trim()))
+      .filter((n) => !Number.isNaN(n));
+    if (dimensions.trim() && (dims.length !== 3 || dims.some((n) => n <= 0))) {
+      toast.error('Dimensions must be like 30x20x15 (cm)');
+      return;
+    }
+    setStep('pickup');
   };
 
   /** Save the typed pickup phone to the seller profile and immediately
@@ -1586,11 +1674,15 @@ function ShipOrderModal({
     try {
       await apiUpdateProfile({ phone: digits });
       toast.success('Pickup phone saved');
-      // Replay the original booking in the same modal.
-      const success = await submitShipment(phoneReturnStep);
+      // Replay the original booking in the same modal. The "pickup"
+      // step still submits via the regular courier ('details') mode —
+      // it just lives behind a different UI step.
+      const submitMode: 'details' | 'selfship' =
+        phoneReturnStep === 'selfship' ? 'selfship' : 'details';
+      const success = await submitShipment(submitMode);
       if (!success) {
         // Phone was saved but shipment still failed (e.g., courier API error).
-        // Navigate back to details step so user can see the error and retry.
+        // Navigate back to the right step so the user sees the error.
         setStep(phoneReturnStep);
       }
     } catch (err: unknown) {
@@ -1733,9 +1825,128 @@ function ShipOrderModal({
             )}
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" onClick={onClose}>Cancel</Button>
-              <Button onClick={handleShip} loading={saving}>
+              <Button onClick={handleDetailsContinue}>
+                <Calendar size={14} />
+                Next: pickup slot
+              </Button>
+            </div>
+          </motion.div>
+        )}
+
+        {step === 'pickup' && (
+          <motion.div
+            key="pickup"
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -20 }}
+            className="space-y-4"
+          >
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setStep('details')}
+                disabled={saving}
+                className="p-1 rounded hover:bg-gray-100 text-text-muted disabled:opacity-50"
+                aria-label="Back to details"
+              >
+                <ChevronLeft size={16} />
+              </button>
+              <p className="text-sm font-semibold text-text-primary">
+                When should the rider come for pickup?
+              </p>
+            </div>
+
+            <div className="rounded-xl bg-blue-50 border border-blue-200 p-3">
+              <p className="text-xs text-blue-800 leading-relaxed">
+                {selectedCourier === 'XELNOVA_COURIER' ? (
+                  <>Tell <strong>Xelgo</strong> when the partner courier should
+                    arrive at your warehouse. We&apos;ll book the shipment and
+                    request the pickup in one go.</>
+                ) : (
+                  <>Tell <strong>{getProviderName(selectedCourier)}</strong>
+                    {' '}when to send a rider to your registered warehouse.
+                    Same-day pickup needs to be requested before <strong>2 PM IST</strong>;
+                    after that, the carrier rolls over to the next working day.</>
+                )}
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-text-muted mb-1.5">
+                  Pickup date *
+                </label>
+                <input
+                  type="date"
+                  value={shipPickupDate}
+                  min={new Date().toISOString().slice(0, 10)}
+                  onChange={(e) => {
+                    setShipPickupDate(e.target.value);
+                    setSkipPickupAtBooking(false);
+                  }}
+                  disabled={skipPickupAtBooking}
+                  className="w-full rounded-xl border border-border bg-surface-raised px-4 py-3 text-sm text-text-primary outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30 disabled:opacity-50"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-text-muted mb-1.5">
+                  Pickup time (IST)
+                </label>
+                <input
+                  type="time"
+                  value={shipPickupTime}
+                  onChange={(e) => {
+                    setShipPickupTime(e.target.value);
+                    setSkipPickupAtBooking(false);
+                  }}
+                  disabled={skipPickupAtBooking}
+                  className="w-full rounded-xl border border-border bg-surface-raised px-4 py-3 text-sm text-text-primary outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30 disabled:opacity-50"
+                />
+              </div>
+            </div>
+
+            <Input
+              stackedLabel
+              label="Number of packages"
+              type="number"
+              min={1}
+              value={String(shipPickupPackages)}
+              onChange={(e) =>
+                setShipPickupPackages(Math.max(1, Number(e.target.value) || 1))
+              }
+              disabled={skipPickupAtBooking}
+            />
+
+            <label className="flex items-start gap-2 cursor-pointer select-none rounded-xl border border-border p-3 hover:bg-gray-50/50">
+              <input
+                type="checkbox"
+                checked={skipPickupAtBooking}
+                onChange={(e) => setSkipPickupAtBooking(e.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+              />
+              <span className="text-xs text-text-secondary leading-relaxed">
+                <span className="font-medium text-text-primary">
+                  Book shipment only — schedule pickup later.
+                </span>
+                <br />
+                The shipment will be created with an AWB but no rider will be
+                booked yet. You can schedule the pickup any time from the order
+                details panel.
+              </span>
+            </label>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button
+                variant="outline"
+                onClick={() => setStep('details')}
+                disabled={saving}
+              >
+                Back
+              </Button>
+              <Button onClick={handleShip} loading={saving} disabled={saving}>
                 <Truck size={14} />
-                Book Shipment
+                {skipPickupAtBooking
+                  ? 'Book shipment'
+                  : 'Book shipment & schedule pickup'}
               </Button>
             </div>
           </motion.div>
@@ -1886,6 +2097,58 @@ function ShipOrderModal({
                 Shipped via <strong>{result.courierProvider}</strong>
               </p>
             )}
+
+            {/* Pickup status — surfaced separately so the seller knows
+                whether the carrier actually accepted the pickup request,
+                not just the manifest. Saves them from chasing an empty
+                "Ready For Pickup" tab on Delhivery One. */}
+            {result.pickup && (
+              <div
+                className={`rounded-xl border p-3 text-left ${
+                  result.pickup.scheduled
+                    ? 'border-emerald-200 bg-emerald-50'
+                    : result.pickup.requested
+                      ? 'border-amber-200 bg-amber-50'
+                      : 'border-blue-200 bg-blue-50'
+                }`}
+              >
+                <p
+                  className={`text-xs font-semibold ${
+                    result.pickup.scheduled
+                      ? 'text-emerald-800'
+                      : result.pickup.requested
+                        ? 'text-amber-800'
+                        : 'text-blue-800'
+                  }`}
+                >
+                  {result.pickup.scheduled
+                    ? 'Pickup scheduled'
+                    : result.pickup.requested
+                      ? 'Pickup not scheduled'
+                      : 'Schedule pickup separately'}
+                </p>
+                <p className="text-[11px] text-text-secondary mt-1 leading-relaxed">
+                  {result.pickup.message}
+                </p>
+                {result.pickup.scheduledFor && (
+                  <p className="text-[11px] text-text-muted mt-1">
+                    Slot:{' '}
+                    {new Date(result.pickup.scheduledFor).toLocaleString('en-IN', {
+                      timeZone: 'Asia/Kolkata',
+                      weekday: 'short',
+                      day: 'numeric',
+                      month: 'short',
+                      hour: 'numeric',
+                      minute: '2-digit',
+                      hour12: true,
+                    })}{' '}
+                    (IST)
+                    {result.pickup.pickupId ? ` · ref ${result.pickup.pickupId}` : ''}
+                  </p>
+                )}
+              </div>
+            )}
+
             {result.trackingUrl ? (
               <a href={result.trackingUrl} target="_blank" rel="noopener noreferrer"
                 className="inline-flex items-center gap-1 text-sm text-primary-600 hover:underline"

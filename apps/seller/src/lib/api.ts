@@ -154,6 +154,14 @@ export async function apiShipOrder(orderId: string, body: {
   awbNumber?: string;
   weight?: number;
   dimensions?: string;
+  /** Pickup date (YYYY-MM-DD, IST). When supplied for an integrated
+   *  courier, the backend books the manifest AND the pickup request in
+   *  one shot (per Delhivery's documented two-call flow). */
+  pickupDate?: string;
+  /** Pickup time (HH:mm or HH:mm:ss, IST). Defaults server-side to 14:00. */
+  pickupTime?: string;
+  /** Number of packages in this pickup batch (defaults to 1). */
+  expectedPackageCount?: number;
 }) {
   const res = await fetch(`${API_URL}/seller/orders/${orderId}/ship`, {
     method: 'POST',

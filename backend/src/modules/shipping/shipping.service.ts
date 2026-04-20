@@ -466,26 +466,33 @@ export class ShippingService {
   /**
    * Computes the next sensible pickup slot in IST.
    *
+   * Per Delhivery One ("Book before 2 PM to get same-day pickup at your
+   * doorstep"), same-day pickups must be booked before 14:00 IST. Booking
+   * after that quietly rolls over to the next day on the partner side,
+   * which previously caused our seller dashboard to claim "Pickup
+   * Scheduled" while Delhivery's "Ready For Pickup" tab stayed empty.
+   *
    * Logic:
-   *   - If it's before 16:00 IST and today is a working day → today @ 17:00
-   *   - Otherwise → next working day @ 14:00
-   *   - Sundays are skipped (Delhivery doesn't run pickups on Sunday)
+   *   - Before 13:00 IST on a working day → today @ 16:00 IST
+   *     (gives the rider a comfortable window before the 2 PM cutoff
+   *     buffer; the actual cutoff is Delhivery-side at 14:00).
+   *   - Otherwise → next working day @ 11:00 IST.
+   *   - Sundays are skipped (Delhivery does not run pickups on Sunday).
    */
   private computeNextPickupSlot(): { date: string; time: string } {
     const nowIst = new Date(Date.now() + 5.5 * 60 * 60 * 1000); // shift to IST wall clock
     const hour = nowIst.getUTCHours();
-    let slot = new Date(nowIst);
+    const slot = new Date(nowIst);
 
-    if (hour < 16 && slot.getUTCDay() !== 0) {
-      // schedule today @ 17:00 IST
-      slot.setUTCHours(17, 0, 0, 0);
+    if (hour < 13 && slot.getUTCDay() !== 0) {
+      // schedule today @ 16:00 IST (well before any rider-side cut-off)
+      slot.setUTCHours(16, 0, 0, 0);
     } else {
-      // next working day @ 14:00 IST
       slot.setUTCDate(slot.getUTCDate() + 1);
       while (slot.getUTCDay() === 0) {
         slot.setUTCDate(slot.getUTCDate() + 1);
       }
-      slot.setUTCHours(14, 0, 0, 0);
+      slot.setUTCHours(11, 0, 0, 0);
     }
 
     const yyyy = slot.getUTCFullYear();
@@ -566,6 +573,9 @@ export class ShippingService {
       awbNumber?: string;
       weight?: number;
       dimensions?: string;
+      pickupDate?: string;
+      pickupTime?: string;
+      expectedPackageCount?: number;
     },
   ) {
     const seller = await this.getSellerProfile(userId);
@@ -650,7 +660,13 @@ export class ShippingService {
     order: any,
     seller: any,
     shippingMode: ShippingMode,
-    dto: { weight?: number; dimensions?: string },
+    dto: {
+      weight?: number;
+      dimensions?: string;
+      pickupDate?: string;
+      pickupTime?: string;
+      expectedPackageCount?: number;
+    },
   ) {
     let provider = this.providers.get(shippingMode);
     if (!provider) {
@@ -793,47 +809,55 @@ export class ShippingService {
     // PICKUP_SCHEDULED vs just BOOKED. We must NOT set it from a stub /
     // fallback date when there's a real carrier in play — otherwise we'd
     // tell the seller "Pickup Scheduled" while Delhivery's dashboard
-    // shows nothing under "Ready For Pickup" (exactly the bug we just
-    // saw with AWB 47919210000140).
+    // shows nothing under "Ready For Pickup" (exactly the bug we saw
+    // when we used to silently auto-schedule the pickup with a heuristic
+    // slot that frequently fell after Delhivery's same-day cutoff).
+    //
+    // Per the Delhivery B2B doc flow
+    // (https://one.delhivery.com/developer-portal/documents/b2b/) the
+    // shipment manifest and the pickup request are TWO separate API
+    // calls — and the seller must own the pickup slot because it has to
+    // line up with their warehouse staffing and Delhivery's ~2 PM
+    // same-day cutoff. So we now ONLY call the pickup-request API when
+    // the seller explicitly supplies pickupDate (+ optional pickupTime).
+    // Otherwise the shipment lands at status BOOKED and the seller
+    // schedules pickup separately from the order details panel.
     let pickupAt: Date | undefined = result.pickupScheduledAt;
+    let scheduledPickupRef: string | undefined;
+    let pickupSchedulingNote: string | undefined;
 
-    // Auto-schedule pickup with the live carrier so the seller never has to
-    // log in to Delhivery One (or any partner dashboard) just to book a
-    // rider. We only treat the shipment as PICKUP_SCHEDULED if the real
-    // carrier returns a pickup_id — otherwise we keep it as BOOKED and
-    // surface the carrier's reason in the status history.
-    let autoPickupRef: string | undefined;
-    let autoPickupNote: string | undefined;
-    if (provider.schedulePickup && courierConfig) {
-      const nextSlot = this.computeNextPickupSlot();
+    const sellerWantsPickupNow = Boolean(dto.pickupDate && dto.pickupDate.trim());
+
+    if (sellerWantsPickupNow && provider.schedulePickup && courierConfig) {
+      const requestedTime = (dto.pickupTime && dto.pickupTime.trim()) || '14:00:00';
       try {
         const pickupRes = await provider.schedulePickup(
           courierConfig as SellerCourierConfig,
           {
             pickupLocation: courierConfig.warehouseId || '',
-            expectedPackageCount: 1,
-            pickupDate: nextSlot.date,
-            pickupTime: nextSlot.time,
+            expectedPackageCount: Math.max(1, dto.expectedPackageCount || 1),
+            pickupDate: dto.pickupDate as string,
+            pickupTime: requestedTime,
           },
         );
         if (pickupRes.success) {
           pickupAt = pickupRes.scheduledFor
             ? new Date(pickupRes.scheduledFor)
-            : new Date(`${nextSlot.date}T${nextSlot.time}+05:30`);
-          autoPickupRef = pickupRes.pickupId;
+            : new Date(`${dto.pickupDate}T${requestedTime}+05:30`);
+          scheduledPickupRef = pickupRes.pickupId;
           this.logger.log(
-            `Auto pickup scheduled for ${result.awbNumber}: ${pickupAt.toISOString()} (ref ${pickupRes.pickupId || '—'})`,
+            `Pickup scheduled for ${result.awbNumber}: ${pickupAt.toISOString()} (ref ${pickupRes.pickupId || '—'})`,
           );
         } else {
-          autoPickupNote = pickupRes.message;
+          pickupSchedulingNote = pickupRes.message;
           this.logger.warn(
-            `Auto pickup scheduling failed for ${result.awbNumber}: ${pickupRes.message}`,
+            `Pickup scheduling failed for ${result.awbNumber}: ${pickupRes.message}`,
           );
         }
       } catch (pickupErr) {
         const msg = pickupErr instanceof Error ? pickupErr.message : String(pickupErr);
-        autoPickupNote = msg;
-        this.logger.warn(`Auto pickup scheduling threw for ${result.awbNumber}: ${msg}`);
+        pickupSchedulingNote = msg;
+        this.logger.warn(`Pickup scheduling threw for ${result.awbNumber}: ${msg}`);
       }
     } else if (provider === this.xelnovaCourier) {
       // Pure stub mode (no real carrier configured) — the stub computes
@@ -845,9 +869,11 @@ export class ShippingService {
     let bookRemark = `Shipment booked via ${carrierLine}`;
     if (pickupAt) {
       bookRemark += `. Pickup scheduled: ${pickupAt.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' })}`;
-      if (autoPickupRef) bookRemark += ` (ref ${autoPickupRef})`;
-    } else if (autoPickupNote) {
-      bookRemark += `. Pickup NOT scheduled with carrier: ${autoPickupNote}. Use "Schedule Pickup" once the issue is resolved.`;
+      if (scheduledPickupRef) bookRemark += ` (ref ${scheduledPickupRef})`;
+    } else if (pickupSchedulingNote) {
+      bookRemark += `. Pickup NOT scheduled with carrier: ${pickupSchedulingNote}. Use "Schedule Pickup" from the order details to retry.`;
+    } else if (!sellerWantsPickupNow && provider !== this.xelnovaCourier) {
+      bookRemark += `. Pickup not scheduled yet — use "Schedule Pickup" from the order details to send a rider.`;
     }
 
     // Create shipment record
@@ -874,16 +900,16 @@ export class ShippingService {
                 timestamp: bookedAtIso,
                 remark:
                   `Pickup scheduled for ${pickupAt.toISOString()}` +
-                  (autoPickupRef ? ` (ref ${autoPickupRef})` : ''),
+                  (scheduledPickupRef ? ` (ref ${scheduledPickupRef})` : ''),
               },
             ]
-          : autoPickupNote
+          : pickupSchedulingNote
             ? [
                 { status: 'BOOKED', timestamp: bookedAtIso, remark: bookRemark },
                 {
                   status: 'BOOKED',
                   timestamp: bookedAtIso,
-                  remark: `Carrier rejected pickup auto-schedule — please retry: ${autoPickupNote}`,
+                  remark: `Carrier rejected pickup request — please retry from "Schedule Pickup": ${pickupSchedulingNote}`,
                 },
               ]
             : [
@@ -910,7 +936,26 @@ export class ShippingService {
         this.logger.warn(`Failed to send shipped notification for ${order.orderNumber}: ${err.message}`),
       );
 
-    return shipment;
+    // Spread the shipment row so the seller UI keeps working unchanged
+    // (it reads awbNumber / trackingUrl / courierProvider directly), and
+    // attach a `pickup` summary so the "Shipment Created" screen can
+    // tell the seller whether the carrier accepted the pickup request.
+    return {
+      ...shipment,
+      pickup: {
+        requested: Boolean(dto.pickupDate?.trim()),
+        scheduled: Boolean(pickupAt),
+        scheduledFor: pickupAt ? pickupAt.toISOString() : null,
+        pickupId: scheduledPickupRef ?? null,
+        message: pickupAt
+          ? 'Pickup scheduled with the carrier.'
+          : pickupSchedulingNote
+            ? `Carrier rejected the pickup request: ${pickupSchedulingNote}`
+            : dto.pickupDate?.trim()
+              ? 'Pickup not scheduled.'
+              : 'No pickup requested at booking time. Use "Schedule Pickup" to send a rider.',
+      },
+    };
   }
 
   // ─── Manual AWB Update (Self-Ship) ───
