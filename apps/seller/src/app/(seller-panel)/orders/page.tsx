@@ -1016,9 +1016,9 @@ function OrderDetail({
       {/* AWB Update Modal */}
       <Modal open={awbModal} onClose={() => setAwbModal(false)} title="Update AWB Number" size="md">
         <div className="space-y-4">
-          <Input label="AWB Number *" value={awbNumber} onChange={(e) => setAwbNumber(e.target.value)} placeholder="Enter AWB / tracking number" />
-          <Input label="Carrier Name" value={awbCarrier} onChange={(e) => setAwbCarrier(e.target.value)} placeholder="e.g. BlueDart, DTDC" />
-          <Input label="Tracking URL" value={awbTrackingUrl} onChange={(e) => setAwbTrackingUrl(e.target.value)} placeholder="https://..." />
+          <Input stackedLabel label="AWB Number *" value={awbNumber} onChange={(e) => setAwbNumber(e.target.value)} placeholder="Enter AWB / tracking number" />
+          <Input stackedLabel label="Carrier Name" value={awbCarrier} onChange={(e) => setAwbCarrier(e.target.value)} placeholder="e.g. BlueDart, DTDC" />
+          <Input stackedLabel label="Tracking URL" value={awbTrackingUrl} onChange={(e) => setAwbTrackingUrl(e.target.value)} placeholder="https://..." />
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={() => setAwbModal(false)}>Cancel</Button>
             <Button onClick={handleUpdateAwb}>Update AWB</Button>
@@ -1055,6 +1055,7 @@ function OrderDetail({
             </div>
           </div>
           <Input
+            stackedLabel
             label="Number of packages"
             type="number"
             min={1}
@@ -1087,8 +1088,8 @@ function OrderDetail({
               ))}
             </select>
           </div>
-          <Input label="Location" value={selfShipLocation} onChange={(e) => setSelfShipLocation(e.target.value)} placeholder="e.g. Mumbai Hub" />
-          <Input label="Remark" value={selfShipRemark} onChange={(e) => setSelfShipRemark(e.target.value)} placeholder="Optional note" />
+          <Input stackedLabel label="Location" value={selfShipLocation} onChange={(e) => setSelfShipLocation(e.target.value)} placeholder="e.g. Mumbai Hub" />
+          <Input stackedLabel label="Remark" value={selfShipRemark} onChange={(e) => setSelfShipRemark(e.target.value)} placeholder="Optional note" />
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={() => setSelfShipStatusModal(false)}>Cancel</Button>
             <Button onClick={handleUpdateSelfShipStatus}>Update Status</Button>
@@ -1704,6 +1705,7 @@ function ShipOrderModal({
             </div>
 
             <Input
+              stackedLabel
               label="Package Weight (kg)"
               type="number"
               value={weight}
@@ -1712,6 +1714,7 @@ function ShipOrderModal({
               icon={<Weight size={14} />}
             />
             <Input
+              stackedLabel
               label="Dimensions L × B × H (cm)"
               value={dimensions}
               onChange={(e) => setDimensions(e.target.value)}
@@ -1750,12 +1753,14 @@ function ShipOrderModal({
               </p>
             </div>
             <Input
+              stackedLabel
               label="Carrier Name"
               value={carrierName}
               onChange={(e) => setCarrierName(e.target.value)}
               placeholder="e.g. BlueDart, DTDC, India Post"
             />
             <Input
+              stackedLabel
               label="AWB / Tracking Number"
               value={awbNumber}
               onChange={(e) => setAwbNumber(e.target.value)}
@@ -1812,6 +1817,7 @@ function ShipOrderModal({
 
             <div>
               <Input
+                stackedLabel
                 label="Pickup phone number"
                 value={pickupPhone}
                 onChange={(e) => {
