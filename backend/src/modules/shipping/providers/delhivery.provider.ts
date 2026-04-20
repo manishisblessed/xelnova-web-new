@@ -512,12 +512,22 @@ export class DelhiveryProvider implements CourierProvider {
       };
     }
 
-    const body = {
+    const body: Record<string, unknown> = {
       pickup_location: options.pickupLocation || config.warehouseId || '',
       expected_package_count: Math.max(1, options.expectedPackageCount || 1),
       pickup_date: options.pickupDate,
       pickup_time: pickupTime,
     };
+
+    // Delhivery's /fm/request/new/ accepts a `packages` array of waybill
+    // strings. When present, the manifested orders matching those waybills
+    // move from "Ready to Ship" → "Ready for Pickup" on Delhivery One,
+    // which ensures the pickup agent's run-sheet includes the specific
+    // shipments. Without this, the pickup request is warehouse-level and
+    // orders sit in "Ready to Ship" even though a pickup slot exists.
+    if (options.waybills?.length) {
+      body.packages = options.waybills;
+    }
 
     if (!body.pickup_location) {
       return {
