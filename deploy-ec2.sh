@@ -1,107 +1,169 @@
 #!/bin/bash
+# ─────────────────────────────────────────────────────────────────────────────
+# Xelnova EC2 deploy script (single-directory layout).
+#
+# Assumes the repo lives at  ~/xelnova-web-new  on the box and pm2 already has
+# the four processes running:  xelnova-api, xelnova-seller, xelnova-web,
+# xelnova-admin. Runs everything in-place (no separate ~/backend directory).
+#
+# Usage:   bash deploy-ec2.sh                 # deploy everything
+#          bash deploy-ec2.sh backend         # backend only
+#          bash deploy-ec2.sh seller          # seller app only
+#          bash deploy-ec2.sh web             # customer web app only
+#          bash deploy-ec2.sh admin           # admin app only
+# ─────────────────────────────────────────────────────────────────────────────
 set -e
 
-echo "=== Updating backend .env with production URLs ==="
-cd ~/backend
+REPO_ROOT="$HOME/xelnova-web-new"
+BACKEND_DIR="$REPO_ROOT/backend"
+TARGET="${1:-all}"
 
-# Update URLs to production
-sed -i 's|GOOGLE_CALLBACK_URL="http://localhost:4000/api/v1/auth/google/callback"|GOOGLE_CALLBACK_URL="https://api.xelnova.in/api/v1/auth/google/callback"|' .env
-sed -i 's|FRONTEND_URL="http://localhost:3000"|FRONTEND_URL="https://xelnova.in"|' .env
-sed -i 's|SELLER_URL="http://localhost:3003"|SELLER_URL="https://seller.xelnova.in"|' .env
-sed -i 's|ADMIN_URL="http://localhost:3002"|ADMIN_URL="https://admin.xelnova.in"|' .env
-sed -i 's|APP_URL="http://localhost:3000"|APP_URL="https://xelnova.in"|' .env
-sed -i 's|CORS_ORIGINS="http://localhost:3000,http://localhost:3002,http://localhost:3003"|CORS_ORIGINS="https://xelnova.in,https://www.xelnova.in,https://seller.xelnova.in,https://admin.xelnova.in"|' .env
-
-# Razorpay — ensure keys are present (TEST keys only for safety)
-grep -q '^RAZORPAY_KEY_ID=' .env || echo 'RAZORPAY_KEY_ID="rzp_test_SYXLNzHZjBIdRu"' >> .env
-grep -q '^RAZORPAY_KEY_SECRET=' .env || echo 'RAZORPAY_KEY_SECRET="36rdANPPAZTBZskZawfsT2M7"' >> .env
-grep -q '^RAZORPAY_WEBHOOK_SECRET=' .env || echo 'RAZORPAY_WEBHOOK_SECRET=""' >> .env
-
-# Safety check: warn if live Razorpay keys are detected
-if grep -q 'rzp_live_' .env; then
-  echo ""
-  echo "⚠️  WARNING: LIVE Razorpay keys detected in .env!"
-  echo "⚠️  Real money will be charged to customers."
-  echo "⚠️  If this is not intended, replace with test keys (rzp_test_...)."
-  echo ""
+if [ ! -d "$REPO_ROOT" ]; then
+  echo "ERROR: $REPO_ROOT does not exist. Clone the repo there first."
+  exit 1
 fi
 
-# Fortius SMS — verify keys are set for OTP delivery
-if ! grep -q '^FORTIUS_API_KEY=.\+' .env; then
+# Resolve the backend pm2 process name (we used to rename xelnova-api →
+# xelnova-backend; honour whichever one is actually online so the script
+# stays idempotent).
+detect_backend_pm2() {
+  if pm2 describe xelnova-backend > /dev/null 2>&1; then
+    echo "xelnova-backend"
+  elif pm2 describe xelnova-api > /dev/null 2>&1; then
+    echo "xelnova-api"
+  else
+    echo ""
+  fi
+}
+
+ensure_backend_env() {
+  local env_file="$BACKEND_DIR/.env"
+  if [ ! -f "$env_file" ]; then
+    echo "WARNING: $env_file is missing — the backend will not boot."
+    echo "         Create it manually with the production secrets, then re-run."
+    return
+  fi
+
+  # Force production URLs (idempotent — only rewrites localhost lines).
+  sed -i 's|GOOGLE_CALLBACK_URL="http://localhost:4000/api/v1/auth/google/callback"|GOOGLE_CALLBACK_URL="https://api.xelnova.in/api/v1/auth/google/callback"|' "$env_file"
+  sed -i 's|FRONTEND_URL="http://localhost:3000"|FRONTEND_URL="https://xelnova.in"|' "$env_file"
+  sed -i 's|SELLER_URL="http://localhost:3003"|SELLER_URL="https://seller.xelnova.in"|' "$env_file"
+  sed -i 's|ADMIN_URL="http://localhost:3002"|ADMIN_URL="https://admin.xelnova.in"|' "$env_file"
+  sed -i 's|APP_URL="http://localhost:3000"|APP_URL="https://xelnova.in"|' "$env_file"
+  sed -i 's|CORS_ORIGINS="http://localhost:3000,http://localhost:3002,http://localhost:3003"|CORS_ORIGINS="https://xelnova.in,https://www.xelnova.in,https://seller.xelnova.in,https://admin.xelnova.in"|' "$env_file"
+
+  # NODE_ENV must be production for prisma/Nest defaults.
+  grep -q '^NODE_ENV=' "$env_file" || echo 'NODE_ENV=production' >> "$env_file"
+
+  # Razorpay — keep test keys present so checkout never silently 500s.
+  grep -q '^RAZORPAY_KEY_ID='        "$env_file" || echo 'RAZORPAY_KEY_ID="rzp_test_SYXLNzHZjBIdRu"' >> "$env_file"
+  grep -q '^RAZORPAY_KEY_SECRET='    "$env_file" || echo 'RAZORPAY_KEY_SECRET="36rdANPPAZTBZskZawfsT2M7"' >> "$env_file"
+  grep -q '^RAZORPAY_WEBHOOK_SECRET=' "$env_file" || echo 'RAZORPAY_WEBHOOK_SECRET=""' >> "$env_file"
+
+  if grep -q 'rzp_live_' "$env_file"; then
+    echo ""
+    echo "WARNING: LIVE Razorpay keys detected — real money will be charged."
+    echo ""
+  fi
+
+  if ! grep -q '^FORTIUS_API_KEY=.\+' "$env_file"; then
+    echo ""
+    echo "WARNING: FORTIUS_API_KEY missing — OTP SMS will NOT be delivered."
+    echo ""
+  fi
+
+  grep -q '^CLOUDINARY_URL=' "$env_file" || echo 'CLOUDINARY_URL=cloudinary://635444549461982:4QTXNyUtKGn9MBDcsqpw_YKhxe4@dgulzkcnq' >> "$env_file"
+  grep -q '^RECAPTCHA_SITE_KEY='   "$env_file" || echo 'RECAPTCHA_SITE_KEY="6Lc4s5osAAAAAOi73vFTn5BLso8XKxXidIoDPiTm"' >> "$env_file"
+  grep -q '^RECAPTCHA_PROJECT_ID=' "$env_file" || echo 'RECAPTCHA_PROJECT_ID="xelnova-1774475911864"' >> "$env_file"
+  grep -q '^RECAPTCHA_API_KEY='    "$env_file" || echo "WARNING: RECAPTCHA_API_KEY not found in .env — set it manually"
+}
+
+deploy_backend() {
+  local pm2_name
+  pm2_name="$(detect_backend_pm2)"
+
+  echo "=== Backend ==="
+  ensure_backend_env
+
+  echo "Building backend (in place)..."
+  cd "$BACKEND_DIR"
+  npx prisma generate
+  npm run build
+
+  if [ -z "$pm2_name" ]; then
+    echo "No existing backend pm2 process; starting fresh as xelnova-api..."
+    pm2 start dist/src/main.js --name xelnova-api --update-env --cwd "$BACKEND_DIR"
+    pm2_name="xelnova-api"
+  else
+    echo "Restarting $pm2_name..."
+    pm2 restart "$pm2_name" --update-env
+  fi
+
+  pm2 save
+  sleep 3
+  pm2 logs "$pm2_name" --lines 15 --nostream
+}
+
+deploy_seller() {
   echo ""
-  echo "⚠️  WARNING: FORTIUS_API_KEY is not set! OTP SMS will NOT be delivered."
-  echo "⚠️  Set FORTIUS_API_KEY in ~/backend/.env for OTP to work."
-  echo ""
-fi
-
-# Cloudinary — ensure CLOUDINARY_URL is present
-grep -q '^CLOUDINARY_URL=' .env || echo 'CLOUDINARY_URL=cloudinary://635444549461982:4QTXNyUtKGn9MBDcsqpw_YKhxe4@dgulzkcnq' >> .env
-
-# reCAPTCHA Enterprise — site key is public, secret/API keys are set manually in ~/backend/.env
-grep -q '^RECAPTCHA_SITE_KEY=' .env || echo 'RECAPTCHA_SITE_KEY="6Lc4s5osAAAAAOi73vFTn5BLso8XKxXidIoDPiTm"' >> .env
-grep -q '^RECAPTCHA_PROJECT_ID=' .env || echo 'RECAPTCHA_PROJECT_ID="xelnova-1774475911864"' >> .env
-grep -q '^RECAPTCHA_API_KEY=' .env || { echo "WARNING: RECAPTCHA_API_KEY not found in .env — set it manually"; }
-
-echo "Building backend..."
-cd ~/xelnova-web-new/backend
-npx prisma generate
-npm run build 2>&1 | tail -5
-
-echo "Syncing backend dist and schema..."
-rsync -av --delete ~/xelnova-web-new/backend/dist/ ~/backend/dist/ > /dev/null
-cp ~/xelnova-web-new/backend/package.json ~/backend/package.json
-cp ~/xelnova-web-new/backend/prisma/schema.prisma ~/backend/prisma/schema.prisma
-cp ~/xelnova-web-new/backend/prisma.config.ts ~/backend/prisma.config.ts 2>/dev/null
-
-echo "Installing deps & generating Prisma client in production dir..."
-cd ~/backend
-npm install --omit=dev 2>&1 | tail -3
-npx prisma generate 2>&1 | tail -3
-
-echo "Ensuring NODE_ENV=production..."
-grep -q '^NODE_ENV=' .env || echo 'NODE_ENV=production' >> .env
-
-echo "Restarting backend (cwd=~/backend)..."
-# Single listener on 4000: remove BOTH legacy names, kill stale bind, then start once (avoids EADDRINUSE)
-pm2 delete xelnova-api xelnova-backend 2>/dev/null || true
-sleep 1
-sudo fuser -k 4000/tcp 2>/dev/null || true
-sleep 2
-cd ~/backend
-# Direct node entrypoint avoids npm workspace resolution issues; dotenv loads ~/backend/.env via cwd
-pm2 start dist/src/main.js --name xelnova-backend --update-env
-sleep 4
-pm2 save
-pm2 logs xelnova-backend --lines 12 --nostream
-
-echo ""
-echo "=== Building seller app ==="
-cd ~/xelnova-web-new/apps/seller
-cat > .env.local << 'ENVEOF'
+  echo "=== Seller app ==="
+  cd "$REPO_ROOT/apps/seller"
+  cat > .env.local << 'ENVEOF'
 NEXT_PUBLIC_API_URL=https://api.xelnova.in/api/v1
 NEXT_PUBLIC_GOOGLE_CLIENT_ID=435713810993-9c2c2j1nh7hcm374mruihfuf4807fuat.apps.googleusercontent.com
 NEXT_PUBLIC_RECAPTCHA_SITE_KEY=6Lc4s5osAAAAAOi73vFTn5BLso8XKxXidIoDPiTm
 ENVEOF
-npm run build 2>&1 | tail -15
+  npm run build
+  pm2 describe xelnova-seller > /dev/null 2>&1 \
+    && pm2 restart xelnova-seller --update-env \
+    || pm2 start npm --name xelnova-seller --cwd "$REPO_ROOT/apps/seller" -- run start
+  pm2 save
+}
 
-echo ""
-echo "=== Starting seller app ==="
-pm2 describe xelnova-seller > /dev/null 2>&1 && pm2 restart xelnova-seller || pm2 start npm --name xelnova-seller -- run start
-
-echo ""
-echo "=== Building web app ==="
-cd ~/xelnova-web-new/apps/web
-cat > .env.local << 'ENVEOF'
+deploy_web() {
+  echo ""
+  echo "=== Customer web app ==="
+  cd "$REPO_ROOT/apps/web"
+  cat > .env.local << 'ENVEOF'
 NEXT_PUBLIC_API_URL=https://api.xelnova.in/api/v1
 NEXT_PUBLIC_GOOGLE_CLIENT_ID=435713810993-9c2c2j1nh7hcm374mruihfuf4807fuat.apps.googleusercontent.com
 ENVEOF
-npm run build 2>&1 | tail -15
+  npm run build
+  pm2 describe xelnova-web > /dev/null 2>&1 \
+    && pm2 restart xelnova-web --update-env \
+    || pm2 start npm --name xelnova-web --cwd "$REPO_ROOT/apps/web" -- run start
+  pm2 save
+}
+
+deploy_admin() {
+  echo ""
+  echo "=== Admin app ==="
+  cd "$REPO_ROOT/apps/admin"
+  npm run build
+  pm2 describe xelnova-admin > /dev/null 2>&1 \
+    && pm2 restart xelnova-admin --update-env \
+    || pm2 start npm --name xelnova-admin --cwd "$REPO_ROOT/apps/admin" -- run start
+  pm2 save
+}
+
+case "$TARGET" in
+  backend)  deploy_backend ;;
+  seller)   deploy_seller ;;
+  web)      deploy_web ;;
+  admin)    deploy_admin ;;
+  all)
+    deploy_backend
+    deploy_seller
+    deploy_web
+    deploy_admin
+    ;;
+  *)
+    echo "Unknown target: $TARGET"
+    echo "Usage: bash deploy-ec2.sh [all|backend|seller|web|admin]"
+    exit 1
+    ;;
+esac
 
 echo ""
-echo "=== Starting web app ==="
-pm2 describe xelnova-web > /dev/null 2>&1 && pm2 restart xelnova-web || pm2 start npm --name xelnova-web -- run start
-
-echo ""
-pm2 save
-echo "=== All done! ==="
+echo "=== Done ==="
 pm2 list
