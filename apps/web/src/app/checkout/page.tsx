@@ -13,6 +13,7 @@ import {
 import { cn, priceInclusiveOfGst } from "@xelnova/utils";
 import { formatCurrency } from "@xelnova/utils";
 import { useAuth, ordersApi, usersApi, paymentApi, cartApi, setAccessToken, walletApi } from "@xelnova/api";
+import { isAxiosError } from "axios";
 import { useCartStore } from "@/lib/store/cart-store";
 import { lookupPincode } from "@/lib/store/location-store";
 import { INDIAN_STATES } from "@/lib/indian-states";
@@ -26,6 +27,11 @@ declare global {
 function hasAuthCookie(): boolean {
   if (typeof document === "undefined") return false;
   return /(?:^|;\s*)xelnova-token=/.test(document.cookie);
+}
+
+/** True if the error is an HTTP 401 from the API (stale / invalid session). */
+function isUnauthorized(err: unknown): boolean {
+  return isAxiosError(err) && err.response?.status === 401;
 }
 
 type PaymentChoice = "razorpay" | "wallet";
@@ -680,6 +686,13 @@ export default function CheckoutPage() {
     setOrderError("");
     syncToken();
 
+    const goToLogin = (msg: string) => {
+      setOrderError(msg);
+      setTimeout(() => {
+        router.replace(`/login?redirect=${encodeURIComponent(pathname)}`);
+      }, 1200);
+    };
+
     try {
       const order = await ordersApi.createOrder({
         items: items.map((item) => ({
@@ -720,6 +733,10 @@ export default function CheckoutPage() {
       } catch (payErr: unknown) {
         const msg = payErr instanceof Error ? payErr.message : "";
         console.error("Payment order creation failed:", payErr);
+        if (isUnauthorized(payErr)) {
+          goToLogin("Your session has expired. Redirecting to sign in…");
+          return;
+        }
         if (msg.toLowerCase().includes("not configured")) {
           throw new Error("Payment gateway is not configured. Please contact support.");
         }
@@ -734,6 +751,10 @@ export default function CheckoutPage() {
       setOrderPlaced(true);
       clearCart();
     } catch (err) {
+      if (isUnauthorized(err)) {
+        goToLogin("Your session has expired. Redirecting to sign in…");
+        return;
+      }
       setOrderError(err instanceof Error ? err.message : "Failed to place order. Please try again.");
     } finally {
       setPlacingOrder(false);

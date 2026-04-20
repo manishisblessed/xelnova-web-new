@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import { authApi } from "@xelnova/api";
 
-const COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
+const COOKIE_MAX_AGE = 60 * 60 * 24 * 90;
 
 const benefits = [
   { icon: ShoppingBag, text: "Discover thousands of quality products" },

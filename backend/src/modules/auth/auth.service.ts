@@ -776,13 +776,55 @@ export class AuthService {
     return result;
   }
 
+  /**
+   * Persist a refresh-token row whose lifetime mirrors the JWT itself
+   * (`JWT_REFRESH_EXPIRES_IN`, default `90d`).
+   *
+   * Previously this was hard-coded to 7 days while the signed JWT was valid
+   * for 90 days, so users were silently logged out every week — `/auth/refresh`
+   * returned 401 (`Invalid or expired refresh token`) once the DB row expired,
+   * which then cascaded into 401s on every other authenticated call (wallet,
+   * notifications, orders, checkout/Pay Now, etc.).
+   */
   private async saveRefreshToken(userId: string, token: string) {
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 7);
+    const ttl = this.configService.get<string>('JWT_REFRESH_EXPIRES_IN', '90d');
+    const ttlMs = AuthService.parseDurationToMs(ttl);
+    const expiresAt = new Date(Date.now() + ttlMs);
 
     await this.prisma.refreshToken.create({
       data: { token, userId, expiresAt },
     });
+  }
+
+  /**
+   * Convert a `jsonwebtoken`-style duration string ("7d", "12h", "30m", "60s",
+   * raw milliseconds, etc.) to milliseconds. Falls back to 90 days if the
+   * value can't be parsed so we never accidentally save a session shorter than
+   * the signed JWT.
+   */
+  private static parseDurationToMs(value: string | number): number {
+    const NINETY_DAYS_MS = 90 * 24 * 60 * 60 * 1000;
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value !== 'string') return NINETY_DAYS_MS;
+
+    const trimmed = value.trim();
+    if (/^\d+$/.test(trimmed)) return Number(trimmed);
+
+    const match = /^(\d+)\s*(ms|s|m|h|d|w|y)$/i.exec(trimmed);
+    if (!match) return NINETY_DAYS_MS;
+
+    const amount = Number(match[1]);
+    const unit = match[2].toLowerCase();
+    const unitMs: Record<string, number> = {
+      ms: 1,
+      s: 1000,
+      m: 60_000,
+      h: 60 * 60_000,
+      d: 24 * 60 * 60_000,
+      w: 7 * 24 * 60 * 60_000,
+      y: 365 * 24 * 60 * 60_000,
+    };
+    return amount * (unitMs[unit] ?? 0) || NINETY_DAYS_MS;
   }
 
   async forgotPassword(email: string) {

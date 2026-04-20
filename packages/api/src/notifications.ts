@@ -11,13 +11,26 @@ function extractErrorMessage(error: unknown, fallback: string): string {
   return fallback;
 }
 
+const EMPTY_NOTIFICATIONS = (page: number, limit: number) => ({
+  notifications: [],
+  unread: 0,
+  pagination: { page, limit, total: 0, totalPages: 0 },
+});
+
 export async function getNotifications(page = 1, limit = 20) {
   try {
     const { data } = await api.get('/notifications', { params: { page, limit } });
     return data.data;
   } catch (error) {
+    // 401 just means we're not signed in (or the session lapsed). The header
+    // polls this endpoint every 30s, so logging it would flood the console
+    // with `[getNotifications] Invalid or expired token`. Stay quiet for that
+    // case — louder errors (network, 5xx, etc.) still surface.
+    if (error instanceof AxiosError && error.response?.status === 401) {
+      return EMPTY_NOTIFICATIONS(page, limit);
+    }
     console.error('[getNotifications]', extractErrorMessage(error, 'Failed to fetch notifications'));
-    return { notifications: [], unread: 0, pagination: { page, limit, total: 0, totalPages: 0 } };
+    return EMPTY_NOTIFICATIONS(page, limit);
   }
 }
 

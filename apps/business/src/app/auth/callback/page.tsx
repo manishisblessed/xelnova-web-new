@@ -5,6 +5,8 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { Loader2, CheckCircle, XCircle } from 'lucide-react';
 
+const COOKIE_MAX_AGE = 60 * 60 * 24 * 90;
+
 function AuthCallbackContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -25,8 +27,8 @@ function AuthCallbackContent() {
     }
 
     if (token && refreshToken) {
-      document.cookie = `xelnova-token=${token}; path=/; max-age=${60 * 60 * 24 * 7}`;
-      document.cookie = `xelnova-refresh-token=${refreshToken}; path=/; max-age=${60 * 60 * 24 * 7}`;
+      document.cookie = `xelnova-token=${token}; path=/; max-age=${COOKIE_MAX_AGE}`;
+      document.cookie = `xelnova-refresh-token=${refreshToken}; path=/; max-age=${COOKIE_MAX_AGE}`;
       
       setStatus('success');
       setMessage(isNewUser ? 'Account created successfully!' : 'Welcome back!');
