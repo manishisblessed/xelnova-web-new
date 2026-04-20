@@ -537,34 +537,80 @@ export class DelhiveryProvider implements CourierProvider {
       };
     }
 
-    this.logger.log(
-      `Delhivery pickup request: ${JSON.stringify(body)} → POST ${base}/fm/request/new/`,
-    );
-
-    let res: Response;
-    try {
-      res = await fetch(`${base}/fm/request/new/`, {
+    const doPickupRequest = async (): Promise<{
+      res: Response;
+      text: string;
+      parsed: any;
+    }> => {
+      this.logger.log(
+        `Delhivery pickup request: ${JSON.stringify(body)} → POST ${base}/fm/request/new/`,
+      );
+      const r = await fetch(`${base}/fm/request/new/`, {
         method: 'POST',
         headers: this.authHeaders(config),
         body: JSON.stringify(body),
       });
+      const t = await r.text();
+      let p: any = null;
+      try { p = t ? JSON.parse(t) : null; } catch { /* noop */ }
+      this.logger.log(
+        `Delhivery pickup response: HTTP ${r.status} → ${t.slice(0, 500)}`,
+      );
+      return { res: r, text: t, parsed: p };
+    };
+
+    let res: Response;
+    let text: string;
+    let parsed: any;
+
+    try {
+      ({ res, text, parsed } = await doPickupRequest());
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.error(`Delhivery pickup request transport error: ${message}`);
       return { success: false, message: `Pickup request failed: ${message}` };
     }
 
-    const text = await res.text();
-    let parsed: any = null;
-    try {
-      parsed = text ? JSON.parse(text) : null;
-    } catch {
-      parsed = null;
-    }
+    // Delhivery returns `pr_exist: true` with error code 669 when a
+    // pickup request already exists for this warehouse + date but has
+    // no packages associated. In that case cancel the stale pickup and
+    // retry so manifested orders get linked to the fresh request.
+    if (
+      parsed?.pr_exist === true &&
+      parsed?.pickup_id &&
+      parsed?.success === false
+    ) {
+      const staleId = parsed.pickup_id;
+      this.logger.warn(
+        `Delhivery: stale pickup ${staleId} exists with no packages. Cancelling and retrying…`,
+      );
 
-    this.logger.log(
-      `Delhivery pickup response: HTTP ${res.status} → ${text.slice(0, 500)}`,
-    );
+      try {
+        const cancelRes = await fetch(`${base}/fm/request/new/`, {
+          method: 'DELETE',
+          headers: this.authHeaders(config),
+          body: JSON.stringify({ pickup_id: staleId }),
+        });
+        const cancelText = await cancelRes.text();
+        this.logger.log(
+          `Delhivery cancel stale pickup ${staleId}: HTTP ${cancelRes.status} → ${cancelText.slice(0, 300)}`,
+        );
+      } catch (cancelErr) {
+        this.logger.warn(
+          `Failed to cancel stale pickup ${staleId}: ${cancelErr instanceof Error ? cancelErr.message : String(cancelErr)}`,
+        );
+      }
+
+      // Retry the pickup request after a short delay
+      await new Promise((r) => setTimeout(r, 1000));
+      try {
+        ({ res, text, parsed } = await doPickupRequest());
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.error(`Delhivery pickup retry transport error: ${message}`);
+        return { success: false, message: `Pickup request failed on retry: ${message}` };
+      }
+    }
 
     if (!res.ok) {
       this.logger.warn(
@@ -582,14 +628,33 @@ export class DelhiveryProvider implements CourierProvider {
       };
     }
 
-    // Delhivery returns 200 even for some errors. The hallmark of a
-    // successful pickup request is a numeric `pickup_id` in the body.
     const pickupId =
       parsed?.pickup_id ??
       parsed?.PickupId ??
       parsed?.pr_id ??
       parsed?.id ??
       undefined;
+
+    // If Delhivery returned success=false explicitly (e.g. pr_exist
+    // again after retry, or some other rejection), don't pretend we
+    // succeeded just because a pickup_id was echoed back.
+    if (parsed?.success === false) {
+      const rawMsg =
+        parsed?.data?.message ||
+        parsed?.error?.message ||
+        parsed?.pr_log ||
+        parsed?.message ||
+        text.slice(0, 200);
+      this.logger.warn(
+        `Delhivery pickup explicitly failed: ${text.slice(0, 500)}`,
+      );
+      return {
+        success: false,
+        message: this.humanizePickupError(
+          rawMsg || 'Delhivery rejected the pickup request.',
+        ),
+      };
+    }
 
     if (pickupId == null || pickupId === '' || pickupId === 0) {
       const rawMsg = parsed?.pr_log || parsed?.message || parsed?.error || text.slice(0, 200);
