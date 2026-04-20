@@ -133,7 +133,7 @@ export class LabelGeneratorService {
     const sellerItems = order.items.filter((item) => sellerProductIds.includes(item.productId));
 
     const settings = await this.loadLabelConfig();
-    const logistics = settings.logisticsName || 'Xelnova Logistics';
+    const logistics = settings.logisticsName || 'Xelgo';
     const prepaid = order.paymentStatus === 'PAID' || (order.paymentMethod || '').toUpperCase() === 'WALLET';
 
     const pdf = await PDFDocument.create();
@@ -558,7 +558,7 @@ export class LabelGeneratorService {
       footerText: 'Thank you for shopping with us!',
       showSellerSignature: true,
       showBarcode: true,
-      logisticsName: 'Xelnova Logistics',
+      logisticsName: 'Xelgo',
     };
 
     const row = await this.prisma.siteSettings.findUnique({ where: { id: 1 } });
