@@ -77,6 +77,14 @@ export default function CheckoutPage() {
   const [formErrors, setFormErrors] = useState<Partial<typeof EMPTY_FORM>>({});
   const [orderPlaced, setOrderPlaced] = useState(false);
   const [orderNumber, setOrderNumber] = useState("");
+
+  // When the order is placed, jump the viewport back to the top so the
+  // confirmation card is the first thing the buyer sees instead of being
+  // hidden below whatever they'd scrolled past on the checkout form.
+  useEffect(() => {
+    if (!orderPlaced || typeof window === "undefined") return;
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }, [orderPlaced]);
   const [placingOrder, setPlacingOrder] = useState(false);
   const [orderError, setOrderError] = useState("");
   const [pincodeLooking, setPincodeLooking] = useState(false);
