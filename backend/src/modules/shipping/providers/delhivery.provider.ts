@@ -572,44 +572,21 @@ export class DelhiveryProvider implements CourierProvider {
     }
 
     // Delhivery returns `pr_exist: true` with error code 669 when a
-    // pickup request already exists for this warehouse + date but has
-    // no packages associated. In that case cancel the stale pickup and
-    // retry so manifested orders get linked to the fresh request.
-    if (
-      parsed?.pr_exist === true &&
-      parsed?.pickup_id &&
-      parsed?.success === false
-    ) {
-      const staleId = parsed.pickup_id;
-      this.logger.warn(
-        `Delhivery: stale pickup ${staleId} exists with no packages. Cancelling and retrying…`,
+    // pickup request already exists for this warehouse + date. The
+    // existing pickup_id is still valid — the agent WILL come. Treat
+    // this as success rather than blocking the seller.
+    if (parsed?.pr_exist === true && parsed?.pickup_id) {
+      const existingId = parsed.pickup_id;
+      this.logger.log(
+        `Delhivery: pickup ${existingId} already exists for this warehouse + date. Treating as success.`,
       );
-
-      try {
-        const cancelRes = await fetch(`${base}/fm/request/new/`, {
-          method: 'DELETE',
-          headers: this.authHeaders(config),
-          body: JSON.stringify({ pickup_id: staleId }),
-        });
-        const cancelText = await cancelRes.text();
-        this.logger.log(
-          `Delhivery cancel stale pickup ${staleId}: HTTP ${cancelRes.status} → ${cancelText.slice(0, 300)}`,
-        );
-      } catch (cancelErr) {
-        this.logger.warn(
-          `Failed to cancel stale pickup ${staleId}: ${cancelErr instanceof Error ? cancelErr.message : String(cancelErr)}`,
-        );
-      }
-
-      // Retry the pickup request after a short delay
-      await new Promise((r) => setTimeout(r, 1000));
-      try {
-        ({ res, text, parsed } = await doPickupRequest());
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        this.logger.error(`Delhivery pickup retry transport error: ${message}`);
-        return { success: false, message: `Pickup request failed on retry: ${message}` };
-      }
+      const scheduledFor = `${options.pickupDate}T${pickupTime}+05:30`;
+      return {
+        success: true,
+        message: `Pickup already scheduled (ref ${existingId}). The Delhivery agent will collect all manifested packages from this warehouse.`,
+        pickupId: String(existingId),
+        scheduledFor,
+      };
     }
 
     if (!res.ok) {
@@ -635,10 +612,11 @@ export class DelhiveryProvider implements CourierProvider {
       parsed?.id ??
       undefined;
 
-    // If Delhivery returned success=false explicitly (e.g. pr_exist
-    // again after retry, or some other rejection), don't pretend we
-    // succeeded just because a pickup_id was echoed back.
-    if (parsed?.success === false) {
+    // Delhivery can return HTTP 200/201 with success=false for genuine
+    // rejections (wrong warehouse name, cutoff, etc.). But ONLY treat
+    // it as failure if there's no pickup_id — some responses include
+    // both success=false and a valid pickup_id (e.g. code 669).
+    if (parsed?.success === false && (pickupId == null || pickupId === '' || pickupId === 0)) {
       const rawMsg =
         parsed?.data?.message ||
         parsed?.error?.message ||
