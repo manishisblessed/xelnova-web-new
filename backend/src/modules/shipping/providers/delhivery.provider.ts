@@ -942,21 +942,35 @@ export class DelhiveryProvider implements CourierProvider {
 
     // Delhivery sometimes returns "some error while creating/updating warehouse"
     // when the warehouse name already exists but with different details. If the
-    // response includes the warehouse name we requested, treat it as success —
-    // the warehouse exists on Delhivery and can be used for pickups.
+    // response includes the warehouse name we requested, try to UPDATE the
+    // existing warehouse with the new address details via the edit endpoint.
     if (
       lower.includes('error while creating/updating warehouse') &&
       xml?.name &&
       xml.name.toLowerCase() === options.name.toLowerCase()
     ) {
       this.logger.log(
-        `Delhivery warehouse "${options.name}" appears to already exist (got name back in error response) — treating as success.`,
+        `Delhivery warehouse "${options.name}" already exists — attempting to update address via edit endpoint.`,
+      );
+      const editResult = await this.editWarehouse(config, options);
+      if (editResult.success) {
+        return {
+          success: true,
+          alreadyExisted: true,
+          registeredName: xml.name,
+          message: `Warehouse "${xml.name}" updated on Delhivery with new address.`,
+          raw: editResult.raw,
+        };
+      }
+      // Edit failed — log but still treat as usable since warehouse exists
+      this.logger.warn(
+        `Delhivery warehouse edit failed: ${editResult.message} — warehouse exists but address may be outdated.`,
       );
       return {
         success: true,
         alreadyExisted: true,
         registeredName: xml.name,
-        message: `Warehouse "${xml.name}" already exists on Delhivery — reusing it.`,
+        message: `Warehouse "${xml.name}" exists on Delhivery (address update failed: ${editResult.message}).`,
         raw: parsed ?? xml ?? text,
       };
     }
@@ -968,6 +982,107 @@ export class DelhiveryProvider implements CourierProvider {
     return {
       success: false,
       message: this.humaniseWarehouseError(errMsg),
+      raw: parsed ?? xml ?? text,
+    };
+  }
+
+  /**
+   * Update an existing warehouse on Delhivery with new address details.
+   * Called when registerWarehouse detects the warehouse already exists
+   * but with different address information.
+   */
+  private async editWarehouse(
+    config: SellerCourierConfig,
+    options: RegisterWarehouseOptions,
+  ): Promise<{ success: boolean; message: string; raw?: unknown }> {
+    const base = this.getBaseUrl(config);
+    const phone = this.normalizePhone(options.phone);
+
+    const body: Record<string, unknown> = {
+      name: options.name,
+      phone,
+      address: options.address,
+      city: options.city,
+      state: options.state,
+      country: options.country || 'India',
+      pin: options.pincode,
+      registered_name: options.registeredName || options.name,
+      contact_person: options.contactPerson || options.registeredName || options.name,
+      email: options.email || '',
+      return_address: options.returnAddress?.trim() || options.address,
+      return_pin: options.returnPincode?.trim() || options.pincode,
+      return_city: options.returnCity?.trim() || options.city,
+      return_state: options.returnState?.trim() || options.state,
+      return_country: options.returnCountry?.trim() || options.country || 'India',
+    };
+
+    this.logger.log(
+      `Delhivery edit warehouse: ${JSON.stringify({ ...body, phone: '••••' + phone.slice(-4) })} → POST ${base}/api/backend/clientwarehouse/edit/`,
+    );
+
+    let res: Response;
+    let text = '';
+    try {
+      res = await fetch(`${base}/api/backend/clientwarehouse/edit/`, {
+        method: 'POST',
+        headers: this.authHeaders(config),
+        body: JSON.stringify(body),
+      });
+      text = await res.text();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.error(`Delhivery warehouse edit transport error: ${msg}`);
+      return { success: false, message: `Warehouse edit failed: ${msg}` };
+    }
+
+    let parsed: any = null;
+    try { parsed = text ? JSON.parse(text) : null; } catch { /* noop */ }
+
+    const xml = !parsed ? this.extractDelhiveryWarehouseXml(text) : null;
+
+    this.logger.log(
+      `Delhivery warehouse edit response: HTTP ${res.status} → ${text.slice(0, 500)}`,
+    );
+
+    // Success cases
+    if (res.ok && parsed?.success === true) {
+      return {
+        success: true,
+        message: `Warehouse "${options.name}" updated successfully.`,
+        raw: parsed,
+      };
+    }
+
+    // XML success response
+    if (xml && /\b(updated|success|modified)\b/i.test(xml.message)) {
+      return {
+        success: true,
+        message: `Warehouse "${options.name}" updated successfully.`,
+        raw: { xml: text, parsed: xml },
+      };
+    }
+
+    // Check for "no changes" or similar which is still acceptable
+    const errMsg = (
+      parsed?.error ||
+      parsed?.message ||
+      xml?.message ||
+      text ||
+      `HTTP ${res.status}`
+    ).toString();
+    const lower = errMsg.toLowerCase();
+    if (lower.includes('no change') || lower.includes('already up to date')) {
+      return {
+        success: true,
+        message: `Warehouse "${options.name}" is already up to date.`,
+        raw: parsed ?? xml ?? text,
+      };
+    }
+
+    this.logger.warn(`Delhivery warehouse edit failed: ${res.status} ${text.slice(0, 300)}`);
+    return {
+      success: false,
+      message: errMsg.slice(0, 200),
       raw: parsed ?? xml ?? text,
     };
   }
