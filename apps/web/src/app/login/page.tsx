@@ -256,7 +256,7 @@ function LoginPageContent() {
         >
           <div className="flex flex-col items-center gap-4 p-8 rounded-2xl bg-white shadow-2xl border border-gray-100">
             <Image src="/xelnova-icon-dark.png" alt="Xelnova" width={64} height={64} className="w-16 h-16" />
-            <Loader2 size={32} className="animate-spin text-violet-600" />
+            <Loader2 size={32} className="animate-spin text-primary-600" />
             <p className="text-lg font-semibold text-gray-900">Signing you in...</p>
             <p className="text-sm text-gray-500">Please wait while we log you in with Google</p>
           </div>
@@ -264,12 +264,12 @@ function LoginPageContent() {
       )}
 
       {/* Left Panel - Branding */}
-      <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-violet-600 via-purple-600 to-indigo-700 relative overflow-hidden">
+      <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-primary-600 via-primary-700 to-primary-900 relative overflow-hidden">
         {/* Animated Background */}
         <div className="absolute inset-0">
           <div className="absolute top-20 left-20 w-64 h-64 bg-white/10 rounded-full blur-3xl animate-pulse" />
-          <div className="absolute bottom-20 right-20 w-80 h-80 bg-pink-500/20 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }} />
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '2s' }} />
+          <div className="absolute bottom-20 right-20 w-80 h-80 bg-accent-400/25 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }} />
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-primary-300/20 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '2s' }} />
         </div>
 
         <div className="relative z-10 flex flex-col justify-center px-10 xl:px-16 w-full">
@@ -352,7 +352,7 @@ function LoginPageContent() {
             {!otpSent ? (
                 <div className="space-y-5">
                   <div
-                    className="flex items-center rounded-xl border border-gray-200 bg-gray-50 overflow-hidden focus-within:border-violet-500 focus-within:ring-2 focus-within:ring-violet-500/20 transition-all"
+                    className="flex items-center rounded-xl border border-gray-200 bg-gray-50 overflow-hidden focus-within:border-primary-500 focus-within:ring-2 focus-within:ring-primary-500/20 transition-all"
                     role="group"
                     aria-label="Phone number"
                   >
@@ -374,7 +374,7 @@ function LoginPageContent() {
                   <button
                     onClick={handleSendOtp}
                     disabled={phone.length !== 10 || loading}
-                    className="w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-500 to-purple-600 py-3.5 text-sm font-semibold text-white hover:from-violet-600 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-violet-500/25"
+                    className="w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-primary-500 to-primary-700 py-3.5 text-sm font-semibold text-white hover:from-primary-600 hover:to-primary-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-primary-500/25"
                   >
                     {loading ? <Loader2 size={16} className="animate-spin" /> : <>Send OTP <ArrowRight size={16} /></>}
                   </button>
@@ -397,7 +397,7 @@ function LoginPageContent() {
                           onChange={(e) => handleOtpChange(i, e.target.value.replace(/\D/g, ''))}
                           onKeyDown={(e) => handleKeyDown(i, e)}
                           onPaste={handleOtpPaste}
-                          className="h-12 w-12 rounded-xl border border-gray-200 bg-gray-50 text-center text-lg font-bold text-gray-900 outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 transition-all"
+                          className="h-12 w-12 rounded-xl border border-gray-200 bg-gray-50 text-center text-lg font-bold text-gray-900 outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 transition-all"
                         />
                       ))}
                     </div>
@@ -405,12 +405,12 @@ function LoginPageContent() {
                   <button
                     onClick={handleVerifyOtp}
                     disabled={otp.some(d => !d) || loading}
-                    className="w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-500 to-purple-600 py-3.5 text-sm font-semibold text-white hover:from-violet-600 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-violet-500/25"
+                    className="w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-primary-500 to-primary-700 py-3.5 text-sm font-semibold text-white hover:from-primary-600 hover:to-primary-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-primary-500/25"
                   >
                     {loading ? <Loader2 size={16} className="animate-spin" /> : <>Verify & Sign In <ArrowRight size={16} /></>}
                   </button>
                   <div className="flex items-center justify-center gap-4 text-sm">
-                    <button onClick={() => setOtpSent(false)} className="text-violet-600 hover:text-violet-700 font-medium">
+                    <button onClick={() => setOtpSent(false)} className="text-primary-600 hover:text-primary-700 font-medium">
                       Change number
                     </button>
                     <span className="text-gray-300">|</span>
@@ -446,9 +446,9 @@ function LoginPageContent() {
                 {/* Google Sign-In */}
                 <div className="space-y-3">
                   {googleLoading ? (
-                    <div className="flex items-center justify-center gap-3 px-4 py-3.5 rounded-xl border border-violet-200 bg-violet-50">
-                      <Loader2 size={20} className="animate-spin text-violet-600" />
-                      <span className="text-sm font-medium text-violet-700">Signing you in with Google...</span>
+                    <div className="flex items-center justify-center gap-3 px-4 py-3.5 rounded-xl border border-primary-200 bg-primary-50">
+                      <Loader2 size={20} className="animate-spin text-primary-600" />
+                      <span className="text-sm font-medium text-primary-700">Signing you in with Google...</span>
                     </div>
                   ) : (
                     <div className="relative">
@@ -472,7 +472,7 @@ function LoginPageContent() {
 
                 <p className="mt-6 text-center text-sm text-gray-600">
                   New to Xelnova?{' '}
-                  <Link href="/register" className="text-violet-600 hover:text-violet-700 font-semibold">
+                  <Link href="/register" className="text-primary-600 hover:text-primary-700 font-semibold">
                     Create an account
                   </Link>
                 </p>
@@ -489,7 +489,7 @@ function LoginPageContent() {
 function LoginFallback() {
   return (
     <div className="min-h-screen flex">
-      <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-violet-600 via-purple-600 to-indigo-700" />
+      <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-primary-600 via-primary-700 to-primary-900" />
       <div className="flex-1 flex items-center justify-center bg-white px-4 py-12">
         <div className="w-full max-w-md">
           <div className="animate-pulse space-y-6">

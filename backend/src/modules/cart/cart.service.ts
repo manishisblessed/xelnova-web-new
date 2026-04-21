@@ -5,6 +5,7 @@ import {
   resolveVariantCompareAtPrice,
   resolveVariantPrice,
 } from '../../common/helpers/variant-price';
+import { gstAmountFromInclusive } from '@xelnova/utils';
 
 @Injectable()
 export class CartService {
@@ -56,18 +57,22 @@ export class CartService {
       };
     });
 
+    // `item.price` is GST-inclusive (the seller-typed value). Subtotal/total
+    // are the inclusive amounts the customer pays; `tax` is the GST component
+    // already inside subtotal — surfaced for the breakdown only, NOT added on top.
     const subtotal = cartItems.reduce(
       (sum, item) => sum + item.price * item.quantity,
       0,
     );
     const { shipping, freeShippingMin } = await this.getShippingRate(subtotal);
     const tax = Math.round(
-      cartItems.reduce((sum, item) => {
-        const lineTotal = item.price * item.quantity;
-        return sum + lineTotal * ((item.gstRate ?? 18) / 100);
-      }, 0),
+      cartItems.reduce(
+        (sum, item) =>
+          sum + gstAmountFromInclusive(item.price, item.gstRate ?? null) * item.quantity,
+        0,
+      ),
     );
-    const total = subtotal + shipping + tax;
+    const total = subtotal + shipping;
 
     return {
       items: cartItems,
@@ -237,16 +242,18 @@ export class CartService {
       discount = Math.min(coupon.discountValue, eligibleSubtotal);
     }
 
+    // Subtotal is GST-inclusive (see getCart). `tax` is the GST portion
+    // already inside the discounted subtotal — kept for the breakdown only.
     const subtotal = cart.summary.subtotal;
     const { shipping } = await this.getShippingRate(subtotal);
     const discountRatio = subtotal > 0 ? (subtotal - discount) / subtotal : 1;
     const tax = Math.round(
       cart.items.reduce((sum: number, item: any) => {
-        const lineTotal = item.price * item.quantity * discountRatio;
-        return sum + lineTotal * ((item.gstRate ?? 18) / 100);
+        const lineGst = gstAmountFromInclusive(item.price, item.gstRate ?? null) * item.quantity;
+        return sum + lineGst * discountRatio;
       }, 0),
     );
-    const total = subtotal - discount + shipping + tax;
+    const total = subtotal - discount + shipping;
 
     return {
       ...cart,

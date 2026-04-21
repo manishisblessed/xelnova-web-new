@@ -18,8 +18,6 @@ import {
 import { Prisma, ProductStatus } from '@prisma/client';
 import { AdminService } from '../admin/admin.service';
 import type { ProductAttributePresetsPayload } from '../admin/default-product-attribute-presets';
-import { DEFAULT_GST_PERCENT, priceExclusiveFromInclusive } from '@xelnova/utils';
-
 /**
  * Validate the `variants` JSON payload from the seller.
  * Expected shape per group:
@@ -848,13 +846,6 @@ export class SellerDashboardService {
     try { return JSON.parse(val); } catch { return null; }
   }
 
-  /** CSV `price` / `compareAtPrice` are GST-inclusive; aligns with seller inventory form. */
-  private gstPercentForBulkRow(gstField: string | undefined): number {
-    if (!gstField?.trim()) return DEFAULT_GST_PERCENT;
-    const n = parseFloat(gstField);
-    return Number.isFinite(n) && n >= 0 ? n : DEFAULT_GST_PERCENT;
-  }
-
   async bulkUploadProducts(userId: string, rows: Record<string, string>[]) {
     const seller = await this.getSellerProfile(userId);
     const returnPolicy = await this.adminService.getMarketplaceReturnPolicy();
@@ -868,23 +859,23 @@ export class SellerDashboardService {
           continue;
         }
 
-        const priceIncl = parseFloat(r.price);
-        if (isNaN(priceIncl) || priceIncl < 0) {
+        // Pricing contract: CSV `price` is the GST-inclusive selling price
+        // (same as the inventory form). It is stored as-is — the buyer sees
+        // exactly this number and the invoice derives taxable + tax from it.
+        const price = parseFloat(r.price);
+        if (isNaN(price) || price < 0) {
           results.push({ row: i + 1, status: 'error', message: 'Invalid price' });
           continue;
         }
 
-        const gstSave = this.gstPercentForBulkRow(r.gstRate);
-        const price = priceExclusiveFromInclusive(priceIncl, gstSave);
-
         let compareAtPrice: number | null = null;
         if (r.compareAtPrice != null && String(r.compareAtPrice).trim() !== '') {
-          const compareIncl = parseFloat(String(r.compareAtPrice));
-          if (isNaN(compareIncl) || compareIncl < 0) {
+          const cmp = parseFloat(String(r.compareAtPrice));
+          if (isNaN(cmp) || cmp < 0) {
             results.push({ row: i + 1, status: 'error', message: 'Invalid compareAtPrice' });
             continue;
           }
-          compareAtPrice = priceExclusiveFromInclusive(compareIncl, gstSave);
+          compareAtPrice = cmp;
         }
 
         const baseSlug = this.slugify(r.name);

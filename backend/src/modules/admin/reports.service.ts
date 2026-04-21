@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { gstAmountFromInclusive } from '@xelnova/utils';
 
 interface ReportQuery {
   dateFrom?: string;
@@ -44,8 +45,11 @@ export class ReportsService {
     for (const order of orders) {
       for (const item of order.items) {
         const gstRate = item.product?.gstRate ?? 18;
-        const taxableValue = item.price * item.quantity;
-        const gstAmount = taxableValue * (gstRate / (100 + gstRate));
+        // `item.price` is GST-inclusive (Apr 2026 contract). Derive the
+        // taxable value and tax components for the report.
+        const inclusiveLine = item.price * item.quantity;
+        const gstAmount = gstAmountFromInclusive(inclusiveLine, gstRate);
+        const taxableValue = inclusiveLine - gstAmount;
         const cgst = gstAmount / 2;
         const sgst = gstAmount / 2;
 
@@ -57,13 +61,13 @@ export class ReportsService {
           hsnCode: item.product?.hsnCode || '',
           quantity: item.quantity,
           unitPrice: item.price,
-          taxableValue,
+          taxableValue: Math.round(taxableValue * 100) / 100,
           gstRate,
           cgst: Math.round(cgst * 100) / 100,
           sgst: Math.round(sgst * 100) / 100,
           igst: 0,
           totalGst: Math.round(gstAmount * 100) / 100,
-          totalAmount: taxableValue,
+          totalAmount: inclusiveLine,
         });
       }
     }

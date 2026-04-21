@@ -161,7 +161,7 @@ export default function BulkUploadPage() {
               ))}
             </div>
             <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
-              <strong>Notes:</strong> Only <code>name</code>, <code>price</code>, and <code>categoryId</code> are required. <strong>price</strong> and <strong>compareAtPrice</strong> must be the amounts customers see — <strong>inclusive of GST</strong> (same as the inventory form). Set <code>gstRate</code> per row when it is not 18%; if omitted, 18% is used for the conversion to stored amounts. SKU is auto-generated for every product. Use pipe (<code>|</code>) for multi-value fields. JSON fields use <code>{`{"key":"value"}`}</code> format. Return/cancellation policy is not per-row — it is configured by admin for the whole marketplace.
+              <strong>Notes:</strong> Only <code>name</code>, <code>price</code>, and <code>categoryId</code> are required. <strong>price</strong> and <strong>compareAtPrice</strong> are the amounts customers see — they are stored exactly as entered (no conversion). <code>gstRate</code> is recorded per product for invoice/tax reporting only and does not change the displayed price. SKU is auto-generated for every product. Use pipe (<code>|</code>) for multi-value fields. JSON fields use <code>{`{"key":"value"}`}</code> format. Return/cancellation policy is not per-row — it is configured by admin for the whole marketplace.
             </div>
           </motion.div>
         )}

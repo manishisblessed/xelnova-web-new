@@ -4,6 +4,7 @@ import { PDFDocument, rgb, StandardFonts, PDFPage, PDFFont } from 'pdf-lib';
 import * as bwipjs from 'bwip-js';
 import * as QRCode from 'qrcode';
 import { ShippingService } from './shipping.service';
+import { gstAmountFromInclusive } from '@xelnova/utils';
 
 interface ShippingLabelConfig {
   companyName: string;
@@ -441,12 +442,13 @@ export class LabelGeneratorService {
       const itemPrice = toNum(item.price);
       const itemQty = toNum(item.quantity);
       const gstRate = toNum(item.gstRate) || 18;
+      // `item.price` is GST-inclusive — back-out taxable + IGST for the columns.
       const grossAmount = itemPrice * itemQty;
       const itemDiscount = grossAmount * discRatio;
-      const taxableValue = grossAmount - itemDiscount;
-      const igst = taxableValue * (gstRate / 100);
+      const lineTot = grossAmount - itemDiscount;
+      const igst = gstAmountFromInclusive(lineTot, gstRate);
+      const taxableValue = lineTot - igst;
       const cess = 0;
-      const lineTot = taxableValue + igst + cess;
       totalQty += itemQty;
       running += lineTot;
 

@@ -190,7 +190,7 @@ export default function HomePage() {
       {/* ─── 4. CATEGORIES ─── */}
       <section className="py-5">
         <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
-          <div className="relative panel-glass py-7 px-4 sm:px-6 transition-all duration-500 hover:shadow-[0_24px_56px_-14px_rgba(124,58,237,0.22)]">
+          <div className="relative panel-glass py-7 px-4 sm:px-6 transition-all duration-500 hover:shadow-[0_24px_56px_-14px_rgba(12,131,31,0.22)]">
             {/* Decorative background shapes */}
             <div className="absolute inset-0 overflow-hidden rounded-[1.25rem] pointer-events-none">
               <div className="absolute -top-10 -left-10 w-40 h-40 bg-gradient-to-br from-primary-200/30 to-transparent rounded-full blur-2xl" />

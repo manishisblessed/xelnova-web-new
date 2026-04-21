@@ -84,7 +84,7 @@ export function StoreAbout({ store }: StoreAboutProps) {
                 ) : (
                   <div 
                     className="w-full h-full flex items-center justify-center text-2xl font-bold text-white"
-                    style={{ backgroundColor: store.storeThemeColor || '#7c3aed' }}
+                    style={{ backgroundColor: store.storeThemeColor || '#0c831f' }}
                   >
                     {store.storeName.charAt(0).toUpperCase()}
                   </div>

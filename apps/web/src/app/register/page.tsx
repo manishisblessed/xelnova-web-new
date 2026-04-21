@@ -75,7 +75,7 @@ export default function RegisterPage() {
   return (
     <div className="min-h-screen flex relative">
       {/* Left Panel — Branding */}
-      <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-violet-600 via-purple-600 to-indigo-700 relative overflow-hidden">
+      <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-primary-600 via-primary-700 to-primary-900 relative overflow-hidden">
         <div className="absolute inset-0">
           <div className="absolute top-20 left-20 w-64 h-64 bg-white/10 rounded-full blur-3xl animate-pulse" />
           <div className="absolute bottom-20 right-20 w-80 h-80 bg-pink-500/20 rounded-full blur-3xl animate-pulse" style={{ animationDelay: "1s" }} />
@@ -172,7 +172,7 @@ export default function RegisterPage() {
                     onChange={(e) => handleChange("name", e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && canSubmit && handleRegister()}
                     placeholder="Enter your full name"
-                    className="w-full pl-11 pr-4 py-3.5 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 outline-none transition-all text-gray-900 placeholder:text-gray-400"
+                    className="w-full pl-11 pr-4 py-3.5 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none transition-all text-gray-900 placeholder:text-gray-400"
                   />
                 </div>
               </div>
@@ -182,7 +182,7 @@ export default function RegisterPage() {
                 <label htmlFor="reg-phone" className="block text-sm font-medium text-gray-700 mb-2">
                   Phone Number <span className="text-gray-400 font-normal">(optional)</span>
                 </label>
-                <div className="flex items-center rounded-xl border border-gray-200 bg-gray-50 overflow-hidden focus-within:border-violet-500 focus-within:ring-2 focus-within:ring-violet-500/20 transition-all">
+                <div className="flex items-center rounded-xl border border-gray-200 bg-gray-50 overflow-hidden focus-within:border-primary-500 focus-within:ring-2 focus-within:ring-primary-500/20 transition-all">
                   <span className="px-4 py-3.5 text-sm text-gray-600 border-r border-gray-200 bg-gray-100">+91</span>
                   <input
                     id="reg-phone"
@@ -212,7 +212,7 @@ export default function RegisterPage() {
                     onChange={(e) => handleChange("email", e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && canSubmit && handleRegister()}
                     placeholder="you@example.com"
-                    className="w-full pl-11 pr-4 py-3.5 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 outline-none transition-all text-gray-900 placeholder:text-gray-400"
+                    className="w-full pl-11 pr-4 py-3.5 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none transition-all text-gray-900 placeholder:text-gray-400"
                   />
                 </div>
               </div>
@@ -231,7 +231,7 @@ export default function RegisterPage() {
                     onChange={(e) => handleChange("password", e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && canSubmit && handleRegister()}
                     placeholder="Create a password"
-                    className="w-full pl-11 pr-12 py-3.5 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 outline-none transition-all text-gray-900 placeholder:text-gray-400"
+                    className="w-full pl-11 pr-12 py-3.5 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none transition-all text-gray-900 placeholder:text-gray-400"
                   />
                   <button
                     type="button"
@@ -251,12 +251,12 @@ export default function RegisterPage() {
                   type="checkbox"
                   checked={agreed}
                   onChange={(e) => setAgreed(e.target.checked)}
-                  className="mt-0.5 w-4 h-4 rounded border-gray-300 text-violet-500 focus:ring-violet-500"
+                  className="mt-0.5 w-4 h-4 rounded border-gray-300 text-primary-500 focus:ring-primary-500"
                 />
                 <label htmlFor="reg-agree" className="text-xs text-gray-600 leading-relaxed cursor-pointer">
                   I agree to Xelnova&apos;s{" "}
-                  <Link href="/terms" className="text-violet-600 hover:text-violet-700 font-medium">Terms of Use</Link> and{" "}
-                  <Link href="/privacy" className="text-violet-600 hover:text-violet-700 font-medium">Privacy Policy</Link>
+                  <Link href="/terms" className="text-primary-600 hover:text-primary-700 font-medium">Terms of Use</Link> and{" "}
+                  <Link href="/privacy" className="text-primary-600 hover:text-primary-700 font-medium">Privacy Policy</Link>
                 </label>
               </div>
 
@@ -264,7 +264,7 @@ export default function RegisterPage() {
               <button
                 onClick={handleRegister}
                 disabled={!canSubmit}
-                className="w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-500 to-purple-600 py-3.5 text-sm font-semibold text-white hover:from-violet-600 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-violet-500/25"
+                className="w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-primary-500 to-primary-700 py-3.5 text-sm font-semibold text-white hover:from-primary-600 hover:to-primary-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-primary-500/25"
               >
                 {loading ? <Loader2 size={16} className="animate-spin" /> : <>Create Account <ArrowRight size={16} /></>}
               </button>
@@ -282,7 +282,7 @@ export default function RegisterPage() {
 
             <p className="text-center text-sm text-gray-600">
               Already have an account?{" "}
-              <Link href="/login" className="text-violet-600 hover:text-violet-700 font-semibold">Sign in</Link>
+              <Link href="/login" className="text-primary-600 hover:text-primary-700 font-semibold">Sign in</Link>
             </p>
           </div>
         </motion.div>

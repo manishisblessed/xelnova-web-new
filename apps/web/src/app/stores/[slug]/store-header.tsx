@@ -27,7 +27,7 @@ export function StoreHeader({ store }: StoreHeaderProps) {
               ) : (
                 <div 
                   className="w-full h-full flex items-center justify-center text-3xl sm:text-4xl font-bold text-white"
-                  style={{ backgroundColor: store.storeThemeColor || '#7c3aed' }}
+                  style={{ backgroundColor: store.storeThemeColor || '#0c831f' }}
                 >
                   {store.storeName.charAt(0).toUpperCase()}
                 </div>

@@ -9,6 +9,7 @@ import { WalletService } from '../wallet/wallet.service';
 import { PaymentService } from '../payment/payment.service';
 import { CreateOrderDto } from './dto/order.dto';
 import { resolveVariantPrice } from '../../common/helpers/variant-price';
+import { gstAmountFromInclusive } from '@xelnova/utils';
 
 import { OrderStatus } from '@prisma/client';
 
@@ -160,18 +161,21 @@ export class OrdersService {
       }),
     );
 
-    // GST-inclusive line totals — use the same per-item rounding as the storefront so the
-    // amount on the cart, on Razorpay and on the invoice match to the rupee.
-    const inclusiveLineTotals = orderItems.map((item) => {
-      const gstRate = item.gstRate ?? 18;
-      const inclusiveUnit = item.price + Math.round((item.price * gstRate) / 100);
-      return inclusiveUnit * item.quantity;
-    });
+    // Pricing contract (Apr 2026): `item.price` is already the GST-inclusive
+    // selling price (the seller-typed value). The line total a customer sees
+    // is just price × qty — no extra GST is added on top.
+    const inclusiveLineTotals = orderItems.map((item) => item.price * item.quantity);
     const inclusiveSubtotal = inclusiveLineTotals.reduce((s, n) => s + n, 0);
-    const subtotal = orderItems.reduce(
-      (sum, item) => sum + item.price * item.quantity,
+    // The GST portion is derived from the inclusive amount for the invoice
+    // and tax reports, so the customer total stays consistent.
+    const taxableSubtotal = orderItems.reduce(
+      (sum, item) =>
+        sum + (item.price - gstAmountFromInclusive(item.price, item.gstRate ?? null)) * item.quantity,
       0,
     );
+    // We persist the inclusive subtotal on the Order so total = subtotal − discount + shipping
+    // continues to balance on existing reports/UIs.
+    const subtotal = inclusiveSubtotal;
 
     let discount = 0;
     if (dto.couponCode) {
@@ -200,11 +204,12 @@ export class OrdersService {
 
     // Shipping eligibility uses the inclusive subtotal so it matches the storefront preview.
     const shipping = await this.getShippingRate(inclusiveSubtotal);
-    // Tax is the difference between inclusive total and exclusive subtotal — same number the
-    // invoice shows, no separate rounding pass needed.
-    const tax = inclusiveSubtotal - subtotal;
-    // The customer-facing total is the inclusive subtotal less any discount, plus shipping.
-    const total = inclusiveSubtotal - discount + shipping;
+    // Tax is the GST component already inside the inclusive prices — kept on
+    // the order purely so invoices/reports can show the breakdown without
+    // recomputing from items.
+    const tax = Math.round(inclusiveSubtotal - taxableSubtotal);
+    // Customer-facing total — `subtotal` is inclusive so don't add `tax` again.
+    const total = subtotal - discount + shipping;
 
     const orderNumber = `XN-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 999999)).padStart(6, '0')}`;
     const estimatedDelivery = new Date();

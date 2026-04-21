@@ -4,6 +4,7 @@ import { PDFDocument, rgb, StandardFonts, PDFPage, PDFFont } from 'pdf-lib';
 import * as QRCode from 'qrcode';
 import * as fs from 'fs';
 import * as path from 'path';
+import { gstAmountFromInclusive } from '@xelnova/utils';
 
 const A4_WIDTH = 595;
 const A4_HEIGHT = 842;
@@ -448,17 +449,16 @@ export class InvoiceService {
       const itemQty = toNum(item.quantity);
       const gstRate = toNum(item.gstRate) || 18;
 
-      // Gross amount on the invoice is now TAX-INCLUSIVE — mirrors what the customer sees in
-      // the cart and on Razorpay so they don't think tax is being added twice.
-      const inclusiveUnit = itemPrice + Math.round((itemPrice * gstRate) / 100);
-      const grossAmount = inclusiveUnit * itemQty;
+      // Pricing contract (Apr 2026): `item.price` is already GST-inclusive
+      // (the seller-typed value). Gross/total mirror the cart, and we
+      // back-out taxable/tax for the GST columns.
+      const inclusiveLine = itemPrice * itemQty;
+      const grossAmount = inclusiveLine;
 
-      // Apportion the order-level discount across items by (exclusive) value.
-      const exclusiveLine = itemPrice * itemQty;
-      const itemDiscount = exclusiveLine * discountRatio;
-      const taxableValue = exclusiveLine - itemDiscount;
-      const taxAmount = taxableValue * (gstRate / 100);
-      const itemTotal = taxableValue + taxAmount;
+      const itemDiscount = inclusiveLine * discountRatio;
+      const itemTotal = inclusiveLine - itemDiscount;
+      const taxAmount = gstAmountFromInclusive(itemTotal, gstRate);
+      const taxableValue = itemTotal - taxAmount;
 
       totalQty += itemQty;
       grandTotal += itemTotal;

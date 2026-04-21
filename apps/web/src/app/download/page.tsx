@@ -5,18 +5,18 @@ import { Smartphone, Star, Shield, Zap, Gift, ArrowLeft, Bell, ShoppingBag, Truc
 
 export default function DownloadPage() {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-violet-50 via-white to-purple-50">
+    <div className="min-h-screen bg-gradient-to-br from-primary-50 via-white to-accent-50">
       <div className="max-w-4xl mx-auto px-4 py-16">
         <Link
           href="/"
-          className="inline-flex items-center gap-2 text-sm text-gray-500 hover:text-violet-600 mb-8 transition-colors"
+          className="inline-flex items-center gap-2 text-sm text-gray-500 hover:text-primary-600 mb-8 transition-colors"
         >
           <ArrowLeft size={16} />
           Back to home
         </Link>
 
         <div className="text-center mb-12">
-          <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-gradient-to-r from-violet-500 to-purple-600 mb-6 shadow-lg shadow-violet-500/25">
+          <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-gradient-to-r from-primary-500 to-primary-700 mb-6 shadow-lg shadow-primary-500/25">
             <Smartphone className="w-10 h-10 text-white" />
           </div>
           <h1 className="text-4xl font-bold text-gray-900 mb-4">
@@ -29,7 +29,7 @@ export default function DownloadPage() {
 
         <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-8 mb-12">
           <div className="text-center py-12">
-            <div className="inline-flex items-center gap-2 px-6 py-3 rounded-full bg-violet-50 text-violet-700 font-medium mb-6">
+            <div className="inline-flex items-center gap-2 px-6 py-3 rounded-full bg-primary-50 text-primary-700 font-medium mb-6">
               <Bell size={18} />
               Coming Soon
             </div>
@@ -78,7 +78,7 @@ export default function DownloadPage() {
             { icon: Zap, title: 'Instant Support', desc: 'Get help instantly through in-app chat support' },
           ].map((feature) => (
             <div key={feature.title} className="bg-white rounded-xl border border-gray-100 p-6 hover:shadow-md transition-shadow">
-              <feature.icon className="w-8 h-8 text-violet-600 mb-3" />
+              <feature.icon className="w-8 h-8 text-primary-600 mb-3" />
               <h3 className="font-semibold text-gray-900 mb-1">{feature.title}</h3>
               <p className="text-sm text-gray-500">{feature.desc}</p>
             </div>
@@ -91,7 +91,7 @@ export default function DownloadPage() {
           </p>
           <Link
             href="/"
-            className="inline-flex items-center gap-2 mt-4 px-6 py-3 rounded-xl bg-violet-50 text-violet-700 font-medium hover:bg-violet-100 transition-colors"
+            className="inline-flex items-center gap-2 mt-4 px-6 py-3 rounded-xl bg-primary-50 text-primary-700 font-medium hover:bg-primary-100 transition-colors"
           >
             <ShoppingBag size={16} />
             Continue Shopping

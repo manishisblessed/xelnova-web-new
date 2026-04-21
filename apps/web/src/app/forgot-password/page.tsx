@@ -56,12 +56,12 @@ export default function ForgotPasswordPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-violet-50 via-white to-purple-50 px-4 py-12">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary-50 via-white to-accent-50 px-4 py-12">
       <div className="w-full max-w-md">
         <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-8">
           <Link
             href="/login"
-            className="inline-flex items-center gap-2 text-sm text-gray-500 hover:text-violet-600 mb-6 transition-colors"
+            className="inline-flex items-center gap-2 text-sm text-gray-500 hover:text-primary-600 mb-6 transition-colors"
           >
             <ArrowLeft size={16} />
             Back to login
@@ -93,7 +93,7 @@ export default function ForgotPasswordPage() {
                 <button
                   onClick={() => setMethod('phone')}
                   className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium transition-all ${
-                    method === 'phone' ? 'bg-white shadow text-violet-600' : 'text-gray-500 hover:text-gray-700'
+                    method === 'phone' ? 'bg-white shadow text-primary-600' : 'text-gray-500 hover:text-gray-700'
                   }`}
                 >
                   <Smartphone size={16} />
@@ -102,7 +102,7 @@ export default function ForgotPasswordPage() {
                 <button
                   onClick={() => setMethod('email')}
                   className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium transition-all ${
-                    method === 'email' ? 'bg-white shadow text-violet-600' : 'text-gray-500 hover:text-gray-700'
+                    method === 'email' ? 'bg-white shadow text-primary-600' : 'text-gray-500 hover:text-gray-700'
                   }`}
                 >
                   <Mail size={16} />
@@ -122,7 +122,7 @@ export default function ForgotPasswordPage() {
                       value={phone}
                       onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
                       placeholder="Enter 10-digit number"
-                      className="flex-1 px-4 py-3.5 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 outline-none text-gray-900 placeholder:text-gray-400"
+                      className="flex-1 px-4 py-3.5 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none text-gray-900 placeholder:text-gray-400"
                     />
                   </div>
                 </div>
@@ -136,7 +136,7 @@ export default function ForgotPasswordPage() {
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       placeholder="you@example.com"
-                      className="w-full pl-11 pr-4 py-3.5 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 outline-none text-gray-900 placeholder:text-gray-400"
+                      className="w-full pl-11 pr-4 py-3.5 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none text-gray-900 placeholder:text-gray-400"
                     />
                   </div>
                 </div>
@@ -145,7 +145,7 @@ export default function ForgotPasswordPage() {
               <button
                 onClick={handleSendOtp}
                 disabled={loading || (method === 'phone' ? phone.length !== 10 : !email)}
-                className="w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-500 to-purple-600 py-3.5 text-sm font-semibold text-white hover:from-violet-600 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-violet-500/25"
+                className="w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-primary-500 to-primary-700 py-3.5 text-sm font-semibold text-white hover:from-primary-600 hover:to-primary-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-primary-500/25"
               >
                 {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : (
                   <>
@@ -170,7 +170,7 @@ export default function ForgotPasswordPage() {
                       value={digit}
                       onChange={(e) => handleOtpChange(index, e.target.value)}
                       onKeyDown={(e) => handleOtpKeyDown(index, e)}
-                      className="w-12 h-14 text-center text-xl font-semibold rounded-xl border-2 border-gray-200 focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 outline-none transition-all"
+                      className="w-12 h-14 text-center text-xl font-semibold rounded-xl border-2 border-gray-200 focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none transition-all"
                     />
                   ))}
                 </div>
@@ -181,7 +181,7 @@ export default function ForgotPasswordPage() {
               </p>
 
               <div className="flex items-center justify-center gap-4 text-sm">
-                <button onClick={() => { setOtpSent(false); setOtp(['', '', '', '', '', '']); }} className="text-violet-600 hover:text-violet-700 font-medium">
+                <button onClick={() => { setOtpSent(false); setOtp(['', '', '', '', '', '']); }} className="text-primary-600 hover:text-primary-700 font-medium">
                   Change number
                 </button>
                 <span className="text-gray-300">|</span>

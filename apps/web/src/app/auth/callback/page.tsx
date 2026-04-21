@@ -44,7 +44,7 @@ function AuthCallbackContent() {
   }, [searchParams, router]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-violet-600 via-purple-600 to-indigo-700 flex items-center justify-center px-4">
+    <div className="min-h-screen bg-gradient-to-br from-primary-600 via-primary-700 to-primary-900 flex items-center justify-center px-4">
       <motion.div
         initial={{ opacity: 0, scale: 0.9 }}
         animate={{ opacity: 1, scale: 1 }}
@@ -52,7 +52,7 @@ function AuthCallbackContent() {
       >
         {status === 'loading' && (
           <>
-            <Loader2 size={48} className="mx-auto text-violet-500 animate-spin mb-4" />
+            <Loader2 size={48} className="mx-auto text-primary-500 animate-spin mb-4" />
             <h2 className="text-xl font-semibold text-gray-900 mb-2">Please wait</h2>
             <p className="text-gray-500">{message}</p>
           </>
@@ -94,9 +94,9 @@ function AuthCallbackContent() {
 
 function LoadingFallback() {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-violet-600 via-purple-600 to-indigo-700 flex items-center justify-center px-4">
+    <div className="min-h-screen bg-gradient-to-br from-primary-600 via-primary-700 to-primary-900 flex items-center justify-center px-4">
       <div className="bg-white rounded-3xl p-8 shadow-2xl max-w-md w-full text-center">
-        <Loader2 size={48} className="mx-auto text-violet-500 animate-spin mb-4" />
+        <Loader2 size={48} className="mx-auto text-primary-500 animate-spin mb-4" />
         <h2 className="text-xl font-semibold text-gray-900 mb-2">Please wait</h2>
         <p className="text-gray-500">Processing your login...</p>
       </div>

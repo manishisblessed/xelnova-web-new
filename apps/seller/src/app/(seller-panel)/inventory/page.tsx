@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useSearchParams } from 'next/navigation';
 import { motion, AnimatePresence, Reorder, useDragControls } from 'framer-motion';
 import { ImagePlus, Pencil, Plus, Trash2, X, Crown, Loader2, Layers, GripVertical, Upload, Camera, Ruler, Image as ImageIcon, Pause, Play, Search, ChevronLeft as ChevronLeftIcon, ChevronRight as ChevronRightIcon, ChevronDown } from 'lucide-react';
@@ -36,7 +37,6 @@ import {
   type FormVariantValue,
   type ProductImage,
   type SizeChartColumn,
-  type VariantGroupJson,
 } from '@/lib/product-variants';
 import {
   BUNDLED_PRODUCT_ATTRIBUTE_PRESETS,
@@ -47,53 +47,18 @@ import {
   type AttributePreset,
   type ProductAttributePresetsBundle,
 } from '@/lib/product-attribute-presets';
-import {
-  DEFAULT_GST_PERCENT,
-  priceExclusiveFromInclusive,
-  priceInclusiveOfGst,
-} from '@xelnova/utils';
+import { DEFAULT_GST_PERCENT } from '@xelnova/utils';
 
 const API_URL = publicApiBase();
 
-function gstPercentForForm(gstField: string): number {
-  const n = gstField.trim() ? Number(gstField) : DEFAULT_GST_PERCENT;
-  return Number.isFinite(n) && n >= 0 ? n : DEFAULT_GST_PERCENT;
-}
-
-function inclusiveCompareAtFromForm(formCompare: string, gstSave: number): number | undefined {
+// Pricing contract: the value typed by the seller IS the GST-inclusive price
+// stored in the database and shown to buyers everywhere. No conversion happens
+// at the form boundary — see `packages/utils/src/index.ts`.
+function compareAtFromForm(formCompare: string): number | undefined {
   if (!formCompare.trim()) return undefined;
   const n = Number(formCompare);
   if (Number.isNaN(n) || n < 0) return NaN;
-  return priceExclusiveFromInclusive(n, gstSave);
-}
-
-function variantRowsToInclusiveDisplay(rows: FormVariantRow[], gstRate: number): FormVariantRow[] {
-  return rows.map((r) => ({
-    ...r,
-    values: r.values.map((v) => ({
-      ...v,
-      price:
-        v.price.trim() !== ''
-          ? String(priceInclusiveOfGst(Number(v.price), gstRate))
-          : '',
-      compareAtPrice:
-        v.compareAtPrice.trim() !== ''
-          ? String(priceInclusiveOfGst(Number(v.compareAtPrice), gstRate))
-          : '',
-    })),
-  }));
-}
-
-function variantPayloadToExclusive(groups: VariantGroupJson[], gstRate: number): VariantGroupJson[] {
-  return groups.map((g) => ({
-    ...g,
-    options: g.options.map((o) => ({
-      ...o,
-      price: o.price != null ? priceExclusiveFromInclusive(o.price, gstRate) : o.price,
-      compareAtPrice:
-        o.compareAtPrice != null ? priceExclusiveFromInclusive(o.compareAtPrice, gstRate) : o.compareAtPrice,
-    })),
-  }));
+  return n;
 }
 
 interface CategoryNode {
@@ -106,8 +71,11 @@ interface SellerProduct {
   id: string;
   name: string;
   slug: string;
+  /** GST-inclusive selling price exactly as the seller entered it. Same value the buyer sees. */
   price: number;
   compareAtPrice?: number | null;
+  /** GST percent (e.g. 18). Used for invoice/tax reporting only — `price` is already inclusive. */
+  gstRate?: number | null;
   stock: number;
   status: string;
   images?: string[];
@@ -217,16 +185,54 @@ function DraftBanner({
  */
 function VariantsCell({ variants }: { variants: unknown }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement | null>(null);
+  const [coords, setCoords] = useState<{ top: number; left: number; placeAbove: boolean } | null>(null);
+  const btnRef = useRef<HTMLButtonElement | null>(null);
+  const popRef = useRef<HTMLDivElement | null>(null);
+
+  // Position the popover using fixed coordinates derived from the trigger button.
+  // Rendering into a portal + fixed positioning avoids the popover being clipped
+  // by the table's overflow container (which was visually disturbing the row).
+  const updatePosition = useCallback(() => {
+    const btn = btnRef.current;
+    if (!btn) return;
+    const rect = btn.getBoundingClientRect();
+    const POPOVER_WIDTH = 260;
+    const POPOVER_MAX_HEIGHT = 280;
+    const GAP = 6;
+    const viewportW = window.innerWidth;
+    const viewportH = window.innerHeight;
+
+    const spaceBelow = viewportH - rect.bottom;
+    const placeAbove = spaceBelow < POPOVER_MAX_HEIGHT && rect.top > spaceBelow;
+
+    let left = rect.left;
+    if (left + POPOVER_WIDTH > viewportW - 8) left = viewportW - POPOVER_WIDTH - 8;
+    if (left < 8) left = 8;
+
+    const top = placeAbove ? rect.top - GAP : rect.bottom + GAP;
+    setCoords({ top, left, placeAbove });
+  }, []);
 
   useEffect(() => {
     if (!open) return;
+    updatePosition();
+    const onScroll = () => updatePosition();
+    const onResize = () => updatePosition();
+    window.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', onResize);
     const onClick = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (btnRef.current?.contains(target)) return;
+      if (popRef.current?.contains(target)) return;
+      setOpen(false);
     };
     document.addEventListener('mousedown', onClick);
-    return () => document.removeEventListener('mousedown', onClick);
-  }, [open]);
+    return () => {
+      window.removeEventListener('scroll', onScroll, true);
+      window.removeEventListener('resize', onResize);
+      document.removeEventListener('mousedown', onClick);
+    };
+  }, [open, updatePosition]);
 
   if (!Array.isArray(variants) || variants.length === 0) {
     return <span className="text-text-muted">—</span>;
@@ -236,8 +242,9 @@ function VariantsCell({ variants }: { variants: unknown }) {
   const totalOptions = groups.reduce((sum, g) => sum + (g.options?.length ?? 0), 0);
 
   return (
-    <div ref={ref} className="relative inline-block">
+    <>
       <button
+        ref={btnRef}
         type="button"
         onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
         className="inline-flex items-center gap-1 rounded-full bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-700 hover:bg-primary-100 transition-colors"
@@ -247,39 +254,53 @@ function VariantsCell({ variants }: { variants: unknown }) {
         {totalOptions || groups.length}
         <ChevronDown className={`h-3 w-3 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
-      {open && (
-        <div className="absolute z-30 mt-1 min-w-[200px] max-w-[280px] rounded-xl border border-border bg-white p-2.5 shadow-lg">
-          <div className="space-y-2">
-            {groups.map((g, i) => (
-              <div key={i}>
-                <p className="text-[10px] font-bold uppercase tracking-wider text-text-muted mb-1">
-                  {g.label || g.type || `Group ${i + 1}`}
-                </p>
-                <div className="flex flex-wrap gap-1">
-                  {(g.options ?? []).map((opt, j) => (
-                    <span
-                      key={j}
-                      className="inline-flex items-center gap-1 rounded-md border border-border bg-surface-muted px-1.5 py-0.5 text-[11px] text-text-primary"
-                    >
-                      {opt.hex && (
-                        <span
-                          className="h-2.5 w-2.5 rounded-full border border-black/10"
-                          style={{ backgroundColor: opt.hex }}
-                        />
-                      )}
-                      {opt.label || '—'}
-                    </span>
-                  ))}
-                  {(!g.options || g.options.length === 0) && (
-                    <span className="text-[11px] text-text-muted">No options</span>
-                  )}
+      {open && coords && typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            ref={popRef}
+            style={{
+              position: 'fixed',
+              top: coords.top,
+              left: coords.left,
+              width: 260,
+              maxHeight: 280,
+              transform: coords.placeAbove ? 'translateY(-100%)' : undefined,
+              zIndex: 1000,
+            }}
+            className="overflow-y-auto rounded-xl border border-border bg-white p-2.5 shadow-lg"
+          >
+            <div className="space-y-2">
+              {groups.map((g, i) => (
+                <div key={i}>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-text-muted mb-1">
+                    {g.label || g.type || `Group ${i + 1}`}
+                  </p>
+                  <div className="flex flex-wrap gap-1">
+                    {(g.options ?? []).map((opt, j) => (
+                      <span
+                        key={j}
+                        className="inline-flex items-center gap-1 rounded-md border border-border bg-surface-muted px-1.5 py-0.5 text-[11px] text-text-primary"
+                      >
+                        {opt.hex && (
+                          <span
+                            className="h-2.5 w-2.5 rounded-full border border-black/10"
+                            style={{ backgroundColor: opt.hex }}
+                          />
+                        )}
+                        {opt.label || '—'}
+                      </span>
+                    ))}
+                    {(!g.options || g.options.length === 0) && (
+                      <span className="text-[11px] text-text-muted">No options</span>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
+              ))}
+            </div>
+          </div>,
+          document.body,
+        )}
+    </>
   );
 }
 
@@ -1471,18 +1492,15 @@ export default function SellerInventoryPage() {
         const full = fullUnknown as Record<string, unknown>;
         setFormName(String(full.name ?? p.name));
         setFormGstRate(full.gstRate != null ? String(full.gstRate) : '');
-        const gstNum = gstPercentForForm(full.gstRate != null ? String(full.gstRate) : '');
         const basePrice = Number(full.price ?? p.price);
         const baseCompare = full.compareAtPrice != null ? Number(full.compareAtPrice) : null;
-        setFormPrice(String(priceInclusiveOfGst(basePrice, gstNum)));
-        setFormCompare(baseCompare != null ? String(priceInclusiveOfGst(baseCompare, gstNum)) : '');
+        setFormPrice(String(basePrice));
+        setFormCompare(baseCompare != null ? String(baseCompare) : '');
         setFormStock(String(full.stock ?? p.stock));
         setFormCategoryId(String(full.categoryId ?? ''));
         setFormShort(String(full.shortDescription ?? ''));
         setFormImages(urlsToProductImages(full.images as string[] | undefined));
-        setFormVariantRows(
-          variantRowsToInclusiveDisplay(variantGroupsToFormRows(full.variants), gstNum),
-        );
+        setFormVariantRows(variantGroupsToFormRows(full.variants));
         setFormMetaTitle(String(full.metaTitle ?? ''));
         setFormMetaKeywords(splitMetaKeywords(String(full.metaTitle ?? '')));
         setFormMetaDesc(String(full.metaDescription ?? ''));
@@ -1772,7 +1790,6 @@ export default function SellerInventoryPage() {
       toast.error('Enter a valid price (inclusive of GST)');
       return;
     }
-    const gstSave = gstPercentForForm(formGstRate);
     if (Number.isNaN(Number(formGstRate)) || Number(formGstRate) < 0) {
       toast.error('Enter a valid GST rate');
       return;
@@ -1787,15 +1804,14 @@ export default function SellerInventoryPage() {
       toast.error('Add product information before submitting');
       return;
     }
-    const price = priceExclusiveFromInclusive(priceIncl, gstSave);
-    const compareAtPrice = inclusiveCompareAtFromForm(formCompare, gstSave);
+    const price = priceIncl;
+    const compareAtPrice = compareAtFromForm(formCompare);
     if (compareAtPrice !== undefined && Number.isNaN(compareAtPrice)) {
       toast.error('Enter a valid compare-at price (inclusive of GST)');
       return;
     }
     const imgs = productImagesToUrls(formImages);
-    let variantPayload = formRowsToVariantGroups(formVariantRows);
-    variantPayload = variantPayloadToExclusive(variantPayload, gstSave);
+    const variantPayload = formRowsToVariantGroups(formVariantRows);
     const metaTitleValue = formMetaKeywords.length
       ? formMetaKeywords.join(' + ')
       : formMetaTitle.trim();
@@ -1870,7 +1886,6 @@ export default function SellerInventoryPage() {
       toast.error('Enter a valid price (inclusive of GST)');
       return;
     }
-    const gstSave = gstPercentForForm(formGstRate);
     if (Number.isNaN(Number(formGstRate)) || Number(formGstRate) < 0) {
       toast.error('Enter a valid GST rate');
       return;
@@ -1885,15 +1900,14 @@ export default function SellerInventoryPage() {
       toast.error('Add product information before saving');
       return;
     }
-    const price = priceExclusiveFromInclusive(priceIncl, gstSave);
-    const compareAtPrice = inclusiveCompareAtFromForm(formCompare, gstSave);
+    const price = priceIncl;
+    const compareAtPrice = compareAtFromForm(formCompare);
     if (compareAtPrice !== undefined && Number.isNaN(compareAtPrice)) {
       toast.error('Enter a valid compare-at price (inclusive of GST)');
       return;
     }
     const imgs = productImagesToUrls(formImages);
-    let variantPayload = formRowsToVariantGroups(formVariantRows);
-    variantPayload = variantPayloadToExclusive(variantPayload, gstSave);
+    const variantPayload = formRowsToVariantGroups(formVariantRows);
     const metaTitleValue = formMetaKeywords.length
       ? formMetaKeywords.join(' + ')
       : formMetaTitle.trim();

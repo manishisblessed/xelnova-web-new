@@ -61,33 +61,61 @@ export function calculateDiscount(
   return Math.round(((comparePrice - price) / comparePrice) * 100);
 }
 
-/** Default GST % when product has no rate (matches cart fallback). */
+/** Default GST % when product has no rate (used by invoice/report tax derivation). */
 export const DEFAULT_GST_PERCENT = 18;
 
 /**
- * Selling price including GST, matching cart tax: taxable + round(taxable × GST%).
- * Use for consumer-facing prices; cart/checkout still use pre-GST `price` from the API.
+ * Pricing contract (changed Apr 2026):
+ *   `Product.price` and `OrderItem.price` are stored as the **GST-inclusive
+ *   selling price** — exactly what the seller types and exactly what the buyer
+ *   pays. No conversion happens at the API boundary.
+ *
+ * The two helpers below are kept as identity functions purely so existing
+ * call sites (cart, checkout, product page, header, wishlist, JSON-LD, etc.)
+ * keep compiling. Do not reintroduce GST math here — derive taxable and tax
+ * via {@link taxableFromInclusive} / {@link gstAmountFromInclusive} only on
+ * invoices and tax reports.
  */
 export function priceInclusiveOfGst(
-  exclusive: number,
-  gstRatePercent?: number | null
+  price: number,
+  _gstRatePercent?: number | null,
 ): number {
-  if (exclusive <= 0) return 0;
-  const r = gstRatePercent ?? DEFAULT_GST_PERCENT;
-  return exclusive + Math.round((exclusive * r) / 100);
+  if (!price || price <= 0) return 0;
+  return price;
+}
+
+export function priceExclusiveFromInclusive(
+  price: number,
+  _gstRatePercent?: number | null,
+): number {
+  if (!price || price <= 0) return 0;
+  return price;
 }
 
 /**
- * Reverse of {@link priceInclusiveOfGst} — for seller-entered inclusive prices stored as taxable value in DB.
- * Rounds to whole rupees to match cart tax rounding.
+ * Back-out the taxable value from a GST-inclusive amount, for invoices and
+ * GST reports. `inclusive = taxable + taxable × gst/100`, so
+ * `taxable = inclusive × 100 / (100 + gst)`.
  */
-export function priceExclusiveFromInclusive(
+export function taxableFromInclusive(
   inclusive: number,
-  gstRatePercent?: number | null
+  gstRatePercent?: number | null,
 ): number {
-  if (inclusive <= 0) return 0;
+  if (!inclusive || inclusive <= 0) return 0;
   const r = gstRatePercent ?? DEFAULT_GST_PERCENT;
-  return Math.round(inclusive / (1 + r / 100));
+  if (r <= 0) return inclusive;
+  return (inclusive * 100) / (100 + r);
+}
+
+/**
+ * GST component of a GST-inclusive amount = inclusive − taxable.
+ */
+export function gstAmountFromInclusive(
+  inclusive: number,
+  gstRatePercent?: number | null,
+): number {
+  if (!inclusive || inclusive <= 0) return 0;
+  return inclusive - taxableFromInclusive(inclusive, gstRatePercent);
 }
 
 export function slugify(text: string): string {

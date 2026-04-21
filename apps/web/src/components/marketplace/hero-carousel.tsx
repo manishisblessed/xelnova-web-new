@@ -54,9 +54,9 @@ const fallbackSlides: Slide[] = [
     badge: 'SHOP NOW',
     cta: 'Shop now',
     href: '/products?sort=discount',
-    accent: 'bg-gradient-to-r from-rose-500 to-orange-500',
-    gradient: 'bg-gradient-to-br from-rose-600 via-purple-700 to-indigo-800',
-    pattern: 'radial-gradient(circle at 80% 20%, rgba(255,255,255,0.08) 0%, transparent 50%)',
+    accent: 'bg-gradient-to-r from-accent-500 to-accent-600',
+    gradient: 'bg-gradient-to-br from-primary-600 via-primary-700 to-primary-900',
+    pattern: 'radial-gradient(circle at 80% 20%, rgba(247,197,43,0.18) 0%, transparent 55%)',
   },
   {
     id: 'fb-2',
@@ -66,9 +66,9 @@ const fallbackSlides: Slide[] = [
     badge: 'EXPLORE',
     cta: 'Explore',
     href: '/products?sort=newest',
-    accent: 'bg-gradient-to-r from-violet-500 to-purple-600',
-    gradient: 'bg-gradient-to-br from-violet-700 via-fuchsia-700 to-pink-700',
-    pattern: 'radial-gradient(circle at 20% 80%, rgba(255,255,255,0.06) 0%, transparent 50%)',
+    accent: 'bg-gradient-to-r from-primary-500 to-primary-700',
+    gradient: 'bg-gradient-to-br from-primary-500 via-primary-600 to-primary-800',
+    pattern: 'radial-gradient(circle at 20% 80%, rgba(255,255,255,0.10) 0%, transparent 55%)',
   },
   {
     id: 'fb-3',
@@ -78,9 +78,9 @@ const fallbackSlides: Slide[] = [
     badge: 'TRENDING',
     cta: 'Browse Electronics',
     href: '/products?category=electronics',
-    accent: 'bg-gradient-to-r from-blue-500 to-cyan-500',
-    gradient: 'bg-gradient-to-br from-blue-700 via-indigo-800 to-slate-900',
-    pattern: 'radial-gradient(circle at 70% 30%, rgba(59,130,246,0.15) 0%, transparent 50%)',
+    accent: 'bg-gradient-to-r from-promo-teal-500 to-promo-teal-600',
+    gradient: 'bg-gradient-to-br from-promo-teal-500 via-promo-teal-600 to-primary-800',
+    pattern: 'radial-gradient(circle at 70% 30%, rgba(43,182,175,0.18) 0%, transparent 55%)',
   },
   {
     id: 'fb-4',
@@ -90,17 +90,17 @@ const fallbackSlides: Slide[] = [
     badge: 'START SELLING',
     cta: 'Register Now',
     href: 'https://seller.xelnova.in/',
-    accent: 'bg-gradient-to-r from-emerald-500 to-teal-500',
-    gradient: 'bg-gradient-to-br from-emerald-700 via-teal-700 to-cyan-800',
-    pattern: 'radial-gradient(circle at 30% 70%, rgba(16,185,129,0.12) 0%, transparent 50%)',
+    accent: 'bg-gradient-to-r from-accent-400 to-accent-500',
+    gradient: 'bg-gradient-to-br from-primary-600 via-primary-700 to-primary-900',
+    pattern: 'radial-gradient(circle at 30% 70%, rgba(247,197,43,0.16) 0%, transparent 55%)',
   },
 ];
 
 const accentColors = [
-  'bg-gradient-to-r from-rose-500 to-orange-500',
-  'bg-gradient-to-r from-violet-500 to-purple-600',
-  'bg-gradient-to-r from-blue-500 to-cyan-500',
-  'bg-gradient-to-r from-emerald-500 to-teal-500',
+  'bg-gradient-to-r from-accent-500 to-accent-600',
+  'bg-gradient-to-r from-primary-500 to-primary-700',
+  'bg-gradient-to-r from-promo-teal-500 to-promo-teal-600',
+  'bg-gradient-to-r from-accent-400 to-accent-500',
 ];
 
 function mapBannerToSlide(banner: Banner, index: number): Slide {
@@ -171,7 +171,7 @@ export function HeroCarousel() {
   const showPhoto = Boolean(slide.image) && !heroImgError;
 
   return (
-    <div className="group relative h-full overflow-hidden rounded-2xl border border-white/10 bg-surface-dark shadow-2xl shadow-black/25 ring-1 ring-white/5 transition-shadow duration-500 hover:shadow-[0_32px_64px_-16px_rgba(124,58,237,0.35)] lg:rounded-3xl">
+    <div className="group relative h-full overflow-hidden rounded-2xl border border-white/10 bg-surface-dark shadow-2xl shadow-black/25 ring-1 ring-white/5 transition-shadow duration-500 hover:shadow-[0_32px_64px_-16px_rgba(12,131,31,0.40)] lg:rounded-3xl">
       <div className="relative h-full min-h-[260px] sm:min-h-[320px] md:min-h-[380px]">
         <AnimatePresence initial={false} custom={direction} mode="popLayout">
           <motion.div

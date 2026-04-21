@@ -262,21 +262,25 @@ export function Header() {
 
   return (
     <header className={`sticky top-0 z-50 bg-white transition-all duration-500 ${isScrolled ? 'shadow-elevated' : ''}`}>
-      {/* Top Bar */}
-      <div className="bg-gradient-to-r from-primary-600 via-purple-600 to-primary-600 text-[11px]">
-        <div className="mx-auto max-w-[1440px] flex items-center justify-between px-4 py-1.5 sm:px-6">
-          <div className="flex items-center gap-3 text-white/90">
+      {/* Top Bar — Blinkit-inspired emerald with sunshine accents */}
+      <div className="bg-gradient-to-r from-primary-700 via-primary-600 to-primary-700 text-[11px] relative overflow-hidden">
+        <div className="pointer-events-none absolute inset-0 opacity-25 bg-[radial-gradient(ellipse_60%_120%_at_85%_50%,rgba(247,197,43,0.35),transparent_60%),radial-gradient(ellipse_40%_120%_at_15%_50%,rgba(255,255,255,0.18),transparent_60%)]" />
+        <div className="relative mx-auto max-w-[1440px] flex items-center justify-between px-4 py-1.5 sm:px-6">
+          <div className="flex items-center gap-3 text-white/95">
             <button
               onClick={() => setLocationModalOpen(true)}
-              className="flex items-center gap-1 hover:text-white transition-colors group"
+              className="flex items-center gap-1.5 hover:text-white transition-colors group"
             >
-              <MapPin size={11} className="text-primary-300" />
+              <span className="inline-flex items-center gap-1 rounded-full bg-accent-400/95 text-primary-900 font-extrabold px-2 py-0.5 shadow-sm shadow-accent-700/20 ring-1 ring-white/40">
+                <MapPin size={10} />
+                <span className="tracking-tight">11 min</span>
+              </span>
               {location ? (
-                <span>Deliver to <strong className="text-white">{location.city} {location.pincode}</strong></span>
+                <span className="hidden sm:inline">Deliver to <strong className="text-white">{location.city} {location.pincode}</strong></span>
               ) : (
-                <span>Select your <strong className="text-white">location</strong></span>
+                <span className="hidden sm:inline">Select your <strong className="text-white">location</strong></span>
               )}
-              <ChevronDown size={9} className="group-hover:rotate-180 transition-transform" />
+              <ChevronDown size={9} className="group-hover:rotate-180 transition-transform hidden sm:inline" />
             </button>
             <span className="text-white/45 hidden sm:inline">|</span>
             <a
@@ -360,7 +364,7 @@ export function Header() {
               />
               <button
                 type="submit"
-                className="flex h-11 w-12 flex-shrink-0 items-center justify-center bg-primary-600 text-white hover:bg-primary-700 transition-colors rounded-r-xl"
+                className="flex h-11 w-14 flex-shrink-0 items-center justify-center bg-gradient-to-br from-primary-500 to-primary-700 text-white hover:from-primary-600 hover:to-primary-700 transition-all rounded-r-xl shadow-[0_4px_12px_-4px_rgba(12,131,31,0.45)] active:scale-95"
               >
                 <Search size={18} />
               </button>
@@ -566,7 +570,7 @@ export function Header() {
                 placeholder="Search products, brands & more..."
                 className="h-10 flex-1 bg-white px-3 text-sm text-text-primary outline-none placeholder:text-text-muted rounded-l-xl"
               />
-              <button type="submit" className="flex h-10 w-10 items-center justify-center bg-primary-600 text-white rounded-r-xl">
+              <button type="submit" className="flex h-10 w-12 items-center justify-center bg-gradient-to-br from-primary-500 to-primary-700 text-white rounded-r-xl shadow-[0_4px_10px_-4px_rgba(12,131,31,0.45)] active:scale-95">
                 <Search size={16} />
               </button>
               {autocompleteDropdown}
@@ -634,7 +638,8 @@ export function Header() {
               className="fixed inset-y-0 left-0 z-[101] w-[300px] bg-white shadow-2xl flex flex-col"
             >
               {/* Sidebar Header */}
-              <div className="bg-gradient-to-r from-violet-600 to-purple-600 px-5 py-5">
+              <div className="relative overflow-hidden bg-gradient-to-br from-primary-600 via-primary-500 to-primary-700 px-5 py-5">
+                <div className="pointer-events-none absolute inset-0 opacity-30 bg-[radial-gradient(ellipse_70%_70%_at_100%_0%,rgba(247,197,43,0.55),transparent_55%)]" />
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-3">
                     {isAuthenticated && user ? (

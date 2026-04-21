@@ -125,7 +125,7 @@ export function HomeBelowFold() {
         <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
           <div className="panel-glass overflow-hidden">
             <div className="flex flex-col md:flex-row">
-              <div className="md:w-56 lg:w-64 bg-gradient-to-br from-violet-600/95 via-purple-600 to-indigo-800 p-6 flex flex-col justify-center items-center text-center relative overflow-hidden border-b md:border-b-0 md:border-r border-white/10 backdrop-blur-sm">
+              <div className="md:w-56 lg:w-64 bg-gradient-to-br from-primary-600 via-primary-700 to-primary-900 p-6 flex flex-col justify-center items-center text-center relative overflow-hidden border-b md:border-b-0 md:border-r border-white/10 backdrop-blur-sm">
                 <div className="absolute inset-0 opacity-20">
                   <div className="absolute top-4 left-4 w-32 h-32 rounded-full bg-white/25 blur-2xl" />
                   <div className="absolute bottom-4 right-4 w-24 h-24 rounded-full bg-accent-400/40 blur-xl" />
@@ -356,7 +356,7 @@ export function HomeBelowFold() {
               <Link
                 key={item.id}
                 href={item.href}
-                className="group panel-glass-sm flex items-center gap-5 rounded-2xl p-5 transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_16px_40px_-12px_rgba(124,58,237,0.2)]"
+                className="group panel-glass-sm flex items-center gap-5 rounded-2xl p-5 transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_16px_40px_-12px_rgba(12,131,31,0.22)]"
               >
                 <div className="w-24 h-24 flex-shrink-0 rounded-xl bg-gradient-to-br from-gray-50 to-gray-100 overflow-hidden flex items-center justify-center border border-border/50">
                   <CategoryImageOrIcon slug={item.slug} name={item.title} imageSrc={item.image} size="lg" />
@@ -396,10 +396,10 @@ export function HomeBelowFold() {
           <SectionHeader title="Shop by Budget" subtitle="Find products that fit your budget" accent />
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 md:gap-5">
             {[
-              { label: 'Under ₹499', range: '0-499', gradient: 'from-emerald-500 to-teal-600', lightGradient: 'from-emerald-50 to-teal-50', icon: '💰', iconBg: 'bg-emerald-100' },
-              { label: 'Under ₹999', range: '0-999', gradient: 'from-blue-500 to-indigo-600', lightGradient: 'from-blue-50 to-indigo-50', icon: '🛍️', iconBg: 'bg-blue-100' },
-              { label: 'Under ₹1,999', range: '0-1999', gradient: 'from-purple-500 to-violet-600', lightGradient: 'from-purple-50 to-violet-50', icon: '✨', iconBg: 'bg-purple-100' },
-              { label: 'Premium', range: '2000-99999', gradient: 'from-amber-500 to-orange-600', lightGradient: 'from-amber-50 to-orange-50', icon: '👑', iconBg: 'bg-amber-100' },
+              { label: 'Under ₹499', range: '0-499', gradient: 'from-primary-500 to-primary-700', lightGradient: 'from-primary-50 to-primary-100', icon: '💰', iconBg: 'bg-primary-100' },
+              { label: 'Under ₹999', range: '0-999', gradient: 'from-promo-teal-400 to-promo-teal-600', lightGradient: 'from-promo-teal-50 to-primary-50', icon: '🛍️', iconBg: 'bg-promo-teal-50' },
+              { label: 'Under ₹1,999', range: '0-1999', gradient: 'from-accent-400 to-accent-600', lightGradient: 'from-accent-50 to-promo-sunshine-50', icon: '✨', iconBg: 'bg-accent-50' },
+              { label: 'Premium', range: '2000-99999', gradient: 'from-promo-peach-400 to-promo-peach-500', lightGradient: 'from-promo-peach-50 to-accent-50', icon: '👑', iconBg: 'bg-promo-peach-50' },
             ].map((tier, i) => (
               <Link
                 key={tier.range}
@@ -436,12 +436,12 @@ export function HomeBelowFold() {
           <SectionHeader title="Curated Collections" subtitle="Hand-picked for every occasion" accent />
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {[
-              { title: 'Work From Home Essentials', desc: 'Desks, chairs, tech & more', gradient: 'from-blue-600 to-indigo-700', href: '/products?collection=wfh', icon: '💻' },
-              { title: 'Wedding Season Picks', desc: 'Outfits, gifts & decorations', gradient: 'from-rose-500 to-pink-600', href: '/products?collection=wedding', icon: '💍' },
-              { title: 'Summer Must-Haves', desc: 'Stay cool this season', gradient: 'from-amber-500 to-orange-600', href: '/products?collection=summer', icon: '☀️' },
-              { title: 'Fitness & Wellness', desc: 'Gym gear, supplements & yoga', gradient: 'from-emerald-500 to-teal-600', href: '/products?collection=fitness', icon: '💪' },
-              { title: 'Home Makeover', desc: 'Decor, furniture & organization', gradient: 'from-violet-500 to-purple-600', href: '/products?collection=home', icon: '🏠' },
-              { title: 'Tech Accessories', desc: 'Cases, chargers & gadgets', gradient: 'from-cyan-500 to-blue-600', href: '/products?collection=tech', icon: '📱' },
+              { title: 'Work From Home Essentials', desc: 'Desks, chairs, tech & more', gradient: 'from-promo-teal-500 to-promo-teal-600', href: '/products?collection=wfh', icon: '💻' },
+              { title: 'Wedding Season Picks', desc: 'Outfits, gifts & decorations', gradient: 'from-promo-peach-400 to-promo-peach-500', href: '/products?collection=wedding', icon: '💍' },
+              { title: 'Summer Must-Haves', desc: 'Stay cool this season', gradient: 'from-accent-400 to-accent-600', href: '/products?collection=summer', icon: '☀️' },
+              { title: 'Fitness & Wellness', desc: 'Gym gear, supplements & yoga', gradient: 'from-primary-500 to-primary-700', href: '/products?collection=fitness', icon: '💪' },
+              { title: 'Home Makeover', desc: 'Decor, furniture & organization', gradient: 'from-primary-400 to-promo-teal-500', href: '/products?collection=home', icon: '🏠' },
+              { title: 'Tech Accessories', desc: 'Cases, chargers & gadgets', gradient: 'from-primary-600 to-primary-800', href: '/products?collection=tech', icon: '📱' },
             ].map((collection) => (
               <Link
                 key={collection.title}
@@ -499,7 +499,7 @@ export function HomeBelowFold() {
                 return (
                   <div
                     key={review.id}
-                    className="panel-glass p-6 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_16px_40px_-12px_rgba(124,58,237,0.15)]"
+                    className="panel-glass p-6 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_16px_40px_-12px_rgba(12,131,31,0.18)]"
                   >
                     <div className="flex items-center gap-1 mb-3">
                       {Array.from({ length: review.rating }).map((_, j) => (
@@ -529,7 +529,7 @@ export function HomeBelowFold() {
       {/* ─── 14. APP DOWNLOAD CTA ─── */}
       <section className="py-6">
         <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
-          <div className="relative bg-gradient-to-r from-violet-600 via-purple-600 to-indigo-700 rounded-3xl p-8 md:p-12 overflow-hidden">
+          <div className="relative bg-gradient-to-br from-primary-600 via-primary-700 to-primary-900 rounded-3xl p-8 md:p-12 overflow-hidden">
             <div className="absolute inset-0 opacity-[0.04]">
               <div className="absolute top-1/2 left-1/4 w-80 h-80 bg-white rounded-full blur-3xl" />
               <div className="absolute bottom-0 right-1/3 w-64 h-64 bg-accent-400 rounded-full blur-3xl" />
@@ -558,14 +558,14 @@ export function HomeBelowFold() {
               </div>
               <div className="hidden md:flex items-center justify-center">
                 <div className="w-48 h-72 bg-white/5 rounded-[2rem] border border-white/10 p-2 relative">
-                  <div className="w-full h-full bg-gradient-to-b from-violet-500/50 to-purple-700/50 rounded-[1.5rem] flex items-center justify-center">
+                  <div className="w-full h-full bg-gradient-to-b from-primary-500/50 to-primary-800/60 rounded-[1.5rem] flex items-center justify-center">
                     <div className="text-center">
                       <Image src="/xelnova-icon-green.png" alt="Xelnova" width={56} height={56} className="w-14 h-14 rounded-2xl mx-auto mb-3" />
                       <p className="text-white font-bold text-base font-display">Xelnova</p>
                       <p className="text-white/70 text-[10px] mt-0.5">Shop smart</p>
                     </div>
                   </div>
-                  <div className="absolute top-0 left-1/2 -translate-x-1/2 w-20 h-4 bg-indigo-800 rounded-b-xl" />
+                  <div className="absolute top-0 left-1/2 -translate-x-1/2 w-20 h-4 bg-primary-900 rounded-b-xl" />
                 </div>
               </div>
             </div>
@@ -596,10 +596,10 @@ export function HomeBelowFold() {
           <SectionHeader title="Why Xelnova?" subtitle="The smarter way to shop" accent />
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-5">
             {[
-              { icon: Wallet, title: 'Xelnova Wallet', desc: 'Add money & pay for recharges, bills & more', color: 'text-emerald-600', bg: 'bg-emerald-50', gradient: 'from-emerald-500 to-teal-500', emoji: '💳' },
-              { icon: Gift, title: 'Daily Rewards', desc: 'Earn loyalty points on every purchase', color: 'text-violet-600', bg: 'bg-violet-50', gradient: 'from-violet-500 to-purple-500', emoji: '🎁' },
-              { icon: Award, title: 'Genuine Products', desc: '100% authentic from verified sellers', color: 'text-blue-600', bg: 'bg-blue-50', gradient: 'from-blue-500 to-indigo-500', emoji: '✅' },
-              { icon: Sparkles, title: 'Best Prices', desc: 'Price match guarantee across the platform', color: 'text-amber-600', bg: 'bg-amber-50', gradient: 'from-amber-500 to-orange-500', emoji: '⭐' },
+              { icon: Wallet, title: 'Xelnova Wallet', desc: 'Add money & pay for recharges, bills & more', color: 'text-primary-700', bg: 'bg-primary-50', gradient: 'from-primary-500 to-primary-700', emoji: '💳' },
+              { icon: Gift, title: 'Daily Rewards', desc: 'Earn loyalty points on every purchase', color: 'text-accent-700', bg: 'bg-accent-50', gradient: 'from-accent-400 to-accent-600', emoji: '🎁' },
+              { icon: Award, title: 'Genuine Products', desc: '100% authentic from verified sellers', color: 'text-promo-teal-600', bg: 'bg-promo-teal-50', gradient: 'from-promo-teal-400 to-promo-teal-600', emoji: '✅' },
+              { icon: Sparkles, title: 'Best Prices', desc: 'Price match guarantee across the platform', color: 'text-promo-peach-500', bg: 'bg-promo-peach-50', gradient: 'from-promo-peach-400 to-promo-peach-500', emoji: '⭐' },
             ].map((item, i) => (
               <div key={item.title} className="group card-3d shine-effect rounded-2xl p-6 text-center bg-white border border-white/80 ring-1 ring-gray-100/50">
                 {/* Gradient background on hover */}
@@ -625,14 +625,14 @@ export function HomeBelowFold() {
           <SectionHeader title="Buying Guides & Tips" subtitle="Make informed purchase decisions" />
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {[
-              { title: 'How to Choose the Right Laptop', category: 'Electronics', color: 'bg-blue-500', href: '/blog/choose-laptop' },
-              { title: 'Fashion Trends for 2026', category: 'Fashion', color: 'bg-pink-500', href: '/blog/fashion-trends' },
-              { title: 'Home Organization Hacks', category: 'Home & Living', color: 'bg-emerald-500', href: '/blog/organization' },
+              { title: 'How to Choose the Right Laptop', category: 'Electronics', color: 'bg-promo-teal-500', href: '/blog/choose-laptop' },
+              { title: 'Fashion Trends for 2026', category: 'Fashion', color: 'bg-promo-peach-500', href: '/blog/fashion-trends' },
+              { title: 'Home Organization Hacks', category: 'Home & Living', color: 'bg-primary-500', href: '/blog/organization' },
             ].map((post) => (
               <Link
                 key={post.title}
                 href={post.href}
-                className="group panel-glass overflow-hidden rounded-2xl transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_16px_40px_-12px_rgba(124,58,237,0.15)]"
+                className="group panel-glass overflow-hidden rounded-2xl transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_16px_40px_-12px_rgba(12,131,31,0.18)]"
               >
                 <div className={`h-2 ${post.color}`} />
                 <div className="p-5">

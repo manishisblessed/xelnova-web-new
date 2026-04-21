@@ -10,7 +10,7 @@ interface StoreHeroProps {
   store: SellerStore;
 }
 
-const DEFAULT_GRADIENT = 'bg-gradient-to-br from-violet-700 via-purple-800 to-indigo-900';
+const DEFAULT_GRADIENT = 'bg-gradient-to-br from-primary-600 via-primary-700 to-primary-900';
 
 export function StoreHero({ store }: StoreHeroProps) {
   const [[page, direction], setPage] = useState([0, 0]);
@@ -41,7 +41,7 @@ export function StoreHero({ store }: StoreHeroProps) {
     setImgError(false);
   }, [currentBanner?.imageUrl]);
 
-  const themeColor = store.storeThemeColor || '#7c3aed';
+  const themeColor = store.storeThemeColor || '#0c831f';
 
   if (!hasBanners) {
     return (

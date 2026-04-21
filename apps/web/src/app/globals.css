@@ -2,29 +2,47 @@
 
 /* ─── Design Tokens ─── */
 @theme {
-  /* Primary — Trust Green (Blinkit / Zepto inspired vibrant emerald) */
+  /* Primary — Blinkit Trust Green (vibrant emerald, optimised for CTAs) */
   --color-primary-50: #ecfdf3;
   --color-primary-100: #d1fadf;
   --color-primary-200: #a6f4c5;
   --color-primary-300: #6ce9a6;
-  --color-primary-400: #32d583;
-  --color-primary-500: #12b76a;
-  --color-primary-600: #039855;
-  --color-primary-700: #027a48;
-  --color-primary-800: #05603a;
-  --color-primary-900: #054f31;
+  --color-primary-400: #2fcf72;
+  --color-primary-500: #11ab3a;
+  --color-primary-600: #0c831f;
+  --color-primary-700: #086a18;
+  --color-primary-800: #065312;
+  --color-primary-900: #04400e;
 
-  /* Accent — Bright Sunshine Yellow (Blinkit signature) */
+  /* Brand RGB triplets (used by shadow / glow utilities) */
+  --rgb-primary-500: 17 171 58;
+  --rgb-primary-600: 12 131 31;
+  --rgb-accent-400: 251 191 36;
+  --rgb-accent-500: 245 184 0;
+
+  /* Accent — Blinkit Sunshine Yellow (logo + promo) */
   --color-accent-50: #fffbeb;
   --color-accent-100: #fef3c7;
   --color-accent-200: #fde68a;
   --color-accent-300: #fcd34d;
   --color-accent-400: #fbbf24;
-  --color-accent-500: #f59e0b;
-  --color-accent-600: #d97706;
-  --color-accent-700: #b45309;
-  --color-accent-800: #92400e;
-  --color-accent-900: #78350f;
+  --color-accent-500: #f5b800;
+  --color-accent-600: #d99a00;
+  --color-accent-700: #b07a00;
+  --color-accent-800: #8a5f00;
+  --color-accent-900: #5e4100;
+
+  /* Promo pastels — match Blinkit category banner cards */
+  --color-promo-teal-50: #e6f7f6;
+  --color-promo-teal-400: #4cc6c0;
+  --color-promo-teal-500: #2bb6af;
+  --color-promo-teal-600: #1f8f89;
+  --color-promo-sunshine-50: #fff7d6;
+  --color-promo-sunshine-400: #ffd640;
+  --color-promo-sunshine-500: #f7c52b;
+  --color-promo-peach-50: #fdecec;
+  --color-promo-peach-400: #f5b6b0;
+  --color-promo-peach-500: #ec9088;
 
   /* Surfaces */
   --color-surface: #ffffff;
@@ -112,6 +130,12 @@ body {
   color: var(--color-primary-900);
 }
 
+/* Focus ring — used by interactive elements */
+.focus-ring-primary:focus-visible {
+  outline: 2px solid var(--color-primary-500);
+  outline-offset: 2px;
+}
+
 /* ─── Utility Classes ─── */
 .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
 .scrollbar-hide::-webkit-scrollbar { display: none; }
@@ -152,47 +176,48 @@ body {
   font-family: var(--font-display);
 }
 
-/* Mesh gradient backgrounds */
+/* Mesh gradient backgrounds — fresh, grocery-app vibes */
 .mesh-hero {
   background:
-    radial-gradient(ellipse 90% 70% at 15% 85%, rgba(124, 58, 237, 0.11) 0%, transparent 55%),
-    radial-gradient(ellipse 70% 55% at 88% 8%, rgba(167, 139, 250, 0.09) 0%, transparent 50%),
-    radial-gradient(ellipse 50% 40% at 50% 100%, rgba(249, 141, 7, 0.04) 0%, transparent 45%),
-    linear-gradient(180deg, #fafbfc 0%, var(--color-surface-raised) 40%, #f8fafc 100%);
+    radial-gradient(ellipse 90% 70% at 15% 85%, rgba(17, 171, 58, 0.10) 0%, transparent 55%),
+    radial-gradient(ellipse 70% 55% at 88% 8%, rgba(247, 197, 43, 0.10) 0%, transparent 50%),
+    radial-gradient(ellipse 50% 40% at 50% 100%, rgba(43, 182, 175, 0.05) 0%, transparent 45%),
+    linear-gradient(180deg, #fafbfc 0%, var(--color-surface-raised) 40%, #f7fcf9 100%);
 }
 
 /* Frosted panels — depth without heaviness */
 .panel-glass {
   border-radius: 1.25rem;
   border: 1px solid rgba(255, 255, 255, 0.75);
-  background: rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.78);
   backdrop-filter: blur(18px) saturate(170%);
   -webkit-backdrop-filter: blur(18px) saturate(170%);
   box-shadow:
     0 1px 0 rgba(255, 255, 255, 0.85) inset,
-    0 12px 40px -12px rgba(124, 58, 237, 0.14),
+    0 12px 40px -12px rgba(12, 131, 31, 0.14),
     0 4px 14px -4px rgba(15, 23, 42, 0.06);
 }
 
 .panel-glass-sm {
   border-radius: 1rem;
   border: 1px solid rgba(255, 255, 255, 0.65);
-  background: rgba(255, 255, 255, 0.55);
+  background: rgba(255, 255, 255, 0.6);
   backdrop-filter: blur(14px) saturate(160%);
   -webkit-backdrop-filter: blur(14px) saturate(160%);
-  box-shadow: 0 8px 28px -8px rgba(124, 58, 237, 0.12);
+  box-shadow: 0 8px 28px -8px rgba(12, 131, 31, 0.12);
 }
 
+/* Stats ribbon — Blinkit deep emerald with sunshine highlights */
 .stats-ribbon {
   position: relative;
   isolation: isolate;
   overflow: hidden;
   border-radius: 1.5rem;
   border: 1px solid rgba(255, 255, 255, 0.22);
-  background: linear-gradient(135deg, rgba(124, 58, 237, 0.95) 0%, rgba(91, 33, 182, 0.92) 45%, rgba(49, 46, 129, 0.95) 100%);
+  background: linear-gradient(135deg, #11ab3a 0%, #0c831f 45%, #065312 100%);
   box-shadow:
     0 1px 0 rgba(255, 255, 255, 0.15) inset,
-    0 24px 56px -16px rgba(124, 58, 237, 0.45),
+    0 24px 56px -16px rgba(12, 131, 31, 0.45),
     0 8px 24px -8px rgba(15, 23, 42, 0.2);
 }
 
@@ -201,8 +226,8 @@ body {
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(ellipse 80% 60% at 20% 20%, rgba(255, 255, 255, 0.18) 0%, transparent 55%),
-    radial-gradient(ellipse 60% 50% at 85% 80%, rgba(251, 191, 36, 0.12) 0%, transparent 50%);
+    radial-gradient(ellipse 80% 60% at 20% 20%, rgba(255, 255, 255, 0.20) 0%, transparent 55%),
+    radial-gradient(ellipse 60% 50% at 85% 80%, rgba(247, 197, 43, 0.18) 0%, transparent 50%);
   pointer-events: none;
 }
 
@@ -213,24 +238,81 @@ body {
   left: -30%;
   width: 45%;
   height: 100%;
-  background: linear-gradient(105deg, transparent 0%, rgba(255, 255, 255, 0.06) 45%, transparent 70%);
+  background: linear-gradient(105deg, transparent 0%, rgba(255, 255, 255, 0.08) 45%, transparent 70%);
   transform: skewX(-12deg);
   pointer-events: none;
 }
 
 .mesh-warm {
   background:
-    radial-gradient(ellipse 70% 50% at 80% 80%, rgba(147, 51, 234, 0.06) 0%, transparent 50%),
-    radial-gradient(ellipse 60% 40% at 20% 20%, rgba(124, 58, 237, 0.05) 0%, transparent 50%),
+    radial-gradient(ellipse 70% 50% at 80% 80%, rgba(247, 197, 43, 0.08) 0%, transparent 50%),
+    radial-gradient(ellipse 60% 40% at 20% 20%, rgba(17, 171, 58, 0.06) 0%, transparent 50%),
     #ffffff;
 }
 
-/* Colored shadows */
-.shadow-primary { box-shadow: 0 8px 30px -4px rgba(124, 58, 237, 0.3); }
-.shadow-accent { box-shadow: 0 8px 30px -4px rgba(249, 141, 7, 0.25); }
+/* Coloured shadows */
+.shadow-primary  { box-shadow: 0 8px 30px -4px rgba(12, 131, 31, 0.30); }
+.shadow-accent   { box-shadow: 0 8px 30px -4px rgba(247, 197, 43, 0.35); }
 .shadow-elevated { box-shadow: 0 20px 60px -12px rgba(0, 0, 0, 0.12), 0 4px 12px -2px rgba(0, 0, 0, 0.06); }
-.shadow-card { box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.03); }
-.shadow-card-hover { box-shadow: 0 20px 40px -8px rgba(0, 0, 0, 0.1), 0 4px 12px -2px rgba(0, 0, 0, 0.04); }
+.shadow-card     { box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.03); }
+.shadow-card-hover { box-shadow: 0 20px 40px -8px rgba(12, 131, 31, 0.16), 0 4px 12px -2px rgba(0, 0, 0, 0.04); }
+
+/* ─── Blinkit-style vibrant promo cards ─── */
+.promo-tile {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  border-radius: 1.25rem;
+  padding: 1.25rem 1.25rem 1.5rem;
+  transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.4s ease;
+  box-shadow: 0 12px 30px -14px rgba(15, 23, 42, 0.18), 0 1px 0 rgba(255, 255, 255, 0.5) inset;
+}
+.promo-tile:hover { transform: translateY(-4px); box-shadow: 0 22px 44px -16px rgba(15, 23, 42, 0.22); }
+.promo-tile::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(120% 80% at 100% 0%, rgba(255, 255, 255, 0.35) 0%, transparent 55%);
+  pointer-events: none;
+}
+
+.promo-teal     { background: linear-gradient(135deg, #34d6cf 0%, #1f8f89 100%); color: #fff; }
+.promo-sunshine { background: linear-gradient(135deg, #ffd640 0%, #f5b800 100%); color: #3a2e00; }
+.promo-peach    { background: linear-gradient(135deg, #fbe1dd 0%, #f5b6b0 100%); color: #5a1d18; }
+.promo-mint     { background: linear-gradient(135deg, #c9f5d6 0%, #6ce9a6 100%); color: #054f31; }
+.promo-lavender { background: linear-gradient(135deg, #efe3ff 0%, #c8a8ff 100%); color: #2d1a4e; }
+
+.promo-tile .promo-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.85rem;
+  padding: 0.4rem 0.85rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.95);
+  color: #0c831f;
+  font-weight: 700;
+  font-size: 0.75rem;
+  letter-spacing: 0.01em;
+  box-shadow: 0 4px 12px -4px rgba(15, 23, 42, 0.18);
+  transition: gap 0.25s ease, background 0.25s ease;
+}
+.promo-tile .promo-cta:hover { gap: 0.55rem; background: #fff; }
+
+/* Blinkit-style "delivery in N minutes" pill */
+.delivery-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+  color: #b07a00;
+  font-weight: 700;
+  font-size: 0.72rem;
+  border: 1px solid rgba(247, 197, 43, 0.5);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.6) inset, 0 4px 10px -6px rgba(247, 197, 43, 0.4);
+}
 
 /* ─── Animations ─── */
 @keyframes fadeInUp {
@@ -293,11 +375,11 @@ body {
 
 /* Animated border glow on hover */
 @keyframes border-glow {
-  0%, 100% { 
-    box-shadow: 0 0 20px rgba(124, 58, 237, 0.15), 0 0 40px rgba(124, 58, 237, 0.1), 0 0 60px rgba(124, 58, 237, 0.05);
+  0%, 100% {
+    box-shadow: 0 0 20px rgba(17, 171, 58, 0.18), 0 0 40px rgba(17, 171, 58, 0.12), 0 0 60px rgba(247, 197, 43, 0.06);
   }
-  50% { 
-    box-shadow: 0 0 25px rgba(124, 58, 237, 0.25), 0 0 50px rgba(124, 58, 237, 0.15), 0 0 75px rgba(124, 58, 237, 0.08);
+  50% {
+    box-shadow: 0 0 25px rgba(17, 171, 58, 0.30), 0 0 50px rgba(17, 171, 58, 0.18), 0 0 75px rgba(247, 197, 43, 0.10);
   }
 }
 
@@ -312,8 +394,8 @@ body {
 }
 
 @keyframes glow-pulse {
-  0%, 100% { filter: drop-shadow(0 0 8px rgba(124, 58, 237, 0.4)); }
-  50% { filter: drop-shadow(0 0 20px rgba(124, 58, 237, 0.6)); }
+  0%, 100% { filter: drop-shadow(0 0 8px rgba(17, 171, 58, 0.45)); }
+  50% { filter: drop-shadow(0 0 20px rgba(17, 171, 58, 0.65)); }
 }
 
 @keyframes shine {
@@ -341,9 +423,9 @@ body {
 
 .card-3d:hover {
   transform: perspective(1000px) rotateX(2deg) rotateY(-2deg) translateY(-8px) scale(1.02);
-  box-shadow: 
-    0 25px 50px -12px rgba(124, 58, 237, 0.25),
-    0 0 0 1px rgba(124, 58, 237, 0.1);
+  box-shadow:
+    0 25px 50px -12px rgba(12, 131, 31, 0.28),
+    0 0 0 1px rgba(17, 171, 58, 0.15);
 }
 
 /* Shine effect overlay */
@@ -392,15 +474,15 @@ body {
   border-top-color: currentColor;
 }
 
-/* Gradient text animation */
+/* Gradient text animation — emerald → sunshine → emerald */
 .text-gradient-animated {
   background: linear-gradient(
     90deg,
-    var(--color-primary-600) 0%,
-    var(--color-accent-500) 25%,
-    var(--color-primary-500) 50%,
-    var(--color-accent-400) 75%,
-    var(--color-primary-600) 100%
+    var(--color-primary-700) 0%,
+    var(--color-primary-500) 25%,
+    var(--color-accent-500) 50%,
+    var(--color-primary-500) 75%,
+    var(--color-primary-700) 100%
   );
   background-size: 200% auto;
   -webkit-background-clip: text;
@@ -417,6 +499,29 @@ body {
   75% { border-radius: 60% 40% 60% 30% / 70% 30% 50% 60%; }
 }
 
+/* Add-to-cart pop — tiny celebratory wiggle on click */
+@keyframes cart-pop {
+  0%   { transform: scale(1); }
+  35%  { transform: scale(1.18) rotate(-4deg); }
+  65%  { transform: scale(0.94) rotate(3deg); }
+  100% { transform: scale(1); }
+}
+.animate-cart-pop { animation: cart-pop 0.5s var(--ease-bounce); }
+
+/* Price tag — Blinkit-style soft gradient chip used on product cards */
+.price-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--color-primary-50), var(--color-primary-100));
+  color: var(--color-primary-700);
+  font-weight: 700;
+  font-size: 0.7rem;
+  border: 1px solid rgba(17, 171, 58, 0.18);
+}
+
 .blob {
   animation: blob-morph 8s ease-in-out infinite;
 }
@@ -430,7 +535,7 @@ body {
 
 .hover-lift:hover {
   transform: translateY(-6px);
-  box-shadow: 0 20px 40px -12px rgba(124, 58, 237, 0.2);
+  box-shadow: 0 20px 40px -12px rgba(12, 131, 31, 0.22);
 }
 
 /* Gradient border */
@@ -445,7 +550,7 @@ body {
   position: absolute;
   inset: -2px;
   border-radius: inherit;
-  background: linear-gradient(135deg, var(--color-primary-400), var(--color-accent-400), var(--color-primary-500));
+  background: linear-gradient(135deg, var(--color-primary-500), var(--color-accent-400), var(--color-primary-600));
   z-index: -1;
   opacity: 0;
   transition: opacity 0.3s ease;
@@ -457,11 +562,11 @@ body {
 
 /* Soft glow effect */
 .soft-glow {
-  box-shadow: 
-    0 0 0 1px rgba(124, 58, 237, 0.05),
-    0 4px 6px -1px rgba(124, 58, 237, 0.08),
-    0 10px 20px -4px rgba(124, 58, 237, 0.1),
-    0 0 40px -10px rgba(124, 58, 237, 0.15);
+  box-shadow:
+    0 0 0 1px rgba(17, 171, 58, 0.06),
+    0 4px 6px -1px rgba(17, 171, 58, 0.08),
+    0 10px 20px -4px rgba(12, 131, 31, 0.12),
+    0 0 40px -10px rgba(247, 197, 43, 0.15);
 }
 
 /* Icon bounce on hover */
@@ -491,23 +596,23 @@ body {
 .stagger-reveal > *:nth-child(9) { animation-delay: 400ms; }
 .stagger-reveal > *:nth-child(10) { animation-delay: 450ms; }
 
-/* Premium button style */
+/* Premium button style — Blinkit-style green CTA with sheen */
 .btn-premium {
   position: relative;
   overflow: hidden;
-  background: linear-gradient(135deg, var(--color-primary-600), var(--color-primary-700));
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 
-    0 1px 0 rgba(255, 255, 255, 0.15) inset,
-    0 4px 12px -2px rgba(124, 58, 237, 0.4);
+  background: linear-gradient(135deg, var(--color-primary-500), var(--color-primary-700));
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.18) inset,
+    0 4px 12px -2px rgba(12, 131, 31, 0.45);
   transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .btn-premium:hover {
   transform: translateY(-2px);
-  box-shadow: 
-    0 1px 0 rgba(255, 255, 255, 0.15) inset,
-    0 8px 20px -4px rgba(124, 58, 237, 0.5);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.18) inset,
+    0 8px 20px -4px rgba(12, 131, 31, 0.55);
 }
 
 .btn-premium::before {
@@ -547,7 +652,7 @@ body {
   left: 10%;
   width: 60px;
   height: 60px;
-  background: linear-gradient(135deg, rgba(124, 58, 237, 0.1), rgba(167, 139, 250, 0.15));
+  background: linear-gradient(135deg, rgba(17, 171, 58, 0.14), rgba(108, 233, 166, 0.18));
   animation-delay: -2s;
 }
 
@@ -556,7 +661,7 @@ body {
   right: 15%;
   width: 40px;
   height: 40px;
-  background: linear-gradient(135deg, rgba(249, 141, 7, 0.1), rgba(255, 173, 32, 0.12));
+  background: linear-gradient(135deg, rgba(247, 197, 43, 0.14), rgba(251, 191, 36, 0.18));
   animation-delay: -4s;
 }
 
