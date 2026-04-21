@@ -1174,27 +1174,58 @@ export default function CheckoutPage() {
 
               <div className="mt-5 space-y-3">
                 <p className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">Payments powered by</p>
-                <div className="flex flex-wrap items-center gap-3">
-                  <div className="rounded-lg border border-border-light bg-white px-3 py-1.5">
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="inline-flex h-9 w-20 items-center justify-center overflow-hidden rounded-lg border border-border-light bg-white">
                     <Image
-                      src="/checkout-trust/razorpay.svg"
+                      src="/payments/brands/razorpay.jpeg"
                       alt="Razorpay"
-                      width={108}
-                      height={24}
-                      className="h-6 w-auto"
+                      width={160}
+                      height={72}
+                      className="h-full w-full object-contain"
                     />
                   </div>
-                  <div className="rounded-lg border border-border-light bg-white px-3 py-1.5">
+                  <div className="inline-flex h-9 w-20 items-center justify-center overflow-hidden rounded-lg border border-border-light bg-white">
                     <Image
-                      src="/checkout-trust/axis-bank.svg"
+                      src="/payments/brands/axis.jpeg"
                       alt="Axis Bank"
-                      width={108}
-                      height={24}
-                      className="h-6 w-auto"
+                      width={160}
+                      height={72}
+                      className="h-full w-full object-contain"
                     />
                   </div>
                 </div>
-                <div className="flex items-start gap-2 text-xs text-text-muted">
+
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-text-muted pt-1">We accept</p>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {[
+                    { name: 'Visa', src: '/payments/brands/visa.jpeg' },
+                    { name: 'Mastercard', src: '/payments/brands/master_card.jpeg' },
+                    { name: 'Diners Club', src: '/payments/brands/dinners_club.jpeg' },
+                    { name: 'Amazon Pay', src: '/payments/brands/amazon_pay.jpeg' },
+                    { name: 'Google Pay', src: '/payments/brands/google_pay.jpeg' },
+                    { name: 'PhonePe', src: '/payments/brands/phone_pe.jpeg' },
+                    { name: 'Paytm', src: '/payments/brands/paytm.jpeg' },
+                    { name: 'CRED', src: '/payments/brands/cred.jpeg' },
+                    { name: 'PayZapp', src: '/payments/brands/payzapp.jpeg' },
+                  ].map((m) => (
+                    <span
+                      key={m.name}
+                      title={m.name}
+                      aria-label={m.name}
+                      className="inline-flex h-8 w-12 items-center justify-center overflow-hidden rounded border border-border-light bg-white"
+                    >
+                      <Image
+                        src={m.src}
+                        alt={m.name}
+                        width={96}
+                        height={64}
+                        className="h-full w-full object-contain"
+                      />
+                    </span>
+                  ))}
+                </div>
+
+                <div className="flex items-start gap-2 text-xs text-text-muted pt-1">
                   <ShieldCheck size={14} className="text-success-600 shrink-0 mt-0.5" />
                   <span>Safe and Secure Payments. 100% Authentic.</span>
                 </div>

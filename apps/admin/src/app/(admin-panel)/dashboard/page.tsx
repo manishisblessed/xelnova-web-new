@@ -5,12 +5,22 @@ import Link from 'next/link';
 import { motion } from 'framer-motion';
 // `Link` is still used by the secondary KPI tiles below — they are
 // custom-styled cards (not <StatCard>) so they keep their own wrappers.
-import { DollarSign, ShoppingCart, Users, Store, Package, Clock, Star } from 'lucide-react';
+import { DollarSign, ShoppingCart, Users, Store, Package, Clock, Star, ArrowUpRight } from 'lucide-react';
 import { DashboardHeader } from '@/components/dashboard/dashboard-header';
 import { StatCard } from '@/components/dashboard/stat-card';
 import { DataTable, type Column } from '@/components/dashboard/data-table';
 import { Badge } from '@xelnova/ui';
-import { apiDashboard } from '@/lib/api';
+import { apiDashboard, apiGet } from '@/lib/api';
+
+interface RecentCustomer {
+  id: string;
+  name: string | null;
+  email: string;
+  phone: string | null;
+  role: string;
+  createdAt: string;
+  _count: { orders: number };
+}
 
 interface DashboardData {
   totalProducts: number;
@@ -51,6 +61,11 @@ const STATUS_VARIANT: Record<string, 'success' | 'danger' | 'warning' | 'info' |
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
+  // Recent customer signups, surfaced as a quick deep-link to the 360°
+  // history view at /customers?focus=<userId>. Loaded independently so the
+  // main dashboard doesn't block on it.
+  const [recentCustomers, setRecentCustomers] = useState<RecentCustomer[]>([]);
+  const [recentCustomersLoading, setRecentCustomersLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
@@ -58,6 +73,15 @@ export default function DashboardPage() {
       .then((d) => { if (!cancelled) setData(d as DashboardData); })
       .catch(() => {})
       .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiGet<RecentCustomer[]>('customers', { limit: '8', role: 'CUSTOMER' })
+      .then((rows) => { if (!cancelled) setRecentCustomers(Array.isArray(rows) ? rows : []); })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setRecentCustomersLoading(false); });
     return () => { cancelled = true; };
   }, []);
 
@@ -188,6 +212,69 @@ export default function DashboardPage() {
             <h3 className="text-sm font-medium text-text-muted mb-4">Recent Activity</h3>
             <DataTable columns={activityColumns} data={data?.recentActivity ?? []} keyExtractor={(row) => row.id} loading={loading} emptyMessage="No recent activity" />
           </div>
+        </div>
+
+        {/* Recent customers — quick entry point to the 360° purchase / refund
+            history view. Clicking a row deep-links to /customers?focus=<id>
+            which auto-opens the existing detail drawer. */}
+        <div className="rounded-2xl border border-border bg-surface p-6 shadow-card">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="text-sm font-medium text-text-muted">Recent customers</h3>
+              <p className="text-xs text-text-muted mt-0.5">
+                Click any name to open the full purchase, refund, support and wallet history.
+              </p>
+            </div>
+            <Link
+              href="/customers"
+              className="inline-flex items-center gap-1 text-xs font-semibold text-primary-600 hover:text-primary-700"
+            >
+              View all <ArrowUpRight size={12} />
+            </Link>
+          </div>
+          {recentCustomersLoading ? (
+            <div className="space-y-2">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="h-10 rounded-lg bg-surface-muted/50 animate-pulse" />
+              ))}
+            </div>
+          ) : recentCustomers.length === 0 ? (
+            <p className="text-sm text-text-muted">No customers yet.</p>
+          ) : (
+            <ul className="divide-y divide-border">
+              {recentCustomers.map((c) => (
+                <li key={c.id}>
+                  <Link
+                    href={`/customers?focus=${encodeURIComponent(c.id)}`}
+                    className="group flex items-center justify-between gap-3 py-2.5 px-1 rounded-lg hover:bg-surface-muted/40 transition-colors"
+                    aria-label={`Open history for ${c.name ?? c.email}`}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-text-primary truncate group-hover:text-primary-600">
+                        {c.name?.trim() || c.email}
+                      </p>
+                      <p className="text-xs text-text-muted truncate">
+                        {c.email}
+                        {c.phone ? <span className="ml-2">· {c.phone}</span> : null}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3 shrink-0">
+                      <Badge variant={c._count.orders > 0 ? 'info' : 'default'}>
+                        {c._count.orders} order{c._count.orders === 1 ? '' : 's'}
+                      </Badge>
+                      <span className="text-[11px] text-text-muted hidden sm:inline">
+                        Joined {new Date(c.createdAt).toLocaleDateString()}
+                      </span>
+                      <ArrowUpRight
+                        size={14}
+                        className="text-text-muted group-hover:text-primary-600 transition-colors"
+                      />
+                    </div>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       </div>
     </>

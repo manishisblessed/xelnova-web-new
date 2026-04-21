@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Badge } from '@xelnova/ui';
 import { AdminListPage } from '@/components/dashboard/admin-list-page';
 import { ActionModal } from '@/components/dashboard/action-modal';
@@ -118,6 +119,12 @@ export default function CustomersPage() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailHeader, setDetailHeader] = useState<Customer | null>(null);
 
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  // Track the last `?focus=<id>` we opened so we don't re-open the drawer on
+  // every re-render (or after the user closes it).
+  const openedFocusRef = useRef<string | null>(null);
+
   const queryParams = useMemo(
     () => (roleFilter === 'ALL' ? undefined : { role: roleFilter }),
     [roleFilter],
@@ -149,6 +156,42 @@ export default function CustomersPage() {
       setDetailLoading(false);
     }
   };
+
+  /**
+   * Opens the 360° drawer when only the user id is known (deep-link from the
+   * Dashboard's "Recent customers" card uses `?focus=<id>`). The drawer title
+   * gracefully falls back to the loaded detail's name once the API call
+   * resolves.
+   */
+  const openDetailById = async (id: string) => {
+    setDetailHeader(null);
+    setDetailOpen(true);
+    setDetail(null);
+    setDetailLoading(true);
+    try {
+      const data = await apiGetAdminCustomerDetail<CustomerDetail>(id);
+      setDetail(data);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to load customer details');
+      setDetailOpen(false);
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
+  // Deep-link support: when `?focus=<userId>` is present, auto-open the
+  // detail drawer for that user and strip the param from the URL so a refresh
+  // / browser-back doesn't keep reopening it.
+  useEffect(() => {
+    const focus = searchParams.get('focus');
+    if (!focus || openedFocusRef.current === focus) return;
+    openedFocusRef.current = focus;
+    void openDetailById(focus);
+    const next = new URLSearchParams(Array.from(searchParams.entries()));
+    next.delete('focus');
+    const qs = next.toString();
+    router.replace(qs ? `/customers?${qs}` : '/customers', { scroll: false });
+  }, [searchParams, router]);
 
   const handleSave = async () => {
     if (!selected) return;
@@ -436,7 +479,13 @@ export default function CustomersPage() {
           setDetail(null);
           setDetailHeader(null);
         }}
-        title={detailHeader?.name ? `${detailHeader.name} — full history` : 'Customer history'}
+        title={
+          detailHeader?.name
+            ? `${detailHeader.name} — full history`
+            : detail?.user?.name
+              ? `${detail.user.name} — full history`
+              : 'Customer history'
+        }
         extraWide
       >
         {detailLoading && (

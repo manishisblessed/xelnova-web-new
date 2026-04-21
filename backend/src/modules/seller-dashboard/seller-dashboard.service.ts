@@ -241,6 +241,17 @@ export class SellerDashboardService {
     if (!dto.brandAuthorizationCertificate?.trim()) {
       throw new BadRequestException('Brand authorization certificate is required');
     }
+
+    // Route the brand entry through the Brand catalogue so the brand-cap rule
+    // (one free brand per seller, every additional brand needs a cert) cannot
+    // be bypassed via free-text brand names on the product form.
+    await this.ensureBrandClaim(
+      seller.id,
+      userId,
+      dto.brand,
+      dto.brandAuthorizationCertificate,
+    );
+
     const additionalDetailsBase =
       dto.additionalDetails && typeof dto.additionalDetails === 'object' && !Array.isArray(dto.additionalDetails)
         ? { ...(dto.additionalDetails as Record<string, unknown>) }
@@ -389,6 +400,20 @@ export class SellerDashboardService {
     }
     if (dto.brand !== undefined && !dto.brand.trim()) {
       throw new BadRequestException('Brand cannot be empty');
+    }
+    // If the seller is changing the brand on this listing, enforce the same
+    // brand-cap rule we apply at create time so a seller can't side-step it
+    // by editing a previously approved product.
+    if (
+      dto.brand !== undefined &&
+      this.slugify(dto.brand) !== this.slugify(product.brand ?? '')
+    ) {
+      await this.ensureBrandClaim(
+        seller.id,
+        userId,
+        dto.brand,
+        dto.brandAuthorizationCertificate,
+      );
     }
     if (dto.hsnCode !== undefined && !dto.hsnCode.trim()) {
       throw new BadRequestException('HSN code cannot be empty');
@@ -1021,6 +1046,48 @@ export class SellerDashboardService {
         isActive: false,
       },
     });
+  }
+
+  /**
+   * Enforces the brand cap at product create / update time so it cannot be
+   * bypassed by typing a free-text brand name on a product form.
+   *
+   * Behaviour:
+   *  - If a Brand record already exists for the given name (case-insensitive
+   *    via slug), the seller may use it only when:
+   *      a) they originally proposed it (proposedBy === sellerId), OR
+   *      b) admin has approved it for global use (approved === true).
+   *    Otherwise we reject — another seller has reserved that brand.
+   *  - If no Brand record exists, we implicitly call `proposeBrand` so the
+   *    seller's first brand is claimed and the existing cap (one brand free,
+   *    each subsequent brand requires a certificate) kicks in for any later
+   *    *different* brand on subsequent listings.
+   *
+   * This guarantees one source of truth (the Brand table) for brand ownership,
+   * which also makes the admin-side certificate lookup reliable.
+   */
+  private async ensureBrandClaim(
+    sellerId: string,
+    userId: string,
+    brandName: string,
+    authorizationCertificate?: string | null,
+  ): Promise<void> {
+    const name = brandName.trim();
+    if (!name) return;
+    const slug = this.slugify(name);
+    const existing = await this.prisma.brand.findUnique({ where: { slug } });
+
+    if (existing) {
+      const ownsIt = existing.proposedBy === sellerId;
+      const globallyApproved = existing.approved === true;
+      if (ownsIt || globallyApproved) return;
+      throw new BadRequestException(
+        `The brand "${name}" is reserved by another seller. Upload an authorisation certificate via the Brands page to request access.`,
+      );
+    }
+
+    // Implicit claim — reuses the existing cap rules in proposeBrand.
+    await this.proposeBrand(userId, name, undefined, authorizationCertificate ?? undefined);
   }
 
   async getSellerBrands(userId: string) {

@@ -269,10 +269,30 @@ function VariantsPreview({ variants }: { variants: unknown }) {
   );
 }
 
-function SpecSection({ label, value }: { label: string; value: unknown }) {
+function SpecSection({
+  label,
+  value,
+  excludeKeys,
+}: {
+  label: string;
+  value: unknown;
+  /**
+   * Keys to drop from the rendered list. Compared case-insensitively against
+   * each entry's key. Use this to avoid duplicating data that's already
+   * surfaced more prominently elsewhere in the modal (e.g. the brand
+   * authorisation certificate, which we lift into the brand block).
+   */
+  excludeKeys?: string[];
+}) {
   if (value == null || typeof value !== 'object' || Array.isArray(value)) return null;
   const o = value as Record<string, unknown>;
-  const entries = Object.entries(o).filter(([, v]) => v != null && String(v).trim() !== '');
+  const skip = new Set((excludeKeys ?? []).map((k) => k.toLowerCase().trim()));
+  const entries = Object.entries(o).filter(
+    ([k, v]) =>
+      v != null &&
+      String(v).trim() !== '' &&
+      !skip.has(k.toLowerCase().trim()),
+  );
   if (entries.length === 0) return null;
   return (
     <div className="rounded-xl border border-border bg-surface-muted/30 p-3">
@@ -285,6 +305,94 @@ function SpecSection({ label, value }: { label: string; value: unknown }) {
           </div>
         ))}
       </dl>
+    </div>
+  );
+}
+
+/**
+ * Pulls the seller-uploaded brand authorisation certificate URL out of the
+ * product's `additionalDetails` JSON. Sellers upload this on every listing
+ * (see `seller-dashboard.service.ts → createProduct`) and the field is keyed
+ * loosely — we match common variants case-insensitively so admin UX is robust
+ * against future renames.
+ */
+const CERT_KEY_MATCHERS = [
+  'brand authorization certificate',
+  'brand authorisation certificate',
+  'brand authorisation',
+  'brand authorization',
+  'brand certificate',
+  'authorization certificate',
+  'authorisation certificate',
+];
+
+function extractAdditionalCertUrl(additionalDetails: unknown): string | null {
+  if (!additionalDetails || typeof additionalDetails !== 'object' || Array.isArray(additionalDetails)) {
+    return null;
+  }
+  const obj = additionalDetails as Record<string, unknown>;
+  for (const [k, v] of Object.entries(obj)) {
+    const norm = k.toLowerCase().trim();
+    if (!CERT_KEY_MATCHERS.includes(norm)) continue;
+    const raw = typeof v === 'string' ? v.trim() : '';
+    if (raw && /^https?:\/\//i.test(raw)) return raw;
+  }
+  return null;
+}
+
+/** Returns the actual additionalDetails key that matched (if any) so we can hide it from the generic list. */
+function findAdditionalCertKey(additionalDetails: unknown): string | null {
+  if (!additionalDetails || typeof additionalDetails !== 'object' || Array.isArray(additionalDetails)) {
+    return null;
+  }
+  const obj = additionalDetails as Record<string, unknown>;
+  for (const k of Object.keys(obj)) {
+    if (CERT_KEY_MATCHERS.includes(k.toLowerCase().trim())) return k;
+  }
+  return null;
+}
+
+function isPdfUrl(url: string): boolean {
+  return /\.pdf(\?|#|$)/i.test(url);
+}
+
+function isImageUrl(url: string): boolean {
+  return /\.(jpe?g|png|webp|gif|bmp|svg)(\?|#|$)/i.test(url) || /\/image\/upload\//i.test(url);
+}
+
+/**
+ * Renders the seller's brand authorisation certificate inline so the admin can
+ * eyeball it without leaving the modal. Falls back to a labelled link when the
+ * URL is neither an image nor a PDF.
+ */
+function CertificatePreview({ url }: { url: string }) {
+  const pdf = isPdfUrl(url);
+  const image = !pdf && isImageUrl(url);
+  return (
+    <div className="mt-2 space-y-2">
+      <a
+        href={url}
+        target="_blank"
+        rel="noreferrer"
+        className="inline-flex items-center gap-1 text-xs font-semibold text-primary-600 hover:text-primary-700 underline break-all"
+      >
+        Open document {pdf ? '(PDF)' : ''}
+      </a>
+      {image && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <a href={url} target="_blank" rel="noreferrer" className="block">
+          <img
+            src={url}
+            alt="Brand authorisation certificate"
+            className="max-h-48 max-w-full rounded-lg border border-border object-contain bg-white"
+          />
+        </a>
+      )}
+      {pdf && (
+        <div className="rounded-lg border border-border bg-surface px-3 py-2 text-[11px] text-text-muted">
+          PDF certificate &middot; click &ldquo;Open document&rdquo; above to review.
+        </div>
+      )}
     </div>
   );
 }
@@ -338,6 +446,11 @@ export default function ProductsPage() {
   const [viewing, setViewing] = useState<AdminProductDetail | null>(null);
   const [viewLoading, setViewLoading] = useState(false);
   const [viewImageIdx, setViewImageIdx] = useState(0);
+  // Inline "Ask for new images" panel inside the product preview modal. Lets
+  // admin flag only the photos as needing redo without changing listing status.
+  const [imageRejectOpen, setImageRejectOpen] = useState(false);
+  const [imageRejectReason, setImageRejectReason] = useState('');
+  const [savingImageReject, setSavingImageReject] = useState(false);
   const [form, setForm] = useState({
     status: 'ACTIVE' as ProductStatus,
     isFeatured: false,
@@ -370,8 +483,12 @@ export default function ProductsPage() {
   };
 
   useEffect(() => {
-    if (viewing?.id) setViewImageIdx(0);
-  }, [viewing?.id]);
+    if (viewing?.id) {
+      setViewImageIdx(0);
+      setImageRejectOpen(false);
+      setImageRejectReason(viewing.imageRejectionReason || '');
+    }
+  }, [viewing?.id, viewing?.imageRejectionReason]);
 
   const openView = async (p: Product) => {
     setViewOpen(true);
@@ -433,6 +550,50 @@ export default function ProductsPage() {
       toast.error(err instanceof Error ? err.message : 'Failed to approve product');
     } finally {
       setApproving(null);
+    }
+  };
+
+  /**
+   * Save / clear the image rejection reason without changing listing status.
+   * Use case: admin is mid-review and only the photos are off (blurry, watermarked,
+   * wrong aspect ratio, etc.) — the seller is asked to re-upload images while
+   * the listing stays in the same status.
+   */
+  const handleImageReject = async () => {
+    if (!viewing) return;
+    const trimmed = imageRejectReason.trim();
+    if (!trimmed) {
+      toast.error('Add a short note so the seller knows what to redo');
+      return;
+    }
+    setSavingImageReject(true);
+    try {
+      await apiUpdate('products', viewing.id, { imageRejectionReason: trimmed });
+      toast.success('Image feedback sent to the seller');
+      setViewing((v) => (v ? { ...v, imageRejectionReason: trimmed } : v));
+      setImageRejectOpen(false);
+      setRefreshTrigger((n) => n + 1);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save image feedback');
+    } finally {
+      setSavingImageReject(false);
+    }
+  };
+
+  const handleImageRejectClear = async () => {
+    if (!viewing) return;
+    setSavingImageReject(true);
+    try {
+      await apiUpdate('products', viewing.id, { imageRejectionReason: '' });
+      toast.success('Image rejection cleared');
+      setViewing((v) => (v ? { ...v, imageRejectionReason: null } : v));
+      setImageRejectReason('');
+      setImageRejectOpen(false);
+      setRefreshTrigger((n) => n + 1);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to clear image feedback');
+    } finally {
+      setSavingImageReject(false);
     }
   };
 
@@ -793,21 +954,27 @@ export default function ProductsPage() {
             )}
 
             {/* Brand authorisation block — visible when reviewing the product. */}
-            <div className="rounded-xl border border-border bg-surface-muted/30 p-3 text-xs">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="font-semibold text-text-primary">
-                  Brand: {viewing.brand?.trim() ? viewing.brand : <span className="text-text-muted">— not set —</span>}
-                </p>
-                {viewing.brandRecord && (
-                  <Badge variant={viewing.brandRecord.approved ? 'success' : 'warning'}>
-                    {viewing.brandRecord.approved ? 'Brand approved' : 'Brand pending'}
-                  </Badge>
-                )}
-              </div>
-              {viewing.brandRecord ? (
-                <div className="mt-2 space-y-1.5 text-text-secondary">
-                  {viewing.brandRecord.proposer && (
-                    <p>
+            {(() => {
+              const brandRecordCert = viewing.brandRecord?.authorizationCertificate ?? null;
+              const sellerUploadedCert = extractAdditionalCertUrl(viewing.additionalDetails);
+              const certUrl = brandRecordCert ?? sellerUploadedCert;
+              return (
+                <div className="rounded-xl border border-border bg-surface-muted/30 p-3 text-xs">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="font-semibold text-text-primary">
+                      Brand: {viewing.brand?.trim() ? viewing.brand : <span className="text-text-muted">— not set —</span>}
+                    </p>
+                    {viewing.brandRecord ? (
+                      <Badge variant={viewing.brandRecord.approved ? 'success' : 'warning'}>
+                        {viewing.brandRecord.approved ? 'Brand approved' : 'Brand pending'}
+                      </Badge>
+                    ) : viewing.brand?.trim() ? (
+                      <Badge variant="default">Free-text brand</Badge>
+                    ) : null}
+                  </div>
+
+                  {viewing.brandRecord?.proposer && (
+                    <p className="mt-2 text-text-secondary">
                       Proposed by:{' '}
                       <span className="font-medium text-text-primary">
                         {viewing.brandRecord.proposer.storeName ?? '—'}
@@ -819,32 +986,27 @@ export default function ProductsPage() {
                       )}
                     </p>
                   )}
-                  {viewing.brandRecord.authorizationCertificate ? (
-                    <p>
-                      Authorisation certificate:{' '}
-                      <a
-                        href={viewing.brandRecord.authorizationCertificate}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="font-semibold text-primary-600 hover:text-primary-700 underline"
-                      >
-                        Open document
-                      </a>
-                    </p>
-                  ) : (
-                    <p className="text-warning-600">
-                      No brand authorisation certificate uploaded by the seller.
-                    </p>
-                  )}
+
+                  <div className="mt-2 text-text-secondary">
+                    <p className="font-semibold text-text-primary">Brand authorisation certificate</p>
+                    {certUrl ? (
+                      <>
+                        {!brandRecordCert && sellerUploadedCert && (
+                          <p className="mt-1 text-[11px] text-text-muted">
+                            Seller-uploaded certificate (not yet a catalogued brand). Verify before approving.
+                          </p>
+                        )}
+                        <CertificatePreview url={certUrl} />
+                      </>
+                    ) : (
+                      <p className="mt-1 text-warning-600">
+                        No brand authorisation certificate found on this listing.
+                      </p>
+                    )}
+                  </div>
                 </div>
-              ) : viewing.brand?.trim() ? (
-                <p className="mt-1 text-text-muted">
-                  No brand record found in the catalogue for &ldquo;{viewing.brand}&rdquo;. The
-                  seller may have typed a free-text brand name. Confirm authorisation manually
-                  before approving.
-                </p>
-              ) : null}
-            </div>
+              );
+            })()}
 
             {viewing.images && viewing.images.length > 0 ? (
               <div className="space-y-2">
@@ -880,6 +1042,100 @@ export default function ProductsPage() {
               </p>
             )}
 
+            {/* Image-only rejection: ask the seller to redo just the photos
+                without changing listing status. Available regardless of status
+                so admins can flag images on already-active listings too. */}
+            <div className="rounded-xl border border-border bg-surface-muted/20 p-3">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold text-text-primary">Image feedback</p>
+                  <p className="text-[11px] text-text-muted mt-0.5">
+                    Ask the seller to redo only the product photos. The listing status will not change.
+                  </p>
+                </div>
+                {viewing.imageRejectionReason ? (
+                  <Badge variant="warning">Images flagged</Badge>
+                ) : (
+                  <Badge variant="default">No issues</Badge>
+                )}
+              </div>
+
+              {viewing.imageRejectionReason && !imageRejectOpen && (
+                <p className="mt-2 text-xs text-text-secondary whitespace-pre-wrap">
+                  <span className="text-text-muted">Last note:</span> {viewing.imageRejectionReason}
+                </p>
+              )}
+
+              {imageRejectOpen ? (
+                <div className="mt-2 space-y-2">
+                  <FormTextarea
+                    value={imageRejectReason}
+                    onChange={(e) => setImageRejectReason(e.target.value)}
+                    placeholder="e.g., Cover image is blurry, please re-upload at 1024x1024 on a white background."
+                    rows={3}
+                  />
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setImageRejectOpen(false);
+                        setImageRejectReason(viewing.imageRejectionReason || '');
+                      }}
+                      disabled={savingImageReject}
+                    >
+                      Cancel
+                    </Button>
+                    {viewing.imageRejectionReason && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => void handleImageRejectClear()}
+                        loading={savingImageReject}
+                      >
+                        Clear flag
+                      </Button>
+                    )}
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => void handleImageReject()}
+                      loading={savingImageReject}
+                    >
+                      Send to seller
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setImageRejectOpen(true);
+                      setImageRejectReason(viewing.imageRejectionReason || '');
+                    }}
+                  >
+                    {viewing.imageRejectionReason ? 'Edit image feedback' : 'Ask for new images'}
+                  </Button>
+                  {viewing.imageRejectionReason && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => void handleImageRejectClear()}
+                      loading={savingImageReject}
+                    >
+                      Clear flag
+                    </Button>
+                  )}
+                </div>
+              )}
+            </div>
+
             {viewing.shortDescription?.trim() && (
               <div>
                 <p className="text-xs font-semibold text-text-primary mb-1">Short description</p>
@@ -906,7 +1162,14 @@ export default function ProductsPage() {
             <SpecSection label="Features & specs" value={viewing.featuresAndSpecs} />
             <SpecSection label="Materials & care" value={viewing.materialsAndCare} />
             <SpecSection label="Item details" value={viewing.itemDetails} />
-            <SpecSection label="Additional details" value={viewing.additionalDetails} />
+            <SpecSection
+              label="Additional details"
+              value={viewing.additionalDetails}
+              excludeKeys={(() => {
+                const k = findAdditionalCertKey(viewing.additionalDetails);
+                return k ? [k] : undefined;
+              })()}
+            />
 
             {viewing.highlights && viewing.highlights.length > 0 && (
               <div>

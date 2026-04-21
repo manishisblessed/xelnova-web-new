@@ -72,13 +72,17 @@ const itemVariants = {
   visible: { opacity: 1, y: 0, transition: { duration: 0.5, ease: [0.16, 1, 0.3, 1] as [number, number, number, number] } },
 };
 
-const paymentMethods: { name: string; src: string; w: number; h: number }[] = [
-  { name: 'Visa', src: '/payments/visa.svg', w: 56, h: 22 },
-  { name: 'Mastercard', src: '/payments/mastercard.svg', w: 40, h: 26 },
-  { name: 'RuPay', src: '/payments/rupay.svg', w: 64, h: 22 },
-  { name: 'UPI', src: '/payments/upi.svg', w: 64, h: 22 },
-  { name: 'Net Banking', src: '/payments/netbanking.svg', w: 78, h: 22 },
-  { name: 'Wallets', src: '/payments/wallets.svg', w: 60, h: 22 },
+const paymentMethods: { name: string; src: string }[] = [
+  { name: 'Visa', src: '/payments/brands/visa.jpeg' },
+  { name: 'Mastercard', src: '/payments/brands/master_card.jpeg' },
+  { name: 'Diners Club', src: '/payments/brands/dinners_club.jpeg' },
+  { name: 'Amazon Pay', src: '/payments/brands/amazon_pay.jpeg' },
+  { name: 'Google Pay', src: '/payments/brands/google_pay.jpeg' },
+  { name: 'PhonePe', src: '/payments/brands/phone_pe.jpeg' },
+  { name: 'Paytm', src: '/payments/brands/paytm.jpeg' },
+  { name: 'CRED', src: '/payments/brands/cred.jpeg' },
+  { name: 'PayZapp', src: '/payments/brands/payzapp.jpeg' },
+  { name: 'Razorpay', src: '/payments/brands/razorpay.jpeg' },
 ];
 
 export function Footer() {
@@ -266,14 +270,14 @@ export function Footer() {
                   key={method.name}
                   title={method.name}
                   aria-label={method.name}
-                  className="inline-flex h-7 items-center justify-center rounded bg-white px-2 shadow-sm ring-1 ring-black/5"
+                  className="inline-flex h-8 w-12 items-center justify-center overflow-hidden rounded bg-white shadow-sm ring-1 ring-black/5"
                 >
                   <Image
                     src={method.src}
                     alt={method.name}
-                    width={method.w}
-                    height={method.h}
-                    className="h-4 w-auto object-contain"
+                    width={96}
+                    height={64}
+                    className="h-full w-full object-contain"
                   />
                 </span>
               ))}
@@ -283,13 +287,22 @@ export function Footer() {
           <div className="mt-5 flex flex-col items-center gap-2 border-t border-white/[0.06] pt-5">
             <div className="flex items-center gap-2">
               <span className="text-[10px] uppercase tracking-wider text-white/55">Payments powered by</span>
-              <span className="inline-flex h-7 items-center justify-center rounded bg-white px-2 shadow-sm ring-1 ring-black/5">
+              <span className="inline-flex h-8 w-16 items-center justify-center overflow-hidden rounded bg-white shadow-sm ring-1 ring-black/5">
                 <Image
-                  src="/payments/axis-bank.svg"
+                  src="/payments/brands/axis.jpeg"
                   alt="Axis Bank Payment Gateway"
-                  width={70}
-                  height={20}
-                  className="h-4 w-auto object-contain"
+                  width={128}
+                  height={64}
+                  className="h-full w-full object-contain"
+                />
+              </span>
+              <span className="inline-flex h-8 w-16 items-center justify-center overflow-hidden rounded bg-white shadow-sm ring-1 ring-black/5">
+                <Image
+                  src="/payments/brands/razorpay.jpeg"
+                  alt="Razorpay"
+                  width={128}
+                  height={64}
+                  className="h-full w-full object-contain"
                 />
               </span>
             </div>

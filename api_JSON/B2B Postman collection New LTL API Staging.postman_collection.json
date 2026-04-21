@@ -1,0 +1,957 @@
+{
+	"info": {
+		"_postman_id": "713ef4cf-2ee4-4180-b573-b93c656944ae",
+		"name": "B2B Postman collection New API Staging Copy 2",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "19474863"
+	},
+	"item": [
+		{
+			"name": "Login API",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"username\": \"pass username\",\n    \"password\": \"pass password\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "https://ltl-clients-api-dev.delhivery.com/ums/login",
+					"protocol": "https",
+					"host": [
+						"ltl-clients-api-dev",
+						"delhivery",
+						"com"
+					],
+					"path": [
+						"ums",
+						"login"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Logout API",
+			"request": {
+				"method": "DELETE",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer Token",
+						"type": "text"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "https://ltl-clients-api-dev.delhivery.com/ums/logout",
+					"protocol": "https",
+					"host": [
+						"ltl-clients-api-dev",
+						"delhivery",
+						"com"
+					],
+					"path": [
+						"ums",
+						"logout"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "TAT API",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					},
+					{
+						"key": "Accept",
+						"value": "application/json",
+						"type": "text"
+					},
+					{
+						"key": "Authorization",
+						"value": "Bearer Token",
+						"type": "text"
+					},
+					{
+						"key": "X-Request-Id",
+						"value": "Unique request ID",
+						"type": "text"
+					},
+					{
+						"key": "X-Source",
+						"value": "Source of the request",
+						"type": "text",
+						"disabled": true
+					}
+				],
+				"url": {
+					"raw": "https://ltl-clients-api-dev.delhivery.com/tat/estimate?origin_pin=122003&destination_pin=136118&mot=S&pdt=B2B",
+					"protocol": "https",
+					"host": [
+						"ltl-clients-api-dev",
+						"delhivery",
+						"com"
+					],
+					"path": [
+						"tat",
+						"estimate"
+					],
+					"query": [
+						{
+							"key": "origin_pin",
+							"value": "122003"
+						},
+						{
+							"key": "destination_pin",
+							"value": "136118"
+						},
+						{
+							"key": "mot",
+							"value": "S"
+						},
+						{
+							"key": "pdt",
+							"value": "B2B"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Pincode serviceability API",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer Token"
+					}
+				],
+				"url": {
+					"raw": "https://ltl-clients-api-dev.delhivery.com/pincode-service/122105?weight=1",
+					"protocol": "https",
+					"host": [
+						"ltl-clients-api-dev",
+						"delhivery",
+						"com"
+					],
+					"path": [
+						"pincode-service",
+						"122105"
+					],
+					"query": [
+						{
+							"key": "weight",
+							"value": "1"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Pincode serviceability API Copy",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer Token"
+					}
+				],
+				"url": {
+					"raw": "https://ltl-clients-api-dev.delhivery.com/pincode-service/122105?weight=1",
+					"protocol": "https",
+					"host": [
+						"ltl-clients-api-dev",
+						"delhivery",
+						"com"
+					],
+					"path": [
+						"pincode-service",
+						"122105"
+					],
+					"query": [
+						{
+							"key": "weight",
+							"value": "1"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Manifest API",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer Token",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "formdata",
+					"formdata": [
+						{
+							"key": "lrn",
+							"value": "",
+							"type": "text"
+						},
+						{
+							"key": "pickup_location_name",
+							"value": "pass registered wh name",
+							"type": "text"
+						},
+						{
+							"key": "payment_mode",
+							"value": "cod",
+							"type": "text"
+						},
+						{
+							"key": "cod_amount",
+							"value": "122",
+							"type": "text"
+						},
+						{
+							"key": "weight",
+							"value": "100",
+							"type": "text"
+						},
+						{
+							"key": "dropoff_location",
+							"value": "{\n \"consignee_name\": \"dummy\",\n \"address\": \"This is my addess\",\n \"city\": \"mumbai\",\n \"state\": \"maharashtra\",\n \"zip\": \"400093\",\n \"phone\": \"1234567890\",\n \"email\": \"\"\n}",
+							"type": "text"
+						},
+						{
+							"key": "rov_insurance",
+							"value": "True",
+							"type": "text"
+						},
+						{
+							"key": "invoices",
+							"value": "[\n{\"ewaybill\": \"\", \"inv_num\": \"I22331030453\", \"inv_amt\": 59729.67, \"inv_qr_code\": \"\"},\n{\"ewaybill\": \"\", \"inv_num\": \"DEL/1122/0095407\", \"inv_amt\": \"2520480.0\", \"inv_qr_code\": \"eyJhbGciOiJSUzI1NiIsImtpZCI6IkI4RDYzRUNCNThFQTVFNkY0QUFDM0Q1MjQ1NDNCMjI0NjY2OUIwRjgiLCJ0eXAiOiJKV1QiLCJ4NXQiOiJ1TlkteTFqcVhtOUtyRDFTUlVPeUpHWnBzUGcifQ.eyJkYXRhIjoie1wiU2VsbGVyR3N0aW5cIjpcIjMzQUFQQ1M5NTc1RTFaVVwiLFwiQnV5ZXJHc3RpblwiOlwiMjNBQVBDUzk1NzVFMVpWXCIsXCJEb2NOb1wiOlwiREVMLzExMjIvMDA5NTQwN1wiLFwiRG9jVHlwXCI6XCJJTlZcIixcIkRvY0R0XCI6XCIzMC8xMS8yMDIyXCIsXCJUb3RJbnZWYWxcIjoyNTIwNDgwLjAsXCJJdGVtQ250XCI6MSxcIk1haW5Ic25Db2RlXCI6XCI4NDI4MjBcIixcIklyblwiOlwiODBlZWIxYzA4Zjg0MTJkYWVhZTBmNmM3NjE0ZWJmMzRiZDEzYWU3NDJiZTYwNzM3MTNlY2Q4N2JlYzgwNjVjOFwiLFwiSXJuRHRcIjpcIjIwMjItMTEtMzAgMTI6MDI6MDBcIn0iLCJpc3MiOiJOSUMifQ.VInEh4yiYmEq0ikdj3qX5TlKVwarcNqFVqpUNRjP5rsOqtXH6vhsUZM2LrMfg1jlJRghfH-PKu77DlOR4bmj_4VmZVvhX-Waziey6Z4QBkOLL8qL2_RSNcxOwLUkd56kWWM5_HmiowSA11zFeE34pbaBaN1hRGy5XkEIAKFWqS-rgppPQAuW4CIvyDcbR0B4jYT3JuOHRzkkg4NB75xAsH9YXJ4ffY7Y5O6nxhxEIYcXhWHoKp1HmW1zelFmU-nLmuUif7eJ8U9s6PCL4onFzN4f2m0dYaNCddT-KgNKnFyghMqtXvBm8y6_ree8vfVcVoVrlr_EwyFOE4rpUKiyGg\"}\n]",
+							"type": "text"
+						},
+						{
+							"key": "shipment_details",
+							"value": "[{\"order_id\": \"oid1\", \"box_count\": 1, \"description\": \"Test description\", \"weight\": 1000, \"waybills\": [], \"master\": False}]",
+							"type": "text"
+						},
+						{
+							"key": "dimensions",
+							"value": "[\n    {\n      \"box_count\": 0, <int>\n      \"length\": 0, <float>\n      \"width\": 0, <float>\n      \"height\": 0 <float>\n    }\n]\n",
+							"type": "text"
+						},
+						{
+							"key": "doc_data",
+							"value": "[\n    {\n        \"doc_type\": \"INVOICE_COPY\",\n        \"doc_meta\": {\n            \"invoice_num\": [\n                \"1/2/2025\"\n            ]\n        }\n    }\n]",
+							"type": "text"
+						},
+						{
+							"key": "doc_file",
+							"type": "file",
+							"src": "/home/delhivery/Downloads/image (4).png"
+						},
+						{
+							"key": "fm_pickup",
+							"value": "False",
+							"type": "text"
+						},
+						{
+							"key": "freight_mode",
+							"value": "fop",
+							"type": "text"
+						},
+						{
+							"key": "billing_address",
+							"value": "{\n\"name\":\"String <required>\"\n\"company\":\"String <required>\"\n\"consignor\":\"String <required>\"\n\"address\":\"String <required>\"\n\"city\":\"String <required>\"\n\"state\":\"String <required>\"\n\"pin\":\"String <required>\"\n\"phone\":\"String <required>\"\n\"pan_number\":\"String <optional> (either pan or gstin mandatory)\"\n\"gst_number\":\"String <optional> (either pan or gstin mandatory)\"\n}",
+							"type": "text"
+						}
+					]
+				},
+				"url": {
+					"raw": "https://ltl-clients-api-dev.delhivery.com/manifest",
+					"protocol": "https",
+					"host": [
+						"ltl-clients-api-dev",
+						"delhivery",
+						"com"
+					],
+					"path": [
+						"manifest"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "WH creation API",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer Token"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"pin_code\": \"324005\",\n    \"city\": \"Gurgaon\",\n    \"state\": \"Haryana\",\n    \"country\": \"India\",\n    \"address_details\": {\n        \"address\": \"Gurgaon\",\n        \"contact_person\": \"contact_person\",\n        \"phone_number\": \"9999999889\"\n    },\n    \"name\": \"testWH\",\n    \"business_hours\": {\n        \"TUE\": {\n            \"start_time\": \"07:00\",\n            \"close_time\": \"08:30\"\n        }\n    },\n    \"pick_up_hours\": {\n        \"TUE\": {\n            \"start_time\": \"13:00\",\n            \"close_time\": \"16:00\"\n        }\n    },\n    \"pick_up_days\": [\n        \"TUE\"\n    ],\n    \"business_days\": [\n        \"TUE\"\n    ],\n    \"ret_address\": {\n        \"pin\": \"324005\",\n        \"address\": \"test\"\n    }\n}"
+				},
+				"url": {
+					"raw": "https://ltl-clients-api-dev.delhivery.com/client-warehouse/create/",
+					"protocol": "https",
+					"host": [
+						"ltl-clients-api-dev",
+						"delhivery",
+						"com"
+					],
+					"path": [
+						"client-warehouse",
+						"create",
+						""
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "WH update API",
+			"request": {
+				"method": "PATCH",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					},
+					{
+						"key": "Authorization",
+						"value": "Bearer Token",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"cl_warehouse_name\": \"Softieons\",\n    \"update_dict\": {\n        \"city\": \"Surat\",\n        \"state\": \"Gujarat\",\n        \"country\": \"India\",\n        \"address_details\": {\n            \"address\": \"5th Floor, Abhinandan Royal, Bhatar Rd, opp. Rajhans Olampia, Swami Gunatit Nagar, Sanskar Nagar, Athwa, Surat, Gujarat 395007 Surat Gujarat 395007, India\",\n            \"contact_person\": \"Dinesh Patil\",\n            \"phone_number\": \"9988888888\",\n            \"company\": \"Softieons\"\n        },\n        \"ret_address\": {\n            \"pin\": \"395007\",\n            \"address\": \"5th Floor, Abhinandan Royal, Bhatar Rd, opp. Rajhans Olampia, Swami Gunatit Nagar, Sanskar Nagar, Athwa, Surat, Gujarat 395007 Surat Gujarat 395007, India\",\n            \"city\": \"Surat\",\n            \"state\": \"Gujarat\",\n            \"country\": \"India\"\n        }\n    }\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "ltl-clients-api-dev.delhivery.com/client-warehouses/update",
+					"host": [
+						"ltl-clients-api-dev",
+						"delhivery",
+						"com"
+					],
+					"path": [
+						"client-warehouses",
+						"update"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Get Manifest Status API",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer Token"
+					}
+				],
+				"url": {
+					"raw": "https://ltl-clients-api-dev.delhivery.com/manifest?job_id=xxxxxxxxxxxxxxxxxxx",
+					"protocol": "https",
+					"host": [
+						"ltl-clients-api-dev",
+						"delhivery",
+						"com"
+					],
+					"path": [
+						"manifest"
+					],
+					"query": [
+						{
+							"key": "job_id",
+							"value": "xxxxxxxxxxxxxxxxxxx"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Book Appointment API",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer Token"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					},
+					{
+						"key": "Cookie",
+						"value": "sessionid=k54hhfr1xo2orq7hvvrky0d35hlq2e38",
+						"disabled": true
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"lrn\": \"xxxxxxxxxxx\",\n    \"date\": \"01/03/2025\",\n    \"start_time\": \"18:30\",\n    \"end_time\": \"19:00\",\n    \"po_number\": [\n        \"122334\",\n        \"edwwe21312312\"\n    ],\n    \"appointment_id\": \"32342424\"\n}"
+				},
+				"url": {
+					"raw": "https://ltl-clients-api-dev.delhivery.com/appointments/lm",
+					"protocol": "https",
+					"host": [
+						"ltl-clients-api-dev",
+						"delhivery",
+						"com"
+					],
+					"path": [
+						"appointments",
+						"lm"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Create PUR API",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer Token"
+					},
+					{
+						"key": "X-Request-Id",
+						"value": "<Unique_Request_ID>",
+						"disabled": true
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"client_warehouse\": \"Delhivery1421\",\n    \"pickup_date\": \"2024-05-17\",\n    \"start_time\": \"10:00:00\",\n    \"expected_package_count\": 1\n}"
+				},
+				"url": {
+					"raw": "https://ltl-clients-api-dev.delhivery.com/pickup_requests",
+					"protocol": "https",
+					"host": [
+						"ltl-clients-api-dev",
+						"delhivery",
+						"com"
+					],
+					"path": [
+						"pickup_requests"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "PUR Cancel API",
+			"request": {
+				"method": "DELETE",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer Token"
+					},
+					{
+						"key": "X-Request-Id",
+						"value": "<Unique_Request_ID>",
+						"disabled": true
+					}
+				],
+				"url": {
+					"raw": "https://ltl-clients-api-dev.delhivery.com/pickup_requests/PUR_ID",
+					"protocol": "https",
+					"host": [
+						"ltl-clients-api-dev",
+						"delhivery",
+						"com"
+					],
+					"path": [
+						"pickup_requests",
+						"PUR_ID"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "EDIT LR API",
+			"request": {
+				"method": "PUT",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/json"
+					},
+					{
+						"key": "Authorization",
+						"value": "Bearer Token"
+					}
+				],
+				"body": {
+					"mode": "formdata",
+					"formdata": [
+						{
+							"key": "invoices",
+							"value": "[\n  {\n    \"inv_number\": \"inv1\",\n    \"inv_amount\": 1234\n  }\n]",
+							"type": "text"
+						},
+						{
+							"key": "cod_amount",
+							"value": "0",
+							"type": "text"
+						},
+						{
+							"key": "consignee_name",
+							"value": "rahul",
+							"type": "text"
+						},
+						{
+							"key": "consignee_address",
+							"value": "jammu",
+							"type": "text"
+						},
+						{
+							"key": "consignee_pincode",
+							"value": "844120",
+							"type": "text"
+						},
+						{
+							"key": "consignee_phone",
+							"value": "9999999999",
+							"type": "text"
+						},
+						{
+							"key": "weight_g",
+							"value": "30",
+							"type": "text"
+						},
+						{
+							"key": "invoices",
+							"value": "[{\n    \"inv_number\":\"I22331030453\",\n      \"inv_amount\": 59729.67,\n      \"qr_code\": \"eyJhbGciOiJSUzI1NiIsImtpZCI6IjQ0NDQwNUM3ODFFNDgyNTA3MkIzNENBNEY4QkRDNjA2Qzg2QjU3MjAiLCJ0eXAiOiJKV1QiLCJ4NXQiOiJSRVFGeDRIa2dsQnlzMHlrLUwzR0JzaHJWeUEifQ.eyJkYXRhIjoie1wiU2VsbGVyR3N0aW5cIjpcIjMzQUFBQ1YyODA5RDFaVFwiLFwiQnV5ZXJHc3RpblwiOlwiMzNBQUpGUjA0OTVCMVpHXCIsXCJEb2NOb1wiOlwiSTIyMzMxMDMwNDUzXCIsXCJEb2NUeXBcIjpcIklOVlwiLFwiRG9jRHRcIjpcIjMwLzA2LzIwMjJcIixcIlRvdEludlZhbFwiOjU5NzI5LjY3LFwiSXRlbUNudFwiOjEsXCJNYWluSHNuQ29kZVwiOlwiODQxODMwMTBcIixcIklyblwiOlwiMjgwOWFjOTg4NTljMzEwMTM2YjllMGEyYmM5MjUxNGJiZmRhMmNmNDVkMjdjMDAxY2E1MWMyNWNiNzZhMjdlZVwiLFwiSXJuRHRcIjpcIjIwMjItMDYtMzAgMjM6Mzc6MDBcIn0iLCJpc3MiOiJOSUMifQ.U97hS7FGz1ovnqWXHoojbc8rRUq7naY8WAEBBy0bLNXOY6lQix2p3-2qsrP7x3gGS9CuPkNC5erDp3-o97cjdHie3pwfebjHfOGLWnqZEeVFbnnY8V8NRV_MWe_sYCjjfpK0oSa-8praDqPuXVmGVIN-XeZQuGVHUWx66thhABMnvCKokb8vcJq5MD3O2gFIHOUg0wfjHho7VLe_fbUI4dSL3QNbV1-8K_IDjgcB9aZHKECnvgicJvVGN3k6MMWjyq25zwe9oGDeXoVL4h3Y9KMZJn0GvyOM76-Os1-SsHznVOL0mMtLJ0Fj_4hI6UdXOu-XJbpAJ61AjHX3mWEtSg\",\n      \"ewaybill\": \"\"\n  }]",
+							"type": "text"
+						},
+						{
+							"key": "cb",
+							"value": "{\n      \"uri\": \"https://btob-api-dev.delhivery.com/docket/upload_callback\",\n      \"method\": \"POST\",\n      \"authorization\": \"Bearer Token\"\n    }",
+							"type": "text"
+						},
+						{
+							"key": "dimensions",
+							"value": "[{\"width_cm\": 5,\"height_cm\": 4,\"length_cm\": 3,\"box_count\": 1}]",
+							"type": "text"
+						},
+						{
+							"key": "invoice_files_meta",
+							"value": "[{\"invoices\": [\"inv00\"]}]",
+							"type": "text"
+						},
+						{
+							"key": "invoice_file",
+							"type": "file",
+							"src": "/home/delhivery/Downloads/24.04.2024_18.01.59_REC.png"
+						}
+					]
+				},
+				"url": {
+					"raw": "https://ltl-clients-api-dev.delhivery.com/lrn/update/LR_NUMBER",
+					"protocol": "https",
+					"host": [
+						"ltl-clients-api-dev",
+						"delhivery",
+						"com"
+					],
+					"path": [
+						"lrn",
+						"update",
+						"LR_NUMBER"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "EDIT LR Status API",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer Token"
+					}
+				],
+				"url": {
+					"raw": "https://ltl-clients-api-dev.delhivery.com/lrn/update/status?job_id=xxxxxxxxxxxxxxxxxxxxxx",
+					"protocol": "https",
+					"host": [
+						"ltl-clients-api-dev",
+						"delhivery",
+						"com"
+					],
+					"path": [
+						"lrn",
+						"update",
+						"status"
+					],
+					"query": [
+						{
+							"key": "job_id",
+							"value": "xxxxxxxxxxxxxxxxxxxxxx"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "LR Track API",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer Token"
+					}
+				],
+				"url": {
+					"raw": "https://ltl-clients-api-dev.delhivery.com/lrn/track?lrnum=xxxxxxxxxxxx",
+					"protocol": "https",
+					"host": [
+						"ltl-clients-api-dev",
+						"delhivery",
+						"com"
+					],
+					"path": [
+						"lrn",
+						"track"
+					],
+					"query": [
+						{
+							"key": "lrnum",
+							"value": "xxxxxxxxxxxx"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "GET shipping label API",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer Token"
+					}
+				],
+				"url": {
+					"raw": "https://ltl-clients-api-dev.delhivery.com/label/get_urls/std/xxxxxxxxxxxxxx",
+					"protocol": "https",
+					"host": [
+						"ltl-clients-api-dev",
+						"delhivery",
+						"com"
+					],
+					"path": [
+						"label",
+						"get_urls",
+						"std",
+						"xxxxxxxxxxxxxx"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Document Download API",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer Token"
+					}
+				],
+				"url": {
+					"raw": "https://ltl-clients-api-dev.delhivery.com/document/download?lrn=xxxxxxxxx&doc_type=LM_POD&auto_download=&version=latest",
+					"protocol": "https",
+					"host": [
+						"ltl-clients-api-dev",
+						"delhivery",
+						"com"
+					],
+					"path": [
+						"document",
+						"download"
+					],
+					"query": [
+						{
+							"key": "lrn",
+							"value": "xxxxxxxxx"
+						},
+						{
+							"key": "doc_type",
+							"value": "LM_POD"
+						},
+						{
+							"key": "auto_download",
+							"value": ""
+						},
+						{
+							"key": "version",
+							"value": "latest"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Freight Estimator API",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer Token"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					},
+					{
+						"key": "Cookie",
+						"value": "sessionid=wb1tx2xtnrckyr22qim211skx1qbzh3d",
+						"disabled": true
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"dimensions\": [\n        {\n            \"length_cm\": 11,\n            \"width_cm\": 1.1,\n            \"height_cm\": 11,\n            \"box_count\": 1\n        }\n    ],\n    \"weight_g\": 100000,\n    \"cheque_payment\": false,\n    \"source_pin\": \"400069\",\n    \"consignee_pin\": \"400069\",\n    \"payment_mode\": \"prepaid\",\n    \"inv_amount\": 123,\n    \"freight_mode\": \"fod\",\n    \"rov_insurance\": true\n}"
+				},
+				"url": {
+					"raw": "https://ltl-clients-api-dev.delhivery.com/freight/estimate",
+					"protocol": "https",
+					"host": [
+						"ltl-clients-api-dev",
+						"delhivery",
+						"com"
+					],
+					"path": [
+						"freight",
+						"estimate"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Freight Charges breakup API",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer Token"
+					}
+				],
+				"url": {
+					"raw": "https://ltl-clients-api-dev.delhivery.com/lrn/freight-breakup?lrns=xxxxxxxx, xxxxxxxxxxxx",
+					"protocol": "https",
+					"host": [
+						"ltl-clients-api-dev",
+						"delhivery",
+						"com"
+					],
+					"path": [
+						"lrn",
+						"freight-breakup"
+					],
+					"query": [
+						{
+							"key": "lrns",
+							"value": "xxxxxxxx, xxxxxxxxxxxx"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "LR Cancel API",
+			"request": {
+				"method": "DELETE",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer Token",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "https://ltl-clients-api-dev.delhivery.com/lrn/cancel/xxxxxxxxxxxx",
+					"protocol": "https",
+					"host": [
+						"ltl-clients-api-dev",
+						"delhivery",
+						"com"
+					],
+					"path": [
+						"lrn",
+						"cancel",
+						"xxxxxxxxxxxx"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Print LR Copy API",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer Token"
+					}
+				],
+				"url": {
+					"raw": "https://ltl-clients-api-dev.delhivery.com/lr_copy/print/xxxxxxxxxxxx",
+					"protocol": "https",
+					"host": [
+						"ltl-clients-api-dev",
+						"delhivery",
+						"com"
+					],
+					"path": [
+						"lr_copy",
+						"print",
+						"xxxxxxxxxxxx"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Generate documents API",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer Token",
+						"type": "text"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "https://ltl-clients-api-dev.delhivery.com/generate?doc_type=lr_copy&lrns=xxxxxxxx",
+					"protocol": "https",
+					"host": [
+						"ltl-clients-api-dev",
+						"delhivery",
+						"com"
+					],
+					"path": [
+						"generate"
+					],
+					"query": [
+						{
+							"key": "doc_type",
+							"value": "lr_copy"
+						},
+						{
+							"key": "lrns",
+							"value": "xxxxxxxx"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Generate document status API",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer Token",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "https://ltl-clients-api-dev.delhivery.com/generate/shipping_label/status/xxxxxxxxx",
+					"protocol": "https",
+					"host": [
+						"ltl-clients-api-dev",
+						"delhivery",
+						"com"
+					],
+					"path": [
+						"generate",
+						"shipping_label",
+						"status",
+						"xxxxxxxxx"
+					]
+				}
+			},
+			"response": []
+		}
+	]
+}
