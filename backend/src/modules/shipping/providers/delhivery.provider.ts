@@ -940,6 +940,27 @@ export class DelhiveryProvider implements CourierProvider {
       };
     }
 
+    // Delhivery sometimes returns "some error while creating/updating warehouse"
+    // when the warehouse name already exists but with different details. If the
+    // response includes the warehouse name we requested, treat it as success —
+    // the warehouse exists on Delhivery and can be used for pickups.
+    if (
+      lower.includes('error while creating/updating warehouse') &&
+      xml?.name &&
+      xml.name.toLowerCase() === options.name.toLowerCase()
+    ) {
+      this.logger.log(
+        `Delhivery warehouse "${options.name}" appears to already exist (got name back in error response) — treating as success.`,
+      );
+      return {
+        success: true,
+        alreadyExisted: true,
+        registeredName: xml.name,
+        message: `Warehouse "${xml.name}" already exists on Delhivery — reusing it.`,
+        raw: parsed ?? xml ?? text,
+      };
+    }
+
     this.logger.warn(
       `Delhivery warehouse create failed: ${res.status} ${text.slice(0, 300)}`,
     );
