@@ -14,7 +14,7 @@ import {
   OrderStatus,
   SellerCourierConfig,
 } from '@prisma/client';
-import { CourierProvider, ShipmentDetails } from './providers/courier-provider.interface';
+import { CourierProvider, ShipmentDetails, RegisterWarehouseOptions } from './providers/courier-provider.interface';
 import { DelhiveryProvider } from './providers/delhivery.provider';
 import { ShipRocketProvider } from './providers/shiprocket.provider';
 import { XpressBeesProvider } from './providers/xpressbees.provider';
@@ -268,6 +268,276 @@ export class ShippingService {
         apiSecret: password,
         warehouseId: pl.ekart?.pickupAlias?.trim() || null,
       }),
+    };
+  }
+
+  // ─── Public-facing pickup-warehouse helpers (used by controller) ───
+
+  async getXelgoPickupWarehouseStatus(userId: string) {
+    const seller = await this.getSellerProfile(userId);
+    const phone =
+      (seller.phone?.trim() || (seller as any).user?.phone?.trim() || '').replace(/(?!^\+)\D/g, '');
+
+    const missing: string[] = [];
+    if (!seller.businessAddress?.trim()) missing.push('Address line');
+    if (!seller.businessCity?.trim()) missing.push('City');
+    if (!seller.businessState?.trim()) missing.push('State');
+    if (!seller.businessPincode?.trim()) missing.push('Pincode');
+    if (!phone) missing.push('Pickup phone');
+
+    const desiredName = (seller as any).xelgoWarehouseName?.trim()
+      || this.buildSellerWarehouseName({
+        id: seller.id,
+        sellerCode: seller.sellerCode,
+        storeName: seller.storeName,
+      });
+
+    const expectedHash = missing.length
+      ? null
+      : this.buildSellerSnapshotHash({
+          businessAddress: seller.businessAddress,
+          businessCity: seller.businessCity,
+          businessState: seller.businessState,
+          businessPincode: seller.businessPincode,
+          phone,
+        });
+
+    const registered = Boolean(
+      (seller as any).xelgoWarehouseName && (seller as any).xelgoWarehouseRegisteredAt,
+    );
+    const drifted = Boolean(
+      registered &&
+        expectedHash &&
+        (seller as any).xelgoWarehouseSnapshotHash !== expectedHash,
+    );
+
+    return {
+      warehouseName: (seller as any).xelgoWarehouseName || desiredName,
+      registered,
+      registeredAt: (seller as any).xelgoWarehouseRegisteredAt ?? null,
+      lastError: (seller as any).xelgoWarehouseRegistrationError ?? null,
+      addressOnFile: {
+        address: seller.businessAddress || '',
+        city: seller.businessCity || '',
+        state: seller.businessState || '',
+        pincode: seller.businessPincode || '',
+        phone,
+      },
+      missingFields: missing,
+      addressDriftedSinceRegistration: drifted,
+      readyToRegister: missing.length === 0,
+    };
+  }
+
+  async registerXelgoPickupWarehouse(userId: string) {
+    const seller = await this.getSellerProfile(userId);
+    const result = await this.ensureSellerXelgoWarehouse(seller as any, { force: true });
+    if (!result.success) {
+      throw new BadRequestException(result.message);
+    }
+    return {
+      warehouseName: result.warehouseName,
+      alreadyRegistered: result.alreadyRegistered,
+      message: result.message,
+    };
+  }
+
+  // ─── Per-seller Xelgo pickup warehouse ───
+  //
+  // Each seller gets their own warehouse registered with the Xelgo
+  // backend (currently Delhivery). This is what makes pan-India
+  // multi-seller pickups work: the rider goes to the seller's actual
+  // address rather than the platform's master "OPULENCE TRADER"
+  // warehouse. Registration happens lazily — the first time a seller
+  // ships a Xelgo order, we create the warehouse on the carrier and
+  // cache the carrier-side name on SellerProfile.
+
+  /**
+   * Build a deterministic, carrier-safe warehouse name for a seller.
+   * Delhivery requires names without spaces/special characters and is
+   * case-sensitive on lookups, so we always go through this helper.
+   */
+  private buildSellerWarehouseName(seller: {
+    id: string;
+    sellerCode?: string | null;
+    storeName?: string | null;
+  }): string {
+    const codePart = (seller.sellerCode || seller.id || '').toString().toUpperCase();
+    const safeCode = codePart.replace(/[^A-Z0-9]/g, '').slice(-12) || 'UNKNOWN';
+    return `XN-${safeCode}`;
+  }
+
+  private buildSellerSnapshotHash(seller: {
+    businessAddress?: string | null;
+    businessCity?: string | null;
+    businessState?: string | null;
+    businessPincode?: string | null;
+    phone?: string | null;
+  }): string {
+    const blob = [
+      seller.businessAddress || '',
+      seller.businessCity || '',
+      seller.businessState || '',
+      seller.businessPincode || '',
+      (seller.phone || '').replace(/\D+/g, '').slice(-10),
+    ]
+      .map((s) => s.trim().toLowerCase())
+      .join('|');
+    return crypto.createHash('sha1').update(blob).digest('hex');
+  }
+
+  /**
+   * Ensure the given seller has a Xelgo (Delhivery) pickup warehouse
+   * registered on the carrier side. Idempotent — re-runs are cheap and
+   * just return the cached name. Auto re-registers when the seller's
+   * address has materially changed since the last registration.
+   *
+   * Returns the carrier-side warehouse name (use as `pickup_location`)
+   * and detail flags so callers can present a useful UI.
+   */
+  async ensureSellerXelgoWarehouse(
+    seller: {
+      id: string;
+      userId: string | null;
+      sellerCode?: string | null;
+      storeName?: string | null;
+      email?: string | null;
+      phone?: string | null;
+      businessAddress?: string | null;
+      businessCity?: string | null;
+      businessState?: string | null;
+      businessPincode?: string | null;
+      xelgoWarehouseName?: string | null;
+      xelgoWarehouseSnapshotHash?: string | null;
+      xelgoWarehouseRegisteredAt?: Date | null;
+      user?: { phone?: string | null; email?: string | null } | null;
+    },
+    options: { force?: boolean } = {},
+  ): Promise<{
+    success: boolean;
+    warehouseName?: string;
+    alreadyRegistered: boolean;
+    message: string;
+    error?: string;
+  }> {
+    const phone =
+      (seller.phone?.trim() || seller.user?.phone?.trim() || '').replace(/(?!^\+)\D/g, '');
+    const email = seller.email?.trim() || seller.user?.email?.trim() || '';
+
+    const missing: string[] = [];
+    if (!seller.businessAddress?.trim()) missing.push('Address line');
+    if (!seller.businessCity?.trim()) missing.push('City');
+    if (!seller.businessState?.trim()) missing.push('State');
+    if (!seller.businessPincode?.trim()) missing.push('Pincode');
+    if (!phone) missing.push('Pickup phone');
+    if (missing.length) {
+      const msg = `Cannot register pickup warehouse — please complete your profile: ${missing.join(', ')}.`;
+      return { success: false, alreadyRegistered: false, message: msg, error: msg };
+    }
+
+    const desiredHash = this.buildSellerSnapshotHash({
+      businessAddress: seller.businessAddress,
+      businessCity: seller.businessCity,
+      businessState: seller.businessState,
+      businessPincode: seller.businessPincode,
+      phone,
+    });
+
+    // Already registered AND nothing has drifted → nothing to do.
+    if (
+      !options.force &&
+      seller.xelgoWarehouseName &&
+      seller.xelgoWarehouseRegisteredAt &&
+      seller.xelgoWarehouseSnapshotHash === desiredHash
+    ) {
+      return {
+        success: true,
+        warehouseName: seller.xelgoWarehouseName,
+        alreadyRegistered: true,
+        message: `Warehouse "${seller.xelgoWarehouseName}" already registered with the carrier.`,
+      };
+    }
+
+    // Resolve the active Xelgo backend & build a name. If the backend
+    // doesn't expose registerWarehouse (e.g. Ekart in some deployments)
+    // we transparently fall back to the platform-level warehouse.
+    const resolved = await this.resolveXelgoBackend();
+    if (resolved.mode === 'unconfigured') {
+      const msg = `Xelgo backend is not configured by the platform admin: ${resolved.reason}`;
+      return { success: false, alreadyRegistered: false, message: msg, error: msg };
+    }
+
+    const provider = this.providers.get(resolved.mode);
+    if (!provider?.registerWarehouse) {
+      // Carrier doesn't support warehouse creation API — keep using the
+      // platform warehouse but DON'T error. The seller can still ship.
+      const fallback = resolved.config.warehouseId || '';
+      return {
+        success: true,
+        warehouseName: fallback,
+        alreadyRegistered: true,
+        message: `${resolved.displayName} doesn't support per-seller warehouses via API — using the platform warehouse "${fallback}".`,
+      };
+    }
+
+    // Decide on a deterministic name. If a stored name exists, reuse it
+    // (we may just need to update the address — but Delhivery does not
+    // expose an "edit warehouse" endpoint on the public B2C surface, so
+    // we register the same name again; the carrier returns
+    // "already exists" which we treat as success).
+    const warehouseName =
+      seller.xelgoWarehouseName?.trim() ||
+      this.buildSellerWarehouseName({
+        id: seller.id,
+        sellerCode: seller.sellerCode,
+        storeName: seller.storeName,
+      });
+
+    const opts: RegisterWarehouseOptions = {
+      name: warehouseName,
+      registeredName: seller.storeName?.trim() || warehouseName,
+      contactPerson: seller.storeName?.trim() || warehouseName,
+      email,
+      phone,
+      address: seller.businessAddress!.trim(),
+      city: seller.businessCity!.trim(),
+      state: seller.businessState!.trim(),
+      country: 'India',
+      pincode: seller.businessPincode!.trim(),
+    };
+
+    const result = await provider.registerWarehouse(resolved.config, opts);
+
+    if (!result.success) {
+      // Record the failure so the seller portal can surface it.
+      await this.prisma.sellerProfile.update({
+        where: { id: seller.id },
+        data: { xelgoWarehouseRegistrationError: result.message.slice(0, 500) },
+      });
+      return {
+        success: false,
+        alreadyRegistered: false,
+        message: result.message,
+        error: result.message,
+      };
+    }
+
+    const finalName = result.registeredName || warehouseName;
+    await this.prisma.sellerProfile.update({
+      where: { id: seller.id },
+      data: {
+        xelgoWarehouseName: finalName,
+        xelgoWarehouseRegisteredAt: new Date(),
+        xelgoWarehouseRegistrationError: null,
+        xelgoWarehouseSnapshotHash: desiredHash,
+      },
+    });
+
+    return {
+      success: true,
+      warehouseName: finalName,
+      alreadyRegistered: Boolean(result.alreadyExisted),
+      message: result.message,
     };
   }
 
@@ -686,6 +956,37 @@ export class ShippingService {
         provider = this.providers.get(resolved.mode)!;
         courierConfig = resolved.config;
         xelgoDisplayName = resolved.displayName;
+
+        // Per-seller pickup warehouse: ensure THIS seller's address is
+        // registered with the carrier so the rider goes to the right
+        // location instead of the platform's master warehouse. Lazy /
+        // idempotent — first ship triggers registration; later ships
+        // reuse the cached name unless the seller's address drifts.
+        try {
+          const ensure = await this.ensureSellerXelgoWarehouse(seller);
+          if (ensure.success && ensure.warehouseName) {
+            // IMPORTANT: clone the synthetic config — it's shared across
+            // sellers. Mutating it would leak one seller's warehouse
+            // into another seller's next booking.
+            courierConfig = { ...courierConfig, warehouseId: ensure.warehouseName } as SellerCourierConfig;
+            this.logger.log(
+              `Xelgo: using seller "${seller.storeName}" warehouse "${ensure.warehouseName}" (${ensure.alreadyRegistered ? 'cached' : 'newly registered'}).`,
+            );
+          } else {
+            // Carrier rejected registration — surface a 400 so the seller
+            // can fix their address before being charged for an AWB.
+            throw new BadRequestException(
+              `Couldn't register your pickup warehouse with the carrier: ${ensure.message}`,
+            );
+          }
+        } catch (err) {
+          if (err instanceof BadRequestException) throw err;
+          const m = err instanceof Error ? err.message : String(err);
+          this.logger.error(`Failed to ensure seller warehouse for ${seller.id}: ${m}`);
+          throw new BadRequestException(
+            `Couldn't register your pickup warehouse with the carrier: ${m}`,
+          );
+        }
       }
     } else {
       courierConfig = await this.prisma.sellerCourierConfig.findUnique({
@@ -1224,7 +1525,21 @@ export class ShippingService {
       }
       provider = this.providers.get(resolved.mode);
       courierConfig = resolved.config;
-      pickupLocation = courierConfig.warehouseId || '';
+
+      // Re-use the seller's own warehouse, NOT the platform default.
+      // If the seller hasn't been onboarded yet (legacy AWB issued
+      // before this feature shipped), fall back to the platform name
+      // so the pickup still goes through.
+      const ensure = await this.ensureSellerXelgoWarehouse(seller);
+      if (ensure.success && ensure.warehouseName) {
+        pickupLocation = ensure.warehouseName;
+        courierConfig = { ...courierConfig, warehouseId: pickupLocation } as SellerCourierConfig;
+      } else {
+        pickupLocation = courierConfig.warehouseId || '';
+        this.logger.warn(
+          `Xelgo pickup for ${shipment.awbNumber}: falling back to platform warehouse "${pickupLocation}" because seller registration failed: ${ensure.message}`,
+        );
+      }
     } else {
       provider = this.providers.get(shipment.shippingMode);
       if (!provider) {

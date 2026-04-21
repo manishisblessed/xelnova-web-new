@@ -240,6 +240,44 @@ export async function apiSchedulePickup(
   }>(res);
 }
 
+// ─── Pickup Warehouse (per-seller, registered with Xelgo carrier) ───
+
+export type PickupWarehouseStatus = {
+  warehouseName: string;
+  registered: boolean;
+  registeredAt: string | null;
+  lastError: string | null;
+  addressOnFile: {
+    address: string;
+    city: string;
+    state: string;
+    pincode: string;
+    phone: string;
+  };
+  missingFields: string[];
+  addressDriftedSinceRegistration: boolean;
+  readyToRegister: boolean;
+};
+
+export async function apiGetPickupWarehouse() {
+  const res = await fetch(`${API_URL}/seller/pickup-warehouse`, {
+    headers: authHeaders(),
+  });
+  return handleResponse<PickupWarehouseStatus>(res);
+}
+
+export async function apiRegisterPickupWarehouse() {
+  const res = await fetch(`${API_URL}/seller/pickup-warehouse/register`, {
+    method: 'POST',
+    headers: authHeaders(),
+  });
+  return handleResponse<{
+    warehouseName: string;
+    alreadyRegistered: boolean;
+    message: string;
+  }>(res);
+}
+
 export async function apiCheckServiceability(orderId: string) {
   const res = await fetch(`${API_URL}/seller/orders/${orderId}/serviceability`, {
     headers: authHeaders(),

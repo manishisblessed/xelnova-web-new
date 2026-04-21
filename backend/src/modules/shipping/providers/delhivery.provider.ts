@@ -10,6 +10,8 @@ import {
   ServiceabilityResult,
   SchedulePickupOptions,
   SchedulePickupResult,
+  RegisterWarehouseOptions,
+  RegisterWarehouseResult,
 } from './courier-provider.interface';
 
 /**
@@ -706,6 +708,149 @@ export class DelhiveryProvider implements CourierProvider {
     }
 
     return res.json();
+  }
+
+  /**
+   * Register a per-seller pickup warehouse under the master Delhivery
+   * account. Delhivery's B2C "Client Warehouse Creation" API
+   * (POST /api/backend/clientwarehouse/create/) accepts a JSON body —
+   * NOT the legacy form-encoded `data=` envelope used by CMU.
+   *
+   * This is what makes pan-India multi-seller pickups work: every
+   * seller gets their own warehouse, their address sits on file with
+   * Delhivery, and the rider routes to the correct location for every
+   * shipment. If a warehouse with the same name already exists,
+   * Delhivery returns a clear error which we treat as success — names
+   * are deterministic (`xn-<sellerCode>`) so a duplicate just means
+   * "this seller is already onboarded with the carrier".
+   */
+  async registerWarehouse(
+    config: SellerCourierConfig,
+    options: RegisterWarehouseOptions,
+  ): Promise<RegisterWarehouseResult> {
+    const base = this.getBaseUrl(config);
+
+    const phone = this.normalizePhone(options.phone);
+    const returnAddress = options.returnAddress?.trim() || options.address;
+    const returnCity = options.returnCity?.trim() || options.city;
+    const returnState = options.returnState?.trim() || options.state;
+    const returnCountry = options.returnCountry?.trim() || options.country || 'India';
+    const returnPin = options.returnPincode?.trim() || options.pincode;
+
+    if (!options.name || !options.address || !options.city || !options.pincode || !phone) {
+      return {
+        success: false,
+        message:
+          'Missing required warehouse fields (name, address, city, pincode, phone).',
+      };
+    }
+
+    const body: Record<string, unknown> = {
+      name: options.name,
+      email: options.email || '',
+      phone,
+      address: options.address,
+      city: options.city,
+      country: options.country || 'India',
+      pin: options.pincode,
+      return_address: returnAddress,
+      return_pin: returnPin,
+      return_city: returnCity,
+      return_state: returnState,
+      return_country: returnCountry,
+      registered_name: options.registeredName || options.name,
+      contact_person: options.contactPerson || options.registeredName || options.name,
+    };
+
+    this.logger.log(
+      `Delhivery register warehouse: ${JSON.stringify({ ...body, phone: '••••' + phone.slice(-4) })} → POST ${base}/api/backend/clientwarehouse/create/`,
+    );
+
+    let res: Response;
+    let text = '';
+    try {
+      res = await fetch(`${base}/api/backend/clientwarehouse/create/`, {
+        method: 'POST',
+        headers: this.authHeaders(config),
+        body: JSON.stringify(body),
+      });
+      text = await res.text();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.error(`Delhivery warehouse create transport error: ${msg}`);
+      return { success: false, message: `Warehouse registration failed: ${msg}` };
+    }
+
+    let parsed: any = null;
+    try { parsed = text ? JSON.parse(text) : null; } catch { /* noop */ }
+
+    this.logger.log(
+      `Delhivery warehouse create response: HTTP ${res.status} → ${text.slice(0, 500)}`,
+    );
+
+    // Success: HTTP 200 with `success: true`.
+    if (res.ok && parsed?.success === true) {
+      return {
+        success: true,
+        registeredName: parsed?.data?.name || options.name,
+        message: `Warehouse "${options.name}" registered with Delhivery.`,
+        raw: parsed,
+      };
+    }
+
+    // Already exists — Delhivery returns 400 with a message containing
+    // "already exists" / "duplicate". For our purposes that's fine —
+    // the warehouse is live and we can use it for pickups.
+    const errMsg = (
+      parsed?.error ||
+      parsed?.message ||
+      parsed?.data?.message ||
+      (Array.isArray(parsed?.errors) && parsed.errors.join('; ')) ||
+      text ||
+      `HTTP ${res.status}`
+    ).toString();
+    const lower = errMsg.toLowerCase();
+    if (
+      lower.includes('already exist') ||
+      lower.includes('duplicate') ||
+      lower.includes('already registered') ||
+      lower.includes('warehouse name already')
+    ) {
+      return {
+        success: true,
+        alreadyExisted: true,
+        registeredName: options.name,
+        message: `Warehouse "${options.name}" was already registered with Delhivery — reusing it.`,
+        raw: parsed ?? text,
+      };
+    }
+
+    this.logger.warn(
+      `Delhivery warehouse create failed: ${res.status} ${text.slice(0, 300)}`,
+    );
+
+    return {
+      success: false,
+      message: this.humaniseWarehouseError(errMsg),
+      raw: parsed ?? text,
+    };
+  }
+
+  private humaniseWarehouseError(rawMsg: string): string {
+    const msg = rawMsg.toLowerCase();
+    if (msg.includes('non serviceable') || msg.includes('not serviceable') || msg.includes('unserviceable')) {
+      return `Delhivery doesn't service pickups from this pincode. Please ask the seller to check their business pincode (or use a nearby serviceable warehouse).`;
+    }
+    if (msg.includes('invalid pin') || msg.includes('invalid pincode')) {
+      return `Invalid pincode supplied to Delhivery. Please correct the seller's business pincode.`;
+    }
+    if (msg.includes('phone') && (msg.includes('invalid') || msg.includes('required'))) {
+      return `Delhivery rejected the pickup phone number. Please ensure the seller's contact number is a valid 10-digit Indian mobile.`;
+    }
+    if (/internal\s*error/i.test(rawMsg)) {
+      return `Delhivery couldn't register the warehouse. Common causes: missing/invalid fields, unserviceable pincode, or a temporary outage.`;
+    }
+    return `Delhivery rejected warehouse registration: ${rawMsg}`;
   }
 
   /**

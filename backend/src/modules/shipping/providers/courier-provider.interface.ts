@@ -89,6 +89,47 @@ export interface SchedulePickupResult {
   scheduledFor?: string;
 }
 
+/**
+ * Per-seller pickup warehouse registration. Used by Xelgo
+ * (Ship-with-Xelnova) so each seller's parcels are collected from
+ * THEIR address instead of the platform's master warehouse.
+ *
+ * Providers that don't expose a warehouse-creation API can leave
+ * `registerWarehouse` unimplemented — the shipping service will fall
+ * back to the platform-level warehouse and surface a clear message.
+ */
+export interface RegisterWarehouseOptions {
+  /** Unique, carrier-safe warehouse identifier (no spaces, ≤ 30 chars). */
+  name: string;
+  /** Legal/registered business name to record on the warehouse. */
+  registeredName: string;
+  contactPerson?: string;
+  email?: string;
+  phone: string;
+  address: string;
+  city: string;
+  state: string;
+  country?: string;
+  pincode: string;
+  /** Where RTO parcels should be sent — defaults to pickup address. */
+  returnAddress?: string;
+  returnCity?: string;
+  returnState?: string;
+  returnCountry?: string;
+  returnPincode?: string;
+}
+
+export interface RegisterWarehouseResult {
+  success: boolean;
+  /** Warehouse name as recorded by the carrier (use this verbatim for pickup_location). */
+  registeredName?: string;
+  /** True if the warehouse already existed — still a usable success. */
+  alreadyExisted?: boolean;
+  message: string;
+  /** Raw response from the carrier for debugging. */
+  raw?: unknown;
+}
+
 export interface ServiceabilityResult {
   serviceable: boolean;
   estimatedDays?: number;
@@ -134,4 +175,14 @@ export interface CourierProvider {
     config: SellerCourierConfig,
     options: SchedulePickupOptions,
   ): Promise<SchedulePickupResult>;
+
+  /**
+   * Optional: register a per-seller pickup warehouse with the carrier.
+   * Used by Xelgo to onboard each seller's address under the platform's
+   * master account, so the rider goes to the seller's location.
+   */
+  registerWarehouse?(
+    config: SellerCourierConfig,
+    options: RegisterWarehouseOptions,
+  ): Promise<RegisterWarehouseResult>;
 }

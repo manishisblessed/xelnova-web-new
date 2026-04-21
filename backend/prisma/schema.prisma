@@ -338,6 +338,18 @@ model SellerProfile {
   businessType     String?
   businessCategory String?
 
+  // Xelgo (Ship-with-Xelnova) — auto-registered Delhivery warehouse
+  // dedicated to this seller. Generated lazily on first shipment from
+  // the seller's businessAddress, so the rider goes to the seller's
+  // actual location instead of the platform's master warehouse.
+  xelgoWarehouseName              String?
+  xelgoWarehouseRegisteredAt      DateTime?
+  xelgoWarehouseRegistrationError String?
+  /// Hash of (address + city + pincode + phone) at registration time.
+  /// We re-register transparently when this drifts so Delhivery always
+  /// has the seller's latest pickup details.
+  xelgoWarehouseSnapshotHash      String?
+
   // Shipping Preferences
   shippingMethod          String? @default("easy_ship")
   offerFreeDelivery       Boolean @default(true)

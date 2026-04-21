@@ -205,6 +205,30 @@ export class ShippingController {
     );
   }
 
+  @Get('pickup-warehouse')
+  @ApiOperation({
+    summary:
+      'Get the seller’s registered pickup warehouse status (for Ship-with-Xelnova).',
+  })
+  async getPickupWarehouse(@CurrentUser('id') userId: string) {
+    return successResponse(
+      await this.service.getXelgoPickupWarehouseStatus(userId),
+      'Pickup warehouse status fetched',
+    );
+  }
+
+  @Post('pickup-warehouse/register')
+  @ApiOperation({
+    summary:
+      'Register (or refresh) the seller’s pickup warehouse with the Xelgo carrier so the rider comes to their address.',
+  })
+  async registerPickupWarehouse(@CurrentUser('id') userId: string) {
+    return successResponse(
+      await this.service.registerXelgoPickupWarehouse(userId),
+      'Pickup warehouse registered with carrier',
+    );
+  }
+
   @Post('orders/:id/shipment/schedule-pickup')
   @ApiOperation({ summary: 'Schedule a carrier pickup for the shipment' })
   async schedulePickup(

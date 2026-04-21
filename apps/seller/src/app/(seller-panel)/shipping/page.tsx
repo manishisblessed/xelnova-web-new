@@ -17,7 +17,10 @@ import {
   apiGetShippingRates,
   apiGetProfile,
   apiUpdateProfile,
+  apiGetPickupWarehouse,
+  apiRegisterPickupWarehouse,
   type ShippingRates,
+  type PickupWarehouseStatus,
 } from '@/lib/api';
 
 interface CourierConfig {
@@ -223,6 +226,37 @@ export default function ShippingSettingsPage() {
   });
   const [savingPickup, setSavingPickup] = useState(false);
   const [pickupDirty, setPickupDirty] = useState(false);
+  // Per-seller Xelgo (Ship-with-Xelnova) pickup warehouse — auto-registered
+  // with Delhivery on first ship so the rider goes to THIS seller's
+  // address instead of the platform's master warehouse.
+  const [xelgoWh, setXelgoWh] = useState<PickupWarehouseStatus | null>(null);
+  const [xelgoWhLoading, setXelgoWhLoading] = useState(true);
+  const [xelgoWhSaving, setXelgoWhSaving] = useState(false);
+
+  const loadXelgoWarehouse = useCallback(async () => {
+    setXelgoWhLoading(true);
+    try {
+      const data = await apiGetPickupWarehouse();
+      setXelgoWh(data);
+    } catch (err) {
+      console.warn('Failed to load Xelgo pickup warehouse status', err);
+    } finally {
+      setXelgoWhLoading(false);
+    }
+  }, []);
+
+  const handleRegisterXelgoWarehouse = async () => {
+    setXelgoWhSaving(true);
+    try {
+      const result = await apiRegisterPickupWarehouse();
+      toast.success(result.message || `Warehouse "${result.warehouseName}" registered.`);
+      await loadXelgoWarehouse();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to register warehouse');
+    } finally {
+      setXelgoWhSaving(false);
+    }
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -266,6 +300,7 @@ export default function ShippingSettingsPage() {
       });
       toast.success('Pickup address updated');
       setPickupDirty(false);
+      loadXelgoWarehouse();
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Failed to save pickup address');
     } finally {
@@ -274,6 +309,7 @@ export default function ShippingSettingsPage() {
   };
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { loadXelgoWarehouse(); }, [loadXelgoWarehouse]);
 
   const getConfigForProvider = (providerId: string) =>
     configs.find((c) => c.provider === providerId);
@@ -427,6 +463,137 @@ export default function ShippingSettingsPage() {
               placeholder="6-digit PIN"
             />
           </div>
+        </motion.div>
+
+        {/* Per-seller pickup warehouse for Ship-with-Xelnova (Xelgo).
+            We register THIS seller's address with our master Delhivery
+            account so the rider routes to their location, not the
+            platform's warehouse. Lazy & idempotent — first ship triggers
+            registration; the seller can also do it explicitly here. */}
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="rounded-2xl border border-primary-200 bg-white p-5 shadow-sm"
+        >
+          <div className="flex items-start justify-between gap-3 mb-3">
+            <div className="flex items-start gap-3">
+              <div className="rounded-xl bg-primary-50 p-2">
+                <Truck size={18} className="text-primary-600" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-sm font-semibold text-text-primary">
+                    Ship-with-Xelnova Pickup Warehouse
+                  </h2>
+                  {xelgoWh?.registered && !xelgoWh?.addressDriftedSinceRegistration && (
+                    <Badge variant="success" className="text-[10px] px-1.5 py-0">
+                      Registered
+                    </Badge>
+                  )}
+                  {xelgoWh?.registered && xelgoWh?.addressDriftedSinceRegistration && (
+                    <Badge variant="warning" className="text-[10px] px-1.5 py-0">
+                      Address changed — re-register
+                    </Badge>
+                  )}
+                  {!xelgoWh?.registered && xelgoWh?.readyToRegister && (
+                    <Badge variant="info" className="text-[10px] px-1.5 py-0">
+                      Ready to register
+                    </Badge>
+                  )}
+                  {!xelgoWh?.readyToRegister && (
+                    <Badge variant="warning" className="text-[10px] px-1.5 py-0">
+                      Profile incomplete
+                    </Badge>
+                  )}
+                </div>
+                <p className="text-xs text-text-muted mt-0.5 leading-relaxed">
+                  Xelnova registers your address as a dedicated warehouse with our courier partner so
+                  pickups come straight to you — no need for you to log in to Delhivery&apos;s portal.
+                </p>
+              </div>
+            </div>
+            <Button
+              size="sm"
+              onClick={handleRegisterXelgoWarehouse}
+              loading={xelgoWhSaving}
+              disabled={!xelgoWh || !xelgoWh.readyToRegister}
+              variant={xelgoWh?.addressDriftedSinceRegistration ? 'primary' : 'outline'}
+            >
+              {xelgoWh?.registered ? 'Re-register' : 'Register now'}
+            </Button>
+          </div>
+
+          {xelgoWhLoading && (
+            <div className="flex items-center gap-2 text-xs text-text-muted">
+              <Loader2 size={14} className="animate-spin" /> Checking warehouse status…
+            </div>
+          )}
+
+          {!xelgoWhLoading && xelgoWh && (
+            <div className="rounded-xl bg-gray-50 border border-gray-200 p-3 space-y-2 text-xs">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                <div>
+                  <span className="text-text-muted">Warehouse name: </span>
+                  <span className="font-mono font-medium text-text-primary">
+                    {xelgoWh.warehouseName}
+                  </span>
+                </div>
+                {xelgoWh.registeredAt && (
+                  <div className="text-text-muted">
+                    Registered {new Date(xelgoWh.registeredAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                  </div>
+                )}
+              </div>
+
+              <div className="text-text-muted">
+                <span className="font-medium text-text-primary">Pickup address on file: </span>
+                {xelgoWh.addressOnFile.address
+                  ? `${xelgoWh.addressOnFile.address}, ${xelgoWh.addressOnFile.city}, ${xelgoWh.addressOnFile.state} – ${xelgoWh.addressOnFile.pincode}`
+                  : <span className="italic">Not set — please complete your profile above.</span>}
+                {xelgoWh.addressOnFile.phone && (
+                  <span> · 📞 {xelgoWh.addressOnFile.phone}</span>
+                )}
+              </div>
+
+              {xelgoWh.missingFields.length > 0 && (
+                <div className="flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-200 p-2 text-amber-800">
+                  <AlertCircle size={14} className="shrink-0 mt-0.5" />
+                  <div>
+                    Complete these fields before registering:&nbsp;
+                    <strong>{xelgoWh.missingFields.join(', ')}</strong>.
+                  </div>
+                </div>
+              )}
+
+              {xelgoWh.addressDriftedSinceRegistration && (
+                <div className="flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-200 p-2 text-amber-800">
+                  <AlertCircle size={14} className="shrink-0 mt-0.5" />
+                  <div>
+                    Your pickup address has changed since you last registered.
+                    Click <strong>Re-register</strong> so the courier picks up from your new location.
+                  </div>
+                </div>
+              )}
+
+              {xelgoWh.lastError && !xelgoWh.registered && (
+                <div className="flex items-start gap-2 rounded-lg bg-red-50 border border-red-200 p-2 text-red-800">
+                  <AlertCircle size={14} className="shrink-0 mt-0.5" />
+                  <div>
+                    Last attempt failed: {xelgoWh.lastError}
+                  </div>
+                </div>
+              )}
+
+              {xelgoWh.registered && !xelgoWh.addressDriftedSinceRegistration && !xelgoWh.lastError && (
+                <div className="flex items-start gap-2 rounded-lg bg-green-50 border border-green-200 p-2 text-green-800">
+                  <CheckCircle2 size={14} className="shrink-0 mt-0.5" />
+                  <div>
+                    All set. Every Ship-with-Xelnova pickup will be collected from this address.
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </motion.div>
 
         {/* Built-in option — only Ship By Own here. Xelgo (platform courier) is offered

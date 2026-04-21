@@ -88,6 +88,10 @@ deploy_backend() {
   echo "Building backend (in place)..."
   cd "$BACKEND_DIR"
   npx prisma generate
+  # Apply any pending Prisma migrations against the prod DB. Safe — this
+  # runs ONLY pending migrations and never resets data.
+  echo "Applying pending Prisma migrations..."
+  npx prisma migrate deploy
   npm run build
 
   if [ -z "$pm2_name" ]; then
