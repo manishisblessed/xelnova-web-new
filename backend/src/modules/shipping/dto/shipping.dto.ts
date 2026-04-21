@@ -58,6 +58,113 @@ export class ShipOrderDto {
   @IsOptional()
   @Min(1)
   expectedPackageCount?: number;
+
+  @ApiPropertyOptional({
+    description:
+      'Which seller pickup location this shipment is dispatched from. ' +
+      'Omit to use the seller\'s default pickup location.',
+  })
+  @IsString()
+  @IsOptional()
+  pickupLocationId?: string;
+}
+
+// ─── Pickup Locations (multi-warehouse) ───
+
+export class CreatePickupLocationDto {
+  @ApiProperty({ description: 'Human label, e.g. "Main warehouse", "Returns hub".' })
+  @IsString()
+  label: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  contactPerson?: string;
+
+  @ApiProperty({ description: '10-digit Indian mobile, sent to the courier as the pickup contact.' })
+  @IsString()
+  phone: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  email?: string;
+
+  @ApiProperty()
+  @IsString()
+  addressLine: string;
+
+  @ApiProperty()
+  @IsString()
+  city: string;
+
+  @ApiProperty()
+  @IsString()
+  state: string;
+
+  @ApiPropertyOptional({ default: 'India' })
+  @IsString()
+  @IsOptional()
+  country?: string;
+
+  @ApiProperty({ description: '6-digit pincode' })
+  @IsString()
+  pincode: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Mark this location as the seller\'s default. Auto-true when this is the very first location for the seller.',
+  })
+  @IsBoolean()
+  @IsOptional()
+  makeDefault?: boolean;
+}
+
+export class UpdatePickupLocationDto {
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  label?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  contactPerson?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  phone?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  email?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  addressLine?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  city?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  state?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  country?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  pincode?: string;
 }
 
 export class UpdateAwbDto {

@@ -10,6 +10,7 @@ import { PricingCheckService } from './pricing-check.service';
 import { SplitPaymentService } from '../payment/split-payment.service';
 import { ReviewsService } from '../reviews/reviews.service';
 import { ShippingService } from '../shipping/shipping.service';
+import { AccountUniquenessService } from '../../common/services/account-uniqueness.service';
 import { Auth } from '../../common/decorators/auth.decorator';
 import { successResponse, paginatedResponse } from '../../common/helpers/response.helper';
 import { getClientIp } from '../../common/helpers/client-ip';
@@ -42,6 +43,7 @@ export class AdminController {
     private readonly splitPayment: SplitPaymentService,
     private readonly reviewsService: ReviewsService,
     private readonly shippingService: ShippingService,
+    private readonly accountUniqueness: AccountUniquenessService,
   ) {}
 
   @Get('dashboard')
@@ -754,6 +756,44 @@ export class AdminController {
     return successResponse(
       await this.shippingService.testXelgoPickup(),
       'Pickup test completed',
+    );
+  }
+
+  // ─── Account Security Audit ───
+
+  @Get('security/duplicate-identifiers')
+  @ApiOperation({
+    summary: 'Audit duplicate identifiers across accounts',
+    description:
+      'Returns a report of accounts that share email, phone, GST, bank account, PAN, or Aadhaar numbers. ' +
+      'Useful for identifying accounts created before cross-role uniqueness enforcement was added.',
+  })
+  async getDuplicateIdentifiersReport() {
+    const report = await this.accountUniqueness.getDuplicateIdentifiersReport();
+    const hasDuplicates =
+      report.duplicateEmails.length > 0 ||
+      report.duplicatePhones.length > 0 ||
+      report.duplicateGst.length > 0 ||
+      report.duplicateBankAccounts.length > 0 ||
+      report.duplicatePan.length > 0 ||
+      report.duplicateAadhaar.length > 0;
+
+    return successResponse(
+      {
+        ...report,
+        summary: {
+          duplicateEmailCount: report.duplicateEmails.length,
+          duplicatePhoneCount: report.duplicatePhones.length,
+          duplicateGstCount: report.duplicateGst.length,
+          duplicateBankAccountCount: report.duplicateBankAccounts.length,
+          duplicatePanCount: report.duplicatePan.length,
+          duplicateAadhaarCount: report.duplicateAadhaar.length,
+          hasDuplicates,
+        },
+      },
+      hasDuplicates
+        ? 'Found duplicate identifiers that may need review'
+        : 'No duplicate identifiers found',
     );
   }
 }

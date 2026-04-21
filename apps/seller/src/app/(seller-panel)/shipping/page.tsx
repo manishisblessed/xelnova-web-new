@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Truck, Plus, Trash2, Edit2, Check, Eye, EyeOff,
   ExternalLink, Loader2, AlertCircle, CheckCircle2, Settings,
-  Shield, Link2, MapPin, Save,
+  Shield, Link2, MapPin, Star,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { DashboardHeader } from '@/components/dashboard/dashboard-header';
@@ -15,12 +15,15 @@ import {
   apiSaveCourierConfig,
   apiDeleteCourierConfig,
   apiGetShippingRates,
-  apiGetProfile,
-  apiUpdateProfile,
-  apiGetPickupWarehouse,
-  apiRegisterPickupWarehouse,
+  apiListPickupLocations,
+  apiCreatePickupLocation,
+  apiUpdatePickupLocation,
+  apiDeletePickupLocation,
+  apiSetDefaultPickupLocation,
+  apiRegisterPickupLocation,
   type ShippingRates,
-  type PickupWarehouseStatus,
+  type SellerPickupLocation,
+  type CreatePickupLocationPayload,
 } from '@/lib/api';
 
 interface CourierConfig {
@@ -215,69 +218,90 @@ export default function ShippingSettingsPage() {
   const [formData, setFormData] = useState<Record<string, string>>({});
   const [showSecrets, setShowSecrets] = useState<Record<string, boolean>>({});
   const [rates, setRates] = useState<ShippingRates | null>(null);
-  // Pickup address (testing observation #8) — sourced from the seller's
-  // business address on the profile. Sellers can edit it inline here so
-  // they don't need to update each courier's portal separately.
-  const [pickupAddress, setPickupAddress] = useState({
-    businessAddress: '',
-    businessCity: '',
-    businessState: '',
-    businessPincode: '',
-  });
-  const [savingPickup, setSavingPickup] = useState(false);
-  const [pickupDirty, setPickupDirty] = useState(false);
-  // Per-seller Xelgo (Ship-with-Xelnova) pickup warehouse — auto-registered
-  // with Delhivery on first ship so the rider goes to THIS seller's
-  // address instead of the platform's master warehouse.
-  const [xelgoWh, setXelgoWh] = useState<PickupWarehouseStatus | null>(null);
-  const [xelgoWhLoading, setXelgoWhLoading] = useState(true);
-  const [xelgoWhSaving, setXelgoWhSaving] = useState(false);
 
-  const loadXelgoWarehouse = useCallback(async () => {
-    setXelgoWhLoading(true);
+  // ─── Pickup Locations (multi-warehouse) ───
+  // Each seller can register N pickup addresses with the carrier. One
+  // is the default (used when the seller doesn't pick one explicitly
+  // on the Ship modal). Each location maps to its own warehouse on
+  // Delhivery, so the rider routes to the correct address per shipment.
+  const [locations, setLocations] = useState<SellerPickupLocation[]>([]);
+  const [locationsLoading, setLocationsLoading] = useState(true);
+  const [locationModal, setLocationModal] = useState<
+    | { mode: 'create' }
+    | { mode: 'edit'; location: SellerPickupLocation }
+    | null
+  >(null);
+  const [locationDeleteConfirm, setLocationDeleteConfirm] = useState<SellerPickupLocation | null>(
+    null,
+  );
+  const [locationActionId, setLocationActionId] = useState<string | null>(null);
+
+  const loadLocations = useCallback(async () => {
+    setLocationsLoading(true);
     try {
-      const data = await apiGetPickupWarehouse();
-      setXelgoWh(data);
+      const data = await apiListPickupLocations();
+      setLocations(Array.isArray(data) ? data : []);
     } catch (err) {
-      console.warn('Failed to load Xelgo pickup warehouse status', err);
+      console.warn('Failed to load pickup locations', err);
     } finally {
-      setXelgoWhLoading(false);
+      setLocationsLoading(false);
     }
   }, []);
 
-  const handleRegisterXelgoWarehouse = async () => {
-    setXelgoWhSaving(true);
+  const handleSetDefaultLocation = async (location: SellerPickupLocation) => {
+    if (location.isDefault) return;
+    setLocationActionId(location.id);
     try {
-      const result = await apiRegisterPickupWarehouse();
-      toast.success(result.message || `Warehouse "${result.warehouseName}" registered.`);
-      await loadXelgoWarehouse();
+      await apiSetDefaultPickupLocation(location.id);
+      toast.success(`"${location.label}" is now your default pickup location.`);
+      await loadLocations();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to register warehouse');
+      toast.error(err instanceof Error ? err.message : 'Failed to set default');
     } finally {
-      setXelgoWhSaving(false);
+      setLocationActionId(null);
+    }
+  };
+
+  const handleReregisterLocation = async (location: SellerPickupLocation) => {
+    setLocationActionId(location.id);
+    try {
+      const updated = await apiRegisterPickupLocation(location.id);
+      toast.success(
+        updated.lastError
+          ? `Carrier rejected: ${updated.lastError}`
+          : `Pickup location "${updated.label}" registered.`,
+      );
+      await loadLocations();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to register location');
+    } finally {
+      setLocationActionId(null);
+    }
+  };
+
+  const handleDeleteLocation = async (location: SellerPickupLocation) => {
+    setLocationActionId(location.id);
+    try {
+      await apiDeletePickupLocation(location.id);
+      toast.success(`Pickup location "${location.label}" deleted.`);
+      setLocationDeleteConfirm(null);
+      await loadLocations();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to delete location');
+    } finally {
+      setLocationActionId(null);
     }
   };
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [configsRes, ratesRes, profileRes] = await Promise.allSettled([
+      const [configsRes, ratesRes] = await Promise.allSettled([
         apiGetCourierConfigs(),
         apiGetShippingRates(),
-        apiGetProfile(),
       ]);
       setConfigs(configsRes.status === 'fulfilled' && Array.isArray(configsRes.value) ? configsRes.value : []);
       if (ratesRes.status === 'fulfilled') setRates(ratesRes.value);
-      if (profileRes.status === 'fulfilled' && profileRes.value && typeof profileRes.value === 'object') {
-        const p = profileRes.value as Record<string, unknown>;
-        setPickupAddress({
-          businessAddress: typeof p.businessAddress === 'string' ? p.businessAddress : '',
-          businessCity: typeof p.businessCity === 'string' ? p.businessCity : '',
-          businessState: typeof p.businessState === 'string' ? p.businessState : '',
-          businessPincode: typeof p.businessPincode === 'string' ? p.businessPincode : '',
-        });
-        setPickupDirty(false);
-      }
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Failed to load configs');
     } finally {
@@ -285,31 +309,8 @@ export default function ShippingSettingsPage() {
     }
   }, []);
 
-  const handleSavePickup = async () => {
-    if (!pickupAddress.businessAddress.trim() || !pickupAddress.businessPincode.trim()) {
-      toast.error('Address and pincode are required');
-      return;
-    }
-    setSavingPickup(true);
-    try {
-      await apiUpdateProfile({
-        businessAddress: pickupAddress.businessAddress.trim(),
-        businessCity: pickupAddress.businessCity.trim(),
-        businessState: pickupAddress.businessState.trim(),
-        businessPincode: pickupAddress.businessPincode.trim(),
-      });
-      toast.success('Pickup address updated');
-      setPickupDirty(false);
-      loadXelgoWarehouse();
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Failed to save pickup address');
-    } finally {
-      setSavingPickup(false);
-    }
-  };
-
   useEffect(() => { load(); }, [load]);
-  useEffect(() => { loadXelgoWarehouse(); }, [loadXelgoWarehouse]);
+  useEffect(() => { loadLocations(); }, [loadLocations]);
 
   const getConfigForProvider = (providerId: string) =>
     configs.find((c) => c.provider === providerId);
@@ -406,192 +407,174 @@ export default function ShippingSettingsPage() {
       <DashboardHeader title="Shipping Settings" />
       <div className="p-6 space-y-6 max-w-4xl">
 
-        {/* Pickup address (testing observation #8) — applies to BOTH self-ship
-            and integrated couriers. Saved values are passed as the return /
-            seller address on every shipment booking. */}
+        {/* Pickup Locations (multi-warehouse).
+            Each address here gets its own warehouse on the carrier
+            (Delhivery), so the rider routes correctly per shipment.
+            One location is the default — used when a seller doesn't
+            pick a specific one on the per-order Ship modal. */}
         <motion.div
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           className="rounded-2xl border border-primary-200 bg-white p-5 shadow-sm"
         >
-          <div className="flex items-start justify-between gap-3 mb-3">
+          <div className="flex items-start justify-between gap-3 mb-4">
             <div className="flex items-start gap-3">
               <div className="rounded-xl bg-primary-50 p-2">
                 <MapPin size={18} className="text-primary-600" />
               </div>
               <div>
-                <h2 className="text-sm font-semibold text-text-primary">Pickup Address</h2>
-                <p className="text-xs text-text-muted mt-0.5">
-                  Used for both self-ship and integrated couriers as your pickup / return address.
-                </p>
-              </div>
-            </div>
-            <Button
-              size="sm"
-              onClick={handleSavePickup}
-              loading={savingPickup}
-              disabled={!pickupDirty}
-            >
-              <Save size={12} /> Save
-            </Button>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="sm:col-span-2">
-              <Input
-                label="Address line"
-                value={pickupAddress.businessAddress}
-                onChange={(e) => { setPickupAddress((p) => ({ ...p, businessAddress: e.target.value })); setPickupDirty(true); }}
-                placeholder="Building / street / area"
-              />
-            </div>
-            <Input
-              label="City"
-              value={pickupAddress.businessCity}
-              onChange={(e) => { setPickupAddress((p) => ({ ...p, businessCity: e.target.value })); setPickupDirty(true); }}
-              placeholder="e.g. Mumbai"
-            />
-            <Input
-              label="State"
-              value={pickupAddress.businessState}
-              onChange={(e) => { setPickupAddress((p) => ({ ...p, businessState: e.target.value })); setPickupDirty(true); }}
-              placeholder="e.g. Maharashtra"
-            />
-            <Input
-              label="Pincode"
-              value={pickupAddress.businessPincode}
-              onChange={(e) => { setPickupAddress((p) => ({ ...p, businessPincode: e.target.value })); setPickupDirty(true); }}
-              placeholder="6-digit PIN"
-            />
-          </div>
-        </motion.div>
-
-        {/* Per-seller pickup warehouse for Ship-with-Xelnova (Xelgo).
-            We register THIS seller's address with our master Delhivery
-            account so the rider routes to their location, not the
-            platform's warehouse. Lazy & idempotent — first ship triggers
-            registration; the seller can also do it explicitly here. */}
-        <motion.div
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="rounded-2xl border border-primary-200 bg-white p-5 shadow-sm"
-        >
-          <div className="flex items-start justify-between gap-3 mb-3">
-            <div className="flex items-start gap-3">
-              <div className="rounded-xl bg-primary-50 p-2">
-                <Truck size={18} className="text-primary-600" />
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <h2 className="text-sm font-semibold text-text-primary">
-                    Ship-with-Xelnova Pickup Warehouse
-                  </h2>
-                  {xelgoWh?.registered && !xelgoWh?.addressDriftedSinceRegistration && (
-                    <Badge variant="success" className="text-[10px] px-1.5 py-0">
-                      Registered
-                    </Badge>
-                  )}
-                  {xelgoWh?.registered && xelgoWh?.addressDriftedSinceRegistration && (
-                    <Badge variant="warning" className="text-[10px] px-1.5 py-0">
-                      Address changed — re-register
-                    </Badge>
-                  )}
-                  {!xelgoWh?.registered && xelgoWh?.readyToRegister && (
-                    <Badge variant="info" className="text-[10px] px-1.5 py-0">
-                      Ready to register
-                    </Badge>
-                  )}
-                  {!xelgoWh?.readyToRegister && (
-                    <Badge variant="warning" className="text-[10px] px-1.5 py-0">
-                      Profile incomplete
-                    </Badge>
-                  )}
-                </div>
+                <h2 className="text-sm font-semibold text-text-primary">Pickup Locations</h2>
                 <p className="text-xs text-text-muted mt-0.5 leading-relaxed">
-                  Xelnova registers your address as a dedicated warehouse with our courier partner so
-                  pickups come straight to you — no need for you to log in to Delhivery&apos;s portal.
+                  Add one or more addresses our rider can pick from. Each address is registered as
+                  its own warehouse with the courier — when you ship an order you can choose which
+                  pickup location it leaves from.
                 </p>
               </div>
             </div>
-            <Button
-              size="sm"
-              onClick={handleRegisterXelgoWarehouse}
-              loading={xelgoWhSaving}
-              disabled={!xelgoWh || !xelgoWh.readyToRegister}
-              variant={xelgoWh?.addressDriftedSinceRegistration ? 'primary' : 'outline'}
-            >
-              {xelgoWh?.registered ? 'Re-register' : 'Register now'}
+            <Button size="sm" onClick={() => setLocationModal({ mode: 'create' })}>
+              <Plus size={12} /> Add location
             </Button>
           </div>
 
-          {xelgoWhLoading && (
-            <div className="flex items-center gap-2 text-xs text-text-muted">
-              <Loader2 size={14} className="animate-spin" /> Checking warehouse status…
+          {locationsLoading && (
+            <div className="flex items-center gap-2 text-xs text-text-muted py-3">
+              <Loader2 size={14} className="animate-spin" /> Loading your pickup locations…
             </div>
           )}
 
-          {!xelgoWhLoading && xelgoWh && (
-            <div className="rounded-xl bg-gray-50 border border-gray-200 p-3 space-y-2 text-xs">
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                <div>
-                  <span className="text-text-muted">Warehouse name: </span>
-                  <span className="font-mono font-medium text-text-primary">
-                    {xelgoWh.warehouseName}
-                  </span>
-                </div>
-                {xelgoWh.registeredAt && (
-                  <div className="text-text-muted">
-                    Registered {new Date(xelgoWh.registeredAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
-                  </div>
-                )}
-              </div>
+          {!locationsLoading && locations.length === 0 && (
+            <div className="rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 p-6 text-center">
+              <MapPin size={20} className="mx-auto text-gray-400" />
+              <p className="text-sm font-medium text-text-primary mt-2">No pickup locations yet</p>
+              <p className="text-xs text-text-muted mt-1">
+                Add at least one address so the courier knows where to come for pickups.
+              </p>
+              <Button
+                size="sm"
+                className="mt-3"
+                onClick={() => setLocationModal({ mode: 'create' })}
+              >
+                <Plus size={12} /> Add your first location
+              </Button>
+            </div>
+          )}
 
-              <div className="text-text-muted">
-                <span className="font-medium text-text-primary">Pickup address on file: </span>
-                {xelgoWh.addressOnFile.address
-                  ? `${xelgoWh.addressOnFile.address}, ${xelgoWh.addressOnFile.city}, ${xelgoWh.addressOnFile.state} – ${xelgoWh.addressOnFile.pincode}`
-                  : <span className="italic">Not set — please complete your profile above.</span>}
-                {xelgoWh.addressOnFile.phone && (
-                  <span> · 📞 {xelgoWh.addressOnFile.phone}</span>
-                )}
-              </div>
-
-              {xelgoWh.missingFields.length > 0 && (
-                <div className="flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-200 p-2 text-amber-800">
-                  <AlertCircle size={14} className="shrink-0 mt-0.5" />
-                  <div>
-                    Complete these fields before registering:&nbsp;
-                    <strong>{xelgoWh.missingFields.join(', ')}</strong>.
+          {!locationsLoading && locations.length > 0 && (
+            <div className="space-y-3">
+              {locations.map((loc) => {
+                const busy = locationActionId === loc.id;
+                return (
+                  <div
+                    key={loc.id}
+                    className={`rounded-xl border p-3 ${
+                      loc.isDefault ? 'border-primary-300 bg-primary-50/40' : 'border-border bg-white'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="text-sm font-semibold text-text-primary truncate">
+                            {loc.label}
+                          </h3>
+                          {loc.isDefault && (
+                            <Badge variant="info" className="text-[10px] px-1.5 py-0">
+                              <Star size={9} className="mr-0.5 fill-current" /> Default
+                            </Badge>
+                          )}
+                          {loc.registered && !loc.addressDriftedSinceRegistration && (
+                            <Badge variant="success" className="text-[10px] px-1.5 py-0">
+                              <CheckCircle2 size={9} className="mr-0.5" /> Registered
+                            </Badge>
+                          )}
+                          {loc.registered && loc.addressDriftedSinceRegistration && (
+                            <Badge variant="warning" className="text-[10px] px-1.5 py-0">
+                              Address changed
+                            </Badge>
+                          )}
+                          {!loc.registered && loc.lastError && (
+                            <Badge variant="warning" className="text-[10px] px-1.5 py-0">
+                              Not registered
+                            </Badge>
+                          )}
+                        </div>
+                        <p className="text-xs text-text-muted mt-1 leading-relaxed">
+                          {loc.addressLine}, {loc.city}, {loc.state} – {loc.pincode}
+                          {loc.phone && <span className="ml-1">· 📞 {loc.phone}</span>}
+                        </p>
+                        {loc.warehouseName && (
+                          <p className="text-[11px] text-text-muted mt-1">
+                            Warehouse name: <span className="font-mono">{loc.warehouseName}</span>
+                            {loc.registeredAt && (
+                              <span className="ml-1">
+                                · Registered{' '}
+                                {new Date(loc.registeredAt).toLocaleDateString('en-IN', {
+                                  day: 'numeric',
+                                  month: 'short',
+                                  year: 'numeric',
+                                })}
+                              </span>
+                            )}
+                          </p>
+                        )}
+                        {loc.addressDriftedSinceRegistration && (
+                          <div className="flex items-start gap-2 mt-2 rounded-lg bg-amber-50 border border-amber-200 p-2 text-[11px] text-amber-800">
+                            <AlertCircle size={12} className="shrink-0 mt-0.5" />
+                            <span>
+                              The address changed after registration — click <strong>Re-register</strong>{' '}
+                              so the courier picks from the new address.
+                            </span>
+                          </div>
+                        )}
+                        {loc.lastError && !loc.registered && (
+                          <div className="flex items-start gap-2 mt-2 rounded-lg bg-red-50 border border-red-200 p-2 text-[11px] text-red-800">
+                            <AlertCircle size={12} className="shrink-0 mt-0.5" />
+                            <span>Carrier rejected: {loc.lastError}</span>
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex flex-col items-end gap-1.5 shrink-0">
+                        <button
+                          onClick={() => setLocationModal({ mode: 'edit', location: loc })}
+                          disabled={busy}
+                          className="rounded-md p-1.5 text-text-muted hover:text-primary-600 hover:bg-primary-50 disabled:opacity-50"
+                          title="Edit"
+                        >
+                          <Edit2 size={14} />
+                        </button>
+                        <button
+                          onClick={() => setLocationDeleteConfirm(loc)}
+                          disabled={busy}
+                          className="rounded-md p-1.5 text-text-muted hover:text-red-600 hover:bg-red-50 disabled:opacity-50"
+                          title="Delete"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      {!loc.isDefault && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleSetDefaultLocation(loc)}
+                          loading={busy}
+                        >
+                          <Star size={12} /> Make default
+                        </Button>
+                      )}
+                      <Button
+                        size="sm"
+                        variant={loc.addressDriftedSinceRegistration || !loc.registered ? 'primary' : 'outline'}
+                        onClick={() => handleReregisterLocation(loc)}
+                        loading={busy}
+                      >
+                        <Truck size={12} />
+                        {loc.registered ? 'Re-register' : 'Register with carrier'}
+                      </Button>
+                    </div>
                   </div>
-                </div>
-              )}
-
-              {xelgoWh.addressDriftedSinceRegistration && (
-                <div className="flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-200 p-2 text-amber-800">
-                  <AlertCircle size={14} className="shrink-0 mt-0.5" />
-                  <div>
-                    Your pickup address has changed since you last registered.
-                    Click <strong>Re-register</strong> so the courier picks up from your new location.
-                  </div>
-                </div>
-              )}
-
-              {xelgoWh.lastError && !xelgoWh.registered && (
-                <div className="flex items-start gap-2 rounded-lg bg-red-50 border border-red-200 p-2 text-red-800">
-                  <AlertCircle size={14} className="shrink-0 mt-0.5" />
-                  <div>
-                    Last attempt failed: {xelgoWh.lastError}
-                  </div>
-                </div>
-              )}
-
-              {xelgoWh.registered && !xelgoWh.addressDriftedSinceRegistration && !xelgoWh.lastError && (
-                <div className="flex items-start gap-2 rounded-lg bg-green-50 border border-green-200 p-2 text-green-800">
-                  <CheckCircle2 size={14} className="shrink-0 mt-0.5" />
-                  <div>
-                    All set. Every Ship-with-Xelnova pickup will be collected from this address.
-                  </div>
-                </div>
-              )}
+                );
+              })}
             </div>
           )}
         </motion.div>
@@ -1038,6 +1021,260 @@ export default function ShippingSettingsPage() {
           </div>
         </div>
       </Modal>
+
+      {/* ── Pickup Location: Create / Edit Modal ── */}
+      <PickupLocationFormModal
+        state={locationModal}
+        onClose={() => setLocationModal(null)}
+        onSaved={async () => {
+          setLocationModal(null);
+          await loadLocations();
+        }}
+      />
+
+      {/* ── Pickup Location: Delete Confirmation ── */}
+      <Modal
+        open={!!locationDeleteConfirm}
+        onClose={() => setLocationDeleteConfirm(null)}
+        title="Delete pickup location"
+        size="sm"
+      >
+        {locationDeleteConfirm && (
+          <div className="space-y-4">
+            <p className="text-sm text-text-secondary">
+              Delete <strong>&ldquo;{locationDeleteConfirm.label}&rdquo;</strong>?
+              {locationDeleteConfirm.isDefault && (
+                <span className="block mt-2 text-amber-700">
+                  This is your <strong>default</strong> pickup location. After deletion, the
+                  oldest remaining location will become the new default.
+                </span>
+              )}
+              <span className="block mt-2 text-xs text-text-muted">
+                Shipments already booked from this address keep working — only future bookings are
+                affected. The carrier-side warehouse is left in place; if you re-add the same
+                address later, we&apos;ll reuse it.
+              </span>
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setLocationDeleteConfirm(null)}
+                size="sm"
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="danger"
+                onClick={() => handleDeleteLocation(locationDeleteConfirm)}
+                loading={locationActionId === locationDeleteConfirm.id}
+                size="sm"
+              >
+                <Trash2 size={13} />
+                Delete location
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </>
+  );
+}
+
+// ─── Pickup Location Form Modal ───
+//
+// One small component, used for both Create and Edit. Keeps the parent
+// page's JSX focused on the list view.
+
+type PickupLocationModalState =
+  | { mode: 'create' }
+  | { mode: 'edit'; location: SellerPickupLocation }
+  | null;
+
+function PickupLocationFormModal({
+  state,
+  onClose,
+  onSaved,
+}: {
+  state: PickupLocationModalState;
+  onClose: () => void;
+  onSaved: () => Promise<void> | void;
+}) {
+  const isEdit = state?.mode === 'edit';
+  const [form, setForm] = useState<CreatePickupLocationPayload>({
+    label: '',
+    contactPerson: '',
+    phone: '',
+    email: '',
+    addressLine: '',
+    city: '',
+    state: '',
+    country: 'India',
+    pincode: '',
+    makeDefault: false,
+  });
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!state) return;
+    if (state.mode === 'edit') {
+      const l = state.location;
+      setForm({
+        label: l.label,
+        contactPerson: l.contactPerson || '',
+        phone: l.phone,
+        email: l.email || '',
+        addressLine: l.addressLine,
+        city: l.city,
+        state: l.state,
+        country: l.country || 'India',
+        pincode: l.pincode,
+        makeDefault: l.isDefault,
+      });
+    } else {
+      setForm({
+        label: '',
+        contactPerson: '',
+        phone: '',
+        email: '',
+        addressLine: '',
+        city: '',
+        state: '',
+        country: 'India',
+        pincode: '',
+        makeDefault: false,
+      });
+    }
+  }, [state]);
+
+  const handleSubmit = async () => {
+    const phoneDigits = form.phone.replace(/\D/g, '');
+    if (!form.label.trim()) return toast.error('Give this location a label');
+    if (!form.addressLine.trim()) return toast.error('Address line is required');
+    if (!form.city.trim()) return toast.error('City is required');
+    if (!form.state.trim()) return toast.error('State is required');
+    if (!/^\d{6}$/.test(form.pincode.trim())) return toast.error('Pincode must be 6 digits');
+    if (phoneDigits.length < 10) return toast.error('Enter a 10-digit pickup phone');
+
+    setSaving(true);
+    try {
+      if (isEdit && state?.mode === 'edit') {
+        await apiUpdatePickupLocation(state.location.id, {
+          label: form.label.trim(),
+          contactPerson: form.contactPerson?.trim(),
+          phone: phoneDigits,
+          email: form.email?.trim(),
+          addressLine: form.addressLine.trim(),
+          city: form.city.trim(),
+          state: form.state.trim(),
+          country: form.country?.trim() || 'India',
+          pincode: form.pincode.trim(),
+        });
+        toast.success(`"${form.label}" updated. Re-registering with the carrier…`);
+      } else {
+        await apiCreatePickupLocation({
+          ...form,
+          phone: phoneDigits,
+          label: form.label.trim(),
+          addressLine: form.addressLine.trim(),
+          city: form.city.trim(),
+          state: form.state.trim(),
+          pincode: form.pincode.trim(),
+        });
+        toast.success(`"${form.label}" added. Registering with the carrier…`);
+      }
+      await onSaved();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save pickup location');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal
+      open={!!state}
+      onClose={onClose}
+      title={isEdit ? 'Edit pickup location' : 'Add pickup location'}
+      size="lg"
+    >
+      <div className="space-y-4">
+        <Input
+          label="Label"
+          placeholder="e.g. Main warehouse, Festival overflow"
+          value={form.label}
+          onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))}
+        />
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Input
+            label="Contact person"
+            placeholder="Name of the person at this address"
+            value={form.contactPerson || ''}
+            onChange={(e) => setForm((f) => ({ ...f, contactPerson: e.target.value }))}
+          />
+          <Input
+            label="Pickup phone"
+            placeholder="10-digit mobile"
+            value={form.phone}
+            onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
+          />
+        </div>
+        <Input
+          label="Email (optional)"
+          placeholder="Pickup point email"
+          value={form.email || ''}
+          onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
+        />
+        <Input
+          label="Address line"
+          placeholder="Building / street / area"
+          value={form.addressLine}
+          onChange={(e) => setForm((f) => ({ ...f, addressLine: e.target.value }))}
+        />
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Input
+            label="City"
+            placeholder="e.g. Mumbai"
+            value={form.city}
+            onChange={(e) => setForm((f) => ({ ...f, city: e.target.value }))}
+          />
+          <Input
+            label="State"
+            placeholder="e.g. Maharashtra"
+            value={form.state}
+            onChange={(e) => setForm((f) => ({ ...f, state: e.target.value }))}
+          />
+          <Input
+            label="Pincode"
+            placeholder="6-digit"
+            value={form.pincode}
+            onChange={(e) => setForm((f) => ({ ...f, pincode: e.target.value }))}
+          />
+        </div>
+        {!isEdit && (
+          <label className="flex items-center gap-2 text-xs text-text-secondary">
+            <input
+              type="checkbox"
+              checked={!!form.makeDefault}
+              onChange={(e) => setForm((f) => ({ ...f, makeDefault: e.target.checked }))}
+              className="rounded border-gray-300"
+            />
+            Make this my default pickup location
+          </label>
+        )}
+        <div className="rounded-lg bg-blue-50 border border-blue-100 p-3 text-[11px] text-blue-700">
+          We&apos;ll register this address with our courier partner (Delhivery) automatically. You
+          can come back here to re-register if the address changes later.
+        </div>
+        <div className="flex justify-end gap-2 pt-1 border-t border-border">
+          <Button variant="outline" onClick={onClose} size="sm">
+            Cancel
+          </Button>
+          <Button onClick={handleSubmit} loading={saving} size="sm">
+            <Check size={13} />
+            {isEdit ? 'Save changes' : 'Add location'}
+          </Button>
+        </div>
+      </div>
+    </Modal>
   );
 }

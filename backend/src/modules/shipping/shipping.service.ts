@@ -517,13 +517,15 @@ export class ShippingService {
   }
 
   /**
-   * Ensure the given seller has a Xelgo (Delhivery) pickup warehouse
-   * registered on the carrier side. Idempotent — re-runs are cheap and
-   * just return the cached name. Auto re-registers when the seller's
-   * address has materially changed since the last registration.
-   *
-   * Returns the carrier-side warehouse name (use as `pickup_location`)
-   * and detail flags so callers can present a useful UI.
+   * BACKWARD-COMPAT shim. The single-warehouse model has been replaced
+   * by per-seller `SellerPickupLocation` rows (each one becomes its own
+   * carrier-side warehouse). This method continues to work by ensuring
+   * the seller has a *default* pickup location (lazily seeded from the
+   * profile's `businessAddress`), then delegates to
+   * `ensurePickupLocationWarehouse`. Callers that still need the
+   * "single warehouse for the seller" view (e.g. the legacy
+   * `/seller/pickup-warehouse` endpoint and the self-heal path) keep
+   * working unchanged.
    */
   async ensureSellerXelgoWarehouse(
     seller: {
@@ -550,10 +552,75 @@ export class ShippingService {
     message: string;
     error?: string;
   }> {
+    const ensured = await this.ensureDefaultPickupLocationFromProfile(seller);
+    if (!ensured.success || !ensured.location) {
+      return {
+        success: false,
+        alreadyRegistered: false,
+        message: ensured.message,
+        error: ensured.message,
+      };
+    }
+    return this.ensurePickupLocationWarehouse(ensured.location.id, options);
+  }
+
+  /**
+   * Make sure the seller has at least one `SellerPickupLocation` row to
+   * act as their default. If they already have one, return it. If they
+   * don't but their profile is complete, create one from the profile's
+   * `businessAddress` (this is the same backfill the migration runs —
+   * but covers sellers who completed onboarding *after* deploy).
+   *
+   * Returns `{ success: false }` when the profile is too incomplete to
+   * synthesise a location automatically; the caller is expected to
+   * surface the missing fields to the seller.
+   */
+  private async ensureDefaultPickupLocationFromProfile(seller: {
+    id: string;
+    storeName?: string | null;
+    email?: string | null;
+    phone?: string | null;
+    businessAddress?: string | null;
+    businessCity?: string | null;
+    businessState?: string | null;
+    businessPincode?: string | null;
+    xelgoWarehouseName?: string | null;
+    xelgoWarehouseSnapshotHash?: string | null;
+    xelgoWarehouseRegisteredAt?: Date | null;
+    user?: { phone?: string | null; email?: string | null } | null;
+  }): Promise<{
+    success: boolean;
+    location: { id: string } | null;
+    message: string;
+  }> {
+    const existingDefault = await this.prisma.sellerPickupLocation.findFirst({
+      where: { sellerId: seller.id, isDefault: true },
+      select: { id: true },
+    });
+    if (existingDefault) {
+      return { success: true, location: existingDefault, message: '' };
+    }
+
+    // Fall back to *any* location for this seller — covers the case
+    // where the seller has locations but none is marked default (e.g.
+    // they deleted the previous default). We promote the oldest one
+    // so the behaviour is deterministic.
+    const anyLocation = await this.prisma.sellerPickupLocation.findFirst({
+      where: { sellerId: seller.id },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true },
+    });
+    if (anyLocation) {
+      await this.prisma.sellerPickupLocation.update({
+        where: { id: anyLocation.id },
+        data: { isDefault: true },
+      });
+      return { success: true, location: anyLocation, message: '' };
+    }
+
+    // Nothing — try to synthesise from the profile.
     const phone =
       (seller.phone?.trim() || seller.user?.phone?.trim() || '').replace(/(?!^\+)\D/g, '');
-    const email = seller.email?.trim() || seller.user?.email?.trim() || '';
-
     const missing: string[] = [];
     if (!seller.businessAddress?.trim()) missing.push('Address line');
     if (!seller.businessCity?.trim()) missing.push('City');
@@ -561,36 +628,146 @@ export class ShippingService {
     if (!seller.businessPincode?.trim()) missing.push('Pincode');
     if (!phone) missing.push('Pickup phone');
     if (missing.length) {
-      const msg = `Cannot register pickup warehouse — please complete your profile: ${missing.join(', ')}.`;
-      return { success: false, alreadyRegistered: false, message: msg, error: msg };
-    }
-
-    const desiredHash = this.buildSellerSnapshotHash({
-      businessAddress: seller.businessAddress,
-      businessCity: seller.businessCity,
-      businessState: seller.businessState,
-      businessPincode: seller.businessPincode,
-      phone,
-    });
-
-    // Already registered AND nothing has drifted → nothing to do.
-    if (
-      !options.force &&
-      seller.xelgoWarehouseName &&
-      seller.xelgoWarehouseRegisteredAt &&
-      seller.xelgoWarehouseSnapshotHash === desiredHash
-    ) {
       return {
-        success: true,
-        warehouseName: seller.xelgoWarehouseName,
-        alreadyRegistered: true,
-        message: `Warehouse "${seller.xelgoWarehouseName}" already registered with the carrier.`,
+        success: false,
+        location: null,
+        message: `Cannot register pickup warehouse — please add ${missing.join(', ')} to your profile, or add a pickup location in Shipping Settings.`,
       };
     }
 
-    // Resolve the active Xelgo backend & build a name. If the backend
-    // doesn't expose registerWarehouse (e.g. Ekart in some deployments)
-    // we transparently fall back to the platform-level warehouse.
+    const created = await this.prisma.sellerPickupLocation.create({
+      data: {
+        sellerId: seller.id,
+        label: 'Main pickup address',
+        contactPerson: seller.storeName?.trim() || null,
+        phone,
+        email: seller.email?.trim() || seller.user?.email?.trim() || null,
+        addressLine: seller.businessAddress!.trim(),
+        city: seller.businessCity!.trim(),
+        state: seller.businessState!.trim(),
+        country: 'India',
+        pincode: seller.businessPincode!.trim(),
+        isDefault: true,
+        // Carry over any already-registered carrier warehouse so we
+        // reuse it instead of creating a duplicate on Delhivery.
+        xelgoWarehouseName: seller.xelgoWarehouseName ?? null,
+        xelgoWarehouseRegisteredAt: seller.xelgoWarehouseRegisteredAt ?? null,
+        xelgoWarehouseSnapshotHash: seller.xelgoWarehouseSnapshotHash ?? null,
+      },
+      select: { id: true },
+    });
+    return { success: true, location: created, message: '' };
+  }
+
+  /**
+   * Build a deterministic warehouse name for an *additional* (non-default)
+   * pickup location. The seller's primary warehouse keeps the legacy
+   * `XN-<sellerCode>` shape so we don't have to migrate Delhivery; new
+   * locations get `XN-<sellerCode>-<6char hash of location.id>` which is
+   * stable across renames and short enough to fit Delhivery's 30-char
+   * warehouse-name limit even for long seller codes.
+   */
+  private buildLocationWarehouseName(
+    seller: { id: string; sellerCode?: string | null },
+    location: { id: string; isDefault: boolean; xelgoWarehouseName?: string | null },
+  ): string {
+    if (location.xelgoWarehouseName?.trim()) {
+      return location.xelgoWarehouseName.trim();
+    }
+    const base = this.buildSellerWarehouseName({
+      id: seller.id,
+      sellerCode: seller.sellerCode,
+    });
+    if (location.isDefault) return base;
+    const suffix = crypto
+      .createHash('sha1')
+      .update(location.id)
+      .digest('hex')
+      .slice(0, 6)
+      .toUpperCase();
+    return `${base}-${suffix}`;
+  }
+
+  private buildLocationSnapshotHash(location: {
+    addressLine: string;
+    city: string;
+    state: string;
+    pincode: string;
+    phone: string;
+  }): string {
+    return this.buildSellerSnapshotHash({
+      businessAddress: location.addressLine,
+      businessCity: location.city,
+      businessState: location.state,
+      businessPincode: location.pincode,
+      phone: location.phone,
+    });
+  }
+
+  /**
+   * Ensure the given pickup location is registered on the carrier side
+   * (currently Delhivery). Idempotent — re-runs are cheap and just
+   * return the cached name. Auto re-registers when the address/phone
+   * have materially changed since the last successful registration.
+   *
+   * This is the single source of truth for "make sure this address can
+   * receive a Delhivery rider". Both the explicit "Register" button on
+   * the seller portal and the lazy first-ship registration go through
+   * here.
+   */
+  async ensurePickupLocationWarehouse(
+    locationId: string,
+    options: { force?: boolean } = {},
+  ): Promise<{
+    success: boolean;
+    warehouseName?: string;
+    alreadyRegistered: boolean;
+    message: string;
+    error?: string;
+  }> {
+    const location = await this.prisma.sellerPickupLocation.findUnique({
+      where: { id: locationId },
+      include: { seller: { select: { id: true, sellerCode: true, storeName: true } } },
+    });
+    if (!location) {
+      const msg = 'Pickup location not found.';
+      return { success: false, alreadyRegistered: false, message: msg, error: msg };
+    }
+
+    const phone = (location.phone || '').replace(/(?!^\+)\D/g, '');
+    const missing: string[] = [];
+    if (!location.addressLine?.trim()) missing.push('Address line');
+    if (!location.city?.trim()) missing.push('City');
+    if (!location.state?.trim()) missing.push('State');
+    if (!location.pincode?.trim()) missing.push('Pincode');
+    if (!phone) missing.push('Pickup phone');
+    if (missing.length) {
+      const msg = `Cannot register pickup location — fill in ${missing.join(', ')}.`;
+      return { success: false, alreadyRegistered: false, message: msg, error: msg };
+    }
+
+    const desiredHash = this.buildLocationSnapshotHash({
+      addressLine: location.addressLine,
+      city: location.city,
+      state: location.state,
+      pincode: location.pincode,
+      phone,
+    });
+
+    if (
+      !options.force &&
+      location.xelgoWarehouseName &&
+      location.xelgoWarehouseRegisteredAt &&
+      location.xelgoWarehouseSnapshotHash === desiredHash
+    ) {
+      return {
+        success: true,
+        warehouseName: location.xelgoWarehouseName,
+        alreadyRegistered: true,
+        message: `Warehouse "${location.xelgoWarehouseName}" already registered with the carrier.`,
+      };
+    }
+
     const resolved = await this.resolveXelgoBackend();
     if (resolved.mode === 'unconfigured') {
       const msg = `Xelgo backend is not configured by the platform admin: ${resolved.reason}`;
@@ -599,8 +776,6 @@ export class ShippingService {
 
     const provider = this.providers.get(resolved.mode);
     if (!provider?.registerWarehouse) {
-      // Carrier doesn't support warehouse creation API — keep using the
-      // platform warehouse but DON'T error. The seller can still ship.
       const fallback = resolved.config.warehouseId || '';
       return {
         success: true,
@@ -610,38 +785,26 @@ export class ShippingService {
       };
     }
 
-    // Decide on a deterministic name. If a stored name exists, reuse it
-    // (we may just need to update the address — but Delhivery does not
-    // expose an "edit warehouse" endpoint on the public B2C surface, so
-    // we register the same name again; the carrier returns
-    // "already exists" which we treat as success).
-    const warehouseName =
-      seller.xelgoWarehouseName?.trim() ||
-      this.buildSellerWarehouseName({
-        id: seller.id,
-        sellerCode: seller.sellerCode,
-        storeName: seller.storeName,
-      });
+    const warehouseName = this.buildLocationWarehouseName(location.seller, location);
 
     const opts: RegisterWarehouseOptions = {
       name: warehouseName,
-      registeredName: seller.storeName?.trim() || warehouseName,
-      contactPerson: seller.storeName?.trim() || warehouseName,
-      email,
+      registeredName: location.contactPerson?.trim() || location.seller.storeName?.trim() || warehouseName,
+      contactPerson: location.contactPerson?.trim() || location.seller.storeName?.trim() || warehouseName,
+      email: location.email?.trim() || '',
       phone,
-      address: seller.businessAddress!.trim(),
-      city: seller.businessCity!.trim(),
-      state: seller.businessState!.trim(),
-      country: 'India',
-      pincode: seller.businessPincode!.trim(),
+      address: location.addressLine.trim(),
+      city: location.city.trim(),
+      state: location.state.trim(),
+      country: location.country || 'India',
+      pincode: location.pincode.trim(),
     };
 
     const result = await provider.registerWarehouse(resolved.config, opts);
 
     if (!result.success) {
-      // Record the failure so the seller portal can surface it.
-      await this.prisma.sellerProfile.update({
-        where: { id: seller.id },
+      await this.prisma.sellerPickupLocation.update({
+        where: { id: location.id },
         data: { xelgoWarehouseRegistrationError: result.message.slice(0, 500) },
       });
       return {
@@ -653,15 +816,11 @@ export class ShippingService {
     }
 
     const finalName = result.registeredName || warehouseName;
-
-    // "Recovered" = the carrier already had this warehouse but we'd
-    // never persisted it locally — i.e. a previously-failed registration
-    // (typically the pre-fix XML response case) is now self-healed.
     const recoveredFromPriorFailure =
-      !seller.xelgoWarehouseName && Boolean(result.alreadyExisted);
+      !location.xelgoWarehouseName && Boolean(result.alreadyExisted);
 
-    await this.prisma.sellerProfile.update({
-      where: { id: seller.id },
+    await this.prisma.sellerPickupLocation.update({
+      where: { id: location.id },
       data: {
         xelgoWarehouseName: finalName,
         xelgoWarehouseRegisteredAt: new Date(),
@@ -670,9 +829,26 @@ export class ShippingService {
       },
     });
 
+    // Mirror the carrier-side state onto the legacy SellerProfile.xelgoWarehouse*
+    // columns IF this is the seller's default location, so any code path
+    // still reading from the legacy fields stays in sync until it can be
+    // migrated. Safe to drop once every reader has moved to
+    // SellerPickupLocation.
+    if (location.isDefault) {
+      await this.prisma.sellerProfile.update({
+        where: { id: location.sellerId },
+        data: {
+          xelgoWarehouseName: finalName,
+          xelgoWarehouseRegisteredAt: new Date(),
+          xelgoWarehouseRegistrationError: null,
+          xelgoWarehouseSnapshotHash: desiredHash,
+        },
+      });
+    }
+
     this.logger.log(
-      `Xelgo warehouse persisted for seller ${seller.id}: name="${finalName}" ` +
-        `alreadyExisted=${Boolean(result.alreadyExisted)} ` +
+      `Xelgo warehouse persisted for location ${location.id} (seller ${location.sellerId}): ` +
+        `name="${finalName}" alreadyExisted=${Boolean(result.alreadyExisted)} ` +
         `recoveredFromPriorFailure=${recoveredFromPriorFailure}`,
     );
 
@@ -681,6 +857,385 @@ export class ShippingService {
       warehouseName: finalName,
       alreadyRegistered: Boolean(result.alreadyExisted),
       message: result.message,
+    };
+  }
+
+  // ─── Pickup Locations: CRUD (for Shipping Settings UI) ───
+
+  /**
+   * List every pickup location belonging to the seller, with
+   * per-location carrier-side status. The default location is always
+   * first; the rest are sorted by `createdAt` ascending so the order
+   * stays stable in the UI.
+   */
+  async listPickupLocations(userId: string) {
+    const seller = await this.getSellerProfile(userId);
+    const rows = await this.prisma.sellerPickupLocation.findMany({
+      where: { sellerId: seller.id },
+      orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
+    });
+    return rows.map((r) => this.serialisePickupLocation(r));
+  }
+
+  async createPickupLocation(
+    userId: string,
+    dto: {
+      label: string;
+      contactPerson?: string;
+      phone: string;
+      email?: string;
+      addressLine: string;
+      city: string;
+      state: string;
+      country?: string;
+      pincode: string;
+      makeDefault?: boolean;
+    },
+  ) {
+    const seller = await this.getSellerProfile(userId);
+    this.assertLocationDtoValid(dto);
+
+    const existingCount = await this.prisma.sellerPickupLocation.count({
+      where: { sellerId: seller.id },
+    });
+    const shouldBeDefault = dto.makeDefault === true || existingCount === 0;
+
+    const created = await this.prisma.$transaction(async (tx) => {
+      if (shouldBeDefault) {
+        await tx.sellerPickupLocation.updateMany({
+          where: { sellerId: seller.id, isDefault: true },
+          data: { isDefault: false },
+        });
+      }
+      return tx.sellerPickupLocation.create({
+        data: {
+          sellerId: seller.id,
+          label: dto.label.trim(),
+          contactPerson: dto.contactPerson?.trim() || null,
+          phone: dto.phone.replace(/(?!^\+)\D/g, ''),
+          email: dto.email?.trim() || null,
+          addressLine: dto.addressLine.trim(),
+          city: dto.city.trim(),
+          state: dto.state.trim(),
+          country: dto.country?.trim() || 'India',
+          pincode: dto.pincode.trim(),
+          isDefault: shouldBeDefault,
+        },
+      });
+    });
+
+    // Fire-and-await registration so the seller sees the live status
+    // immediately. Any failure is recorded on the row and surfaced via
+    // the serialised response — we never throw here, because the row
+    // itself was created successfully and we don't want the UI to
+    // think the save failed.
+    await this.ensurePickupLocationWarehouse(created.id).catch((err) => {
+      this.logger.warn(
+        `Initial register on new pickup location ${created.id} threw: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    });
+
+    const fresh = await this.prisma.sellerPickupLocation.findUnique({
+      where: { id: created.id },
+    });
+    return this.serialisePickupLocation(fresh!);
+  }
+
+  async updatePickupLocation(
+    userId: string,
+    locationId: string,
+    dto: {
+      label?: string;
+      contactPerson?: string | null;
+      phone?: string;
+      email?: string | null;
+      addressLine?: string;
+      city?: string;
+      state?: string;
+      country?: string;
+      pincode?: string;
+    },
+  ) {
+    const seller = await this.getSellerProfile(userId);
+    const existing = await this.prisma.sellerPickupLocation.findFirst({
+      where: { id: locationId, sellerId: seller.id },
+    });
+    if (!existing) {
+      throw new NotFoundException('Pickup location not found');
+    }
+
+    const data: Record<string, unknown> = {};
+    if (dto.label !== undefined) data.label = dto.label.trim();
+    if (dto.contactPerson !== undefined) data.contactPerson = dto.contactPerson?.trim() || null;
+    if (dto.phone !== undefined) data.phone = dto.phone.replace(/(?!^\+)\D/g, '');
+    if (dto.email !== undefined) data.email = dto.email?.trim() || null;
+    if (dto.addressLine !== undefined) data.addressLine = dto.addressLine.trim();
+    if (dto.city !== undefined) data.city = dto.city.trim();
+    if (dto.state !== undefined) data.state = dto.state.trim();
+    if (dto.country !== undefined) data.country = dto.country?.trim() || 'India';
+    if (dto.pincode !== undefined) data.pincode = dto.pincode.trim();
+
+    if (Object.keys(data).length === 0) {
+      return this.serialisePickupLocation(existing);
+    }
+
+    await this.prisma.sellerPickupLocation.update({
+      where: { id: locationId },
+      data,
+    });
+
+    // The address may have changed materially; let ensure detect drift
+    // via the snapshot hash and re-register if needed.
+    await this.ensurePickupLocationWarehouse(locationId).catch((err) => {
+      this.logger.warn(
+        `Re-register on updated pickup location ${locationId} threw: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    });
+
+    const fresh = await this.prisma.sellerPickupLocation.findUnique({
+      where: { id: locationId },
+    });
+    return this.serialisePickupLocation(fresh!);
+  }
+
+  async deletePickupLocation(userId: string, locationId: string) {
+    const seller = await this.getSellerProfile(userId);
+    const location = await this.prisma.sellerPickupLocation.findFirst({
+      where: { id: locationId, sellerId: seller.id },
+    });
+    if (!location) {
+      throw new NotFoundException('Pickup location not found');
+    }
+
+    const totalCount = await this.prisma.sellerPickupLocation.count({
+      where: { sellerId: seller.id },
+    });
+    if (totalCount === 1) {
+      throw new BadRequestException(
+        'You must have at least one pickup location. Add another location before deleting this one.',
+      );
+    }
+
+    // Refuse if any non-terminal shipment still uses this location —
+    // otherwise tracking history & label downloads would point at a
+    // stranded address.
+    const activeShipment = await this.prisma.shipment.findFirst({
+      where: {
+        pickupLocationId: locationId,
+        shipmentStatus: {
+          notIn: [
+            ShipmentStatus.DELIVERED,
+            ShipmentStatus.RTO_DELIVERED,
+            ShipmentStatus.CANCELLED,
+          ],
+        },
+      },
+      select: { id: true, awbNumber: true },
+    });
+    if (activeShipment) {
+      throw new BadRequestException(
+        `Can't delete this pickup location — shipment ${activeShipment.awbNumber || activeShipment.id} is still in transit. Wait for it to deliver, or move it to a different location first.`,
+      );
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.sellerPickupLocation.delete({ where: { id: locationId } });
+      // If we deleted the default, promote the oldest remaining row.
+      if (location.isDefault) {
+        const next = await tx.sellerPickupLocation.findFirst({
+          where: { sellerId: seller.id },
+          orderBy: { createdAt: 'asc' },
+        });
+        if (next) {
+          await tx.sellerPickupLocation.update({
+            where: { id: next.id },
+            data: { isDefault: true },
+          });
+        }
+      }
+    });
+
+    return { success: true, message: 'Pickup location deleted' };
+  }
+
+  async setDefaultPickupLocation(userId: string, locationId: string) {
+    const seller = await this.getSellerProfile(userId);
+    const target = await this.prisma.sellerPickupLocation.findFirst({
+      where: { id: locationId, sellerId: seller.id },
+    });
+    if (!target) {
+      throw new NotFoundException('Pickup location not found');
+    }
+    if (target.isDefault) {
+      return this.serialisePickupLocation(target);
+    }
+
+    await this.prisma.$transaction([
+      this.prisma.sellerPickupLocation.updateMany({
+        where: { sellerId: seller.id, isDefault: true },
+        data: { isDefault: false },
+      }),
+      this.prisma.sellerPickupLocation.update({
+        where: { id: locationId },
+        data: { isDefault: true },
+      }),
+    ]);
+
+    const fresh = await this.prisma.sellerPickupLocation.findUnique({
+      where: { id: locationId },
+    });
+    return this.serialisePickupLocation(fresh!);
+  }
+
+  async registerPickupLocation(userId: string, locationId: string) {
+    const seller = await this.getSellerProfile(userId);
+    const location = await this.prisma.sellerPickupLocation.findFirst({
+      where: { id: locationId, sellerId: seller.id },
+      select: { id: true },
+    });
+    if (!location) {
+      throw new NotFoundException('Pickup location not found');
+    }
+    const result = await this.ensurePickupLocationWarehouse(locationId, { force: true });
+    if (!result.success) {
+      throw new BadRequestException(result.message);
+    }
+    const fresh = await this.prisma.sellerPickupLocation.findUnique({
+      where: { id: locationId },
+    });
+    return this.serialisePickupLocation(fresh!);
+  }
+
+  /**
+   * Resolve which pickup location a shipment booking should use:
+   *   • If `requestedLocationId` is provided, validate it belongs to the
+   *     seller and return it.
+   *   • Otherwise, return the seller's default location.
+   *   • If no default exists yet (greenfield seller, profile complete),
+   *     synthesise one from the profile so the seller can ship right
+   *     away without having to visit Shipping Settings first.
+   *
+   * Throws `BadRequestException` with an actionable message when no
+   * location can be resolved.
+   */
+  async resolvePickupLocationForShipment(
+    sellerId: string,
+    requestedLocationId?: string | null,
+  ) {
+    if (requestedLocationId) {
+      const explicit = await this.prisma.sellerPickupLocation.findFirst({
+        where: { id: requestedLocationId, sellerId },
+      });
+      if (!explicit) {
+        throw new BadRequestException(
+          'Selected pickup location was not found. Please pick another from the dropdown.',
+        );
+      }
+      return explicit;
+    }
+
+    const def = await this.prisma.sellerPickupLocation.findFirst({
+      where: { sellerId, isDefault: true },
+    });
+    if (def) return def;
+
+    // No default yet — fall back to whatever the seller has, or
+    // synthesise from the profile if they have no locations at all.
+    const sellerForSeed = await this.prisma.sellerProfile.findUnique({
+      where: { id: sellerId },
+      include: { user: { select: { phone: true, email: true } } },
+    });
+    if (!sellerForSeed) {
+      throw new BadRequestException('Seller profile not found');
+    }
+    const ensured = await this.ensureDefaultPickupLocationFromProfile(sellerForSeed);
+    if (!ensured.success || !ensured.location) {
+      throw new BadRequestException(ensured.message);
+    }
+    const fresh = await this.prisma.sellerPickupLocation.findUnique({
+      where: { id: ensured.location.id },
+    });
+    if (!fresh) throw new BadRequestException('Failed to resolve a pickup location');
+    return fresh;
+  }
+
+  private assertLocationDtoValid(dto: {
+    label: string;
+    phone: string;
+    addressLine: string;
+    city: string;
+    state: string;
+    pincode: string;
+  }) {
+    const missing: string[] = [];
+    if (!dto.label?.trim()) missing.push('Label');
+    if (!dto.addressLine?.trim()) missing.push('Address line');
+    if (!dto.city?.trim()) missing.push('City');
+    if (!dto.state?.trim()) missing.push('State');
+    if (!dto.pincode?.trim()) missing.push('Pincode');
+    const phoneDigits = (dto.phone || '').replace(/\D/g, '');
+    if (phoneDigits.length < 10) missing.push('Phone (10-digit mobile)');
+    if (!/^\d{6}$/.test(dto.pincode?.trim() || '')) {
+      throw new BadRequestException('Pincode must be 6 digits.');
+    }
+    if (missing.length) {
+      throw new BadRequestException(`Missing or invalid: ${missing.join(', ')}`);
+    }
+  }
+
+  private serialisePickupLocation(row: {
+    id: string;
+    label: string;
+    contactPerson: string | null;
+    phone: string;
+    email: string | null;
+    addressLine: string;
+    city: string;
+    state: string;
+    country: string;
+    pincode: string;
+    isDefault: boolean;
+    xelgoWarehouseName: string | null;
+    xelgoWarehouseRegisteredAt: Date | null;
+    xelgoWarehouseRegistrationError: string | null;
+    xelgoWarehouseSnapshotHash: string | null;
+    createdAt: Date;
+    updatedAt: Date;
+  }) {
+    const desiredHash = this.buildLocationSnapshotHash({
+      addressLine: row.addressLine,
+      city: row.city,
+      state: row.state,
+      pincode: row.pincode,
+      phone: (row.phone || '').replace(/(?!^\+)\D/g, ''),
+    });
+    const registered = Boolean(row.xelgoWarehouseName && row.xelgoWarehouseRegisteredAt);
+    const drifted = Boolean(
+      registered && row.xelgoWarehouseSnapshotHash && row.xelgoWarehouseSnapshotHash !== desiredHash,
+    );
+    return {
+      id: row.id,
+      label: row.label,
+      contactPerson: row.contactPerson,
+      phone: row.phone,
+      email: row.email,
+      addressLine: row.addressLine,
+      city: row.city,
+      state: row.state,
+      country: row.country,
+      pincode: row.pincode,
+      isDefault: row.isDefault,
+      warehouseName: row.xelgoWarehouseName,
+      registered,
+      registeredAt: row.xelgoWarehouseRegisteredAt,
+      lastError: row.xelgoWarehouseRegistrationError,
+      addressDriftedSinceRegistration: drifted,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
     };
   }
 
@@ -989,6 +1544,11 @@ export class ShippingService {
       pickupDate?: string;
       pickupTime?: string;
       expectedPackageCount?: number;
+      /// Optional — when omitted, the seller's default pickup location
+      /// is used. Required to differ from the default when the seller
+      /// has more than one location and wants this order picked up
+      /// from a non-default warehouse.
+      pickupLocationId?: string;
     },
   ) {
     const seller = await this.getSellerProfile(userId);
@@ -1079,6 +1639,7 @@ export class ShippingService {
       pickupDate?: string;
       pickupTime?: string;
       expectedPackageCount?: number;
+      pickupLocationId?: string;
     },
   ) {
     let provider = this.providers.get(shippingMode);
@@ -1088,6 +1649,15 @@ export class ShippingService {
 
     let courierConfig: SellerCourierConfig | null = null;
     let xelgoDisplayName: string | null = null;
+    // Resolve the pickup location up-front. We need it for BOTH the
+    // Xelgo registration step AND the seller-address payload sent to
+    // every carrier (Delhivery, ShipRocket, XpressBees, Ekart). Picking
+    // it once here keeps the rest of this method simple and ensures
+    // self-ship + every courier uses the exact same address.
+    const pickupLocation = await this.resolvePickupLocationForShipment(
+      seller.id,
+      dto.pickupLocationId,
+    );
 
     if (shippingMode === ShippingMode.XELNOVA_COURIER) {
       const resolved = await this.resolveXelgoBackend();
@@ -1100,34 +1670,36 @@ export class ShippingService {
         courierConfig = resolved.config;
         xelgoDisplayName = resolved.displayName;
 
-        // Per-seller pickup warehouse: ensure THIS seller's address is
-        // registered with the carrier so the rider goes to the right
-        // location instead of the platform's master warehouse. Lazy /
-        // idempotent — first ship triggers registration; later ships
-        // reuse the cached name unless the seller's address drifts.
+        // Per-location pickup warehouse: ensure THE CHOSEN pickup
+        // address is registered with the carrier so the rider goes to
+        // the right warehouse. Lazy / idempotent — first ship from a
+        // location triggers registration; later ships reuse the cached
+        // name unless the address drifts.
         try {
-          const ensure = await this.ensureSellerXelgoWarehouse(seller);
+          const ensure = await this.ensurePickupLocationWarehouse(pickupLocation.id);
           if (ensure.success && ensure.warehouseName) {
             // IMPORTANT: clone the synthetic config — it's shared across
             // sellers. Mutating it would leak one seller's warehouse
             // into another seller's next booking.
             courierConfig = { ...courierConfig, warehouseId: ensure.warehouseName } as SellerCourierConfig;
             this.logger.log(
-              `Xelgo: using seller "${seller.storeName}" warehouse "${ensure.warehouseName}" (${ensure.alreadyRegistered ? 'cached' : 'newly registered'}).`,
+              `Xelgo: using "${seller.storeName}" pickup location "${pickupLocation.label}" → warehouse "${ensure.warehouseName}" (${ensure.alreadyRegistered ? 'cached' : 'newly registered'}).`,
             );
           } else {
             // Carrier rejected registration — surface a 400 so the seller
-            // can fix their address before being charged for an AWB.
+            // can fix the location before being charged for an AWB.
             throw new BadRequestException(
-              `Couldn't register your pickup warehouse with the carrier: ${ensure.message}`,
+              `Couldn't register pickup location "${pickupLocation.label}" with the carrier: ${ensure.message}`,
             );
           }
         } catch (err) {
           if (err instanceof BadRequestException) throw err;
           const m = err instanceof Error ? err.message : String(err);
-          this.logger.error(`Failed to ensure seller warehouse for ${seller.id}: ${m}`);
+          this.logger.error(
+            `Failed to ensure pickup location ${pickupLocation.id} for seller ${seller.id}: ${m}`,
+          );
           throw new BadRequestException(
-            `Couldn't register your pickup warehouse with the carrier: ${m}`,
+            `Couldn't register pickup location "${pickupLocation.label}" with the carrier: ${m}`,
           );
         }
       }
@@ -1155,38 +1727,26 @@ export class ShippingService {
       throw new BadRequestException('Order has no shipping address');
     }
 
-    // Pre-flight: every courier (Delhivery, ShipRocket, XpressBees, Ekart)
-    // requires a complete seller pickup/return address. Without it the
-    // upstream API typically responds with a useless generic error
-    // ("An internal Error has occurred…") which the seller has no way to
-    // act on. Fail early with a clear, actionable message instead.
-    //
-    // Phone is checked against both SellerProfile.phone and the parent
-    // User.phone — sellers who completed phone OTP at signup/login but
-    // never re-typed it on the onboarding form already have a verified
-    // mobile on User.phone, and that's the number we'll send to the
-    // carrier as the pickup contact.
-    const rawPickupPhone =
-      seller.phone?.trim() || (seller as { user?: { phone?: string | null } }).user?.phone?.trim() || '';
-    // Couriers (Delhivery in particular) reject formatted strings — keep
-    // digits only, plus a leading "+" if present.
-    const pickupPhone = rawPickupPhone.replace(/(?!^\+)\D/g, '');
-    const missingSellerFields: string[] = [];
-    if (!seller.businessAddress?.trim()) missingSellerFields.push('Address line');
-    if (!seller.businessCity?.trim()) missingSellerFields.push('City');
-    if (!seller.businessState?.trim()) missingSellerFields.push('State');
-    if (!seller.businessPincode?.trim()) missingSellerFields.push('Pincode');
-    if (!pickupPhone) missingSellerFields.push('Pickup phone number');
-    if (missingSellerFields.length > 0) {
+    // Pre-flight on the chosen pickup LOCATION (not the seller profile
+    // — locations have their own address + phone now). Couriers reject
+    // formatted phones, so we strip down to digits + leading "+".
+    const pickupPhone = (pickupLocation.phone || '').replace(/(?!^\+)\D/g, '');
+    const missingPickupFields: string[] = [];
+    if (!pickupLocation.addressLine?.trim()) missingPickupFields.push('Address line');
+    if (!pickupLocation.city?.trim()) missingPickupFields.push('City');
+    if (!pickupLocation.state?.trim()) missingPickupFields.push('State');
+    if (!pickupLocation.pincode?.trim()) missingPickupFields.push('Pincode');
+    if (!pickupPhone) missingPickupFields.push('Pickup phone number');
+    if (missingPickupFields.length > 0) {
       throw new BadRequestException(
-        `Your pickup address is incomplete. Please add ${missingSellerFields.join(', ')} on your Profile before booking a shipment.`,
+        `Pickup location "${pickupLocation.label}" is incomplete. Add ${missingPickupFields.join(', ')} in Shipping Settings → Pickup Locations before booking.`,
       );
     }
 
     const shipmentDetails: ShipmentDetails = {
       weight: dto.weight,
       dimensions: dto.dimensions,
-      pickupPincode: seller.businessPincode || '',
+      pickupPincode: pickupLocation.pincode || '',
       deliveryPincode: addr.pincode,
       deliveryAddress: {
         fullName: addr.fullName,
@@ -1198,12 +1758,12 @@ export class ShippingService {
         pincode: addr.pincode,
       },
       sellerAddress: {
-        address: seller.businessAddress || '',
-        city: seller.businessCity || '',
-        state: seller.businessState || '',
-        pincode: seller.businessPincode || '',
+        address: pickupLocation.addressLine || '',
+        city: pickupLocation.city || '',
+        state: pickupLocation.state || '',
+        pincode: pickupLocation.pincode || '',
         phone: pickupPhone,
-        name: seller.storeName,
+        name: pickupLocation.contactPerson?.trim() || seller.storeName,
       },
       orderNumber: order.orderNumber,
       orderId: order.id,
@@ -1336,6 +1896,7 @@ export class ShippingService {
         weight: dto.weight,
         dimensions: dto.dimensions,
         courierCharges: result.charges,
+        pickupLocationId: pickupLocation.id,
         statusHistory: pickupAt
           ? [
               { status: 'BOOKED', timestamp: bookedAtIso, remark: bookRemark },
@@ -1669,18 +2230,25 @@ export class ShippingService {
       provider = this.providers.get(resolved.mode);
       courierConfig = resolved.config;
 
-      // Re-use the seller's own warehouse, NOT the platform default.
-      // If the seller hasn't been onboarded yet (legacy AWB issued
-      // before this feature shipped), fall back to the platform name
-      // so the pickup still goes through.
-      const ensure = await this.ensureSellerXelgoWarehouse(seller);
+      // Use the warehouse that the SHIPMENT was booked from — not the
+      // seller's current default. If a seller has multiple pickup
+      // locations and the order was booked from the overflow warehouse,
+      // the rider must come to that overflow address (Delhivery rejects
+      // pickup-requests that don't match the manifest's warehouse).
+      //
+      // Legacy AWBs issued before multi-pickup support landed have
+      // `pickupLocationId == null` — those fall through to the seller's
+      // default location, which is exactly what they used at booking.
+      const ensure = shipment.pickupLocationId
+        ? await this.ensurePickupLocationWarehouse(shipment.pickupLocationId)
+        : await this.ensureSellerXelgoWarehouse(seller);
       if (ensure.success && ensure.warehouseName) {
         pickupLocation = ensure.warehouseName;
         courierConfig = { ...courierConfig, warehouseId: pickupLocation } as SellerCourierConfig;
       } else {
         pickupLocation = courierConfig.warehouseId || '';
         this.logger.warn(
-          `Xelgo pickup for ${shipment.awbNumber}: falling back to platform warehouse "${pickupLocation}" because seller registration failed: ${ensure.message}`,
+          `Xelgo pickup for ${shipment.awbNumber}: falling back to platform warehouse "${pickupLocation}" because location registration failed: ${ensure.message}`,
         );
       }
     } else {

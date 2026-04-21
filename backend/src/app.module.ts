@@ -30,12 +30,14 @@ import { SellerStoreModule } from './modules/seller-store/seller-store.module';
 import { BusinessModule } from './modules/business/business.module';
 import { ContactModule } from './modules/contact/contact.module';
 import { LoggingMiddleware } from './common/middleware/logging.middleware';
+import { CommonModule } from './common/common.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     ScheduleModule.forRoot(),
     PrismaModule,
+    CommonModule,
     LoggingModule,
     VerificationModule,
     ProductsModule,

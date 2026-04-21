@@ -24,6 +24,8 @@ import {
   UpdateShipmentStatusDto,
   SaveCourierConfigDto,
   UpdateCourierConfigDto,
+  CreatePickupLocationDto,
+  UpdatePickupLocationDto,
 } from './dto/shipping.dto';
 import { ShippingMode } from '@prisma/client';
 import {
@@ -226,6 +228,87 @@ export class ShippingController {
     return successResponse(
       await this.service.registerXelgoPickupWarehouse(userId),
       'Pickup warehouse registered with carrier',
+    );
+  }
+
+  // ─── Pickup Locations (multi-warehouse) ───
+  //
+  // Each seller can register N pickup locations with the carrier
+  // (Delhivery). One is marked default and is used when the seller
+  // doesn't explicitly pick one on the Ship modal. Every location is
+  // registered as its own carrier-side warehouse so the rider routes
+  // to the correct address per shipment.
+
+  @Get('pickup-locations')
+  @ApiOperation({ summary: 'List the seller’s pickup locations (with carrier-side status).' })
+  async listPickupLocations(@CurrentUser('id') userId: string) {
+    return successResponse(
+      await this.service.listPickupLocations(userId),
+      'Pickup locations fetched',
+    );
+  }
+
+  @Post('pickup-locations')
+  @ApiOperation({ summary: 'Create a new pickup location and register it with the carrier.' })
+  async createPickupLocation(
+    @CurrentUser('id') userId: string,
+    @Body() dto: CreatePickupLocationDto,
+  ) {
+    return successResponse(
+      await this.service.createPickupLocation(userId, dto),
+      'Pickup location created',
+    );
+  }
+
+  @Patch('pickup-locations/:id')
+  @ApiOperation({ summary: 'Update a pickup location (re-registers with the carrier on address change).' })
+  async updatePickupLocation(
+    @CurrentUser('id') userId: string,
+    @Param('id') id: string,
+    @Body() dto: UpdatePickupLocationDto,
+  ) {
+    return successResponse(
+      await this.service.updatePickupLocation(userId, id, dto),
+      'Pickup location updated',
+    );
+  }
+
+  @Delete('pickup-locations/:id')
+  @ApiOperation({ summary: 'Delete a pickup location (refused if it has live shipments).' })
+  async deletePickupLocation(
+    @CurrentUser('id') userId: string,
+    @Param('id') id: string,
+  ) {
+    return successResponse(
+      await this.service.deletePickupLocation(userId, id),
+      'Pickup location deleted',
+    );
+  }
+
+  @Post('pickup-locations/:id/set-default')
+  @ApiOperation({ summary: 'Mark a pickup location as the seller’s default for new shipments.' })
+  async setDefaultPickupLocation(
+    @CurrentUser('id') userId: string,
+    @Param('id') id: string,
+  ) {
+    return successResponse(
+      await this.service.setDefaultPickupLocation(userId, id),
+      'Default pickup location updated',
+    );
+  }
+
+  @Post('pickup-locations/:id/register')
+  @ApiOperation({
+    summary:
+      'Force-register (or refresh) a pickup location with the carrier. Useful after fixing an address that previously failed registration.',
+  })
+  async registerPickupLocation(
+    @CurrentUser('id') userId: string,
+    @Param('id') id: string,
+  ) {
+    return successResponse(
+      await this.service.registerPickupLocation(userId, id),
+      'Pickup location registered with carrier',
     );
   }
 

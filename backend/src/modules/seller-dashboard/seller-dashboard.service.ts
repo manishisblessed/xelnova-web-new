@@ -4,6 +4,7 @@ import { EmailService } from '../email/email.service';
 import { WalletService } from '../wallet/wallet.service';
 import { PaymentService } from '../payment/payment.service';
 import { NotificationService } from '../notifications/notification.service';
+import { AccountUniquenessService } from '../../common/services/account-uniqueness.service';
 import {
   CreateProductDto,
   UpdateProductDto,
@@ -75,6 +76,7 @@ export class SellerDashboardService {
     private readonly paymentService: PaymentService,
     private readonly notificationService: NotificationService,
     private readonly adminService: AdminService,
+    private readonly accountUniqueness: AccountUniquenessService,
   ) {}
 
   private async getSellerProfile(userId: string) {
@@ -804,6 +806,18 @@ export class SellerDashboardService {
 
   async updateProfile(userId: string, dto: UpdateSellerProfileDto) {
     const seller = await this.getSellerProfile(userId);
+
+    // Validate uniqueness of KYC fields before updating.
+    // Each of these fields must be unique across all sellers.
+    await this.accountUniqueness.validateSellerKycFields(
+      {
+        gstNumber: dto.gstNumber,
+        bankAccountNumber: dto.bankAccountNumber,
+        panNumber: dto.panNumber,
+        aadhaarNumber: dto.aadhaarNumber,
+      },
+      seller.id,
+    );
 
     // Normalise pickup phone — strip spaces / dashes so the carrier
     // payload always contains digits-only (Delhivery in particular

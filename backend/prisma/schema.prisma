@@ -290,7 +290,7 @@ model SellerProfile {
   reviewedAt            DateTime?
 
   // GST Details
-  gstNumber           String?
+  gstNumber           String?   @unique
   gstVerified         Boolean   @default(false)
   gstVerifiedAt       DateTime?
   gstVerifiedData     Json?
@@ -298,7 +298,7 @@ model SellerProfile {
   sellsNonGstProducts Boolean   @default(false)
 
   // PAN Details
-  panNumber        String?
+  panNumber        String?   @unique
   panName          String?
   panVerified      Boolean   @default(false)
   panVerifiedAt    DateTime?
@@ -307,7 +307,7 @@ model SellerProfile {
   maskedAadhaarUrl String?
 
   // Aadhaar Details
-  aadhaarNumber       String?
+  aadhaarNumber       String?   @unique
   aadhaarVerified     Boolean   @default(false)
   aadhaarVerifiedAt   DateTime?
   aadhaarVerifiedData Json?
@@ -326,7 +326,7 @@ model SellerProfile {
 
   // Bank Details
   bankAccountName    String?
-  bankAccountNumber  String?
+  bankAccountNumber  String?   @unique
   bankIfscCode       String?
   bankVerified       Boolean   @default(false)
   bankVerifiedAt     DateTime?
@@ -346,16 +346,19 @@ model SellerProfile {
   businessType     String?
   businessCategory String?
 
-  // Xelgo (Ship-with-Xelnova) — auto-registered Delhivery warehouse
-  // dedicated to this seller. Generated lazily on first shipment from
-  // the seller's businessAddress, so the rider goes to the seller's
-  // actual location instead of the platform's master warehouse.
+  // Xelgo (Ship-with-Xelnova) — DEPRECATED single-warehouse fields.
+  //
+  // Kept on the model for backwards compat (the data is migrated into
+  // SellerPickupLocation as the seller's default location at deploy
+  // time — see migration 20260422000000_seller_pickup_locations). New
+  // code MUST read from / write to SellerPickupLocation; these columns
+  // are retained only so a rollback of the application code can still
+  // address the original warehouse on the carrier.
   xelgoWarehouseName              String?
   xelgoWarehouseRegisteredAt      DateTime?
   xelgoWarehouseRegistrationError String?
   /// Hash of (address + city + pincode + phone) at registration time.
-  /// We re-register transparently when this drifts so Delhivery always
-  /// has the seller's latest pickup details.
+  /// Legacy field — see comment above.
   xelgoWarehouseSnapshotHash      String?
 
   // Shipping Preferences
@@ -372,12 +375,13 @@ model SellerProfile {
   featuredProductIds String[]
   storeThemeColor    String?  @default("#7c3aed")
 
-  products       Product[]
-  payouts        Payout[]
-  documents      SellerDocument[]
-  courierConfigs SellerCourierConfig[]
-  shipments      Shipment[]
-  storeBanners   SellerStoreBanner[]
+  products        Product[]
+  payouts         Payout[]
+  documents       SellerDocument[]
+  courierConfigs  SellerCourierConfig[]
+  shipments       Shipment[]
+  storeBanners    SellerStoreBanner[]
+  pickupLocations SellerPickupLocation[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1052,13 +1056,73 @@ model Shipment {
   courierCharges  Float?
   statusHistory   Json           @default("[]")
 
+  /// Which seller pickup location this shipment was booked from. Null
+  /// for legacy shipments created before multi-pickup support landed
+  /// (those used the seller's businessAddress + the deprecated single
+  /// xelgoWarehouseName on SellerProfile).
+  pickupLocationId String?
+  pickupLocation   SellerPickupLocation? @relation(fields: [pickupLocationId], references: [id], onDelete: SetNull)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([sellerId])
   @@index([awbNumber])
   @@index([shipmentStatus])
+  @@index([pickupLocationId])
   @@map("shipments")
+}
+
+// ─── Seller Pickup Location ───
+//
+// Each seller can register multiple pickup locations (warehouses) with
+// the carrier. Every location is registered as its own warehouse on
+// Delhivery (`XN-<sellerCode>` for the legacy default; `XN-<sellerCode>-<slug>`
+// for additional locations) so the rider routes to the correct address
+// per shipment. Exactly one location per seller is `isDefault = true`
+// and is used when the seller doesn't pick a specific one on the Ship
+// modal.
+model SellerPickupLocation {
+  id       String        @id @default(cuid())
+  sellerId String
+  seller   SellerProfile @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+
+  /// Human label shown to the seller on the Ship modal dropdown
+  /// (e.g. "Main warehouse", "Festival overflow", "Returns hub").
+  label         String
+  contactPerson String?
+  /// 10-digit Indian mobile sent to Delhivery as the pickup contact.
+  phone         String
+  email         String?
+
+  addressLine String
+  city        String
+  state       String
+  country     String  @default("India")
+  pincode     String
+
+  /// Exactly one location per seller is marked default. Enforced in app
+  /// code (a partial unique index would be cleaner but Prisma still
+  /// has limited support for those across providers).
+  isDefault Boolean @default(false)
+
+  /// Carrier-side state — same shape as the legacy fields on
+  /// SellerProfile, scoped to this single location.
+  xelgoWarehouseName              String?   @unique
+  xelgoWarehouseRegisteredAt      DateTime?
+  xelgoWarehouseRegistrationError String?
+  /// Hash of address+phone at registration time. When this drifts we
+  /// re-register transparently so Delhivery always has fresh details.
+  xelgoWarehouseSnapshotHash      String?
+
+  shipments Shipment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([sellerId])
+  @@index([sellerId, isDefault])
+  @@map("seller_pickup_locations")
 }
 
 // ─── Seller Courier Config ───

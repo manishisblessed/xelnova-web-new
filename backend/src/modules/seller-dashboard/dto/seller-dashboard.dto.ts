@@ -119,6 +119,7 @@ export class UpdateSellerProfileDto {
   @ApiPropertyOptional() @IsOptional() @IsString() location?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() gstNumber?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() panNumber?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() aadhaarNumber?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() bankAccountName?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() bankAccountNumber?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() bankIfscCode?: string;

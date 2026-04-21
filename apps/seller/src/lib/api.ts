@@ -172,6 +172,9 @@ export async function apiShipOrder(orderId: string, body: {
   pickupTime?: string;
   /** Number of packages in this pickup batch (defaults to 1). */
   expectedPackageCount?: number;
+  /** Which seller pickup location to dispatch from. Omit to use the
+   *  seller's default location. */
+  pickupLocationId?: string;
 }) {
   const res = await fetch(`${API_URL}/seller/orders/${orderId}/ship`, {
     method: 'POST',
@@ -286,6 +289,103 @@ export async function apiRegisterPickupWarehouse() {
     alreadyRegistered: boolean;
     message: string;
   }>(res);
+}
+
+// ─── Pickup Locations (multi-warehouse) ───
+//
+// New model: every seller can register N pickup addresses, each one
+// becomes its own warehouse on the carrier (Delhivery). One is
+// `isDefault` and is used when the seller doesn't pick one explicitly
+// on the Ship modal.
+
+export type SellerPickupLocation = {
+  id: string;
+  label: string;
+  contactPerson: string | null;
+  phone: string;
+  email: string | null;
+  addressLine: string;
+  city: string;
+  state: string;
+  country: string;
+  pincode: string;
+  isDefault: boolean;
+  warehouseName: string | null;
+  registered: boolean;
+  registeredAt: string | null;
+  lastError: string | null;
+  addressDriftedSinceRegistration: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CreatePickupLocationPayload = {
+  label: string;
+  contactPerson?: string;
+  phone: string;
+  email?: string;
+  addressLine: string;
+  city: string;
+  state: string;
+  country?: string;
+  pincode: string;
+  makeDefault?: boolean;
+};
+
+export type UpdatePickupLocationPayload = Partial<
+  Omit<CreatePickupLocationPayload, 'makeDefault'>
+>;
+
+export async function apiListPickupLocations() {
+  const res = await fetch(`${API_URL}/seller/pickup-locations`, {
+    headers: authHeaders(),
+  });
+  return handleResponse<SellerPickupLocation[]>(res);
+}
+
+export async function apiCreatePickupLocation(payload: CreatePickupLocationPayload) {
+  const res = await fetch(`${API_URL}/seller/pickup-locations`, {
+    method: 'POST',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return handleResponse<SellerPickupLocation>(res);
+}
+
+export async function apiUpdatePickupLocation(
+  id: string,
+  payload: UpdatePickupLocationPayload,
+) {
+  const res = await fetch(`${API_URL}/seller/pickup-locations/${id}`, {
+    method: 'PATCH',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return handleResponse<SellerPickupLocation>(res);
+}
+
+export async function apiDeletePickupLocation(id: string) {
+  const res = await fetch(`${API_URL}/seller/pickup-locations/${id}`, {
+    method: 'DELETE',
+    headers: authHeaders(),
+  });
+  return handleResponse<{ success: boolean; message: string }>(res);
+}
+
+export async function apiSetDefaultPickupLocation(id: string) {
+  const res = await fetch(`${API_URL}/seller/pickup-locations/${id}/set-default`, {
+    method: 'POST',
+    headers: authHeaders(),
+  });
+  return handleResponse<SellerPickupLocation>(res);
+}
+
+export async function apiRegisterPickupLocation(id: string) {
+  const res = await fetch(`${API_URL}/seller/pickup-locations/${id}/register`, {
+    method: 'POST',
+    headers: authHeaders(),
+  });
+  return handleResponse<SellerPickupLocation>(res);
 }
 
 export async function apiCheckServiceability(orderId: string) {

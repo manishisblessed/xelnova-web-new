@@ -16,6 +16,7 @@ import { EmailService } from '../email/email.service';
 import { RegisterDto } from './dto/auth.dto';
 import type { BusinessRegisterDto } from '../business/dto/business.dto';
 import { LoggingService } from '../logging/logging.service';
+import { AccountUniquenessService } from '../../common/services/account-uniqueness.service';
 import { Prisma, Role } from '@prisma/client';
 import { OAuth2Client } from 'google-auth-library';
 
@@ -32,6 +33,7 @@ export class AuthService {
     private readonly configService: ConfigService,
     private readonly loggingService: LoggingService,
     private readonly emailService: EmailService,
+    private readonly accountUniqueness: AccountUniquenessService,
   ) {}
 
   async login(
@@ -135,9 +137,16 @@ export class AuthService {
     dto.name = dto.name.trim();
     const role: Role = dto.role || 'CUSTOMER';
 
-    // Per-role uniqueness: the same email/phone is allowed to exist as a
-    // separate account under a different Role (e.g. CUSTOMER + SELLER), but
-    // never twice within the same Role.
+    // Cross-role uniqueness: block new registrations if email/phone is already
+    // used by ANY role (CUSTOMER, SELLER, BUSINESS, ADMIN). Existing accounts
+    // created before this policy are grandfathered and continue to work.
+    await this.accountUniqueness.assertEmailAvailable(dto.email);
+
+    if (dto.phone) {
+      await this.accountUniqueness.assertPhoneAvailable(dto.phone);
+    }
+
+    // Also check per-role uniqueness for clearer error messages
     const existing = await this.prisma.user.findFirst({
       where: { email: dto.email, role },
     });
@@ -304,6 +313,20 @@ export class AuthService {
             : `No ${appRole.toLowerCase()} account is registered with this number.`,
         );
       }
+
+      // Cross-role check: block if this phone is already used by another role
+      const phoneAvailable = await this.accountUniqueness.isPhoneAvailableForNewAccount(phone);
+      if (!phoneAvailable) {
+        const phoneVariants = this.getPhoneVariants(phone);
+        const existingAccount = await this.prisma.user.findFirst({
+          where: { phone: { in: phoneVariants } },
+          select: { role: true },
+        });
+        throw new ConflictException(
+          `This phone number is already registered as a ${existingAccount?.role?.toLowerCase() || 'user'} on Xelnova. Each phone number can only be used for one account.`,
+        );
+      }
+
       const tempPassword = await bcrypt.hash(Math.random().toString(36).slice(-12), 10);
       try {
         user = await this.prisma.user.create({
@@ -391,6 +414,10 @@ export class AuthService {
       throw new BadRequestException('Phone not verified or verification expired. Please verify OTP again.');
     }
     await this.prisma.otpVerification.delete({ where: { id: verified.id } });
+
+    // Cross-role uniqueness: block if email/phone already used by any role
+    await this.accountUniqueness.assertEmailAvailable(email);
+    await this.accountUniqueness.assertPhoneAvailable(phone);
 
     const phoneVariants = this.getPhoneVariants(phone);
     const existingPhone = await this.prisma.user.findFirst({
@@ -558,6 +585,9 @@ export class AuthService {
     const isNewUser = !user;
 
     if (!user) {
+      // Cross-role check: block new Google signups if email is used by another role
+      await this.accountUniqueness.assertEmailAvailable(googleUser.email);
+
       const tempPassword = await bcrypt.hash(
         Math.random().toString(36).slice(-16) + googleUser.googleId,
         10,
@@ -748,8 +778,10 @@ export class AuthService {
     dto.email = dto.email.trim().toLowerCase();
     dto.name = dto.name.trim();
 
-    // Per-role uniqueness — a person can hold a CUSTOMER and SELLER row with
-    // the same email; only block if a BUSINESS row already exists.
+    // Cross-role uniqueness: block if email is already used by any role
+    await this.accountUniqueness.assertEmailAvailable(dto.email);
+
+    // Also check per-role uniqueness for clearer error messages
     const existing = await this.prisma.user.findFirst({
       where: { email: dto.email, role: 'BUSINESS' },
     });

@@ -28,7 +28,9 @@ import {
   apiDownloadCustomerInvoice,
   apiGetShippingRates,
   apiUpdateProfile,
+  apiListPickupLocations,
   type ShippingRates,
+  type SellerPickupLocation,
 } from '@/lib/api';
 
 interface OrderProduct {
@@ -1396,6 +1398,14 @@ function ShipOrderModal({
   const [shipPickupTime, setShipPickupTime] = useState<string>('');
   const [shipPickupPackages, setShipPickupPackages] = useState<number>(1);
   const [skipPickupAtBooking, setSkipPickupAtBooking] = useState(false);
+
+  // ─── Pickup location selection (multi-warehouse) ───
+  // Populated from /seller/pickup-locations when the modal opens. Default
+  // selection is whichever location has `isDefault: true`. If the seller
+  // has just one location we still load it but hide the dropdown — there's
+  // nothing to choose between.
+  const [pickupLocations, setPickupLocations] = useState<SellerPickupLocation[]>([]);
+  const [selectedPickupLocationId, setSelectedPickupLocationId] = useState<string>('');
   // Inline pickup-phone capture — when the backend rejects the booking
   // because the seller's pickup phone is missing, we collect it right
   // here instead of pushing the user to the Profile page (per UX feedback
@@ -1439,18 +1449,32 @@ function ShipOrderModal({
   const loadConfigs = useCallback(async () => {
     setLoadingConfigs(true);
     try {
-      const [configs, rates] = await Promise.allSettled([
+      const [configs, rates, locations] = await Promise.allSettled([
         apiGetCourierConfigs(),
         apiGetShippingRates(),
+        apiListPickupLocations(),
       ]);
       const providers = configs.status === 'fulfilled' && Array.isArray(configs.value)
         ? (configs.value as CourierConfig[]).filter((c) => c.isActive).map((c) => c.provider)
         : [];
       setConfiguredProviders(providers);
       if (rates.status === 'fulfilled') setShippingRates(rates.value);
+
+      const locs = locations.status === 'fulfilled' && Array.isArray(locations.value)
+        ? locations.value
+        : [];
+      setPickupLocations(locs);
+      // Pre-select the default location (or the first one if no default
+      // is marked) so the seller doesn't have to click a dropdown when
+      // they only have one address.
+      const def = locs.find((l) => l.isDefault) || locs[0];
+      setSelectedPickupLocationId(def?.id || '');
+
       return providers;
     } catch {
       setConfiguredProviders([]);
+      setPickupLocations([]);
+      setSelectedPickupLocationId('');
       return [];
     } finally {
       setLoadingConfigs(false);
@@ -1566,6 +1590,14 @@ function ShipOrderModal({
       } else {
         body.weight = weight ? parseFloat(weight) : undefined;
         body.dimensions = dimensions.trim() || undefined;
+        // Tell the backend which warehouse to dispatch from. If the
+        // seller has only one location we still send it explicitly so
+        // the backend doesn't have to fall back to default-resolution
+        // (the dropdown is hidden in that case but the value is still
+        // pre-filled from `loadConfigs`).
+        if (selectedPickupLocationId) {
+          body.pickupLocationId = selectedPickupLocationId;
+        }
         // Per Delhivery's two-call flow, only ask the backend to schedule
         // a pickup if the seller actually confirmed a date. If they
         // chose "Skip" we send no pickup fields and the shipment lands
@@ -1590,6 +1622,7 @@ function ShipOrderModal({
       shipPickupDate,
       shipPickupTime,
       shipPickupPackages,
+      selectedPickupLocationId,
     ],
   );
 
@@ -1854,6 +1887,74 @@ function ShipOrderModal({
                 When should the rider come for pickup?
               </p>
             </div>
+
+            {pickupLocations.length > 0 && (() => {
+              const selected = pickupLocations.find((l) => l.id === selectedPickupLocationId);
+              const showDropdown = pickupLocations.length > 1;
+              return (
+                <div className="rounded-xl border border-border bg-white p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-medium text-text-muted">
+                      Pickup from
+                    </label>
+                    <a
+                      href="/shipping"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-[11px] text-primary-600 hover:underline"
+                    >
+                      Manage locations
+                    </a>
+                  </div>
+                  {showDropdown ? (
+                    <select
+                      value={selectedPickupLocationId}
+                      onChange={(e) => setSelectedPickupLocationId(e.target.value)}
+                      className="w-full rounded-xl border border-border bg-surface-raised px-3 py-2.5 text-sm text-text-primary outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30"
+                    >
+                      {pickupLocations.map((loc) => (
+                        <option key={loc.id} value={loc.id}>
+                          {loc.label}
+                          {loc.isDefault ? ' (default)' : ''}
+                          {' — '}
+                          {loc.city}, {loc.pincode}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    selected && (
+                      <p className="text-sm font-medium text-text-primary">
+                        {selected.label}
+                        <span className="text-xs text-text-muted font-normal ml-1">
+                          (only address — add more in Shipping Settings)
+                        </span>
+                      </p>
+                    )
+                  )}
+                  {selected && (
+                    <p className="text-[11px] text-text-muted leading-relaxed">
+                      {selected.addressLine}, {selected.city}, {selected.state} – {selected.pincode}
+                      {selected.phone && <> · 📞 {selected.phone}</>}
+                    </p>
+                  )}
+                  {selected && !selected.registered && (
+                    <p className="text-[11px] text-amber-700">
+                      This location isn&apos;t registered with the courier yet — we&apos;ll register it automatically when you ship.
+                    </p>
+                  )}
+                </div>
+              );
+            })()}
+
+            {pickupLocations.length === 0 && !loadingConfigs && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                You don&apos;t have any pickup locations yet.&nbsp;
+                <a href="/shipping" className="underline font-medium">
+                  Add one in Shipping Settings
+                </a>
+                {' '}so the courier knows where to come for pickup.
+              </div>
+            )}
 
             <div className="rounded-xl bg-blue-50 border border-blue-200 p-3">
               <p className="text-xs text-blue-800 leading-relaxed">
