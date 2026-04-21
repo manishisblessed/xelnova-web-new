@@ -271,16 +271,17 @@ export function Header() {
               onClick={() => setLocationModalOpen(true)}
               className="flex items-center gap-1.5 hover:text-white transition-colors group"
             >
-              <span className="inline-flex items-center gap-1 rounded-full bg-accent-400/95 text-primary-900 font-extrabold px-2 py-0.5 shadow-sm shadow-accent-700/20 ring-1 ring-white/40">
-                <MapPin size={10} />
-                <span className="tracking-tight">11 min</span>
-              </span>
+              <MapPin size={10} className="shrink-0 opacity-90" aria-hidden />
               {location ? (
-                <span className="hidden sm:inline">Deliver to <strong className="text-white">{location.city} {location.pincode}</strong></span>
+                <span className="inline max-w-[min(100%,14rem)] truncate sm:max-w-none">
+                  Deliver to <strong className="text-white">{location.city} {location.pincode}</strong>
+                </span>
               ) : (
-                <span className="hidden sm:inline">Select your <strong className="text-white">location</strong></span>
+                <span className="inline">
+                  Select your <strong className="text-white">location</strong>
+                </span>
               )}
-              <ChevronDown size={9} className="group-hover:rotate-180 transition-transform hidden sm:inline" />
+              <ChevronDown size={9} className="group-hover:rotate-180 transition-transform shrink-0" />
             </button>
             <span className="text-white/45 hidden sm:inline">|</span>
             <a
