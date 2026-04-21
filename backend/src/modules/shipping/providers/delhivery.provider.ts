@@ -758,9 +758,11 @@ export class DelhiveryProvider implements CourierProvider {
       this.logger.warn(
         `Delhivery packing_slip failed: HTTP ${jsonRes.status} ${text.slice(0, 200)}`,
       );
-      throw new Error(
-        `Delhivery hasn't generated the label for AWB ${awbNumber} yet. Try again in a few minutes (labels are usually ready 1–2 minutes after manifestation).`,
+      const err = new Error(
+        `Delhivery couldn't return a label PDF for AWB ${awbNumber}. The label may not be generated yet — please try again shortly.`,
       );
+      (err as any).status = 503;
+      throw err;
     }
 
     let parsed: any = null;
@@ -835,16 +837,21 @@ export class DelhiveryProvider implements CourierProvider {
       };
     }
 
+    // Include city, state, pincode in the address field so Delhivery
+    // displays the complete pickup address on their shipping labels.
+    const fullAddress = `${options.address}, ${options.city}, ${options.state} - ${options.pincode}`;
+    const fullReturnAddress = `${returnAddress}, ${returnCity}, ${returnState} - ${returnPin}`;
+
     const body: Record<string, unknown> = {
       name: options.name,
       email: options.email || '',
       phone,
-      address: options.address,
+      address: fullAddress,
       city: options.city,
       state: options.state,
       country: options.country || 'India',
       pin: options.pincode,
-      return_address: returnAddress,
+      return_address: fullReturnAddress,
       return_pin: returnPin,
       return_city: returnCity,
       return_state: returnState,
@@ -998,10 +1005,20 @@ export class DelhiveryProvider implements CourierProvider {
     const base = this.getBaseUrl(config);
     const phone = this.normalizePhone(options.phone);
 
+    const returnAddress = options.returnAddress?.trim() || options.address;
+    const returnCity = options.returnCity?.trim() || options.city;
+    const returnState = options.returnState?.trim() || options.state;
+    const returnPin = options.returnPincode?.trim() || options.pincode;
+
+    // Include city, state, pincode in the address field so Delhivery
+    // displays the complete pickup address on their shipping labels.
+    const fullAddress = `${options.address}, ${options.city}, ${options.state} - ${options.pincode}`;
+    const fullReturnAddress = `${returnAddress}, ${returnCity}, ${returnState} - ${returnPin}`;
+
     const body: Record<string, unknown> = {
       name: options.name,
       phone,
-      address: options.address,
+      address: fullAddress,
       city: options.city,
       state: options.state,
       country: options.country || 'India',
@@ -1009,10 +1026,10 @@ export class DelhiveryProvider implements CourierProvider {
       registered_name: options.registeredName || options.name,
       contact_person: options.contactPerson || options.registeredName || options.name,
       email: options.email || '',
-      return_address: options.returnAddress?.trim() || options.address,
-      return_pin: options.returnPincode?.trim() || options.pincode,
-      return_city: options.returnCity?.trim() || options.city,
-      return_state: options.returnState?.trim() || options.state,
+      return_address: fullReturnAddress,
+      return_pin: returnPin,
+      return_city: returnCity,
+      return_state: returnState,
       return_country: options.returnCountry?.trim() || options.country || 'India',
     };
 

@@ -114,11 +114,13 @@ export class LabelGeneratorService {
         return official;
       }
     } catch (err) {
-      // Surface carrier errors to the seller — they're actionable
-      // ("label not ready yet, try again in 1–2 min"). Only fall
-      // through to the custom label when no carrier label exists at
-      // all (self-ship, unconfigured Xelgo, etc.).
-      throw err;
+      // Delhivery's packing_slip API returns JSON, not PDF. Their FAQ
+      // explicitly states: "Does this API give PDF? Ans- No. This gives
+      // JSON response only and you need to convert JSON to PDF."
+      // Fall back to our own label generator instead of throwing.
+      this.logger.warn(
+        `Carrier label unavailable for order ${orderId}: ${err instanceof Error ? err.message : String(err)}. Falling back to Xelnova label.`,
+      );
     }
 
     return this.generateXelnovaFallbackLabel(orderId, sellerUserId);
