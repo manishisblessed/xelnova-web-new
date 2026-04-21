@@ -1,8 +1,9 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ForbiddenException, forwardRef, Inject } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PDFDocument, rgb, StandardFonts, PDFPage, PDFFont } from 'pdf-lib';
 import * as bwipjs from 'bwip-js';
 import * as QRCode from 'qrcode';
+import { ShippingService } from './shipping.service';
 
 interface ShippingLabelConfig {
   companyName: string;
@@ -88,9 +89,47 @@ function drawDashedSeparator(page: PDFPage, y: number) {
 
 @Injectable()
 export class LabelGeneratorService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(LabelGeneratorService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    // forwardRef avoids a circular-dependency edge case if ShippingService
+    // ever needs to call back into LabelGeneratorService.
+    @Inject(forwardRef(() => ShippingService))
+    private readonly shippingService: ShippingService,
+  ) {}
 
   async generateShippingLabel(orderId: string, sellerUserId: string): Promise<Buffer> {
+    // 1) PREFER the carrier's official label when available.
+    //    Sellers asked us to stop branding the slip as "Xelgo" — the
+    //    actual rider scans the carrier's barcode at pickup, so the
+    //    bytes the seller prints must match what the carrier issued.
+    try {
+      const official = await this.shippingService.getCarrierIssuedLabel(orderId, sellerUserId);
+      if (official && official.length > 0) {
+        this.logger.log(
+          `Returning carrier-issued label for order ${orderId} (${official.length} bytes).`,
+        );
+        return official;
+      }
+    } catch (err) {
+      // Surface carrier errors to the seller — they're actionable
+      // ("label not ready yet, try again in 1–2 min"). Only fall
+      // through to the custom label when no carrier label exists at
+      // all (self-ship, unconfigured Xelgo, etc.).
+      throw err;
+    }
+
+    return this.generateXelnovaFallbackLabel(orderId, sellerUserId);
+  }
+
+  /**
+   * Custom Xelnova-branded label PDF. Used ONLY when the shipment has
+   * no carrier-issued label (self-ship, or Xelgo running on the
+   * internal stub). Real carrier shipments always serve the carrier's
+   * exact PDF instead.
+   */
+  private async generateXelnovaFallbackLabel(orderId: string, sellerUserId: string): Promise<Buffer> {
     const seller = await this.prisma.sellerProfile.findFirst({
       where: { userId: sellerUserId },
       select: {

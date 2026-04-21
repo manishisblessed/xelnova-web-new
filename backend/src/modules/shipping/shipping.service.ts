@@ -271,6 +271,78 @@ export class ShippingService {
     };
   }
 
+  // ─── Carrier-issued (official) shipping label ───
+
+  /**
+   * Fetch the EXACT shipping label PDF that the carrier (currently
+   * Delhivery) issues for a given order. Returns the PDF buffer when
+   * available, or `null` when the shipment is not on a label-capable
+   * carrier (e.g. self-ship) so the caller can render a Xelnova
+   * fallback.
+   *
+   * Throws when the carrier IS supported but rejects the request — the
+   * caller should surface that error so the seller can retry (labels
+   * are usually ready 1–2 minutes after manifestation).
+   */
+  async getCarrierIssuedLabel(
+    orderId: string,
+    sellerUserId: string,
+  ): Promise<Buffer | null> {
+    const seller = await this.getSellerProfile(sellerUserId);
+    await this.ensureOrderBelongsToSeller(orderId, seller.id);
+
+    const shipment = await this.prisma.shipment.findUnique({
+      where: { orderId },
+    });
+    if (!shipment || !shipment.awbNumber) return null;
+
+    // Self-ship doesn't have a carrier label — caller falls back.
+    if (shipment.shippingMode === ShippingMode.SELF_SHIP) return null;
+
+    // Resolve the right courier config + provider for this shipment.
+    let provider: CourierProvider | undefined;
+    let config: SellerCourierConfig | null = null;
+
+    if (shipment.shippingMode === ShippingMode.XELNOVA_COURIER) {
+      const resolved = await this.resolveXelgoBackend();
+      if (resolved.mode === 'unconfigured') return null;
+      provider = this.providers.get(resolved.mode);
+      config = resolved.config;
+    } else {
+      provider = this.providers.get(shipment.shippingMode);
+      const cfg = await this.prisma.sellerCourierConfig.findUnique({
+        where: {
+          sellerId_provider: { sellerId: shipment.sellerId, provider: shipment.shippingMode },
+        },
+      });
+      if (!cfg) return null;
+      config = {
+        ...cfg,
+        apiKey: this.decrypt(cfg.apiKey),
+        apiSecret: cfg.apiSecret ? this.decrypt(cfg.apiSecret) : null,
+      };
+    }
+
+    if (!provider || !config) return null;
+
+    // Today only Delhivery exposes a pre-printed label download we can
+    // proxy faithfully. Other providers return JSON / hosted URLs we
+    // either pass through to the seller already, or render via the
+    // Xelnova fallback.
+    if (
+      shipment.shippingMode === ShippingMode.DELHIVERY ||
+      (shipment.shippingMode === ShippingMode.XELNOVA_COURIER && provider instanceof DelhiveryProvider)
+    ) {
+      const pdf = await (provider as DelhiveryProvider).downloadLabel(
+        shipment.awbNumber,
+        config,
+      );
+      return pdf;
+    }
+
+    return null;
+  }
+
   // ─── Public-facing pickup-warehouse helpers (used by controller) ───
 
   async getXelgoPickupWarehouseStatus(userId: string) {

@@ -692,22 +692,112 @@ export class DelhiveryProvider implements CourierProvider {
     return rawMsg;
   }
 
+  /**
+   * Fetch the OFFICIAL Delhivery shipping label as a PDF buffer.
+   *
+   * Delhivery exposes the packing slip / label through several API
+   * shapes that vary by account vintage:
+   *
+   *   1. Some accounts return a PDF directly when you pass `pdf=true`
+   *      to `/api/p/packing_slip/`.
+   *   2. Most accounts return JSON containing one of:
+   *        - `pdf_download_link`
+   *        - `pdf_links: ["https://…"]`
+   *        - `packages[*].pdf_download_link`
+   *        - `data.url`
+   *      …which is a presigned CDN URL we can then GET to retrieve
+   *      the PDF bytes.
+   *
+   * We try the PDF response first and fall back to the JSON +
+   * download-link path. Returning a buffer (rather than parsed JSON)
+   * lets the caller stream the carrier's exact label to the seller —
+   * matching what they'd download from Delhivery One byte-for-byte.
+   */
   async downloadLabel(
     awbNumber: string,
     config: SellerCourierConfig,
-  ): Promise<any> {
+  ): Promise<Buffer> {
     const base = this.getBaseUrl(config);
+    const headers = this.authHeaders(config);
 
-    const res = await fetch(
-      `${base}/api/p/packing_slip?wbns=${encodeURIComponent(awbNumber)}&token=${config.apiKey}`,
-      { headers: this.authHeaders(config) },
+    const tryFetchPdf = async (url: string): Promise<Buffer | null> => {
+      try {
+        const r = await fetch(url, { headers });
+        if (!r.ok) return null;
+        const ct = (r.headers.get('content-type') || '').toLowerCase();
+        if (ct.includes('application/pdf') || ct.includes('octet-stream')) {
+          return Buffer.from(await r.arrayBuffer());
+        }
+        // Some CDN responses elide content-type — peek at magic bytes.
+        const buf = Buffer.from(await r.arrayBuffer());
+        if (buf.slice(0, 4).toString('ascii') === '%PDF') return buf;
+        return null;
+      } catch {
+        return null;
+      }
+    };
+
+    // 1. Try direct PDF response from packing_slip.
+    const direct = await tryFetchPdf(
+      `${base}/api/p/packing_slip/?wbns=${encodeURIComponent(awbNumber)}&pdf=true`,
     );
-
-    if (!res.ok) {
-      throw new Error('Failed to download Delhivery packing slip');
+    if (direct) {
+      this.logger.log(
+        `Delhivery label (direct PDF) fetched for ${awbNumber}, ${direct.length} bytes.`,
+      );
+      return direct;
     }
 
-    return res.json();
+    // 2. Fall back to JSON → resolve a download link → fetch.
+    const jsonRes = await fetch(
+      `${base}/api/p/packing_slip/?wbns=${encodeURIComponent(awbNumber)}`,
+      { headers },
+    );
+    const text = await jsonRes.text();
+    if (!jsonRes.ok) {
+      this.logger.warn(
+        `Delhivery packing_slip failed: HTTP ${jsonRes.status} ${text.slice(0, 200)}`,
+      );
+      throw new Error(
+        `Delhivery hasn't generated the label for AWB ${awbNumber} yet. Try again in a few minutes (labels are usually ready 1–2 minutes after manifestation).`,
+      );
+    }
+
+    let parsed: any = null;
+    try { parsed = text ? JSON.parse(text) : null; } catch { /* noop */ }
+
+    const candidateUrls: string[] = [];
+    const push = (v: unknown) => {
+      if (typeof v === 'string' && /^https?:\/\//i.test(v)) candidateUrls.push(v);
+    };
+    push(parsed?.pdf_download_link);
+    push(parsed?.data?.url);
+    push(parsed?.data?.pdf_download_link);
+    if (Array.isArray(parsed?.pdf_links)) parsed.pdf_links.forEach(push);
+    if (Array.isArray(parsed?.packages)) {
+      for (const pkg of parsed.packages) {
+        push(pkg?.pdf_download_link);
+        push(pkg?.label_link);
+        push(pkg?.label_url);
+      }
+    }
+
+    for (const url of candidateUrls) {
+      const buf = await tryFetchPdf(url);
+      if (buf) {
+        this.logger.log(
+          `Delhivery label fetched via download link for ${awbNumber}, ${buf.length} bytes.`,
+        );
+        return buf;
+      }
+    }
+
+    this.logger.warn(
+      `Delhivery packing_slip returned no usable PDF for ${awbNumber}. Body: ${text.slice(0, 300)}`,
+    );
+    throw new Error(
+      `Delhivery couldn't return a label PDF for AWB ${awbNumber}. The label may not be generated yet — please try again shortly.`,
+    );
   }
 
   /**
