@@ -498,8 +498,11 @@ export class SellerOnboardingService {
     hashedPassword: string,
     ipAddress?: string,
   ) {
-    const existingUser = await this.prisma.user.findUnique({
-      where: { email: dto.email },
+    // Per-role uniqueness: only ever resolve / create the SELLER row. A
+    // CUSTOMER row sharing this email is a deliberately separate account
+    // and must NOT be promoted to SELLER (would silently merge personas).
+    const existingUser = await this.prisma.user.findFirst({
+      where: { email: dto.email, role: 'SELLER' },
     });
 
     if (existingUser) {
@@ -508,9 +511,8 @@ export class SellerOnboardingService {
         data: {
           name: dto.fullName,
           password: hashedPassword,
-          role: 'SELLER',
-          // Backfill phone if missing — sellers were getting blank phone in profile
-          // because legacy users existed without one (testing observation #19).
+          // Backfill phone if missing — sellers were getting blank phone in
+          // profile because legacy users existed without one.
           phone: existingUser.phone || dto.phone,
           phoneVerified: existingUser.phoneVerified || true,
           lastLoginAt: new Date(),

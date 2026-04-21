@@ -9,6 +9,8 @@ export {
   getAccessToken,
   setApiBaseURL,
   getApiBaseURL,
+  setAppRole,
+  getAppRole,
 } from './client';
 export { configureApiAuthStorage } from './auth-storage';
 export { configureTokenPersistence, type TokenPersistence } from './token-persistence';

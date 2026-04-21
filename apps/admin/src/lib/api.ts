@@ -6,9 +6,18 @@ function getToken(): string | null {
   return match ? decodeURIComponent(match[1]) : null;
 }
 
+/**
+ * Header sent on EVERY admin request so the backend scopes auth lookups
+ * (login, password reset, etc.) to the ADMIN row only — even if the same
+ * email also exists as a CUSTOMER or SELLER account.
+ */
+const APP_ROLE_HEADER: Record<string, string> = { 'X-App-Role': 'ADMIN' };
+
 function authHeaders(): Record<string, string> {
   const token = getToken();
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  return token
+    ? { Authorization: `Bearer ${token}`, ...APP_ROLE_HEADER }
+    : { ...APP_ROLE_HEADER };
 }
 
 /**
@@ -109,7 +118,7 @@ async function handleResponse<T = unknown>(res: Response): Promise<T> {
 export async function apiLogin(email: string, password: string) {
   const res = await fetch(`${API_URL}/auth/login`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...APP_ROLE_HEADER },
     body: JSON.stringify({ email, password }),
   });
   return handleResponse<{ user: any; accessToken: string; refreshToken: string }>(res);

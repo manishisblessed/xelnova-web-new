@@ -34,20 +34,34 @@ export class AuthService {
     private readonly emailService: EmailService,
   ) {}
 
-  async login(email: string, password: string, ipAddress?: string, userAgent?: string) {
+  async login(
+    email: string,
+    password: string,
+    appRole: Role = 'CUSTOMER',
+    ipAddress?: string,
+    userAgent?: string,
+  ) {
     email = email.trim().toLowerCase();
-    const user = await this.prisma.user.findUnique({ where: { email } });
+    // Look for the user inside the calling app's role bucket only —
+    // a CUSTOMER row and a SELLER row may share the same email but are
+    // entirely separate accounts (per-role uniqueness, see schema).
+    const user = await this.prisma.user.findFirst({
+      where: { email, role: appRole },
+    });
     if (!user) {
       await this.loggingService.logActivity({
         type: 'AUTH',
         action: 'LOGIN_FAILED',
-        message: `Failed login attempt for email: ${email}`,
+        message: `Failed login attempt for email: ${email} on app ${appRole}`,
         ipAddress,
         userAgent,
         status: 'failed',
-        meta: { reason: 'User not found', email },
+        meta: { reason: 'User not found', email, appRole },
       });
-      throw new UnauthorizedException('Invalid email or password');
+      // If the email exists under a *different* role, give the operator a
+      // human hint so they know to register a separate account here.
+      const otherRoleHint = await this.describeOtherRoleAccount(email, appRole);
+      throw new UnauthorizedException(otherRoleHint || 'Invalid email or password');
     }
 
     if (user.isBanned) {
@@ -119,24 +133,32 @@ export class AuthService {
   async register(dto: RegisterDto & { role?: Role }, ipAddress?: string, userAgent?: string) {
     dto.email = dto.email.trim().toLowerCase();
     dto.name = dto.name.trim();
-    const existing = await this.prisma.user.findUnique({
-      where: { email: dto.email },
+    const role: Role = dto.role || 'CUSTOMER';
+
+    // Per-role uniqueness: the same email/phone is allowed to exist as a
+    // separate account under a different Role (e.g. CUSTOMER + SELLER), but
+    // never twice within the same Role.
+    const existing = await this.prisma.user.findFirst({
+      where: { email: dto.email, role },
     });
     if (existing) {
-      throw new ConflictException('User with this email already exists');
+      throw new ConflictException(
+        `An account with this email already exists for ${role.toLowerCase()}s`,
+      );
     }
 
     if (dto.phone) {
-      const phoneExists = await this.prisma.user.findUnique({
-        where: { phone: dto.phone },
+      const phoneExists = await this.prisma.user.findFirst({
+        where: { phone: dto.phone, role },
       });
       if (phoneExists) {
-        throw new ConflictException('Phone number already registered');
+        throw new ConflictException(
+          `This phone number is already registered as a ${role.toLowerCase()}`,
+        );
       }
     }
 
     const hashedPassword = await bcrypt.hash(dto.password, 10);
-    const role = dto.role || 'CUSTOMER';
 
     const user = await this.prisma.user.create({
       data: {
@@ -173,17 +195,22 @@ export class AuthService {
     };
   }
 
-  async sendOtp(phone: string) {
+  async sendOtp(phone: string, appRole: Role = 'CUSTOMER') {
     const otp = String(Math.floor(100000 + Math.random() * 900000));
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
+    // Identifier is namespaced by role so an OTP triggered from the seller
+    // portal can never be consumed from the customer storefront (or vice
+    // versa) — keeps the two accounts strictly separate.
+    const identifier = `${appRole}:${phone}`;
+
     await this.prisma.otpVerification.deleteMany({
-      where: { identifier: phone, type: 'PHONE', purpose: 'LOGIN' },
+      where: { identifier, type: 'PHONE', purpose: 'LOGIN' },
     });
 
     await this.prisma.otpVerification.create({
       data: {
-        identifier: phone,
+        identifier,
         type: 'PHONE',
         otp,
         purpose: 'LOGIN',
@@ -200,9 +227,10 @@ export class AuthService {
     };
   }
 
-  async verifyOtp(phone: string, otp: string) {
+  async verifyOtp(phone: string, otp: string, appRole: Role = 'CUSTOMER') {
+    const identifier = `${appRole}:${phone}`;
     const stored = await this.prisma.otpVerification.findFirst({
-      where: { identifier: phone, type: 'PHONE', purpose: 'LOGIN', verified: false },
+      where: { identifier, type: 'PHONE', purpose: 'LOGIN', verified: false },
       orderBy: { createdAt: 'desc' },
     });
 
@@ -237,18 +265,22 @@ export class AuthService {
     // of whether the DB stores "+919090702705" or "9090702705".
     const phoneVariants = this.getPhoneVariants(phone);
 
+    // Look only inside the calling app's role bucket — a SELLER row sharing
+    // this phone is a deliberately separate account and must NOT log the
+    // customer storefront in (and vice versa).
     let user = await this.prisma.user.findFirst({
-      where: { phone: { in: phoneVariants } },
+      where: { phone: { in: phoneVariants }, role: appRole },
     });
 
-    // If no user found by phone on User table, check SellerProfile phone and link it
-    if (!user) {
+    // If no user matched in this role and we're on the seller app, allow
+    // re-linking from a stray SellerProfile (legacy onboarding flow).
+    if (!user && appRole === 'SELLER') {
       const sellerProfile = await this.prisma.sellerProfile.findFirst({
         where: { phone: { in: phoneVariants } },
         include: { user: true },
       });
 
-      if (sellerProfile?.user) {
+      if (sellerProfile?.user && sellerProfile.user.role === 'SELLER') {
         user = await this.prisma.user.update({
           where: { id: sellerProfile.user.id },
           data: { phone, phoneVerified: true },
@@ -259,8 +291,19 @@ export class AuthService {
     let createdNewPhoneUser = false;
 
     if (!user) {
-      // Phone-only signup: email stays NULL until the user provides one
-      // (e.g. at checkout or on their profile page).
+      // Customer storefront: phone-only signup is fine — auto-create a
+      // CUSTOMER row, email stays NULL until the user provides one (e.g.
+      // at checkout). For sellers / business / admin we never auto-create:
+      // those personas require explicit registration / KYC, so we surface
+      // a clear error and the frontend can route the user to the right
+      // signup screen.
+      if (appRole !== 'CUSTOMER') {
+        throw new BadRequestException(
+          appRole === 'SELLER'
+            ? 'No seller account is registered with this number. Please complete seller signup first.'
+            : `No ${appRole.toLowerCase()} account is registered with this number.`,
+        );
+      }
       const tempPassword = await bcrypt.hash(Math.random().toString(36).slice(-12), 10);
       try {
         user = await this.prisma.user.create({
@@ -281,7 +324,7 @@ export class AuthService {
           err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002';
         if (!unique) throw err;
         user = await this.prisma.user.findFirst({
-          where: { phone: { in: phoneVariants } },
+          where: { phone: { in: phoneVariants }, role: 'CUSTOMER' },
         });
         if (!user) throw err;
       }
@@ -324,13 +367,19 @@ export class AuthService {
     };
   }
 
-  async completePhoneRegistration(phone: string, name: string, email: string) {
+  async completePhoneRegistration(
+    phone: string,
+    name: string,
+    email: string,
+    appRole: Role = 'CUSTOMER',
+  ) {
     email = email.trim().toLowerCase();
     name = name.trim();
 
+    const identifier = `${appRole}:${phone}`;
     const verified = await this.prisma.otpVerification.findFirst({
       where: {
-        identifier: phone,
+        identifier,
         type: 'PHONE',
         purpose: 'LOGIN',
         verified: true,
@@ -345,13 +394,17 @@ export class AuthService {
 
     const phoneVariants = this.getPhoneVariants(phone);
     const existingPhone = await this.prisma.user.findFirst({
-      where: { phone: { in: phoneVariants } },
+      where: { phone: { in: phoneVariants }, role: appRole },
     });
     if (existingPhone) {
-      throw new ConflictException('An account with this phone number already exists');
+      throw new ConflictException(
+        `An account with this phone number already exists for ${appRole.toLowerCase()}s`,
+      );
     }
 
-    const existingEmail = await this.prisma.user.findUnique({ where: { email } });
+    const existingEmail = await this.prisma.user.findFirst({
+      where: { email, role: appRole },
+    });
 
     if (existingEmail) {
       // Account exists (e.g. registered via Google) — link the verified phone and log them in
@@ -398,11 +451,15 @@ export class AuthService {
         phone,
         password: tempPassword,
         avatar: null,
-        role: 'CUSTOMER',
+        role: appRole,
         phoneVerified: true,
         authProvider: 'PHONE',
       },
     });
+
+    if (user.role === 'SELLER') {
+      await this.ensureSellerProfileForSellerUser(user.id, user.name, user.email, phone);
+    }
 
     const tokens = await this.generateTokens(user.id, user.email, user.role);
     await this.saveRefreshToken(user.id, tokens.refreshToken);
@@ -491,8 +548,11 @@ export class AuthService {
   }, role: Role = 'CUSTOMER', ipAddress?: string, userAgent?: string) {
     googleUser.email = googleUser.email.trim().toLowerCase();
 
-    let user = await this.prisma.user.findUnique({
-      where: { email: googleUser.email },
+    // Look only inside the calling app's role bucket. A CUSTOMER row with
+    // the same email is a deliberately separate account and must NOT be
+    // promoted to SELLER (would silently merge two distinct personas).
+    let user = await this.prisma.user.findFirst({
+      where: { email: googleUser.email, role },
     });
 
     const isNewUser = !user;
@@ -518,36 +578,22 @@ export class AuthService {
       await this.loggingService.logActivity({
         type: 'AUTH',
         action: 'GOOGLE_REGISTER',
-        message: `New user registered via Google: ${googleUser.email}`,
+        message: `New user registered via Google: ${googleUser.email} (${role})`,
         userId: user.id,
         userRole: user.role,
         ipAddress,
         userAgent,
-        meta: { provider: 'google', isNewUser: true },
+        meta: { provider: 'google', isNewUser: true, role },
       });
     } else {
       await this.prisma.user.update({
         where: { id: user.id },
-        data: { 
+        data: {
           avatar: user.avatar ? undefined : googleUser.avatar,
           emailVerified: true,
           authProvider: 'GOOGLE',
         },
       });
-    }
-
-    if (role === 'SELLER') {
-      if (user.role === 'ADMIN') {
-        throw new UnauthorizedException(
-          'This account is an administrator. Use the Admin app to sign in.',
-        );
-      }
-      if (user.role === 'CUSTOMER') {
-        user = await this.prisma.user.update({
-          where: { id: user.id },
-          data: { role: 'SELLER' },
-        });
-      }
     }
 
     if (user.role === 'SELLER') {
@@ -702,11 +748,13 @@ export class AuthService {
     dto.email = dto.email.trim().toLowerCase();
     dto.name = dto.name.trim();
 
-    const existing = await this.prisma.user.findUnique({
-      where: { email: dto.email },
+    // Per-role uniqueness — a person can hold a CUSTOMER and SELLER row with
+    // the same email; only block if a BUSINESS row already exists.
+    const existing = await this.prisma.user.findFirst({
+      where: { email: dto.email, role: 'BUSINESS' },
     });
     if (existing) {
-      throw new ConflictException('User with this email already exists');
+      throw new ConflictException('A business account with this email already exists');
     }
 
     const hashedPassword = await bcrypt.hash(dto.password, 10);
@@ -765,15 +813,9 @@ export class AuthService {
     };
   }
 
-  /** Same as `login`, but only succeeds for users with platform role `BUSINESS`. */
+  /** Same as `login`, but only ever resolves the BUSINESS row for that email. */
   async loginBusiness(email: string, password: string, ipAddress?: string, userAgent?: string) {
-    const result = await this.login(email, password, ipAddress, userAgent);
-    if (result.user.role !== 'BUSINESS') {
-      throw new ForbiddenException(
-        'This account is not a business buyer. Sign in on the retail storefront, or create a Xelnova Business account.',
-      );
-    }
-    return result;
+    return this.login(email, password, 'BUSINESS', ipAddress, userAgent);
   }
 
   /**
@@ -827,10 +869,12 @@ export class AuthService {
     return amount * (unitMs[unit] ?? 0) || NINETY_DAYS_MS;
   }
 
-  async forgotPassword(email: string) {
-    const user = await this.prisma.user.findUnique({ where: { email: email.trim().toLowerCase() } });
+  async forgotPassword(email: string, appRole: Role = 'CUSTOMER') {
+    const user = await this.prisma.user.findFirst({
+      where: { email: email.trim().toLowerCase(), role: appRole },
+    });
     if (!user) {
-      // Don't reveal whether the email exists
+      // Don't reveal whether the email exists for this role
       return { message: 'If that email is registered, a reset link has been sent.' };
     }
 
@@ -847,6 +891,41 @@ export class AuthService {
     }
 
     return { message: 'If that email is registered, a reset link has been sent.' };
+  }
+
+  /**
+   * If a login fails on this app's role bucket but the email *does* exist
+   * under another role, return a helpful message so the user knows they
+   * need to register a separate account here instead of guessing the
+   * password forever. Returns null when the email isn't registered at all
+   * (so we keep the standard "Invalid email or password" message and don't
+   * leak existence to attackers).
+   */
+  private async describeOtherRoleAccount(
+    email: string,
+    appRole: Role,
+  ): Promise<string | null> {
+    const other = await this.prisma.user.findFirst({
+      where: { email, role: { not: appRole } },
+      select: { role: true },
+    });
+    if (!other) return null;
+    const otherRoleHuman: Record<Role, string> = {
+      CUSTOMER: 'shopper',
+      SELLER: 'seller',
+      ADMIN: 'admin',
+      BUSINESS: 'business buyer',
+    };
+    const thisRoleHuman: Record<Role, string> = {
+      CUSTOMER: 'shopper',
+      SELLER: 'seller',
+      ADMIN: 'admin',
+      BUSINESS: 'business buyer',
+    };
+    return (
+      `This email is registered as a ${otherRoleHuman[other.role]} on Xelnova. ` +
+      `It does not have a ${thisRoleHuman[appRole]} account here yet — please register a new ${thisRoleHuman[appRole]} account.`
+    );
   }
 
   async resetPassword(token: string, newPassword: string) {

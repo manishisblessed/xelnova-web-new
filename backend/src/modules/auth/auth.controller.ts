@@ -39,60 +39,84 @@ export class AuthController {
     return req.ip || req.socket?.remoteAddress || '';
   }
 
+  /**
+   * Read the calling app's role (CUSTOMER / SELLER / ADMIN / BUSINESS) from
+   * the `X-App-Role` request header. Each frontend sets this once on init
+   * (see `setAppRole` in `@xelnova/api`, plus `apps/seller/lib/api.ts` and
+   * `apps/admin/lib/api.ts`). Defaults to CUSTOMER for back-compat with any
+   * legacy client that doesn't send the header (e.g. older mobile builds).
+   */
+  private getAppRole(req: Request): Role {
+    const raw = (req.headers['x-app-role'] as string | undefined)?.toUpperCase();
+    if (raw === 'SELLER' || raw === 'ADMIN' || raw === 'BUSINESS' || raw === 'CUSTOMER') {
+      return raw as Role;
+    }
+    return 'CUSTOMER';
+  }
+
   @Post('login')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Login with email and password' })
+  @ApiOperation({ summary: 'Login with email and password (scoped by X-App-Role header)' })
   async login(
     @Body() dto: LoginDto,
     @Req() req: Request,
     @Headers('user-agent') userAgent: string,
   ) {
     const ipAddress = this.getClientIp(req);
-    const result = await this.authService.login(dto.email, dto.password, ipAddress, userAgent);
+    const appRole = this.getAppRole(req);
+    const result = await this.authService.login(dto.email, dto.password, appRole, ipAddress, userAgent);
     return successResponse(result, 'Login successful');
   }
 
   @Post('register')
-  @ApiOperation({ summary: 'Register a new account' })
+  @ApiOperation({ summary: 'Register a new account (scoped by X-App-Role header)' })
   async register(
     @Body() dto: RegisterDto & { role?: Role },
     @Req() req: Request,
     @Headers('user-agent') userAgent: string,
   ) {
     const ipAddress = this.getClientIp(req);
+    if (!dto.role) {
+      dto.role = this.getAppRole(req);
+    }
     const result = await this.authService.register(dto, ipAddress, userAgent);
     return successResponse(result, 'Registration successful');
   }
 
   @Post('send-otp')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Send OTP to phone number' })
-  async sendOtp(@Body() dto: SendOtpDto) {
-    const result = await this.authService.sendOtp(dto.phone);
+  @ApiOperation({ summary: 'Send OTP to phone number (scoped by X-App-Role header)' })
+  async sendOtp(@Body() dto: SendOtpDto, @Req() req: Request) {
+    const result = await this.authService.sendOtp(dto.phone, this.getAppRole(req));
     return successResponse(result, 'OTP sent successfully');
   }
 
   @Post('verify-otp')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Verify OTP and login' })
-  async verifyOtp(@Body() dto: VerifyOtpDto) {
-    const result = await this.authService.verifyOtp(dto.phone, dto.otp);
+  @ApiOperation({ summary: 'Verify OTP and login (scoped by X-App-Role header)' })
+  async verifyOtp(@Body() dto: VerifyOtpDto, @Req() req: Request) {
+    const result = await this.authService.verifyOtp(dto.phone, dto.otp, this.getAppRole(req));
     return successResponse(result, 'OTP verified successfully');
   }
 
   @Post('complete-phone-registration')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Complete registration for new phone user (after OTP verification)' })
-  async completePhoneRegistration(@Body() dto: CompletePhoneRegistrationDto) {
-    const result = await this.authService.completePhoneRegistration(dto.phone, dto.name, dto.email);
+  async completePhoneRegistration(@Body() dto: CompletePhoneRegistrationDto, @Req() req: Request) {
+    const result = await this.authService.completePhoneRegistration(
+      dto.phone,
+      dto.name,
+      dto.email,
+      this.getAppRole(req),
+    );
     return successResponse(result, 'Registration successful');
   }
 
   @Post('forgot-password')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Send password reset email' })
-  async forgotPassword(@Body() dto: ForgotPasswordDto) {
-    const result = await this.authService.forgotPassword(dto.email);
+  @ApiOperation({ summary: 'Send password reset email (scoped by X-App-Role header)' })
+  async forgotPassword(@Body() dto: ForgotPasswordDto, @Req() req: Request) {
+    const result = await this.authService.forgotPassword(dto.email, this.getAppRole(req));
     return successResponse(result, result.message);
   }
 

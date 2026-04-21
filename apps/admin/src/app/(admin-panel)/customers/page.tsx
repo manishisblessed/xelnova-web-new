@@ -96,7 +96,7 @@ interface CustomerDetail {
 }
 
 const DEFAULT_BAN = 'Suspended by admin';
-const ROLE_OPTIONS = ['ALL', 'CUSTOMER', 'SELLER', 'SUPPORT'] as const;
+const ROLE_OPTIONS = ['ALL', 'CUSTOMER', 'SELLER', 'BUSINESS'] as const;
 
 function fmtMoney(n: number | null | undefined) {
   if (n == null || !Number.isFinite(Number(n))) return '—';
@@ -287,7 +287,7 @@ export default function CustomersPage() {
       header: 'Role',
       render: (r) => {
         const variant =
-          r.role === 'SELLER' ? 'info' : r.role === 'SUPPORT' ? 'warning' : 'default';
+          r.role === 'SELLER' ? 'info' : r.role === 'BUSINESS' ? 'warning' : 'default';
         return <Badge variant={variant}>{r.role}</Badge>;
       },
     },

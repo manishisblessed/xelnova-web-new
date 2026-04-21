@@ -610,8 +610,16 @@ export class AdminService {
   async getCustomers(query: AdminCustomerQueryDto) {
     const page = query.page || 1;
     const limit = query.limit || 20;
+    // Validate the role filter against the actual Prisma enum. Anything
+    // else (legacy filter values, typos, deleted roles, etc.) silently
+    // degrades to "all non-admin accounts" instead of crashing Prisma
+    // with `Invalid value for argument \`role\`. Expected Role.`.
+    const validRoles = Object.values(Role) as string[];
+    const requestedRole = query.role && validRoles.includes(query.role)
+      ? (query.role as Role)
+      : null;
     const where: Prisma.UserWhereInput = {
-      role: query.role ? (query.role as Role) : { not: Role.ADMIN },
+      role: requestedRole ?? { not: Role.ADMIN },
     };
 
     if (query.search) {
@@ -1180,9 +1188,13 @@ export class AdminService {
     }
     if (!name) throw new BadRequestException('Name is required');
 
-    const existing = await this.prisma.user.findUnique({ where: { email } });
+    // Per-role uniqueness: a person may already have a CUSTOMER/SELLER row
+    // with the same email — only block if an ADMIN row already exists.
+    const existing = await this.prisma.user.findFirst({
+      where: { email, role: 'ADMIN' },
+    });
     if (existing) {
-      throw new ConflictException('A user with this email already exists');
+      throw new ConflictException('An admin user with this email already exists');
     }
 
     let adminRoleId: string | null = null;

@@ -7,6 +7,24 @@ let accessToken: string | null = null;
 /** Override API base URL (e.g. Expo `EXPO_PUBLIC_API_URL` + `/api/v1`). */
 let configuredBaseURL: string | null = null;
 
+/**
+ * Calling app's role: 'CUSTOMER' | 'SELLER' | 'ADMIN' | 'BUSINESS'. Set once
+ * on app init via `setAppRole()` and forwarded as `X-App-Role` on every
+ * request. The backend uses this to scope per-role uniqueness on email/phone
+ * — i.e. the seller portal logging into auth/login only ever resolves the
+ * SELLER row, never the same person's separate CUSTOMER account.
+ */
+type AppRole = 'CUSTOMER' | 'SELLER' | 'ADMIN' | 'BUSINESS';
+let appRole: AppRole | null = null;
+
+export function setAppRole(role: AppRole | null) {
+  appRole = role;
+}
+
+export function getAppRole(): AppRole | null {
+  return appRole;
+}
+
 export function getApiBaseURL(): string {
   return (
     configuredBaseURL ||
@@ -39,6 +57,10 @@ export function createApiClient(baseURL?: string): AxiosInstance {
     if (token && config.headers) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+    const role = getAppRole();
+    if (role && config.headers && !config.headers['X-App-Role']) {
+      config.headers['X-App-Role'] = role;
+    }
     return config;
   });
 
@@ -59,9 +81,11 @@ export function createApiClient(baseURL?: string): AxiosInstance {
               : null;
 
           if (refreshToken) {
+            const role = getAppRole();
             const response = await axios.post(
               `${client.defaults.baseURL}/auth/refresh`,
               { refreshToken },
+              role ? { headers: { 'X-App-Role': role } } : undefined,
             );
 
             const { accessToken: newAccessToken, refreshToken: newRefreshToken } =

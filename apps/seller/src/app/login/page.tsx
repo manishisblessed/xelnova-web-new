@@ -119,7 +119,7 @@ function LoginFormInner() {
     try {
       const res = await fetch(`${API_BASE}/auth/google/token`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-App-Role': 'SELLER' },
         body: JSON.stringify({ idToken: response.credential, role: 'seller' }),
         signal: abortController.signal,
       });
@@ -235,7 +235,7 @@ function LoginFormInner() {
     try {
       const res = await fetch(`${API_BASE}/auth/send-otp`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-App-Role': 'SELLER' },
         body: JSON.stringify({ phone: `+91${phone}` }),
       });
       const raw = await res.text();
@@ -264,7 +264,7 @@ function LoginFormInner() {
     try {
       const res = await fetch(`${API_BASE}/auth/verify-otp`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-App-Role': 'SELLER' },
         body: JSON.stringify({ phone: `+91${phone}`, otp: otpString }),
       });
       const raw = await res.text();

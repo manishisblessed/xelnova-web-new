@@ -14,9 +14,19 @@ function getToken(): string | null {
   return getDashboardToken();
 }
 
+/**
+ * Header sent on EVERY request from the seller portal so the backend scopes
+ * auth/login, OTP, register, etc. to the SELLER row only. A user who also
+ * has a separate CUSTOMER row with the same email is a different account
+ * and must never be returned here.
+ */
+const APP_ROLE_HEADER: Record<string, string> = { 'X-App-Role': 'SELLER' };
+
 function authHeaders(): Record<string, string> {
   const token = getToken();
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  return token
+    ? { Authorization: `Bearer ${token}`, ...APP_ROLE_HEADER }
+    : { ...APP_ROLE_HEADER };
 }
 
 async function handleResponse<T = unknown>(res: Response): Promise<T> {
@@ -61,7 +71,7 @@ export interface LoginResponse {
 export async function apiLogin(email: string, password: string) {
   const res = await fetch(`${API_URL}/auth/login`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...APP_ROLE_HEADER },
     body: JSON.stringify({ email, password }),
   });
   return handleResponse<LoginResponse>(res);

@@ -120,8 +120,12 @@ enum ShipmentStatus {
 model User {
   id                String       @id @default(cuid())
   name              String
-  email             String?      @unique
-  phone             String?      @unique
+  /// Same email may exist once per role (one CUSTOMER row + one SELLER row,
+  /// for example). Uniqueness is enforced via the composite indexes at the
+  /// bottom of this model. NEVER add a single-column @unique on email/phone
+  /// here — it would re-merge multi-role accounts and break separation.
+  email             String?
+  phone             String?
   password          String
   avatar            String?
   role              Role         @default(CUSTOMER)
@@ -170,6 +174,10 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // Per-role uniqueness — same email/phone may exist once per Role
+  // (e.g. one CUSTOMER + one SELLER), but never twice within the same role.
+  @@unique([email, role], name: "users_email_role_key")
+  @@unique([phone, role], name: "users_phone_role_key")
   @@map("users")
 }
 

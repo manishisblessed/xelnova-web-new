@@ -68,15 +68,22 @@ export class UsersService {
     userId: string,
     data: { name?: string; email?: string; phone?: string },
   ) {
-    if (data.email) {
+    // Per-role uniqueness — only block when another row in the SAME role
+    // already owns this email/phone. A user can legitimately share their
+    // email with their separate seller (or business) account.
+    const me = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { role: true },
+    });
+    if (data.email && me) {
       const existing = await this.prisma.user.findFirst({
-        where: { email: data.email, id: { not: userId } },
+        where: { email: data.email, role: me.role, id: { not: userId } },
       });
       if (existing) throw new BadRequestException('Email already in use');
     }
-    if (data.phone) {
+    if (data.phone && me) {
       const existing = await this.prisma.user.findFirst({
-        where: { phone: data.phone, id: { not: userId } },
+        where: { phone: data.phone, role: me.role, id: { not: userId } },
       });
       if (existing) throw new BadRequestException('Phone number already in use');
     }

@@ -14,12 +14,15 @@ import Constants from 'expo-constants';
 import {
   configureTokenPersistence,
   setApiBaseURL,
+  setAppRole,
   loginBusiness,
   logout,
   hydrateAuthFromPersistence,
   type AuthUser,
 } from '@xelnova/api';
 import { businessTokenPersistence } from './src/lib/persistence';
+
+setAppRole('BUSINESS');
 
 export default function App() {
   const [ready, setReady] = useState(false);

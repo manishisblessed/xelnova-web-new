@@ -11,12 +11,14 @@ export async function POST(request: NextRequest) {
   const body = await request.text();
   try {
     const clientIp = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || '';
+    const appRole = request.headers.get('x-app-role') || '';
     const res = await fetch(`${BACKEND_URL}/api/v1/auth/google/token`, {
       method: 'POST',
       headers: {
         'Content-Type': request.headers.get('content-type') || 'application/json',
         'User-Agent': request.headers.get('user-agent') || '',
         ...(clientIp ? { 'X-Forwarded-For': clientIp } : {}),
+        ...(appRole ? { 'X-App-Role': appRole } : {}),
       },
       body: body || undefined,
     });
@@ -43,7 +45,7 @@ export async function OPTIONS() {
     headers: {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Allow-Headers': 'Content-Type, X-App-Role',
     },
   });
 }

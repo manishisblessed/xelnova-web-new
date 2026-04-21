@@ -1172,7 +1172,7 @@ export default function RegisterPage() {
         try {
           const loginRes = await fetch(`${API_BASE}/auth/login`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'X-App-Role': 'SELLER' },
             body: JSON.stringify({ email: formData.email, password: formData.password }),
           });
           const loginData = await loginRes.json();

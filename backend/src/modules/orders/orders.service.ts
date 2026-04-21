@@ -465,7 +465,7 @@ export class OrdersService {
   ): Promise<void> {
     const current = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { name: true, email: true },
+      select: { name: true, email: true, role: true },
     });
     if (!current) return;
 
@@ -478,8 +478,11 @@ export class OrdersService {
 
     const trimmedEmail = email?.trim().toLowerCase();
     if (trimmedEmail && !current.email) {
+      // Per-role uniqueness: only block if another row in the SAME role
+      // already owns this email. A seller using the same email on the
+      // storefront has a separate CUSTOMER account and isn't a conflict.
       const conflict = await this.prisma.user.findFirst({
-        where: { email: trimmedEmail, id: { not: userId } },
+        where: { email: trimmedEmail, role: current.role, id: { not: userId } },
         select: { id: true },
       });
       if (!conflict) update.email = trimmedEmail;

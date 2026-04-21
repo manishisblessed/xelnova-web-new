@@ -112,7 +112,7 @@ function LoginPageContent() {
     try {
       const res = await fetch(`${API_BASE}/auth/google/token`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-App-Role': 'CUSTOMER' },
         body: JSON.stringify({ idToken: response.credential, role: 'customer' }),
       });
 
