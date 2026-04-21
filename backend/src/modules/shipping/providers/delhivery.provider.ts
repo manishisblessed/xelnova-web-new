@@ -827,11 +827,11 @@ export class DelhiveryProvider implements CourierProvider {
     const returnCountry = options.returnCountry?.trim() || options.country || 'India';
     const returnPin = options.returnPincode?.trim() || options.pincode;
 
-    if (!options.name || !options.address || !options.city || !options.pincode || !phone) {
+    if (!options.name || !options.address || !options.city || !options.state || !options.pincode || !phone) {
       return {
         success: false,
         message:
-          'Missing required warehouse fields (name, address, city, pincode, phone).',
+          'Missing required warehouse fields (name, address, city, state, pincode, phone).',
       };
     }
 
@@ -841,6 +841,7 @@ export class DelhiveryProvider implements CourierProvider {
       phone,
       address: options.address,
       city: options.city,
+      state: options.state,
       country: options.country || 'India',
       pin: options.pincode,
       return_address: returnAddress,
