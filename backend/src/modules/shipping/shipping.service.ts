@@ -346,25 +346,18 @@ export class ShippingService {
   // ─── Public-facing pickup-warehouse helpers (used by controller) ───
 
   async getXelgoPickupWarehouseStatus(userId: string) {
-    const seller = await this.getSellerProfile(userId);
-    const phone =
+    let seller = await this.getSellerProfile(userId);
+    let phone =
       (seller.phone?.trim() || (seller as any).user?.phone?.trim() || '').replace(/(?!^\+)\D/g, '');
 
-    const missing: string[] = [];
+    let missing: string[] = [];
     if (!seller.businessAddress?.trim()) missing.push('Address line');
     if (!seller.businessCity?.trim()) missing.push('City');
     if (!seller.businessState?.trim()) missing.push('State');
     if (!seller.businessPincode?.trim()) missing.push('Pincode');
     if (!phone) missing.push('Pickup phone');
 
-    const desiredName = (seller as any).xelgoWarehouseName?.trim()
-      || this.buildSellerWarehouseName({
-        id: seller.id,
-        sellerCode: seller.sellerCode,
-        storeName: seller.storeName,
-      });
-
-    const expectedHash = missing.length
+    let expectedHash = missing.length
       ? null
       : this.buildSellerSnapshotHash({
           businessAddress: seller.businessAddress,
@@ -373,6 +366,71 @@ export class ShippingService {
           businessPincode: seller.businessPincode,
           phone,
         });
+
+    // ─── Silent self-heal ───
+    //
+    // If the seller previously hit a registration error (e.g. before the
+    // Delhivery XML-response fix landed) but their profile is now
+    // complete and the warehouse isn't recorded as registered, retry
+    // once on this read. The carrier-side call is idempotent — Delhivery
+    // will respond "already exists" for warehouses that were created in
+    // a prior failed attempt, and our patched provider correctly maps
+    // that to success. This way sellers don't need to manually click
+    // "Re-register" to recover from the old bug.
+    const needsHeal =
+      missing.length === 0 &&
+      Boolean((seller as any).xelgoWarehouseRegistrationError) &&
+      (
+        !(seller as any).xelgoWarehouseName ||
+        !(seller as any).xelgoWarehouseRegisteredAt ||
+        ((seller as any).xelgoWarehouseSnapshotHash !== expectedHash)
+      );
+
+    if (needsHeal) {
+      try {
+        const healResult = await this.ensureSellerXelgoWarehouse(seller as any, {});
+        this.logger.log(
+          `Xelgo pickup warehouse self-heal for seller ${seller.id}: ` +
+            `success=${healResult.success} alreadyRegistered=${healResult.alreadyRegistered} ` +
+            `name=${healResult.warehouseName ?? '∅'}`,
+        );
+        // Re-read so the response reflects the post-heal state without
+        // a second round-trip from the client.
+        seller = await this.getSellerProfile(userId);
+        phone =
+          (seller.phone?.trim() || (seller as any).user?.phone?.trim() || '').replace(/(?!^\+)\D/g, '');
+        missing = [];
+        if (!seller.businessAddress?.trim()) missing.push('Address line');
+        if (!seller.businessCity?.trim()) missing.push('City');
+        if (!seller.businessState?.trim()) missing.push('State');
+        if (!seller.businessPincode?.trim()) missing.push('Pincode');
+        if (!phone) missing.push('Pickup phone');
+        expectedHash = missing.length
+          ? null
+          : this.buildSellerSnapshotHash({
+              businessAddress: seller.businessAddress,
+              businessCity: seller.businessCity,
+              businessState: seller.businessState,
+              businessPincode: seller.businessPincode,
+              phone,
+            });
+      } catch (err) {
+        this.logger.warn(
+          `Xelgo pickup warehouse self-heal threw for seller ${seller.id}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+        // Fall through with the original (un-healed) state. The seller
+        // can still click "Re-register" manually and see the error.
+      }
+    }
+
+    const desiredName = (seller as any).xelgoWarehouseName?.trim()
+      || this.buildSellerWarehouseName({
+        id: seller.id,
+        sellerCode: seller.sellerCode,
+        storeName: seller.storeName,
+      });
 
     const registered = Boolean(
       (seller as any).xelgoWarehouseName && (seller as any).xelgoWarehouseRegisteredAt,
@@ -595,6 +653,13 @@ export class ShippingService {
     }
 
     const finalName = result.registeredName || warehouseName;
+
+    // "Recovered" = the carrier already had this warehouse but we'd
+    // never persisted it locally — i.e. a previously-failed registration
+    // (typically the pre-fix XML response case) is now self-healed.
+    const recoveredFromPriorFailure =
+      !seller.xelgoWarehouseName && Boolean(result.alreadyExisted);
+
     await this.prisma.sellerProfile.update({
       where: { id: seller.id },
       data: {
@@ -604,6 +669,12 @@ export class ShippingService {
         xelgoWarehouseSnapshotHash: desiredHash,
       },
     });
+
+    this.logger.log(
+      `Xelgo warehouse persisted for seller ${seller.id}: name="${finalName}" ` +
+        `alreadyExisted=${Boolean(result.alreadyExisted)} ` +
+        `recoveredFromPriorFailure=${recoveredFromPriorFailure}`,
+    );
 
     return {
       success: true,

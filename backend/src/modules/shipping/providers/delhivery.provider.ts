@@ -874,17 +874,39 @@ export class DelhiveryProvider implements CourierProvider {
     let parsed: any = null;
     try { parsed = text ? JSON.parse(text) : null; } catch { /* noop */ }
 
+    // Delhivery's clientwarehouse/create endpoint sometimes responds with
+    // an XML envelope instead of JSON — typically when the request is
+    // forwarded to the legacy HQ system. The HTTP status can also be 400
+    // even when the warehouse is actually created (the body says
+    // "A new client warehouse has been created in HQ(Delhivery)"). We
+    // extract the inner `<message>` / `<name>` so the rest of this
+    // method can branch on the same logical outcomes as the JSON path.
+    const xml = !parsed ? this.extractDelhiveryWarehouseXml(text) : null;
+
     this.logger.log(
       `Delhivery warehouse create response: HTTP ${res.status} → ${text.slice(0, 500)}`,
     );
 
-    // Success: HTTP 200 with `success: true`.
+    // Success: HTTP 200 with `success: true` (modern JSON path).
     if (res.ok && parsed?.success === true) {
       return {
         success: true,
         registeredName: parsed?.data?.name || options.name,
         message: `Warehouse "${options.name}" registered with Delhivery.`,
         raw: parsed,
+      };
+    }
+
+    // Success via XML envelope — Delhivery HQ propagation. The body
+    // explicitly says "has been created" (or "successfully created").
+    // Treat as success even though the HTTP status is 400.
+    if (xml && /\b(has been created|successfully created|created successfully)\b/i.test(xml.message)) {
+      const finalName = xml.name || options.name;
+      return {
+        success: true,
+        registeredName: finalName,
+        message: `Warehouse "${finalName}" registered with Delhivery.`,
+        raw: { xml: text, parsed: xml },
       };
     }
 
@@ -896,6 +918,7 @@ export class DelhiveryProvider implements CourierProvider {
       parsed?.message ||
       parsed?.data?.message ||
       (Array.isArray(parsed?.errors) && parsed.errors.join('; ')) ||
+      xml?.message ||
       text ||
       `HTTP ${res.status}`
     ).toString();
@@ -904,14 +927,15 @@ export class DelhiveryProvider implements CourierProvider {
       lower.includes('already exist') ||
       lower.includes('duplicate') ||
       lower.includes('already registered') ||
-      lower.includes('warehouse name already')
+      lower.includes('warehouse name already') ||
+      lower.includes('client warehouse with this name')
     ) {
       return {
         success: true,
         alreadyExisted: true,
-        registeredName: options.name,
+        registeredName: xml?.name || options.name,
         message: `Warehouse "${options.name}" was already registered with Delhivery — reusing it.`,
-        raw: parsed ?? text,
+        raw: parsed ?? xml ?? text,
       };
     }
 
@@ -922,7 +946,34 @@ export class DelhiveryProvider implements CourierProvider {
     return {
       success: false,
       message: this.humaniseWarehouseError(errMsg),
-      raw: parsed ?? text,
+      raw: parsed ?? xml ?? text,
+    };
+  }
+
+  /**
+   * Pull `<message>` and `<name>` out of Delhivery's XML envelope. We
+   * deliberately do not pull a full XML parser dependency for this —
+   * the payload structure is fixed and shallow. Returns null when the
+   * body isn't recognisably XML.
+   */
+  private extractDelhiveryWarehouseXml(
+    text: string,
+  ): { message: string; name: string } | null {
+    if (!text || !/<\?xml|<root[\s>]/i.test(text)) return null;
+    const messageMatch = text.match(/<message>([\s\S]*?)<\/message>/i);
+    const nameMatch = text.match(/<name>([\s\S]*?)<\/name>/i);
+    if (!messageMatch && !nameMatch) return null;
+    const decode = (s: string) =>
+      s
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&amp;/g, '&')
+        .replace(/&quot;/g, '"')
+        .replace(/&apos;/g, "'")
+        .trim();
+    return {
+      message: messageMatch ? decode(messageMatch[1]) : '',
+      name: nameMatch ? decode(nameMatch[1]) : '',
     };
   }
 
