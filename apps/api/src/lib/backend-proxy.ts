@@ -30,6 +30,8 @@ export async function proxyToBackend(
   if (contentType) headers.set('Content-Type', contentType);
   const role = request.headers.get('x-role');
   if (role) headers.set('X-Role', role);
+  const appRole = request.headers.get('x-app-role');
+  if (appRole) headers.set('X-App-Role', appRole);
   const userAgent = request.headers.get('user-agent');
   if (userAgent) headers.set('User-Agent', userAgent);
   const forwarded = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip');

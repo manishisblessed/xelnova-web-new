@@ -9,6 +9,7 @@ const allowedOrigins = [
   'https://www.xelnova.in',
   'https://seller.xelnova.in',
   'https://admin.xelnova.in',
+  'https://business.xelnova.in',
 ];
 
 export function middleware(request: NextRequest) {
@@ -19,7 +20,7 @@ export function middleware(request: NextRequest) {
     const response = new NextResponse(null, { status: 204 });
     response.headers.set('Access-Control-Allow-Origin', isAllowed ? origin || '*' : '');
     response.headers.set('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-    response.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Role');
+    response.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, X-Role, X-App-Role');
     response.headers.set('Access-Control-Max-Age', '86400');
     return response;
   }
@@ -27,7 +28,7 @@ export function middleware(request: NextRequest) {
   const response = NextResponse.next();
   response.headers.set('Access-Control-Allow-Origin', isAllowed ? origin || '*' : '');
   response.headers.set('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-  response.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Role');
+  response.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, X-Role, X-App-Role');
   return response;
 }
 
