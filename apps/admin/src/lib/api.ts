@@ -20,6 +20,48 @@ function authHeaders(): Record<string, string> {
     : { ...APP_ROLE_HEADER };
 }
 
+let isRefreshing = false;
+let refreshPromise: Promise<boolean> | null = null;
+
+async function refreshSession(): Promise<boolean> {
+  if (isRefreshing && refreshPromise) {
+    return refreshPromise;
+  }
+  isRefreshing = true;
+  refreshPromise = (async () => {
+    try {
+      const res = await fetch('/api/session/refresh', {
+        method: 'POST',
+        credentials: 'include',
+      });
+      if (res.ok) {
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
+    } finally {
+      isRefreshing = false;
+      refreshPromise = null;
+    }
+  })();
+  return refreshPromise;
+}
+
+async function fetchWithRefresh(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+): Promise<Response> {
+  const res = await fetch(input, init);
+  if (res.status === 401 && typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
+    const refreshed = await refreshSession();
+    if (refreshed) {
+      return fetch(input, { ...init, headers: authHeaders() });
+    }
+  }
+  return res;
+}
+
 /**
  * Centralized handler for an expired / invalid admin session. Called whenever
  * the backend returns 401 (or an explicit "Invalid or expired token" message)
@@ -46,25 +88,18 @@ function looksLikeExpiredSession(status: number, message?: string): boolean {
 function handleSessionExpired(message?: string) {
   if (typeof window === 'undefined') return;
   if (sessionExpiredHandled) return;
-  // If we're already on /login, don't fire the "session expired" toast — a
-  // 401 there means "wrong credentials", which the login form surfaces itself.
   if (window.location.pathname.startsWith('/login')) return;
   sessionExpiredHandled = true;
 
-  // Clear client-side state so we don't bounce back into the panel.
   try {
     localStorage.removeItem('xelnova-dashboard-user');
   } catch {
-    // ignore — storage might be disabled
+    // ignore
   }
 
-  // Drop the session cookies via our own session route, then redirect.
-  // Fire-and-forget — we don't want to block the redirect on it.
   fetch('/api/session', { method: 'DELETE', credentials: 'include' }).catch(() => undefined);
 
-  // Surface a friendly toast if sonner is available.
   try {
-    // Dynamic import keeps this file dependency-free for SSR.
     import('sonner').then(({ toast }) => {
       toast.error(message || 'Your session has expired. Please log in again.');
     }).catch(() => undefined);
@@ -116,7 +151,7 @@ async function handleResponse<T = unknown>(res: Response): Promise<T> {
 // ─── Auth ───
 
 export async function apiLogin(email: string, password: string) {
-  const res = await fetch(`${API_URL}/auth/login`, {
+  const res = await fetchWithRefresh(`${API_URL}/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...APP_ROLE_HEADER },
     body: JSON.stringify({ email, password }),
@@ -127,7 +162,7 @@ export async function apiLogin(email: string, password: string) {
 // ─── Dashboard ───
 
 export async function apiDashboard() {
-  const res = await fetch(`${API_URL}/admin/dashboard`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/admin/dashboard`, { headers: authHeaders() });
   return handleResponse(res);
 }
 
@@ -135,7 +170,7 @@ export async function apiDashboard() {
 
 export async function apiLogs(type: string, params?: Record<string, string>) {
   const q = params ? `?${new URLSearchParams(params)}` : '';
-  const res = await fetch(`${API_URL}/logs/${type}${q}`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/logs/${type}${q}`, { headers: authHeaders() });
   const json = await res.json();
   if (!res.ok) {
     if (looksLikeExpiredSession(res.status, json?.message)) {
@@ -153,12 +188,12 @@ export async function apiLogs(type: string, params?: Record<string, string>) {
 
 export async function apiGet<T = unknown>(section: string, params?: Record<string, string>): Promise<T> {
   const query = new URLSearchParams({ limit: '100', ...params });
-  const res = await fetch(`${API_URL}/admin/${section}?${query}`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/admin/${section}?${query}`, { headers: authHeaders() });
   return handleResponse<T>(res);
 }
 
 export async function apiCreate<T = unknown>(section: string, body: Record<string, unknown>): Promise<T> {
-  const res = await fetch(`${API_URL}/admin/${section}`, {
+  const res = await fetchWithRefresh(`${API_URL}/admin/${section}`, {
     method: 'POST',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -167,7 +202,7 @@ export async function apiCreate<T = unknown>(section: string, body: Record<strin
 }
 
 export async function apiUpdate<T = unknown>(section: string, id: string, body: Record<string, unknown>): Promise<T> {
-  const res = await fetch(`${API_URL}/admin/${section}/${id}`, {
+  const res = await fetchWithRefresh(`${API_URL}/admin/${section}/${id}`, {
     method: 'PATCH',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -176,7 +211,7 @@ export async function apiUpdate<T = unknown>(section: string, id: string, body: 
 }
 
 export async function apiDelete(section: string, id: string): Promise<void> {
-  const res = await fetch(`${API_URL}/admin/${section}/${id}`, {
+  const res = await fetchWithRefresh(`${API_URL}/admin/${section}/${id}`, {
     method: 'DELETE',
     headers: authHeaders(),
   });
@@ -185,7 +220,7 @@ export async function apiDelete(section: string, id: string): Promise<void> {
 
 /** Full product payload (descriptions, images, variants, specs) for admin review. */
 export async function apiGetAdminProduct<T = unknown>(id: string): Promise<T> {
-  const res = await fetch(`${API_URL}/admin/products/${id}`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/admin/products/${id}`, { headers: authHeaders() });
   return handleResponse<T>(res);
 }
 
@@ -195,12 +230,12 @@ export async function apiGetAdminProduct<T = unknown>(id: string): Promise<T> {
  * GET /admin/customers/:id.
  */
 export async function apiGetAdminCustomerDetail<T = unknown>(id: string): Promise<T> {
-  const res = await fetch(`${API_URL}/admin/customers/${id}`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/admin/customers/${id}`, { headers: authHeaders() });
   return handleResponse<T>(res);
 }
 
 export async function apiPost<T = unknown>(path: string, body: Record<string, unknown>): Promise<T> {
-  const res = await fetch(`${API_URL}/admin/${path}`, {
+  const res = await fetchWithRefresh(`${API_URL}/admin/${path}`, {
     method: 'POST',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -212,7 +247,7 @@ export async function apiPost<T = unknown>(path: string, body: Record<string, un
 
 export async function apiRevenue(params?: Record<string, string>) {
   const q = params ? `?${new URLSearchParams(params)}` : '';
-  const res = await fetch(`${API_URL}/admin/revenue${q}`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/admin/revenue${q}`, { headers: authHeaders() });
   return handleResponse(res);
 }
 
@@ -220,12 +255,12 @@ export async function apiRevenue(params?: Record<string, string>) {
 
 export async function apiActivity(params?: Record<string, string>) {
   const q = params ? `?${new URLSearchParams(params)}` : '';
-  const res = await fetch(`${API_URL}/admin/activity${q}`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/admin/activity${q}`, { headers: authHeaders() });
   return handleResponse(res);
 }
 
 export async function apiPatchSiteSettings(body: Record<string, unknown>) {
-  const res = await fetch(`${API_URL}/admin/settings`, {
+  const res = await fetchWithRefresh(`${API_URL}/admin/settings`, {
     method: 'PATCH',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -237,17 +272,17 @@ export async function apiPatchSiteSettings(body: Record<string, unknown>) {
 
 export async function apiGetTickets(params?: Record<string, string>) {
   const query = new URLSearchParams({ limit: '50', ...params });
-  const res = await fetch(`${API_URL}/tickets/admin?${query}`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/tickets/admin?${query}`, { headers: authHeaders() });
   return handleResponse(res);
 }
 
 export async function apiGetTicketDetail(id: string) {
-  const res = await fetch(`${API_URL}/tickets/admin/${id}`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/tickets/admin/${id}`, { headers: authHeaders() });
   return handleResponse(res);
 }
 
 export async function apiReplyTicket(id: string, message: string, isInternal = false) {
-  const res = await fetch(`${API_URL}/tickets/admin/${id}/reply`, {
+  const res = await fetchWithRefresh(`${API_URL}/tickets/admin/${id}/reply`, {
     method: 'POST',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify({ message, isInternal }),
@@ -259,7 +294,7 @@ export async function apiForwardTicket(
   id: string,
   body: { sellerId?: string; note?: string },
 ) {
-  const res = await fetch(`${API_URL}/tickets/admin/${id}/forward`, {
+  const res = await fetchWithRefresh(`${API_URL}/tickets/admin/${id}/forward`, {
     method: 'POST',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -268,7 +303,7 @@ export async function apiForwardTicket(
 }
 
 export async function apiUpdateTicketStatus(id: string, status: string, priority?: string) {
-  const res = await fetch(`${API_URL}/tickets/admin/${id}/status`, {
+  const res = await fetchWithRefresh(`${API_URL}/tickets/admin/${id}/status`, {
     method: 'PATCH',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify({ status, priority }),
@@ -277,7 +312,7 @@ export async function apiUpdateTicketStatus(id: string, status: string, priority
 }
 
 export async function apiUpdateShipment(orderId: string, body: Record<string, unknown>) {
-  const res = await fetch(`${API_URL}/admin/orders/${orderId}/shipment`, {
+  const res = await fetchWithRefresh(`${API_URL}/admin/orders/${orderId}/shipment`, {
     method: 'PATCH',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -289,13 +324,13 @@ export async function apiUpdateShipment(orderId: string, body: Record<string, un
 
 export async function apiGetGstReport(params?: Record<string, string>) {
   const q = params ? `?${new URLSearchParams(params)}` : '';
-  const res = await fetch(`${API_URL}/admin/reports/gst${q}`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/admin/reports/gst${q}`, { headers: authHeaders() });
   return handleResponse(res);
 }
 
 export async function apiDownloadGstCsv(params?: Record<string, string>) {
   const q = params ? `?${new URLSearchParams(params)}` : '';
-  const res = await fetch(`${API_URL}/admin/reports/gst/csv${q}`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/admin/reports/gst/csv${q}`, { headers: authHeaders() });
   if (!res.ok) throw new Error('Failed to download CSV');
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
@@ -307,13 +342,13 @@ export async function apiDownloadGstCsv(params?: Record<string, string>) {
 
 export async function apiGetTdsReport(params?: Record<string, string>) {
   const q = params ? `?${new URLSearchParams(params)}` : '';
-  const res = await fetch(`${API_URL}/admin/reports/tds${q}`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/admin/reports/tds${q}`, { headers: authHeaders() });
   return handleResponse(res);
 }
 
 export async function apiDownloadTdsCsv(params?: Record<string, string>) {
   const q = params ? `?${new URLSearchParams(params)}` : '';
-  const res = await fetch(`${API_URL}/admin/reports/tds/csv${q}`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/admin/reports/tds/csv${q}`, { headers: authHeaders() });
   if (!res.ok) throw new Error('Failed to download CSV');
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
@@ -325,7 +360,7 @@ export async function apiDownloadTdsCsv(params?: Record<string, string>) {
 
 export async function apiGetRefundReport(params?: Record<string, string>) {
   const q = params ? `?${new URLSearchParams(params)}` : '';
-  const res = await fetch(`${API_URL}/admin/reports/refunds${q}`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/admin/reports/refunds${q}`, { headers: authHeaders() });
   return handleResponse(res);
 }
 
@@ -333,7 +368,7 @@ export async function apiGetRefundReport(params?: Record<string, string>) {
 
 export async function apiDownloadRefundCsv(params?: Record<string, string>) {
   const q = params ? `?${new URLSearchParams(params)}` : '';
-  const res = await fetch(`${API_URL}/admin/reports/refunds/csv${q}`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/admin/reports/refunds/csv${q}`, { headers: authHeaders() });
   if (!res.ok) throw new Error('Failed to download CSV');
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
@@ -347,13 +382,13 @@ export async function apiDownloadRefundCsv(params?: Record<string, string>) {
 
 export async function apiGetSalesReport(params?: Record<string, string>) {
   const q = params ? `?${new URLSearchParams(params)}` : '';
-  const res = await fetch(`${API_URL}/admin/reports/sales${q}`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/admin/reports/sales${q}`, { headers: authHeaders() });
   return handleResponse(res);
 }
 
 export async function apiDownloadSalesCsv(params?: Record<string, string>) {
   const q = params ? `?${new URLSearchParams(params)}` : '';
-  const res = await fetch(`${API_URL}/admin/reports/sales/csv${q}`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/admin/reports/sales/csv${q}`, { headers: authHeaders() });
   if (!res.ok) throw new Error('Failed to download CSV');
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
@@ -366,12 +401,12 @@ export async function apiDownloadSalesCsv(params?: Record<string, string>) {
 // ─── Inventory Report ───
 
 export async function apiGetInventoryReport() {
-  const res = await fetch(`${API_URL}/admin/reports/inventory`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/admin/reports/inventory`, { headers: authHeaders() });
   return handleResponse(res);
 }
 
 export async function apiDownloadInventoryCsv() {
-  const res = await fetch(`${API_URL}/admin/reports/inventory/csv`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/admin/reports/inventory/csv`, { headers: authHeaders() });
   if (!res.ok) throw new Error('Failed to download CSV');
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
@@ -385,13 +420,13 @@ export async function apiDownloadInventoryCsv() {
 
 export async function apiGetSellerPerformanceReport(params?: Record<string, string>) {
   const q = params ? `?${new URLSearchParams(params)}` : '';
-  const res = await fetch(`${API_URL}/admin/reports/sellers${q}`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/admin/reports/sellers${q}`, { headers: authHeaders() });
   return handleResponse(res);
 }
 
 export async function apiDownloadSellerPerformanceCsv(params?: Record<string, string>) {
   const q = params ? `?${new URLSearchParams(params)}` : '';
-  const res = await fetch(`${API_URL}/admin/reports/sellers/csv${q}`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/admin/reports/sellers/csv${q}`, { headers: authHeaders() });
   if (!res.ok) throw new Error('Failed to download CSV');
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
@@ -405,13 +440,13 @@ export async function apiDownloadSellerPerformanceCsv(params?: Record<string, st
 
 export async function apiGetCouponUsageReport(params?: Record<string, string>) {
   const q = params ? `?${new URLSearchParams(params)}` : '';
-  const res = await fetch(`${API_URL}/admin/reports/coupons${q}`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/admin/reports/coupons${q}`, { headers: authHeaders() });
   return handleResponse(res);
 }
 
 export async function apiDownloadCouponUsageCsv(params?: Record<string, string>) {
   const q = params ? `?${new URLSearchParams(params)}` : '';
-  const res = await fetch(`${API_URL}/admin/reports/coupons/csv${q}`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/admin/reports/coupons/csv${q}`, { headers: authHeaders() });
   if (!res.ok) throw new Error('Failed to download CSV');
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
@@ -424,12 +459,12 @@ export async function apiDownloadCouponUsageCsv(params?: Record<string, string>)
 // ─── Duplicates & Pricing ───
 
 export async function apiScanDuplicates() {
-  const res = await fetch(`${API_URL}/admin/duplicates`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/admin/duplicates`, { headers: authHeaders() });
   return handleResponse(res);
 }
 
 export async function apiHideDuplicate(productId: string) {
-  const res = await fetch(`${API_URL}/admin/duplicates/${productId}/hide`, {
+  const res = await fetchWithRefresh(`${API_URL}/admin/duplicates/${productId}/hide`, {
     method: 'POST',
     headers: authHeaders(),
   });
@@ -437,14 +472,14 @@ export async function apiHideDuplicate(productId: string) {
 }
 
 export async function apiScanPricing() {
-  const res = await fetch(`${API_URL}/admin/pricing-flags`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/admin/pricing-flags`, { headers: authHeaders() });
   return handleResponse(res);
 }
 
 // ─── Split Payment / Advance Payout ───
 
 export async function apiCreateAdvancePayout(body: { sellerId: string; amount: number; orderId?: string; note?: string }) {
-  const res = await fetch(`${API_URL}/admin/payouts/advance`, {
+  const res = await fetchWithRefresh(`${API_URL}/admin/payouts/advance`, {
     method: 'POST',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -453,12 +488,12 @@ export async function apiCreateAdvancePayout(body: { sellerId: string; amount: n
 }
 
 export async function apiGetSellerShares(orderId: string) {
-  const res = await fetch(`${API_URL}/admin/orders/${orderId}/seller-shares`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/admin/orders/${orderId}/seller-shares`, { headers: authHeaders() });
   return handleResponse(res);
 }
 
 export async function apiSettleOrder(orderId: string) {
-  const res = await fetch(`${API_URL}/admin/orders/${orderId}/settle`, {
+  const res = await fetchWithRefresh(`${API_URL}/admin/orders/${orderId}/settle`, {
     method: 'POST',
     headers: authHeaders(),
   });
@@ -468,7 +503,7 @@ export async function apiSettleOrder(orderId: string) {
 // ─── Reverse Pickup ───
 
 export async function apiScheduleReversePickup(returnId: string, body: { courier: string; awb?: string; trackingUrl?: string; pickupDate?: string }) {
-  const res = await fetch(`${API_URL}/returns/${returnId}/reverse-pickup`, {
+  const res = await fetchWithRefresh(`${API_URL}/returns/${returnId}/reverse-pickup`, {
     method: 'POST',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -479,12 +514,12 @@ export async function apiScheduleReversePickup(returnId: string, body: { courier
 // ─── Abandoned Cart ───
 
 export async function apiGetAbandonedCarts(hours = 24) {
-  const res = await fetch(`${API_URL}/admin/notifications/abandoned-carts?hours=${hours}`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/admin/notifications/abandoned-carts?hours=${hours}`, { headers: authHeaders() });
   return handleResponse(res);
 }
 
 export async function apiSendAbandonedCartReminders(hours = 24) {
-  const res = await fetch(`${API_URL}/admin/notifications/abandoned-carts/send-reminders?hours=${hours}`, {
+  const res = await fetchWithRefresh(`${API_URL}/admin/notifications/abandoned-carts/send-reminders?hours=${hours}`, {
     method: 'POST',
     headers: authHeaders(),
   });
@@ -492,19 +527,19 @@ export async function apiSendAbandonedCartReminders(hours = 24) {
 }
 
 export async function apiGetAbandonedCartStats() {
-  const res = await fetch(`${API_URL}/admin/notifications/abandoned-carts/stats`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/admin/notifications/abandoned-carts/stats`, { headers: authHeaders() });
   return handleResponse(res);
 }
 
 // ─── Fraud Detection ───
 
 export async function apiGetFraudFlags(page = 1, all = false) {
-  const res = await fetch(`${API_URL}/admin/notifications/fraud-flags?page=${page}&all=${all}`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/admin/notifications/fraud-flags?page=${page}&all=${all}`, { headers: authHeaders() });
   return handleResponse(res);
 }
 
 export async function apiReviewFraudFlag(flagId: string, body: { status: 'CLEARED' | 'BLOCKED'; adminNote: string }) {
-  const res = await fetch(`${API_URL}/admin/notifications/fraud-flags/${flagId}/review`, {
+  const res = await fetchWithRefresh(`${API_URL}/admin/notifications/fraud-flags/${flagId}/review`, {
     method: 'PATCH',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -515,7 +550,7 @@ export async function apiReviewFraudFlag(flagId: string, body: { status: 'CLEARE
 // ─── COD Risk ───
 
 export async function apiAssessCodRisk(userId: string, amount: number) {
-  const res = await fetch(`${API_URL}/cod/risk/${userId}?amount=${amount}`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/cod/risk/${userId}?amount=${amount}`, { headers: authHeaders() });
   return handleResponse(res);
 }
 
@@ -523,18 +558,18 @@ export async function apiAssessCodRisk(userId: string, amount: number) {
 
 export async function apiGetReviews(params?: Record<string, string>) {
   const query = new URLSearchParams({ limit: '50', ...params });
-  const res = await fetch(`${API_URL}/admin/reviews?${query}`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/admin/reviews?${query}`, { headers: authHeaders() });
   return handleResponse(res);
 }
 
 export async function apiGetPendingReviews(params?: Record<string, string>) {
   const query = new URLSearchParams({ limit: '50', ...params });
-  const res = await fetch(`${API_URL}/admin/reviews/pending?${query}`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/admin/reviews/pending?${query}`, { headers: authHeaders() });
   return handleResponse(res);
 }
 
 export async function apiApproveReview(id: string) {
-  const res = await fetch(`${API_URL}/admin/reviews/${id}/approve`, {
+  const res = await fetchWithRefresh(`${API_URL}/admin/reviews/${id}/approve`, {
     method: 'POST',
     headers: authHeaders(),
   });
@@ -542,7 +577,7 @@ export async function apiApproveReview(id: string) {
 }
 
 export async function apiRejectReview(id: string) {
-  const res = await fetch(`${API_URL}/admin/reviews/${id}/reject`, {
+  const res = await fetchWithRefresh(`${API_URL}/admin/reviews/${id}/reject`, {
     method: 'POST',
     headers: authHeaders(),
   });

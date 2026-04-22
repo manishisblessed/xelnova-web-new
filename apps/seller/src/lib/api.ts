@@ -29,6 +29,34 @@ function authHeaders(): Record<string, string> {
     : { ...APP_ROLE_HEADER };
 }
 
+let isRefreshing = false;
+let refreshPromise: Promise<boolean> | null = null;
+
+async function refreshSession(): Promise<boolean> {
+  if (isRefreshing && refreshPromise) {
+    return refreshPromise;
+  }
+  isRefreshing = true;
+  refreshPromise = (async () => {
+    try {
+      const res = await fetch('/api/session/refresh', {
+        method: 'POST',
+        credentials: 'include',
+      });
+      if (res.ok) {
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
+    } finally {
+      isRefreshing = false;
+      refreshPromise = null;
+    }
+  })();
+  return refreshPromise;
+}
+
 async function handleResponse<T = unknown>(res: Response): Promise<T> {
   const json = await res.json();
   if (!res.ok) {
@@ -41,9 +69,23 @@ async function handleResponse<T = unknown>(res: Response): Promise<T> {
   return json.data;
 }
 
+async function fetchWithRefresh(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+): Promise<Response> {
+  const res = await fetch(input, init);
+  if (res.status === 401 && typeof window !== 'undefined') {
+    const refreshed = await refreshSession();
+    if (refreshed) {
+      return fetch(input, { ...init, headers: authHeaders() });
+    }
+  }
+  return res;
+}
+
 /** Public user profile (any authenticated role). Used e.g. seller /register to skip duplicate OTP when already verified. */
 export async function apiGetUserProfile() {
-  const res = await fetch(`${API_URL}/users/profile`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/users/profile`, { headers: authHeaders() });
   return handleResponse<{
     id: string;
     name: string;
@@ -69,7 +111,7 @@ export interface LoginResponse {
 }
 
 export async function apiLogin(email: string, password: string) {
-  const res = await fetch(`${API_URL}/auth/login`, {
+  const res = await fetchWithRefresh(`${API_URL}/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...APP_ROLE_HEADER },
     body: JSON.stringify({ email, password }),
@@ -78,7 +120,7 @@ export async function apiLogin(email: string, password: string) {
 }
 
 export async function apiSellerRegistrationStatus() {
-  const res = await fetch(`${API_URL}/seller/registration-status`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/seller/registration-status`, { headers: authHeaders() });
   return handleResponse<{
     hasSellerProfile: boolean;
     sellerId?: string | null;
@@ -91,30 +133,30 @@ export async function apiSellerRegistrationStatus() {
 // ─── Dashboard ───
 
 export async function apiDashboard() {
-  const res = await fetch(`${API_URL}/seller/dashboard`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/seller/dashboard`, { headers: authHeaders() });
   return handleResponse(res);
 }
 
 // ─── Products ───
 
 export async function apiGetProductAttributePresets(): Promise<ProductAttributePresetsBundle> {
-  const res = await fetch(`${API_URL}/seller/product-attribute-presets`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/seller/product-attribute-presets`, { headers: authHeaders() });
   return handleResponse(res);
 }
 
 export async function apiGetProducts(params?: Record<string, string>) {
   const query = new URLSearchParams({ limit: '100', ...params });
-  const res = await fetch(`${API_URL}/seller/products?${query}`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/seller/products?${query}`, { headers: authHeaders() });
   return handleResponse(res);
 }
 
 export async function apiGetProduct(id: string) {
-  const res = await fetch(`${API_URL}/seller/products/${id}`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/seller/products/${id}`, { headers: authHeaders() });
   return handleResponse(res);
 }
 
 export async function apiCreateProduct(body: Record<string, unknown>) {
-  const res = await fetch(`${API_URL}/seller/products`, {
+  const res = await fetchWithRefresh(`${API_URL}/seller/products`, {
     method: 'POST',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -123,7 +165,7 @@ export async function apiCreateProduct(body: Record<string, unknown>) {
 }
 
 export async function apiUpdateProduct(id: string, body: Record<string, unknown>) {
-  const res = await fetch(`${API_URL}/seller/products/${id}`, {
+  const res = await fetchWithRefresh(`${API_URL}/seller/products/${id}`, {
     method: 'PATCH',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -132,7 +174,7 @@ export async function apiUpdateProduct(id: string, body: Record<string, unknown>
 }
 
 export async function apiDeleteProduct(id: string) {
-  const res = await fetch(`${API_URL}/seller/products/${id}`, {
+  const res = await fetchWithRefresh(`${API_URL}/seller/products/${id}`, {
     method: 'DELETE',
     headers: authHeaders(),
   });
@@ -143,12 +185,12 @@ export async function apiDeleteProduct(id: string) {
 
 export async function apiGetOrders(params?: Record<string, string>) {
   const query = new URLSearchParams({ limit: '100', ...params });
-  const res = await fetch(`${API_URL}/seller/orders?${query}`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/seller/orders?${query}`, { headers: authHeaders() });
   return handleResponse(res);
 }
 
 export async function apiUpdateOrderStatus(orderId: string, status: string) {
-  const res = await fetch(`${API_URL}/seller/orders/${orderId}/status`, {
+  const res = await fetchWithRefresh(`${API_URL}/seller/orders/${orderId}/status`, {
     method: 'PATCH',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify({ status }),
@@ -176,7 +218,7 @@ export async function apiShipOrder(orderId: string, body: {
    *  seller's default location. */
   pickupLocationId?: string;
 }) {
-  const res = await fetch(`${API_URL}/seller/orders/${orderId}/ship`, {
+  const res = await fetchWithRefresh(`${API_URL}/seller/orders/${orderId}/ship`, {
     method: 'POST',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -189,7 +231,7 @@ export async function apiUpdateShipmentAwb(orderId: string, body: {
   carrierName?: string;
   trackingUrl?: string;
 }) {
-  const res = await fetch(`${API_URL}/seller/orders/${orderId}/shipment/awb`, {
+  const res = await fetchWithRefresh(`${API_URL}/seller/orders/${orderId}/shipment/awb`, {
     method: 'PATCH',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -202,7 +244,7 @@ export async function apiUpdateShipmentStatus(orderId: string, body: {
   location?: string;
   remark?: string;
 }) {
-  const res = await fetch(`${API_URL}/seller/orders/${orderId}/shipment/status`, {
+  const res = await fetchWithRefresh(`${API_URL}/seller/orders/${orderId}/shipment/status`, {
     method: 'PATCH',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -211,21 +253,21 @@ export async function apiUpdateShipmentStatus(orderId: string, body: {
 }
 
 export async function apiGetShipment(orderId: string) {
-  const res = await fetch(`${API_URL}/seller/orders/${orderId}/shipment`, {
+  const res = await fetchWithRefresh(`${API_URL}/seller/orders/${orderId}/shipment`, {
     headers: authHeaders(),
   });
   return handleResponse(res);
 }
 
 export async function apiTrackShipment(orderId: string) {
-  const res = await fetch(`${API_URL}/seller/orders/${orderId}/shipment/track`, {
+  const res = await fetchWithRefresh(`${API_URL}/seller/orders/${orderId}/shipment/track`, {
     headers: authHeaders(),
   });
   return handleResponse(res);
 }
 
 export async function apiCancelShipment(orderId: string) {
-  const res = await fetch(`${API_URL}/seller/orders/${orderId}/shipment/cancel`, {
+  const res = await fetchWithRefresh(`${API_URL}/seller/orders/${orderId}/shipment/cancel`, {
     method: 'POST',
     headers: authHeaders(),
   });
@@ -240,7 +282,7 @@ export async function apiSchedulePickup(
   orderId: string,
   body: { pickupDate: string; pickupTime?: string; expectedPackageCount?: number },
 ) {
-  const res = await fetch(`${API_URL}/seller/orders/${orderId}/shipment/schedule-pickup`, {
+  const res = await fetchWithRefresh(`${API_URL}/seller/orders/${orderId}/shipment/schedule-pickup`, {
     method: 'POST',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -273,14 +315,14 @@ export type PickupWarehouseStatus = {
 };
 
 export async function apiGetPickupWarehouse() {
-  const res = await fetch(`${API_URL}/seller/pickup-warehouse`, {
+  const res = await fetchWithRefresh(`${API_URL}/seller/pickup-warehouse`, {
     headers: authHeaders(),
   });
   return handleResponse<PickupWarehouseStatus>(res);
 }
 
 export async function apiRegisterPickupWarehouse() {
-  const res = await fetch(`${API_URL}/seller/pickup-warehouse/register`, {
+  const res = await fetchWithRefresh(`${API_URL}/seller/pickup-warehouse/register`, {
     method: 'POST',
     headers: authHeaders(),
   });
@@ -337,14 +379,14 @@ export type UpdatePickupLocationPayload = Partial<
 >;
 
 export async function apiListPickupLocations() {
-  const res = await fetch(`${API_URL}/seller/pickup-locations`, {
+  const res = await fetchWithRefresh(`${API_URL}/seller/pickup-locations`, {
     headers: authHeaders(),
   });
   return handleResponse<SellerPickupLocation[]>(res);
 }
 
 export async function apiCreatePickupLocation(payload: CreatePickupLocationPayload) {
-  const res = await fetch(`${API_URL}/seller/pickup-locations`, {
+  const res = await fetchWithRefresh(`${API_URL}/seller/pickup-locations`, {
     method: 'POST',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -356,7 +398,7 @@ export async function apiUpdatePickupLocation(
   id: string,
   payload: UpdatePickupLocationPayload,
 ) {
-  const res = await fetch(`${API_URL}/seller/pickup-locations/${id}`, {
+  const res = await fetchWithRefresh(`${API_URL}/seller/pickup-locations/${id}`, {
     method: 'PATCH',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -365,7 +407,7 @@ export async function apiUpdatePickupLocation(
 }
 
 export async function apiDeletePickupLocation(id: string) {
-  const res = await fetch(`${API_URL}/seller/pickup-locations/${id}`, {
+  const res = await fetchWithRefresh(`${API_URL}/seller/pickup-locations/${id}`, {
     method: 'DELETE',
     headers: authHeaders(),
   });
@@ -373,7 +415,7 @@ export async function apiDeletePickupLocation(id: string) {
 }
 
 export async function apiSetDefaultPickupLocation(id: string) {
-  const res = await fetch(`${API_URL}/seller/pickup-locations/${id}/set-default`, {
+  const res = await fetchWithRefresh(`${API_URL}/seller/pickup-locations/${id}/set-default`, {
     method: 'POST',
     headers: authHeaders(),
   });
@@ -381,7 +423,7 @@ export async function apiSetDefaultPickupLocation(id: string) {
 }
 
 export async function apiRegisterPickupLocation(id: string) {
-  const res = await fetch(`${API_URL}/seller/pickup-locations/${id}/register`, {
+  const res = await fetchWithRefresh(`${API_URL}/seller/pickup-locations/${id}/register`, {
     method: 'POST',
     headers: authHeaders(),
   });
@@ -389,7 +431,7 @@ export async function apiRegisterPickupLocation(id: string) {
 }
 
 export async function apiCheckServiceability(orderId: string) {
-  const res = await fetch(`${API_URL}/seller/orders/${orderId}/serviceability`, {
+  const res = await fetchWithRefresh(`${API_URL}/seller/orders/${orderId}/serviceability`, {
     headers: authHeaders(),
   });
   return handleResponse(res);
@@ -455,7 +497,7 @@ export async function apiDownloadMonthlyInvoices(opts: { year?: number; month?: 
 // ─── Courier Configs ───
 
 export async function apiGetCourierConfigs() {
-  const res = await fetch(`${API_URL}/seller/courier-configs`, {
+  const res = await fetchWithRefresh(`${API_URL}/seller/courier-configs`, {
     headers: authHeaders(),
   });
   return handleResponse(res);
@@ -469,7 +511,7 @@ export async function apiSaveCourierConfig(body: {
   warehouseId?: string;
   metadata?: Record<string, any>;
 }) {
-  const res = await fetch(`${API_URL}/seller/courier-configs`, {
+  const res = await fetchWithRefresh(`${API_URL}/seller/courier-configs`, {
     method: 'POST',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -478,7 +520,7 @@ export async function apiSaveCourierConfig(body: {
 }
 
 export async function apiUpdateCourierConfig(provider: string, body: Record<string, unknown>) {
-  const res = await fetch(`${API_URL}/seller/courier-configs/${provider}`, {
+  const res = await fetchWithRefresh(`${API_URL}/seller/courier-configs/${provider}`, {
     method: 'PATCH',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -487,7 +529,7 @@ export async function apiUpdateCourierConfig(provider: string, body: Record<stri
 }
 
 export async function apiDeleteCourierConfig(provider: string) {
-  const res = await fetch(`${API_URL}/seller/courier-configs/${provider}`, {
+  const res = await fetchWithRefresh(`${API_URL}/seller/courier-configs/${provider}`, {
     method: 'DELETE',
     headers: authHeaders(),
   });
@@ -498,12 +540,12 @@ export async function apiDeleteCourierConfig(provider: string) {
 
 export async function apiGetRevenue(params?: Record<string, string>) {
   const q = params ? `?${new URLSearchParams(params)}` : '';
-  const res = await fetch(`${API_URL}/seller/revenue${q}`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/seller/revenue${q}`, { headers: authHeaders() });
   return handleResponse(res);
 }
 
 export async function apiGetAnalytics() {
-  const res = await fetch(`${API_URL}/seller/analytics`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/seller/analytics`, { headers: authHeaders() });
   return handleResponse(res);
 }
 
@@ -512,7 +554,7 @@ export async function apiGetAnalytics() {
 export async function apiUploadImage(file: File): Promise<{ url: string; publicId: string }> {
   const form = new FormData();
   form.append('file', file);
-  const res = await fetch(`${API_URL}/upload/image`, {
+  const res = await fetchWithRefresh(`${API_URL}/upload/image`, {
     method: 'POST',
     headers: authHeaders(),
     body: form,
@@ -523,7 +565,7 @@ export async function apiUploadImage(file: File): Promise<{ url: string; publicI
 export async function apiUploadImages(files: File[]): Promise<{ url: string; publicId: string }[]> {
   const form = new FormData();
   for (const file of files) form.append('files', file);
-  const res = await fetch(`${API_URL}/upload/images`, {
+  const res = await fetchWithRefresh(`${API_URL}/upload/images`, {
     method: 'POST',
     headers: authHeaders(),
     body: form,
@@ -532,7 +574,7 @@ export async function apiUploadImages(files: File[]): Promise<{ url: string; pub
 }
 
 export async function apiDeleteImage(publicId: string): Promise<void> {
-  const res = await fetch(`${API_URL}/upload/${encodeURIComponent(publicId)}`, {
+  const res = await fetchWithRefresh(`${API_URL}/upload/${encodeURIComponent(publicId)}`, {
     method: 'DELETE',
     headers: authHeaders(),
   });
@@ -542,18 +584,18 @@ export async function apiDeleteImage(publicId: string): Promise<void> {
 // ─── Wallet ───
 
 export async function apiGetWalletBalance() {
-  const res = await fetch(`${API_URL}/wallet/balance`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/wallet/balance`, { headers: authHeaders() });
   return handleResponse(res);
 }
 
 export async function apiGetWalletTransactions(page = 1, limit = 20) {
   const params = new URLSearchParams({ page: page.toString(), limit: limit.toString() });
-  const res = await fetch(`${API_URL}/wallet/transactions?${params}`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/wallet/transactions?${params}`, { headers: authHeaders() });
   return handleResponse(res);
 }
 
 export async function apiRequestPayout(amount: number, notes?: string) {
-  const res = await fetch(`${API_URL}/wallet/payout`, {
+  const res = await fetchWithRefresh(`${API_URL}/wallet/payout`, {
     method: 'POST',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify({ amount, notes }),
@@ -574,7 +616,7 @@ export interface BankDetails {
 }
 
 export async function apiGetBankDetails(): Promise<BankDetails> {
-  const res = await fetch(`${API_URL}/wallet/bank-details`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/wallet/bank-details`, { headers: authHeaders() });
   return handleResponse<BankDetails>(res);
 }
 
@@ -601,7 +643,7 @@ export async function apiRequestManualPayout(
   acceptedTerms: boolean,
   notes?: string,
 ): Promise<PayoutResponse> {
-  const res = await fetch(`${API_URL}/wallet/payout/manual`, {
+  const res = await fetchWithRefresh(`${API_URL}/wallet/payout/manual`, {
     method: 'POST',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify({ amount, acceptedTerms, notes }),
@@ -614,7 +656,7 @@ export async function apiRequestAdvancePayout(
   acceptedTerms: boolean,
   notes?: string,
 ): Promise<PayoutResponse & { percentage: number; amount: number }> {
-  const res = await fetch(`${API_URL}/wallet/payout/advance`, {
+  const res = await fetchWithRefresh(`${API_URL}/wallet/payout/advance`, {
     method: 'POST',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify({ percentage, acceptedTerms, notes }),
@@ -635,7 +677,7 @@ export interface PayoutHistoryItem {
 
 export async function apiGetPayoutHistory(page = 1, limit = 20) {
   const params = new URLSearchParams({ page: page.toString(), limit: limit.toString() });
-  const res = await fetch(`${API_URL}/wallet/payouts?${params}`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/wallet/payouts?${params}`, { headers: authHeaders() });
   return handleResponse<{
     payouts: PayoutHistoryItem[];
     pagination: { page: number; limit: number; total: number; totalPages: number };
@@ -645,17 +687,17 @@ export async function apiGetPayoutHistory(page = 1, limit = 20) {
 // ─── Tickets ───
 
 export async function apiGetSellerTickets() {
-  const res = await fetch(`${API_URL}/tickets/seller`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/tickets/seller`, { headers: authHeaders() });
   return handleResponse(res);
 }
 
 export async function apiGetSellerTicketDetail(id: string) {
-  const res = await fetch(`${API_URL}/tickets/seller/${id}`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/tickets/seller/${id}`, { headers: authHeaders() });
   return handleResponse(res);
 }
 
 export async function apiSellerReplyTicket(id: string, message: string) {
-  const res = await fetch(`${API_URL}/tickets/seller/${id}/reply`, {
+  const res = await fetchWithRefresh(`${API_URL}/tickets/seller/${id}/reply`, {
     method: 'POST',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify({ message }),
@@ -666,7 +708,7 @@ export async function apiSellerReplyTicket(id: string, message: string) {
 // ─── Bulk Upload ───
 
 export async function apiBulkUploadProducts(rows: Record<string, string>[]) {
-  const res = await fetch(`${API_URL}/seller/products/bulk-upload`, {
+  const res = await fetchWithRefresh(`${API_URL}/seller/products/bulk-upload`, {
     method: 'POST',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify({ rows }),
@@ -677,12 +719,12 @@ export async function apiBulkUploadProducts(rows: Record<string, string>[]) {
 // ─── Inventory Alerts ───
 
 export async function apiGetInventoryAlerts() {
-  const res = await fetch(`${API_URL}/seller/inventory-alerts`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/seller/inventory-alerts`, { headers: authHeaders() });
   return handleResponse(res);
 }
 
 export async function apiSendInventoryAlerts() {
-  const res = await fetch(`${API_URL}/seller/inventory-alerts/notify`, {
+  const res = await fetchWithRefresh(`${API_URL}/seller/inventory-alerts/notify`, {
     method: 'POST',
     headers: authHeaders(),
   });
@@ -692,7 +734,7 @@ export async function apiSendInventoryAlerts() {
 // ─── Brand Proposal ───
 
 export async function apiProposeBrand(name: string, logo?: string, authorizationCertificate?: string) {
-  const res = await fetch(`${API_URL}/seller/brands/propose`, {
+  const res = await fetchWithRefresh(`${API_URL}/seller/brands/propose`, {
     method: 'POST',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify({ name, logo, authorizationCertificate }),
@@ -701,14 +743,14 @@ export async function apiProposeBrand(name: string, logo?: string, authorization
 }
 
 export async function apiGetSellerBrands() {
-  const res = await fetch(`${API_URL}/seller/brands`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/seller/brands`, { headers: authHeaders() });
   return handleResponse(res);
 }
 
 // ─── Seller Coupons ───
 
 export async function apiGetSellerCoupons() {
-  const res = await fetch(`${API_URL}/seller/coupons`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/seller/coupons`, { headers: authHeaders() });
   return handleResponse(res);
 }
 
@@ -723,7 +765,7 @@ export async function apiCreateSellerCoupon(body: {
   usageLimit?: number;
   scope?: string;
 }) {
-  const res = await fetch(`${API_URL}/seller/coupons`, {
+  const res = await fetchWithRefresh(`${API_URL}/seller/coupons`, {
     method: 'POST',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -732,7 +774,7 @@ export async function apiCreateSellerCoupon(body: {
 }
 
 export async function apiUpdateSellerCoupon(id: string, body: Record<string, unknown>) {
-  const res = await fetch(`${API_URL}/seller/coupons/${id}`, {
+  const res = await fetchWithRefresh(`${API_URL}/seller/coupons/${id}`, {
     method: 'PATCH',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -741,7 +783,7 @@ export async function apiUpdateSellerCoupon(id: string, body: Record<string, unk
 }
 
 export async function apiDeleteSellerCoupon(id: string) {
-  const res = await fetch(`${API_URL}/seller/coupons/${id}`, {
+  const res = await fetchWithRefresh(`${API_URL}/seller/coupons/${id}`, {
     method: 'DELETE',
     headers: authHeaders(),
   });
@@ -752,13 +794,13 @@ export async function apiDeleteSellerCoupon(id: string) {
 
 export async function apiGetSettlement(params?: Record<string, string>) {
   const q = params ? `?${new URLSearchParams(params)}` : '';
-  const res = await fetch(`${API_URL}/seller/settlement${q}`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/seller/settlement${q}`, { headers: authHeaders() });
   return handleResponse(res);
 }
 
 export async function apiDownloadSettlementCsv(params?: Record<string, string>) {
   const q = params ? `?${new URLSearchParams(params)}` : '';
-  const res = await fetch(`${API_URL}/seller/settlement/csv${q}`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/seller/settlement/csv${q}`, { headers: authHeaders() });
   if (!res.ok) throw new Error('Failed to download CSV');
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
@@ -775,19 +817,19 @@ export async function apiDownloadSettlementCsv(params?: Record<string, string>) 
 
 export async function apiGetSalesAnalytics(period?: string) {
   const q = period ? `?period=${period}` : '';
-  const res = await fetch(`${API_URL}/seller/sales-analytics${q}`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/seller/sales-analytics${q}`, { headers: authHeaders() });
   return handleResponse(res);
 }
 
 // ─── Profile ───
 
 export async function apiGetProfile() {
-  const res = await fetch(`${API_URL}/seller/profile`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/seller/profile`, { headers: authHeaders() });
   return handleResponse(res);
 }
 
 export async function apiUpdateProfile(body: Record<string, unknown>) {
-  const res = await fetch(`${API_URL}/seller/profile`, {
+  const res = await fetchWithRefresh(`${API_URL}/seller/profile`, {
     method: 'PATCH',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -804,7 +846,7 @@ export interface ShippingRates {
 }
 
 export async function apiGetShippingRates(): Promise<ShippingRates> {
-  const res = await fetch(`${API_URL}/products/shipping-rates`);
+  const res = await fetchWithRefresh(`${API_URL}/products/shipping-rates`);
   return handleResponse<ShippingRates>(res);
 }
 
@@ -833,7 +875,7 @@ export interface StoreSettings {
 }
 
 export async function apiGetStoreSettings(): Promise<StoreSettings> {
-  const res = await fetch(`${API_URL}/seller/store`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${API_URL}/seller/store`, { headers: authHeaders() });
   return handleResponse<StoreSettings>(res);
 }
 
@@ -844,7 +886,7 @@ export async function apiUpdateStoreSettings(data: {
   aboutDescription?: string;
   storeThemeColor?: string;
 }): Promise<void> {
-  const res = await fetch(`${API_URL}/seller/store`, {
+  const res = await fetchWithRefresh(`${API_URL}/seller/store`, {
     method: 'PATCH',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -853,7 +895,7 @@ export async function apiUpdateStoreSettings(data: {
 }
 
 export async function apiUpdateFeaturedProducts(productIds: string[]): Promise<void> {
-  const res = await fetch(`${API_URL}/seller/store/featured-products`, {
+  const res = await fetchWithRefresh(`${API_URL}/seller/store/featured-products`, {
     method: 'PUT',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify({ productIds }),
@@ -868,7 +910,7 @@ export async function apiCreateStoreBanner(data: {
   link?: string;
   sortOrder?: number;
 }): Promise<SellerStoreBanner> {
-  const res = await fetch(`${API_URL}/seller/store/banners`, {
+  const res = await fetchWithRefresh(`${API_URL}/seller/store/banners`, {
     method: 'POST',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -887,7 +929,7 @@ export async function apiUpdateStoreBanner(
     isActive?: boolean;
   },
 ): Promise<SellerStoreBanner> {
-  const res = await fetch(`${API_URL}/seller/store/banners/${id}`, {
+  const res = await fetchWithRefresh(`${API_URL}/seller/store/banners/${id}`, {
     method: 'PATCH',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -896,7 +938,7 @@ export async function apiUpdateStoreBanner(
 }
 
 export async function apiDeleteStoreBanner(id: string): Promise<void> {
-  const res = await fetch(`${API_URL}/seller/store/banners/${id}`, {
+  const res = await fetchWithRefresh(`${API_URL}/seller/store/banners/${id}`, {
     method: 'DELETE',
     headers: authHeaders(),
   });
@@ -904,7 +946,7 @@ export async function apiDeleteStoreBanner(id: string): Promise<void> {
 }
 
 export async function apiReorderStoreBanners(bannerIds: string[]): Promise<SellerStoreBanner[]> {
-  const res = await fetch(`${API_URL}/seller/store/banners/reorder`, {
+  const res = await fetchWithRefresh(`${API_URL}/seller/store/banners/reorder`, {
     method: 'PUT',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify({ bannerIds }),

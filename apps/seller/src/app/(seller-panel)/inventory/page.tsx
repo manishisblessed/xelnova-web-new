@@ -17,6 +17,7 @@ import {
   apiGetProducts,
   apiUpdateProduct,
   apiUploadImage,
+  apiUploadImages,
 } from '@/lib/api';
 import { useSellerProfile } from '@/lib/seller-profile-context';
 import { VerificationBanner } from '@/components/dashboard/verification-banner';
@@ -548,9 +549,18 @@ function ProductImageGallery({
       toast.error('Please select image files (JPG, PNG, WebP)');
       return;
     }
+
+    const MAX_FILE_SIZE = 5 * 1024 * 1024;
+    const oversizedFiles = imageFiles.filter((f) => f.size > MAX_FILE_SIZE);
+    if (oversizedFiles.length > 0) {
+      toast.error(`${oversizedFiles.length} file(s) exceed 5MB limit: ${oversizedFiles.map((f) => f.name).join(', ')}`);
+    }
+    const validFiles = imageFiles.filter((f) => f.size <= MAX_FILE_SIZE);
+    if (validFiles.length === 0) return;
+
     const slotsLeft = MAX_PRODUCT_IMAGES - images.length - uploadQueue.length;
-    const batch = imageFiles.slice(0, slotsLeft);
-    if (imageFiles.length > slotsLeft) {
+    const batch = validFiles.slice(0, slotsLeft);
+    if (validFiles.length > slotsLeft) {
       toast.info(`Only ${slotsLeft} more image${slotsLeft === 1 ? '' : 's'} allowed (max ${MAX_PRODUCT_IMAGES})`);
     }
     if (batch.length === 0) return;
@@ -567,22 +577,30 @@ function ProductImageGallery({
 
     const results: ProductImage[] = [];
 
-    for (const item of queueItems) {
-      try {
-        const { url, publicId } = await apiUploadImage(item.file);
-        results.push({ id: item.id, url, publicId });
+    try {
+      if (batch.length === 1) {
+        const { url, publicId } = await apiUploadImage(batch[0]);
+        results.push({ id: queueItems[0].id, url, publicId });
         setUploadQueue((prev) =>
-          prev.map((q) => (q.id === item.id ? { ...q, progress: 'done' } : q)),
+          prev.map((q) => (q.id === queueItems[0].id ? { ...q, progress: 'done' } : q)),
         );
-      } catch (e) {
-        toast.error(`Failed to upload ${item.file.name}`);
-        setUploadQueue((prev) =>
-          prev.map((q) => (q.id === item.id ? { ...q, progress: 'error' } : q)),
-        );
+      } else {
+        const uploadedResults = await apiUploadImages(batch);
+        uploadedResults.forEach((res, i) => {
+          results.push({ id: queueItems[i].id, url: res.url, publicId: res.publicId });
+          setUploadQueue((prev) =>
+            prev.map((q) => (q.id === queueItems[i].id ? { ...q, progress: 'done' } : q)),
+          );
+        });
       }
+    } catch (e: unknown) {
+      const errorMsg = e instanceof Error ? e.message : 'Upload failed';
+      toast.error(`Failed to upload images: ${errorMsg}`);
+      setUploadQueue((prev) =>
+        prev.map((q) => (queueItems.some((qi) => qi.id === q.id) ? { ...q, progress: 'error' } : q)),
+      );
     }
 
-    // Small delay so user sees the green checkmarks before they disappear
     await new Promise((r) => setTimeout(r, 400));
     setUploadQueue((prev) => prev.filter((q) => q.progress === 'uploading'));
     if (results.length > 0) {

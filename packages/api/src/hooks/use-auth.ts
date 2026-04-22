@@ -71,13 +71,17 @@ export function AuthProvider({
           if (!cancelled) setAccessToken(tokens.accessToken);
         })
         .catch(() => {
-          if (typeof document !== 'undefined') {
-            const hasCookie = /(?:^|;\s*)xelnova-token=/.test(document.cookie);
-            if (hasCookie) return;
-          }
-          if (!cancelled) {
-            setUser(null);
-            authApi.logout();
+          // Don't logout on refresh failure - the axios interceptor will handle
+          // 401s during API calls. This prevents logout on temporary network issues.
+          // Only logout if there's no refresh token stored at all.
+          if (typeof window !== 'undefined') {
+            const hasRefreshToken = localStorage.getItem('xelnova-refresh-token');
+            if (!hasRefreshToken) {
+              if (!cancelled) {
+                setUser(null);
+                authApi.logout();
+              }
+            }
           }
         })
         .finally(() => {

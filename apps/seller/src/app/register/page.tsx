@@ -512,21 +512,21 @@ export default function RegisterPage() {
       }
       if (data.success) {
         setGstVerification({ status: 'verified', data: data.data });
-        // Per testing observation #21 — once GSTIN verifies, the legal /
-        // trade name returned by the GST registry is the source of truth
-        // for the seller's business name. We always overwrite the store
-        // name with the verified value (preferring the more complete
-        // legal name) so the seller can't accidentally proceed with a
-        // mismatched typed-in name.
-        const verifiedFirmName = (data.data?.legalName || data.data?.tradeName || '').trim();
-        if (verifiedFirmName) {
+        // Use trade name (business name) as the store name. Trade name is
+        // the public-facing brand/business name, while legal name is the
+        // proprietor/company's registered legal name. Fall back to legal
+        // name only if trade name is unavailable.
+        const verifiedStoreName = (data.data?.tradeName || data.data?.legalName || '').trim();
+        // For bank account holder, legal name is more appropriate as it
+        // matches the official registered name for KYC/payment purposes.
+        const verifiedLegalName = (data.data?.legalName || data.data?.tradeName || '').trim();
+        if (verifiedStoreName) {
           setFormData(prev => ({
             ...prev,
-            storeName: verifiedFirmName,
-            // Also seed the bank account holder name (so penny-drop has
-            // a sensible default to match against) only if the seller
-            // hasn't typed something else yet.
-            accountHolderName: prev.accountHolderName?.trim() ? prev.accountHolderName : verifiedFirmName,
+            storeName: verifiedStoreName,
+            // Seed the bank account holder name with legal name (for penny-drop
+            // verification) only if the seller hasn't typed something else yet.
+            accountHolderName: prev.accountHolderName?.trim() ? prev.accountHolderName : verifiedLegalName,
           }));
         }
       } else {

@@ -81,7 +81,9 @@ export function LocationModal({ open, onClose }: LocationModalProps) {
 
           if (postcode && /^[1-9][0-9]{5}$/.test(postcode)) {
             setPincode(postcode);
-            await handleLookup(postcode);
+            const locationData = await lookupPincode(postcode);
+            setLocation(locationData);
+            onClose();
           } else {
             setError('Could not detect pincode from your location. Please enter manually.');
           }
