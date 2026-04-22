@@ -850,7 +850,7 @@ export default function ProductsPage() {
         section="products"
         columns={columns}
         keyExtractor={(r) => r.id}
-        searchKeys={['name', 'slug']}
+        searchKeys={['name', 'slug', 'sku']}
         filterKey="status"
         filterOptions={[...STATUS_OPTIONS]}
         refreshTrigger={refreshTrigger}
