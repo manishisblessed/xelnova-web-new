@@ -57,13 +57,18 @@ export function SellerProfileGate({ children }: { children: React.ReactNode }) {
           setState('incomplete');
         }
       })
-      .catch(async () => {
+      .catch(async (err: any) => {
         if (cancelled) return;
-        try {
-          await fetch('/api/session', { method: 'DELETE', credentials: 'include' });
-        } catch { /* best effort */ }
-        if (typeof window !== 'undefined') localStorage.removeItem('xelnova-dashboard-user');
-        router.replace('/login');
+        const status = err?.response?.status;
+        if (status === 401 || status === 403) {
+          try {
+            await fetch('/api/session', { method: 'DELETE', credentials: 'include' });
+          } catch { /* best effort */ }
+          if (typeof window !== 'undefined') localStorage.removeItem('xelnova-dashboard-user');
+          router.replace('/login');
+        } else {
+          setState('ok');
+        }
       });
     return () => {
       cancelled = true;

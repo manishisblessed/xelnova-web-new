@@ -29,6 +29,24 @@ function syncToken() {
   if (m) setAccessToken(decodeURIComponent(m[1]));
 }
 
+function loadRazorpayScript(): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (typeof window === "undefined") {
+      resolve(false);
+      return;
+    }
+    if (document.querySelector('script[src="https://checkout.razorpay.com/v1/checkout.js"]')) {
+      resolve(true);
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = "https://checkout.razorpay.com/v1/checkout.js";
+    script.onload = () => resolve(true);
+    script.onerror = () => resolve(false);
+    document.body.appendChild(script);
+  });
+}
+
 const tabs: { id: Tab; label: string; icon: typeof Wallet }[] = [
   { id: "overview", label: "Overview", icon: Wallet },
   { id: "add", label: "Add Money", icon: Plus },
@@ -55,6 +73,7 @@ export default function WalletPage() {
     orderId: string;
   } | null>(null);
   const kycPopupRef = useRef<Window | null>(null);
+  const razorpayScriptLoaded = useRef(false);
 
   const loadWallet = useCallback(async () => {
     try {
@@ -75,6 +94,14 @@ export default function WalletPage() {
   }, []);
 
   useEffect(() => { loadWallet(); }, [loadWallet]);
+
+  useEffect(() => {
+    if (!razorpayScriptLoaded.current) {
+      loadRazorpayScript().then((success) => {
+        razorpayScriptLoaded.current = success;
+      });
+    }
+  }, []);
 
   useEffect(() => {
     const handleMessage = async (event: MessageEvent) => {
@@ -137,6 +164,13 @@ export default function WalletPage() {
     setActionLoading(true);
     setActionError(null);
     try {
+      if (!(window as any).Razorpay) {
+        const loaded = await loadRazorpayScript();
+        if (!loaded) {
+          setActionError("Payment gateway failed to load. Please refresh and try again.");
+          return;
+        }
+      }
       const order = await walletApi.createAddMoneyOrder(amount);
       const options = {
         key: order.keyId,

@@ -199,7 +199,7 @@ export default function SellerRegisterPage() {
 
           <p className="text-center text-sm text-text-muted mt-6">
             Already have an account?{' '}
-            <Link href="/seller/dashboard" className="text-primary-600 font-medium hover:underline">Sign in</Link>
+            <a href="https://seller.xelnova.in" className="text-primary-600 font-medium hover:underline">Sign in</a>
           </p>
         </div>
       </section>

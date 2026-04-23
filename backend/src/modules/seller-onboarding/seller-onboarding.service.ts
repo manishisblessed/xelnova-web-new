@@ -443,17 +443,34 @@ export class SellerOnboardingService {
 
       const resumeStep = Math.max(existingSeller.onboardingStep ?? 2, 2);
 
-      await this.prisma.sellerProfile.update({
-        where: { id: existingSeller.id },
-        data: {
-          userId: user.id,
-          email: dto.email,
-          phone: dto.phone,
-          storeName: existingSeller.storeName || dto.fullName + "'s Store",
-          onboardingStatus: resumeStep >= 3 ? existingSeller.onboardingStatus : 'EMAIL_VERIFIED',
-          onboardingStep: resumeStep,
-        },
-      });
+      try {
+        await this.prisma.sellerProfile.update({
+          where: { id: existingSeller.id },
+          data: {
+            userId: user.id,
+            email: dto.email,
+            phone: dto.phone,
+            storeName: existingSeller.storeName || dto.fullName + "'s Store",
+            onboardingStatus: resumeStep >= 3 ? existingSeller.onboardingStatus : 'EMAIL_VERIFIED',
+            onboardingStep: resumeStep,
+          },
+        });
+      } catch (error: any) {
+        if (error?.code === 'P2002') {
+          const field = error?.meta?.target?.[0] || 'field';
+          if (field === 'phone') {
+            throw new HttpException(
+              'This phone number is already registered with another seller account. Please use a different phone number.',
+              HttpStatus.CONFLICT,
+            );
+          }
+          throw new HttpException(
+            `This ${field} is already in use. Please use a different value.`,
+            HttpStatus.CONFLICT,
+          );
+        }
+        throw error;
+      }
 
       return {
         success: true,
@@ -472,25 +489,49 @@ export class SellerOnboardingService {
     // so we keep this disposable and add a random suffix to avoid clashing
     // with another seller who happens to share the same first name.
     const slug = this.generateSlug(dto.fullName);
-    const sellerProfile = await this.prisma.sellerProfile.create({
-      data: {
-        userId: user.id,
-        email: dto.email,
-        phone: dto.phone,
-        storeName: dto.fullName + "'s Store",
-        slug,
-        onboardingStatus: 'EMAIL_VERIFIED',
-        onboardingStep: 2,
-      },
-    });
+    try {
+      const sellerProfile = await this.prisma.sellerProfile.create({
+        data: {
+          userId: user.id,
+          email: dto.email,
+          phone: dto.phone,
+          storeName: dto.fullName + "'s Store",
+          slug,
+          onboardingStatus: 'EMAIL_VERIFIED',
+          onboardingStep: 2,
+        },
+      });
 
-    return {
-      success: true,
-      message: 'Account created successfully',
-      userId: user.id,
-      sellerId: sellerProfile.id,
-      nextStep: 2,
-    };
+      return {
+        success: true,
+        message: 'Account created successfully',
+        userId: user.id,
+        sellerId: sellerProfile.id,
+        nextStep: 2,
+      };
+    } catch (error: any) {
+      // Handle unique constraint violations with user-friendly messages
+      if (error?.code === 'P2002') {
+        const field = error?.meta?.target?.[0] || 'field';
+        if (field === 'email') {
+          throw new HttpException(
+            'This email address is already registered with another seller account. Please use a different email.',
+            HttpStatus.CONFLICT,
+          );
+        }
+        if (field === 'phone') {
+          throw new HttpException(
+            'This phone number is already registered with another seller account. Please use a different phone number.',
+            HttpStatus.CONFLICT,
+          );
+        }
+        throw new HttpException(
+          `This ${field} is already in use. Please use a different value.`,
+          HttpStatus.CONFLICT,
+        );
+      }
+      throw error;
+    }
   }
 
   private async findOrCreateUser(
@@ -522,19 +563,43 @@ export class SellerOnboardingService {
       return existingUser;
     }
 
-    return this.prisma.user.create({
-      data: {
-        name: dto.fullName,
-        email: dto.email,
-        phone: dto.phone,
-        password: hashedPassword,
-        role: 'SELLER',
-        emailVerified: true,
-        phoneVerified: true,
-        lastLoginAt: new Date(),
-        lastLoginIp: ipAddress,
-      },
-    });
+    try {
+      return await this.prisma.user.create({
+        data: {
+          name: dto.fullName,
+          email: dto.email,
+          phone: dto.phone,
+          password: hashedPassword,
+          role: 'SELLER',
+          emailVerified: true,
+          phoneVerified: true,
+          lastLoginAt: new Date(),
+          lastLoginIp: ipAddress,
+        },
+      });
+    } catch (error: any) {
+      // Handle unique constraint violations with user-friendly messages
+      if (error?.code === 'P2002') {
+        const field = error?.meta?.target?.[0] || 'field';
+        if (field === 'email') {
+          throw new HttpException(
+            'This email address is already registered. Please use a different email or log in to your existing account.',
+            HttpStatus.CONFLICT,
+          );
+        }
+        if (field === 'phone') {
+          throw new HttpException(
+            'This phone number is already registered. Please use a different phone number or log in to your existing account.',
+            HttpStatus.CONFLICT,
+          );
+        }
+        throw new HttpException(
+          `This ${field} is already in use. Please use a different value.`,
+          HttpStatus.CONFLICT,
+        );
+      }
+      throw error;
+    }
   }
 
   // ========== Step 2: Business Verification ==========
@@ -587,41 +652,110 @@ export class SellerOnboardingService {
     if (dto.aadhaarNumber) {
       const cleaned = dto.aadhaarNumber.replace(/\s/g, '');
       maskedAadhaar = 'XXXX-XXXX-' + cleaned.slice(-4);
+
+      // Check if this Aadhaar is already registered with another seller
+      const existingWithAadhaar = await this.prisma.sellerProfile.findFirst({
+        where: {
+          aadhaarNumber: maskedAadhaar,
+          id: { not: sellerId },
+        },
+        select: { id: true },
+      });
+      if (existingWithAadhaar) {
+        throw new HttpException(
+          'This Aadhaar number is already registered with another seller account. Please use a different Aadhaar for verification.',
+          HttpStatus.CONFLICT,
+        );
+      }
     }
 
-    await this.prisma.sellerProfile.update({
-      where: { id: sellerId },
-      data: {
-        gstNumber: dto.gstNumber,
-        gstVerified,
-        gstVerifiedAt: gstVerified ? new Date() : null,
-        gstVerifiedData: gstVerifiedData as any,
-        sellsNonGstProducts: dto.sellsNonGstProducts || false,
-        panNumber: dto.panNumber,
-        panName: dto.panName,
-        panVerified: dto.panVerified || false,
-        panVerifiedAt: dto.panVerified ? new Date() : null,
-        panVerifiedData: dto.panVerifiedData || undefined,
-        aadhaarNumber: maskedAadhaar,
-        aadhaarVerified: dto.aadhaarVerified || false,
-        aadhaarVerifiedAt: dto.aadhaarVerified ? new Date() : null,
-        aadhaarVerifiedData: dto.aadhaarVerifiedData || undefined,
-        storeName: dto.storeName,
-        slug,
-        description: dto.description,
-        businessType: dto.businessType,
-        categorySelectionType: dto.categorySelectionType,
-        selectedCategories: dto.selectedCategories || [],
-        businessAddress: dto.businessAddress,
-        businessCity: dto.businessCity,
-        businessState: dto.businessState,
-        businessPincode: dto.businessPincode,
-        location: dto.businessCity && dto.businessState
-          ? `${dto.businessCity}, ${dto.businessState}`
-          : undefined,
-        onboardingStep: 3,
-      },
-    });
+    // Check PAN uniqueness if provided
+    if (dto.panNumber) {
+      const existingWithPan = await this.prisma.sellerProfile.findFirst({
+        where: {
+          panNumber: dto.panNumber.trim().toUpperCase(),
+          id: { not: sellerId },
+        },
+        select: { id: true },
+      });
+      if (existingWithPan) {
+        throw new HttpException(
+          'This PAN number is already registered with another seller account. Please use a different PAN.',
+          HttpStatus.CONFLICT,
+        );
+      }
+    }
+
+    // Check GST uniqueness if provided
+    if (dto.gstNumber && !dto.sellsNonGstProducts) {
+      const existingWithGst = await this.prisma.sellerProfile.findFirst({
+        where: {
+          gstNumber: dto.gstNumber.trim().toUpperCase(),
+          id: { not: sellerId },
+        },
+        select: { id: true },
+      });
+      if (existingWithGst) {
+        throw new HttpException(
+          'This GST number is already registered with another seller account. Please use a different GST number.',
+          HttpStatus.CONFLICT,
+        );
+      }
+    }
+
+    try {
+      await this.prisma.sellerProfile.update({
+        where: { id: sellerId },
+        data: {
+          gstNumber: dto.gstNumber,
+          gstVerified,
+          gstVerifiedAt: gstVerified ? new Date() : null,
+          gstVerifiedData: gstVerifiedData as any,
+          sellsNonGstProducts: dto.sellsNonGstProducts || false,
+          panNumber: dto.panNumber,
+          panName: dto.panName,
+          panVerified: dto.panVerified || false,
+          panVerifiedAt: dto.panVerified ? new Date() : null,
+          panVerifiedData: dto.panVerifiedData || undefined,
+          aadhaarNumber: maskedAadhaar,
+          aadhaarVerified: dto.aadhaarVerified || false,
+          aadhaarVerifiedAt: dto.aadhaarVerified ? new Date() : null,
+          aadhaarVerifiedData: dto.aadhaarVerifiedData || undefined,
+          storeName: dto.storeName,
+          slug,
+          description: dto.description,
+          businessType: dto.businessType,
+          categorySelectionType: dto.categorySelectionType,
+          selectedCategories: dto.selectedCategories || [],
+          businessAddress: dto.businessAddress,
+          businessCity: dto.businessCity,
+          businessState: dto.businessState,
+          businessPincode: dto.businessPincode,
+          location: dto.businessCity && dto.businessState
+            ? `${dto.businessCity}, ${dto.businessState}`
+            : undefined,
+          onboardingStep: 3,
+        },
+      });
+    } catch (error: any) {
+      // Handle unique constraint violations with user-friendly messages
+      if (error?.code === 'P2002') {
+        const field = error?.meta?.target?.[0] || 'field';
+        const fieldMessages: Record<string, string> = {
+          aadhaarNumber: 'This Aadhaar number is already registered with another seller account. Please use a different Aadhaar for verification.',
+          panNumber: 'This PAN number is already registered with another seller account. Please use a different PAN.',
+          gstNumber: 'This GST number is already registered with another seller account. Please use a different GST number.',
+          email: 'This email address is already registered. Please use a different email.',
+          phone: 'This phone number is already registered. Please use a different phone number.',
+          slug: 'This store name is already taken. Please choose a different store name.',
+        };
+        throw new HttpException(
+          fieldMessages[field] || `This ${field} is already in use. Please use a different value.`,
+          HttpStatus.CONFLICT,
+        );
+      }
+      throw error;
+    }
 
     return {
       success: true,

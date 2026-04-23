@@ -27,7 +27,7 @@ const staticSections = [
     links: [
       { name: 'Start Selling', href: '/seller' },
       { name: 'Seller Registration', href: '/seller/register' },
-      { name: 'Seller Dashboard', href: '/seller/dashboard' },
+      { name: 'Seller Dashboard', href: 'https://seller.xelnova.in', external: true },
       { name: 'Seller Policies', href: '/seller/policies' },
       { name: 'Fulfillment', href: '/seller/fulfillment' },
     ],
@@ -233,9 +233,15 @@ export function Footer() {
               <ul className="space-y-2.5">
                 {section.links.map((link) => (
                   <li key={link.name}>
-                    <Link href={link.href} className="text-sm text-white/70 hover:text-primary-300 transition-colors">
-                      {link.name}
-                    </Link>
+                    {(link as any).external ? (
+                      <a href={link.href} className="text-sm text-white/70 hover:text-primary-300 transition-colors">
+                        {link.name}
+                      </a>
+                    ) : (
+                      <Link href={link.href} className="text-sm text-white/70 hover:text-primary-300 transition-colors">
+                        {link.name}
+                      </Link>
+                    )}
                   </li>
                 ))}
               </ul>

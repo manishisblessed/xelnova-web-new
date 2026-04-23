@@ -105,14 +105,17 @@ export function createApiClient(baseURL?: string): AxiosInstance {
             originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
             return client(originalRequest);
           }
-        } catch {
-          setAccessToken(null);
-          const tp = getTokenPersistence();
-          if (tp) {
-            await tp.clear().catch(() => {});
-          } else if (typeof window !== 'undefined') {
-            localStorage.removeItem(AUTH_STORAGE_KEYS.refreshToken());
-            localStorage.removeItem(AUTH_STORAGE_KEYS.user());
+        } catch (refreshError: any) {
+          const refreshStatus = refreshError?.response?.status;
+          if (refreshStatus === 401 || refreshStatus === 403) {
+            setAccessToken(null);
+            const tp = getTokenPersistence();
+            if (tp) {
+              await tp.clear().catch(() => {});
+            } else if (typeof window !== 'undefined') {
+              localStorage.removeItem(AUTH_STORAGE_KEYS.refreshToken());
+              localStorage.removeItem(AUTH_STORAGE_KEYS.user());
+            }
           }
         }
       }

@@ -92,9 +92,9 @@ export default function SellerLandingPage() {
                 <Link href="/seller/register" className="inline-flex items-center justify-center gap-2 bg-primary-600 text-white px-8 py-4 rounded-xl font-bold text-base hover:bg-primary-700 transition-all shadow-primary active:scale-[0.98]">
                   Start Selling Now <ArrowRight size={18} />
                 </Link>
-                <Link href="/seller/dashboard" className="inline-flex items-center justify-center gap-2 bg-white/10 text-white border border-white/20 px-8 py-4 rounded-xl font-bold text-base hover:bg-white/20 transition-all">
+                <a href="https://seller.xelnova.in" className="inline-flex items-center justify-center gap-2 bg-white/10 text-white border border-white/20 px-8 py-4 rounded-xl font-bold text-base hover:bg-white/20 transition-all">
                   Seller Login
-                </Link>
+                </a>
               </div>
             </motion.div>
             <motion.div initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.7, delay: 0.2 }} className="hidden md:block">

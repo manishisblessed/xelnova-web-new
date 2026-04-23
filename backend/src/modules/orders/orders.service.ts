@@ -477,7 +477,7 @@ export class OrdersService {
     const update: { name?: string; email?: string } = {};
 
     const trimmedName = name?.trim();
-    if (trimmedName && !current.name?.trim()) {
+    if (trimmedName) {
       update.name = trimmedName;
     }
 

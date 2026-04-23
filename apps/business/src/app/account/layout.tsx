@@ -67,9 +67,12 @@ export default function AccountLayout({ children }: { children: React.ReactNode 
     usersApi
       .getProfile()
       .then((data) => { if (!cancelled) setUser(data); })
-      .catch(() => {
+      .catch((err: any) => {
         if (!cancelled) {
-          router.replace(`/login?redirect=${encodeURIComponent(pathname)}`);
+          const status = err?.response?.status;
+          if (status === 401 || status === 403) {
+            router.replace(`/login?redirect=${encodeURIComponent(pathname)}`);
+          }
         }
       })
       .finally(() => { if (!cancelled) setLoading(false); });
