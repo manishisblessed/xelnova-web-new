@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -137,6 +137,8 @@ export default function RegisterPage() {
   const [loading, setLoading] = useState(false);
   const [sellerId, setSellerId] = useState<string | null>(null);
   const [resumeChecked, setResumeChecked] = useState(false);
+  /** Set at login: phone OTP → only collect email; Google → only collect phone. */
+  const [contactMode, setContactMode] = useState<'both' | 'email_only' | 'phone_only'>('both');
 
   const [formData, setFormData] = useState({
     fullName: '',
@@ -197,6 +199,14 @@ export default function RegisterPage() {
   const pointsRef = useRef<{ x: number; y: number; t: number }[]>([]);
   const strokeHistoryRef = useRef<ImageData[]>([]);
 
+  useLayoutEffect(() => {
+    try {
+      const ch = sessionStorage.getItem('xelnova-seller-auth-channel');
+      if (ch === 'phone') setContactMode('email_only');
+      else if (ch === 'email') setContactMode('phone_only');
+    } catch { /* ignore */ }
+  }, []);
+
   const resetToStep1 = useCallback(() => {
     setSellerId(null);
     setCurrentStep(1);
@@ -228,9 +238,11 @@ export default function RegisterPage() {
       const saved = sessionStorage.getItem('xelnova-reg');
       if (saved) {
         const { sellerId: savedId, step, email } = JSON.parse(saved);
-        if (savedId && step >= 2) {
+        if (savedId) {
           setSellerId(savedId);
-          setCurrentStep(step);
+          if (typeof step === 'number' && step >= 1 && step <= 3) {
+            setCurrentStep(step);
+          }
           if (email) setFormData(prev => ({ ...prev, email }));
           return;
         }
@@ -389,6 +401,17 @@ export default function RegisterPage() {
       loadMathCaptcha();
     }
   }, [loadMathCaptcha]);
+
+  /** Validation sets `errors.captcha` before solve; clear it once the puzzle is completed. */
+  useEffect(() => {
+    if (!captcha.solved) return;
+    setErrors((prev) => {
+      if (!prev.captcha) return prev;
+      const next = { ...prev };
+      delete next.captcha;
+      return next;
+    });
+  }, [captcha.solved]);
 
   useEffect(() => {
     if (recaptchaScriptLoaded.current || !RECAPTCHA_SITE_KEY) return;
@@ -983,15 +1006,35 @@ export default function RegisterPage() {
 
     if (step === 1) {
       if (!formData.fullName.trim()) newErrors.fullName = 'Full name is required';
-      if (!formData.email.trim()) newErrors.email = 'Email is required';
-      else if (!/\S+@\S+\.\S+/.test(formData.email)) newErrors.email = 'Invalid email';
-      if (!formData.phone.trim()) newErrors.phone = 'Phone is required';
-      else if (!/^[6-9]\d{9}$/.test(formData.phone)) newErrors.phone = 'Invalid phone number';
+      if (contactMode === 'email_only') {
+        if (!formData.email.trim()) newErrors.email = 'Email is required';
+        else if (!/\S+@\S+\.\S+/.test(formData.email)) newErrors.email = 'Invalid email';
+        if (!emailOtp.verified) newErrors.email = 'Email not verified';
+        if (!formData.phone.trim() || !/^[6-9]\d{9}$/.test(formData.phone)) {
+          newErrors.submit = 'Sign-in phone missing. Please sign in again and continue.';
+        } else if (!phoneOtp.verified) {
+          newErrors.submit = 'Sign-in phone must be verified. Please sign in again.';
+        }
+      } else if (contactMode === 'phone_only') {
+        if (!formData.phone.trim()) newErrors.phone = 'Phone is required';
+        else if (!/^[6-9]\d{9}$/.test(formData.phone)) newErrors.phone = 'Invalid phone number';
+        if (!phoneOtp.verified) newErrors.phone = 'Phone not verified';
+        if (!formData.email.trim() || !/\S+@\S+\.\S+/.test(formData.email)) {
+          newErrors.submit = 'Sign-in email missing. Please sign in again and continue.';
+        } else if (!emailOtp.verified) {
+          newErrors.submit = 'Sign-in email must be verified. Please sign in again.';
+        }
+      } else {
+        if (!formData.email.trim()) newErrors.email = 'Email is required';
+        else if (!/\S+@\S+\.\S+/.test(formData.email)) newErrors.email = 'Invalid email';
+        if (!formData.phone.trim()) newErrors.phone = 'Phone is required';
+        else if (!/^[6-9]\d{9}$/.test(formData.phone)) newErrors.phone = 'Invalid phone number';
+        if (!emailOtp.verified) newErrors.email = 'Email not verified';
+        if (!phoneOtp.verified) newErrors.phone = 'Phone not verified';
+      }
       if (!formData.password) newErrors.password = 'Password is required';
       else if (formData.password.length < 6) newErrors.password = 'Min 6 characters';
       if (formData.password !== formData.confirmPassword) newErrors.confirmPassword = "Passwords don't match";
-      if (!emailOtp.verified) newErrors.email = 'Email not verified';
-      if (!phoneOtp.verified) newErrors.phone = 'Phone not verified';
       if (!captcha.solved) newErrors.captcha = 'Complete the puzzle';
     }
 
@@ -1311,7 +1354,17 @@ export default function RegisterPage() {
                   {/* ===== STEP 1: Account ===== */}
                   {currentStep === 1 && (
                     <>
-                      <StepHeader step={1} title="Create your account" description="Verify your email and phone, then set a secure password." />
+                      <StepHeader
+                        step={1}
+                        title="Create your account"
+                        description={
+                          contactMode === 'email_only'
+                            ? 'Verify your email, then set a secure password. Your mobile number is already verified from sign-in.'
+                            : contactMode === 'phone_only'
+                              ? 'Verify your mobile number, then set a secure password. Your email is already verified from sign-in.'
+                              : 'Verify your email and phone, then set a secure password.'
+                        }
+                      />
 
                       {/* Captcha */}
                       <div className="mb-6 p-4 rounded-xl border border-gray-200 bg-gray-50/50">
@@ -1321,7 +1374,7 @@ export default function RegisterPage() {
                         </div>
                         {captcha.solved ? (
                           <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 rounded-lg px-3 py-2">
-                            <CheckCircle size={16} /> Verified
+                            <CheckCircle size={16} /> Completed
                           </div>
                         ) : captcha.mode === 'math' && captcha.mathPuzzle ? (
                           <div className="space-y-2">
@@ -1341,7 +1394,9 @@ export default function RegisterPage() {
                             <span className="text-sm text-gray-700">Verify I&apos;m not a robot</span>
                           </button>
                         )}
-                        {errors.captcha && <p className="text-xs text-red-500 mt-1">{errors.captcha}</p>}
+                        {errors.captcha && !captcha.solved && (
+                          <p className="text-xs text-red-500 mt-1">{errors.captcha}</p>
+                        )}
                       </div>
 
                       {/* Full Name */}
@@ -1354,7 +1409,8 @@ export default function RegisterPage() {
                         {errors.fullName && <p className="text-xs text-red-500 mt-1">{errors.fullName}</p>}
                       </div>
 
-                      {/* Email + OTP */}
+                      {/* Email + OTP (hidden when user signed in with email/Google — phone is the only new verification) */}
+                      {contactMode !== 'phone_only' && (
                       <div className="mb-5">
                         <label className={labelClass}>Email Address *</label>
                         {emailOtp.verified ? (
@@ -1406,8 +1462,10 @@ export default function RegisterPage() {
                         {emailOtp.error && <p className="text-xs text-red-500 mt-1.5">{emailOtp.error}</p>}
                         {errors.email && <p className="text-xs text-red-500 mt-1.5">{errors.email}</p>}
                       </div>
+                      )}
 
-                      {/* Phone + OTP */}
+                      {/* Phone + OTP (hidden when user signed in with phone OTP — email is the only new verification) */}
+                      {contactMode !== 'email_only' && (
                       <div className="mb-5">
                         <label className={labelClass}>Mobile Number *</label>
                         {phoneOtp.verified ? (
@@ -1459,6 +1517,7 @@ export default function RegisterPage() {
                         {phoneOtp.error && <p className="text-xs text-red-500 mt-1.5">{phoneOtp.error}</p>}
                         {errors.phone && <p className="text-xs text-red-500 mt-1.5">{errors.phone}</p>}
                       </div>
+                      )}
 
                       {/* Password */}
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">

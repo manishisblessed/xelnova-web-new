@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, Query, Res, Header } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, Query, Res, Header, BadRequestException } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { Response } from 'express';
 import { SellerDashboardService } from './seller-dashboard.service';
@@ -150,6 +150,17 @@ export class SellerDashboardController {
   @ApiOperation({ summary: 'Get brands proposed by this seller' })
   async getSellerBrands(@CurrentUser('id') userId: string) {
     return successResponse(await this.service.getSellerBrands(userId), 'Brands fetched');
+  }
+
+  @Get('brands/listing-hint')
+  @ApiOperation({
+    summary: 'Whether a brand name will need dealer certificate + additional documents (registered by another seller)',
+  })
+  async getBrandListingHint(@CurrentUser('id') userId: string, @Query('brand') brand?: string) {
+    if (brand == null || String(brand).trim() === '') {
+      throw new BadRequestException('Query parameter "brand" is required');
+    }
+    return successResponse(await this.service.getBrandListingHint(userId, String(brand)), 'Hint');
   }
 
   // ─── Seller Coupons ───

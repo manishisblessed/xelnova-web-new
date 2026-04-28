@@ -1,7 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:3001/api/v1';
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
+
+function resolveServerApiV1Base(request: NextRequest): string {
+  const fromPublic = process.env.NEXT_PUBLIC_API_URL?.trim();
+  if (fromPublic) return fromPublic.replace(/\/$/, '');
+
+  const fromEnv =
+    process.env.BACKEND_URL?.trim() || process.env.ADMIN_INTERNAL_API_URL?.trim();
+  if (fromEnv) {
+    const b = fromEnv.replace(/\/$/, '');
+    return b.endsWith('/api/v1') ? b : `${b}/api/v1`;
+  }
+
+  const { origin } = new URL(request.url);
+  return `${origin}/api/v1`;
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -10,7 +24,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'No refresh token' }, { status: 401 });
     }
 
-    const backendRes = await fetch(`${BACKEND_URL}/auth/refresh`, {
+    const apiV1 = resolveServerApiV1Base(request);
+    const backendRes = await fetch(`${apiV1}/auth/refresh`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

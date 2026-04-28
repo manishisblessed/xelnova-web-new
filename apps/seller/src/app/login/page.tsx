@@ -75,7 +75,14 @@ function LoginFormInner() {
     user: { id: string; name: string; email: string; role: string; avatar?: string | null },
     hasSellerProfile?: boolean,
     refreshToken?: string,
+    /** Drives /register step 1: phone OTP sign-in → collect email only; Google → collect phone only. */
+    authChannel?: 'phone' | 'email' | null,
   ) => {
+    if (authChannel) {
+      try {
+        sessionStorage.setItem('xelnova-seller-auth-channel', authChannel);
+      } catch { /* ignore */ }
+    }
     const dashboardUser = {
       id: user.id,
       name: user.name,
@@ -154,7 +161,13 @@ function LoginFormInner() {
           return;
         }
 
-        await createSessionAndRedirect(payload.accessToken, payload.user, payload.hasSellerProfile, payload.refreshToken);
+        await createSessionAndRedirect(
+          payload.accessToken,
+          payload.user,
+          payload.hasSellerProfile,
+          payload.refreshToken,
+          'email',
+        );
         return;
       } else {
         const msg =
@@ -282,7 +295,13 @@ function LoginFormInner() {
       if (!result.accessToken || !result.user) {
         throw new Error('Could not sign you in. Please try again.');
       }
-      await createSessionAndRedirect(result.accessToken, result.user, result.hasSellerProfile, result.refreshToken);
+      await createSessionAndRedirect(
+        result.accessToken,
+        result.user,
+        result.hasSellerProfile,
+        result.refreshToken,
+        'phone',
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Invalid OTP');
     } finally {

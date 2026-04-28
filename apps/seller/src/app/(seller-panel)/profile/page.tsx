@@ -23,57 +23,115 @@ import { StatCard } from '@/components/dashboard/stat-card';
 import { Badge, Button, Input, Modal } from '@xelnova/ui';
 import { apiGetProfile, apiUpdateProfile, apiUploadImage } from '@/lib/api';
 
-/**
- * Display a seller code in a more human-friendly form by inserting
- * thousands separators in the trailing numeric segment, e.g.
- *   "XEL3501"            → "XEL3,501"
- *   "Grand_HR-XEL003502" → "Grand_HR-XEL3,502"  (also strips leading zeros)
- *
- * Per testing observation #17 — the raw padded number was hard to read.
- */
-function formatSellerCodeForDisplay(code: string): string {
-  return code.replace(/(XEL)(0*)(\d+)/i, (_, prefix: string, _zeros: string, num: string) => {
-    const n = num.replace(/^0+/, '') || '0';
-    const withCommas = Number(n).toLocaleString('en-IN');
-    return `${prefix}${withCommas}`;
-  });
+/** Public seller # shown in the UI: first registered seller (internal sequence 1) → 3501. */
+const PUBLIC_SELLER_ID_BASE = 3500;
+
+function xelSequenceFromCode(code: string | null | undefined): number | null {
+  if (!code) return null;
+  const m = code.match(/XEL(\d+)/i);
+  if (!m) return null;
+  const n = parseInt(m[1], 10);
+  return Number.isFinite(n) && n >= 1 ? n : null;
 }
 
-function SellerIdBadge({ code }: { code: string }) {
+function getPublicSellerIdNumber(
+  sellerCodeSequence: number | null | undefined,
+  sellerCode: string | null | undefined,
+): number | null {
+  const seq = sellerCodeSequence != null && sellerCodeSequence >= 1
+    ? sellerCodeSequence
+    : xelSequenceFromCode(sellerCode);
+  if (seq == null) return null;
+  return PUBLIC_SELLER_ID_BASE + seq;
+}
+
+function CopyableIdentityChip({
+  label,
+  valueDisplay,
+  copyText,
+  copiedLabel,
+  disabled,
+}: {
+  label: string;
+  valueDisplay: string;
+  copyText: string;
+  copiedLabel: string;
+  disabled?: boolean;
+}) {
   const [copied, setCopied] = useState(false);
-  const display = formatSellerCodeForDisplay(code);
 
   const handleCopy = useCallback(async () => {
+    if (disabled || !copyText.trim()) return;
     try {
       if (typeof navigator !== 'undefined' && navigator.clipboard) {
-        // Copy the raw code (without commas) so it stays valid for lookups.
-        await navigator.clipboard.writeText(code);
+        await navigator.clipboard.writeText(copyText);
       }
       setCopied(true);
-      toast.success('Seller ID copied');
+      toast.success(copiedLabel);
       setTimeout(() => setCopied(false), 1500);
     } catch {
       toast.error('Could not copy');
     }
-  }, [code]);
+  }, [copyText, copiedLabel, disabled]);
 
   return (
     <button
       type="button"
       onClick={handleCopy}
-      title="Click to copy"
-      className="group mt-2 inline-flex items-center gap-2 rounded-lg border border-primary-200 bg-primary-50/70 px-2.5 py-1 text-xs font-mono font-semibold tracking-wide text-primary-700 shadow-sm transition-all hover:border-primary-300 hover:bg-primary-100/80 focus:outline-none focus:ring-2 focus:ring-primary-500/40"
+      disabled={disabled}
+      title={disabled ? undefined : 'Click to copy'}
+      className="group mt-2 inline-flex max-w-full min-w-0 items-center gap-2 rounded-lg border border-primary-200 bg-primary-50/70 px-2.5 py-1 text-left text-xs font-semibold text-primary-700 shadow-sm transition-all hover:border-primary-300 hover:bg-primary-100/80 focus:outline-none focus:ring-2 focus:ring-primary-500/40 disabled:cursor-default disabled:opacity-60"
     >
-      <span className="text-[10px] font-sans font-medium uppercase tracking-[0.12em] text-primary-600/70">
-        Seller ID
+      <span className="shrink-0 text-[10px] font-sans font-medium uppercase tracking-[0.12em] text-primary-600/70">
+        {label}
       </span>
-      <span className="text-text-primary">{display}</span>
-      {copied ? (
-        <Check className="h-3.5 w-3.5 text-success-500" aria-hidden />
+      <span className="min-w-0 font-mono tracking-wide text-text-primary truncate">{valueDisplay}</span>
+      {disabled ? null : copied ? (
+        <Check className="h-3.5 w-3.5 shrink-0 text-success-500" aria-hidden />
       ) : (
-        <Copy className="h-3.5 w-3.5 text-primary-500/70 transition-opacity group-hover:opacity-100 opacity-70" aria-hidden />
+        <Copy className="h-3.5 w-3.5 shrink-0 text-primary-500/70 transition-opacity group-hover:opacity-100 opacity-70" aria-hidden />
       )}
     </button>
+  );
+}
+
+function ProfileSellerIdentity({
+  storeName,
+  sellerCodeSequence,
+  sellerCode,
+  slug,
+}: {
+  storeName: string;
+  sellerCodeSequence?: number | null;
+  sellerCode?: string | null;
+  slug: string;
+}) {
+  const name = (storeName || '').trim() || '—';
+  const publicId = getPublicSellerIdNumber(sellerCodeSequence, sellerCode ?? null);
+  const idFallback = (sellerCode || slug || '').trim();
+  const idDisplay = publicId != null
+    ? publicId.toLocaleString('en-IN')
+    : (idFallback || '—');
+  const idCopy = publicId != null ? String(publicId) : idFallback;
+  const idDisabled = !idCopy;
+
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-2">
+      <CopyableIdentityChip
+        label="Seller name"
+        valueDisplay={name}
+        copyText={name === '—' ? '' : name}
+        copiedLabel="Seller name copied"
+        disabled={!name || name === '—'}
+      />
+      <CopyableIdentityChip
+        label="Seller ID"
+        valueDisplay={idDisplay}
+        copyText={idCopy}
+        copiedLabel="Seller ID copied"
+        disabled={idDisabled}
+      />
+    </div>
   );
 }
 
@@ -138,8 +196,10 @@ interface SellerProfileResponse {
   id: string;
   storeName: string;
   slug: string;
-  /** Friendly public seller code, e.g. "Grand_HR-XEL00001". Falls back to slug when null (legacy sellers). */
+  /** Friendly public seller code, e.g. "Grand_HR-XEL1". Falls back to slug when null (legacy sellers). */
   sellerCode?: string | null;
+  /** Internal sequence; public seller ID in UI = 3500 + sequence (e.g. 1 → 3501). */
+  sellerCodeSequence?: number | null;
   logo?: string | null;
   description?: string | null;
   verified: boolean;
@@ -357,7 +417,12 @@ export default function ProfilePage() {
                     <Mail className="h-3.5 w-3.5 shrink-0 opacity-70" />
                     <span className="truncate">{profile.user?.email}</span>
                   </p>
-                  <SellerIdBadge code={profile.sellerCode || profile.slug} />
+                  <ProfileSellerIdentity
+                    storeName={profile.storeName}
+                    sellerCodeSequence={profile.sellerCodeSequence}
+                    sellerCode={profile.sellerCode}
+                    slug={profile.slug}
+                  />
                 </div>
               </div>
               <Button type="button" variant="outline" onClick={openEdit} className="shrink-0 self-start sm:self-end">

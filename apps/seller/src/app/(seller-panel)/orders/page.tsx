@@ -1851,9 +1851,6 @@ function ShipOrderModal({
                 <p className="text-sm font-semibold text-primary-700">
                   Delivery charge: ₹{estimatedShipping.total}
                 </p>
-                <p className="text-[11px] text-primary-600/80 mt-0.5">
-                  All-inclusive Xelgo charge. The same single amount is shown to the customer.
-                </p>
               </div>
             )}
             <div className="flex justify-end gap-2 pt-2">

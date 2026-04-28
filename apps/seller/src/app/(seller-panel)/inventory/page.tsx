@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useSearchParams } from 'next/navigation';
 import { motion, AnimatePresence, Reorder, useDragControls } from 'framer-motion';
-import { ImagePlus, Pencil, Plus, Trash2, X, Crown, Loader2, Layers, GripVertical, Upload, Camera, Ruler, Image as ImageIcon, Pause, Play, Search, ChevronLeft as ChevronLeftIcon, ChevronRight as ChevronRightIcon, ChevronDown } from 'lucide-react';
+import { ImagePlus, Pencil, Plus, Trash2, X, Crown, Loader2, Layers, GripVertical, Upload, Camera, Ruler, Image as ImageIcon, Pause, Play, Search, ChevronLeft as ChevronLeftIcon, ChevronRight as ChevronRightIcon, ChevronDown, ExternalLink } from 'lucide-react';
 import { toast } from 'sonner';
 import { DashboardHeader } from '@/components/dashboard/dashboard-header';
 import { DataTable, type Column } from '@/components/dashboard/data-table';
@@ -12,12 +12,14 @@ import { Badge, Button, Input, Modal } from '@xelnova/ui';
 import {
   apiCreateProduct,
   apiDeleteProduct,
+  apiGetBrandListingHint,
   apiGetProduct,
   apiGetProductAttributePresets,
   apiGetProducts,
   apiUpdateProduct,
   apiUploadImage,
   apiUploadImages,
+  type BrandListingHint,
 } from '@/lib/api';
 import { useSellerProfile } from '@/lib/seller-profile-context';
 import { VerificationBanner } from '@/components/dashboard/verification-banner';
@@ -55,11 +57,82 @@ const API_URL = publicApiBase();
 // Pricing contract: the value typed by the seller IS the GST-inclusive price
 // stored in the database and shown to buyers everywhere. No conversion happens
 // at the form boundary — see `packages/utils/src/index.ts`.
-function compareAtFromForm(formCompare: string): number | undefined {
-  if (!formCompare.trim()) return undefined;
-  const n = Number(formCompare);
-  if (Number.isNaN(n) || n < 0) return NaN;
-  return n;
+/** Whole non-negative integers for stock fields. */
+function parseNonNegativeIntString(s: string): { ok: true; n: number } | { ok: false } {
+  if (!s.trim()) return { ok: false };
+  const n = Number(s);
+  if (Number.isNaN(n) || n < 0 || !Number.isInteger(n)) return { ok: false };
+  return { ok: true, n };
+}
+
+function validateMainProductCommerce(
+  formPrice: string,
+  formCompare: string,
+  formStock: string,
+  formSku: string,
+): string | null {
+  const price = Number(formPrice);
+  if (Number.isNaN(price) || price < 0) {
+    return 'Enter a valid selling price (₹), inclusive of GST.';
+  }
+  if (!formCompare.trim()) {
+    return 'MRP (₹) is required. Enter a valid amount, inclusive of GST.';
+  }
+  const mrp = Number(formCompare);
+  if (Number.isNaN(mrp) || mrp < 0) {
+    return 'Enter a valid MRP (₹), inclusive of GST.';
+  }
+  const st = parseNonNegativeIntString(formStock);
+  if (!st.ok) {
+    return 'Enter a valid stock quantity (whole number, 0 or more).';
+  }
+  if (!formSku.trim()) {
+    return 'SKU is required for this product.';
+  }
+  return null;
+}
+
+function validateVariantRowsCommerce(rows: FormVariantRow[]): string | null {
+  for (const row of rows) {
+    for (const val of row.values) {
+      if (!val.label.trim()) continue;
+      const name = val.label.trim();
+      if (!val.price.trim()) {
+        return `Variant "${name}": Price (₹) is required.`;
+      }
+      const p = Number(val.price);
+      if (Number.isNaN(p) || p < 0) {
+        return `Variant "${name}": Enter a valid Price (₹).`;
+      }
+      if (!val.compareAtPrice.trim()) {
+        return `Variant "${name}": MRP (₹) is required.`;
+      }
+      const mrp = Number(val.compareAtPrice);
+      if (Number.isNaN(mrp) || mrp < 0) {
+        return `Variant "${name}": Enter a valid MRP (₹).`;
+      }
+      if (!val.stock.trim()) {
+        return `Variant "${name}": Stock is required.`;
+      }
+      const st = parseNonNegativeIntString(val.stock);
+      if (!st.ok) {
+        return `Variant "${name}": Enter a valid stock quantity (whole number).`;
+      }
+      if (!val.sku.trim()) {
+        return `Variant "${name}": SKU is required.`;
+      }
+    }
+  }
+  const payload = formRowsToVariantGroups(rows);
+  for (const row of rows) {
+    if (row.label.trim() && !row.values.some((v) => v.label.trim())) {
+      return `Variant group "${row.label.trim()}" needs at least one value with label, price, MRP, stock, and SKU.`;
+    }
+  }
+  if (rows.length > 0 && payload.length === 0) {
+    return 'Complete each variant group: option name, at least one value, and price, MRP, stock, and SKU for every value.';
+  }
+  return null;
 }
 
 interface CategoryNode {
@@ -309,6 +382,7 @@ function productStatusVariant(status: string): 'success' | 'warning' | 'danger' 
   if (status === 'ACTIVE') return 'success';
   if (status === 'ON_HOLD') return 'warning';
   if (status === 'PENDING') return 'warning';
+  if (status === 'PENDING_BRAND_AUTHORIZATION') return 'warning';
   if (status === 'REJECTED') return 'danger';
   if (status === 'DRAFT') return 'info';
   return 'default';
@@ -316,6 +390,7 @@ function productStatusVariant(status: string): 'success' | 'warning' | 'danger' 
 
 function productStatusLabel(status: string): string {
   if (status === 'ON_HOLD') return 'ON HOLD';
+  if (status === 'PENDING_BRAND_AUTHORIZATION') return 'PENDING · BRAND';
   return status;
 }
 
@@ -1234,6 +1309,7 @@ export default function SellerInventoryPage() {
   const [formPrice, setFormPrice] = useState('');
   const [formCompare, setFormCompare] = useState('');
   const [formStock, setFormStock] = useState('');
+  const [formSku, setFormSku] = useState('');
   const [formCategoryId, setFormCategoryId] = useState('');
   const [formShort, setFormShort] = useState('');
   const [formImages, setFormImages] = useState<ProductImage[]>([]);
@@ -1247,6 +1323,11 @@ export default function SellerInventoryPage() {
   const [formGstRate, setFormGstRate] = useState('');
   const [formBrandCertificate, setFormBrandCertificate] = useState('');
   const [uploadingBrandCertificate, setUploadingBrandCertificate] = useState(false);
+  /** Extra document URLs when listing under another seller's brand (admin must approve). */
+  const [formBrandAuthExtraUrls, setFormBrandAuthExtraUrls] = useState<string[]>(['']);
+  const [brandListingHint, setBrandListingHint] = useState<BrandListingHint | null>(null);
+  const [brandHintLoading, setBrandHintLoading] = useState(false);
+  const brandHintDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [formLowStock, setFormLowStock] = useState('5');
   const [formWeight, setFormWeight] = useState('');
   // Dimensions are persisted as a single "L x W x H" string for backwards
@@ -1271,6 +1352,38 @@ export default function SellerInventoryPage() {
   const [formRegulatoryInfo, setFormRegulatoryInfo] = useState('');
   const [formWarrantyInfo, setFormWarrantyInfo] = useState('');
   const brandCertificateInputRef = useRef<HTMLInputElement>(null);
+  const [showBrandCertUrlField, setShowBrandCertUrlField] = useState(false);
+  const [brandCertLinkDraft, setBrandCertLinkDraft] = useState('');
+  const [brandCertImageError, setBrandCertImageError] = useState(false);
+  const dealerAuthorizationRequired = brandListingHint?.mode === 'dealer_authorization_required';
+
+  useEffect(() => {
+    setBrandCertImageError(false);
+  }, [formBrandCertificate]);
+
+  // Fetch listing rules when the seller types a brand (new brand vs. authorized dealer, etc.)
+  useEffect(() => {
+    if (!createOpen && !editProduct) return;
+    if (brandHintDebounceRef.current) {
+      clearTimeout(brandHintDebounceRef.current);
+    }
+    const name = formBrand.trim();
+    if (!name) {
+      setBrandListingHint({ mode: 'empty' });
+      setBrandHintLoading(false);
+      return;
+    }
+    setBrandHintLoading(true);
+    brandHintDebounceRef.current = setTimeout(() => {
+      void apiGetBrandListingHint(name)
+        .then((h) => setBrandListingHint(h))
+        .catch(() => setBrandListingHint({ mode: 'empty' }))
+        .finally(() => setBrandHintLoading(false));
+    }, 400);
+    return () => {
+      if (brandHintDebounceRef.current) clearTimeout(brandHintDebounceRef.current);
+    };
+  }, [formBrand, createOpen, editProduct]);
 
   // ─── Autosave (Add Product draft) ───
   // We persist the entire create-form state to localStorage so the seller
@@ -1289,6 +1402,7 @@ export default function SellerInventoryPage() {
       formPrice,
       formCompare,
       formStock,
+      formSku,
       formCategoryId,
       formShort,
       formImages,
@@ -1299,6 +1413,7 @@ export default function SellerInventoryPage() {
       formHsnCode,
       formGstRate,
       formBrandCertificate,
+      formBrandAuthExtraUrls,
       formLowStock,
       formWeight,
       formDimensions,
@@ -1312,9 +1427,9 @@ export default function SellerInventoryPage() {
       formWarrantyInfo,
     }),
     [
-      formName, formBrand, formPrice, formCompare, formStock, formCategoryId,
+      formName, formBrand, formPrice, formCompare, formStock, formSku, formCategoryId,
       formShort, formImages, formVariantRows, formMetaTitle, formMetaKeywords,
-      formMetaDesc, formHsnCode, formGstRate, formBrandCertificate, formLowStock,
+      formMetaDesc, formHsnCode, formGstRate, formBrandCertificate, formBrandAuthExtraUrls, formLowStock,
       formWeight, formDimensions, formFeaturesAndSpecs, formMaterialsAndCare,
       formItemDetails, formAdditionalDetails, formProductDescription,
       formSafetyInfo, formRegulatoryInfo, formWarrantyInfo,
@@ -1358,6 +1473,7 @@ export default function SellerInventoryPage() {
       setFormPrice(get('formPrice', ''));
       setFormCompare(get('formCompare', ''));
       setFormStock(get('formStock', ''));
+      setFormSku(get('formSku', ''));
       setFormCategoryId(get('formCategoryId', ''));
       setFormShort(get('formShort', ''));
       setFormImages(get<ProductImage[]>('formImages', []));
@@ -1368,6 +1484,12 @@ export default function SellerInventoryPage() {
       setFormHsnCode(get('formHsnCode', ''));
       setFormGstRate(get('formGstRate', ''));
       setFormBrandCertificate(get('formBrandCertificate', ''));
+      const extraDraft = get<unknown>('formBrandAuthExtraUrls', null);
+      if (Array.isArray(extraDraft) && extraDraft.length) {
+        setFormBrandAuthExtraUrls(extraDraft.map((u: unknown) => String(u)));
+      } else {
+        setFormBrandAuthExtraUrls(['']);
+      }
       setFormLowStock(get('formLowStock', '5'));
       setFormWeight(get('formWeight', ''));
       const dimDraft = get('formDimensions', '');
@@ -1461,6 +1583,7 @@ export default function SellerInventoryPage() {
     setFormPrice('');
     setFormCompare('');
     setFormStock('');
+    setFormSku('');
     setFormCategoryId('');
     setFormShort('');
     setFormImages([]);
@@ -1472,6 +1595,10 @@ export default function SellerInventoryPage() {
     setFormHsnCode('');
     setFormGstRate('');
     setFormBrandCertificate('');
+    setShowBrandCertUrlField(false);
+    setBrandCertLinkDraft('');
+    setFormBrandAuthExtraUrls(['']);
+    setBrandListingHint(null);
     setFormLowStock('5');
     setFormWeight('');
     setFormDimensions('');
@@ -1495,6 +1622,8 @@ export default function SellerInventoryPage() {
 
   const openEdit = (p: SellerProduct) => {
     setEditProduct(p);
+    setShowBrandCertUrlField(false);
+    setBrandCertLinkDraft('');
     setFormName(p.name);
     setFormBrand('');
     setFormPrice('');
@@ -1515,6 +1644,7 @@ export default function SellerInventoryPage() {
         setFormPrice(String(basePrice));
         setFormCompare(baseCompare != null ? String(baseCompare) : '');
         setFormStock(String(full.stock ?? p.stock));
+        setFormSku(typeof full.sku === 'string' ? full.sku : String(full.sku ?? ''));
         setFormCategoryId(String(full.categoryId ?? ''));
         setFormShort(String(full.shortDescription ?? ''));
         setFormImages(urlsToProductImages(full.images as string[] | undefined));
@@ -1546,6 +1676,12 @@ export default function SellerInventoryPage() {
         setFormSafetyInfo(String(full.safetyInfo ?? ''));
         setFormRegulatoryInfo(String(full.regulatoryInfo ?? ''));
         setFormWarrantyInfo(String(full.warrantyInfo ?? ''));
+        const extraUrls = full.brandAuthAdditionalDocumentUrls as string[] | undefined;
+        if (Array.isArray(extraUrls) && extraUrls.length) {
+          setFormBrandAuthExtraUrls(extraUrls.map((u) => String(u)));
+        } else {
+          setFormBrandAuthExtraUrls(['']);
+        }
       })
       .catch((err: Error) => {
         toast.error(err.message || 'Could not load product details');
@@ -1773,6 +1909,8 @@ export default function SellerInventoryPage() {
     try {
       const { url } = await apiUploadImage(file);
       setFormBrandCertificate(url);
+      setShowBrandCertUrlField(false);
+      setBrandCertLinkDraft('');
       toast.success('Brand authorization certificate uploaded');
     } catch {
       toast.error('Failed to upload certificate. Please try again.');
@@ -1781,9 +1919,18 @@ export default function SellerInventoryPage() {
     }
   };
 
+  const applyBrandCertFromLink = () => {
+    const u = brandCertLinkDraft.trim();
+    if (!u.startsWith('http://') && !u.startsWith('https://')) {
+      toast.error('Enter a valid URL starting with https://');
+      return;
+    }
+    setFormBrandCertificate(u);
+    setBrandCertLinkDraft('');
+    setShowBrandCertUrlField(false);
+  };
+
   const submitCreate = async () => {
-    const priceIncl = Number(formPrice);
-    const stock = Number(formStock);
     if (!formName.trim() || !formCategoryId) {
       toast.error('Name and category are required');
       return;
@@ -1796,16 +1943,17 @@ export default function SellerInventoryPage() {
       toast.error('Brand authorization certificate is required');
       return;
     }
+    const additionalBrandDocUrls = formBrandAuthExtraUrls.map((s) => s.trim()).filter(Boolean);
+    if (dealerAuthorizationRequired && additionalBrandDocUrls.length < 1) {
+      toast.error('Add at least one additional document URL (e.g. dealer letter, invoice) for this brand.');
+      return;
+    }
     if (!formHsnCode.trim()) {
       toast.error('HSN code is required');
       return;
     }
     if (!formGstRate.trim()) {
       toast.error('GST rate is required');
-      return;
-    }
-    if (Number.isNaN(priceIncl) || priceIncl < 0) {
-      toast.error('Enter a valid price (inclusive of GST)');
       return;
     }
     if (Number.isNaN(Number(formGstRate)) || Number(formGstRate) < 0) {
@@ -1822,12 +1970,19 @@ export default function SellerInventoryPage() {
       toast.error('Add product information before submitting');
       return;
     }
-    const price = priceIncl;
-    const compareAtPrice = compareAtFromForm(formCompare);
-    if (compareAtPrice !== undefined && Number.isNaN(compareAtPrice)) {
-      toast.error('Enter a valid compare-at price (inclusive of GST)');
+    const mainCommerceErr = validateMainProductCommerce(formPrice, formCompare, formStock, formSku);
+    if (mainCommerceErr) {
+      toast.error(mainCommerceErr);
       return;
     }
+    const variantCommerceErr = validateVariantRowsCommerce(formVariantRows);
+    if (variantCommerceErr) {
+      toast.error(variantCommerceErr);
+      return;
+    }
+    const price = Number(formPrice);
+    const compareAtPrice = Number(formCompare);
+    const stockN = Math.trunc(Number(formStock));
     const imgs = productImagesToUrls(formImages);
     const variantPayload = formRowsToVariantGroups(formVariantRows);
     const metaTitleValue = formMetaKeywords.length
@@ -1839,8 +1994,9 @@ export default function SellerInventoryPage() {
         name: formName.trim(),
         brand: formBrand.trim(),
         price,
+        sku: formSku.trim(),
         categoryId: formCategoryId,
-        stock: Number.isNaN(stock) ? 0 : stock,
+        stock: stockN,
         compareAtPrice,
         shortDescription: formShort.trim() || undefined,
         images: imgs.length ? imgs : undefined,
@@ -1850,6 +2006,7 @@ export default function SellerInventoryPage() {
         hsnCode: formHsnCode.trim(),
         gstRate: Number(formGstRate),
         brandAuthorizationCertificate: formBrandCertificate.trim(),
+        brandAuthAdditionalDocumentUrls: dealerAuthorizationRequired ? additionalBrandDocUrls : [],
         lowStockThreshold: formLowStock ? Number(formLowStock) : undefined,
         weight: formWeight ? Number(formWeight) : undefined,
         dimensions: formDimensions.trim() || undefined,
@@ -1862,8 +2019,10 @@ export default function SellerInventoryPage() {
         regulatoryInfo: formRegulatoryInfo.trim() || undefined,
         warrantyInfo: formWarrantyInfo.trim() || undefined,
       });
-      toast.success('Product created and submitted for approval', { 
-        description: 'Your product will be reviewed by our team and go live once approved.' 
+      toast.success('Product created and submitted for approval', {
+        description: dealerAuthorizationRequired
+          ? 'Your brand documents will be reviewed before this listing can go live.'
+          : 'Your product will be reviewed by our team and go live once approved.',
       });
       setCreateOpen(false);
       resetForm();
@@ -1878,8 +2037,6 @@ export default function SellerInventoryPage() {
 
   const submitEdit = async () => {
     if (!editProduct) return;
-    const priceIncl = Number(formPrice);
-    const stock = Number(formStock);
     if (!formName.trim()) {
       toast.error('Name is required');
       return;
@@ -1892,16 +2049,17 @@ export default function SellerInventoryPage() {
       toast.error('Brand authorization certificate is required');
       return;
     }
+    const additionalBrandDocUrlsEdit = formBrandAuthExtraUrls.map((s) => s.trim()).filter(Boolean);
+    if (dealerAuthorizationRequired && additionalBrandDocUrlsEdit.length < 1) {
+      toast.error('Add at least one additional document URL (e.g. dealer letter, invoice) for this brand.');
+      return;
+    }
     if (!formHsnCode.trim()) {
       toast.error('HSN code is required');
       return;
     }
     if (!formGstRate.trim()) {
       toast.error('GST rate is required');
-      return;
-    }
-    if (Number.isNaN(priceIncl) || priceIncl < 0) {
-      toast.error('Enter a valid price (inclusive of GST)');
       return;
     }
     if (Number.isNaN(Number(formGstRate)) || Number(formGstRate) < 0) {
@@ -1918,12 +2076,19 @@ export default function SellerInventoryPage() {
       toast.error('Add product information before saving');
       return;
     }
-    const price = priceIncl;
-    const compareAtPrice = compareAtFromForm(formCompare);
-    if (compareAtPrice !== undefined && Number.isNaN(compareAtPrice)) {
-      toast.error('Enter a valid compare-at price (inclusive of GST)');
+    const mainCommerceErr = validateMainProductCommerce(formPrice, formCompare, formStock, formSku);
+    if (mainCommerceErr) {
+      toast.error(mainCommerceErr);
       return;
     }
+    const variantCommerceErr = validateVariantRowsCommerce(formVariantRows);
+    if (variantCommerceErr) {
+      toast.error(variantCommerceErr);
+      return;
+    }
+    const price = Number(formPrice);
+    const compareAtPrice = Number(formCompare);
+    const stockN = Math.trunc(Number(formStock));
     const imgs = productImagesToUrls(formImages);
     const variantPayload = formRowsToVariantGroups(formVariantRows);
     const metaTitleValue = formMetaKeywords.length
@@ -1935,7 +2100,8 @@ export default function SellerInventoryPage() {
         name: formName.trim(),
         brand: formBrand.trim(),
         price,
-        stock: Number.isNaN(stock) ? 0 : stock,
+        sku: formSku.trim(),
+        stock: stockN,
         compareAtPrice,
         shortDescription: formShort.trim() || undefined,
         images: imgs,
@@ -1946,6 +2112,7 @@ export default function SellerInventoryPage() {
         hsnCode: formHsnCode.trim(),
         gstRate: Number(formGstRate),
         brandAuthorizationCertificate: formBrandCertificate.trim(),
+        brandAuthAdditionalDocumentUrls: dealerAuthorizationRequired ? additionalBrandDocUrlsEdit : [],
         lowStockThreshold: formLowStock ? Number(formLowStock) : undefined,
         weight: formWeight ? Number(formWeight) : undefined,
         dimensions: formDimensions.trim() || undefined,
@@ -1985,7 +2152,11 @@ export default function SellerInventoryPage() {
   };
 
   const toggleHold = async (product: SellerProduct) => {
-    if (product.status === 'PENDING' || product.status === 'REJECTED') {
+    if (
+      product.status === 'PENDING' ||
+      product.status === 'PENDING_BRAND_AUTHORIZATION' ||
+      product.status === 'REJECTED'
+    ) {
       toast.error('Cannot change status of pending or rejected products');
       return;
     }
@@ -2057,6 +2228,9 @@ export default function SellerInventoryPage() {
           <Badge variant={productStatusVariant(row.status)}>{productStatusLabel(row.status)}</Badge>
           {row.status === 'PENDING' && (
             <span className="text-[10px] text-warning-600">Awaiting admin review</span>
+          )}
+          {row.status === 'PENDING_BRAND_AUTHORIZATION' && (
+            <span className="text-[10px] text-warning-600">Brand documents under review</span>
           )}
           {row.status === 'REJECTED' && row.rejectionReason && (
             <span className="text-[10px] text-danger-600 max-w-[140px] truncate" title={row.rejectionReason}>
@@ -2150,13 +2324,28 @@ export default function SellerInventoryPage() {
         value={formName}
         onChange={(e) => setFormName(e.target.value)}
       />
-      <Input
-        stackedLabel
-        label="Brand name"
-        required
-        value={formBrand}
-        onChange={(e) => setFormBrand(e.target.value)}
-      />
+      <div className="space-y-2">
+        <Input
+          stackedLabel
+          label="Brand name"
+          required
+          value={formBrand}
+          onChange={(e) => setFormBrand(e.target.value)}
+        />
+        {brandHintLoading && formBrand.trim() ? (
+          <p className="text-xs text-text-muted">Checking brand listing rules…</p>
+        ) : null}
+        {brandListingHint?.mode === 'dealer_authorization_required' ? (
+          <div className="rounded-lg border border-amber-200 bg-amber-50/80 px-3 py-2 text-xs text-amber-950">
+            {brandListingHint.message}
+          </div>
+        ) : null}
+        {brandListingHint?.mode === 'new_brand' && formBrand.trim() ? (
+          <p className="text-xs text-text-muted">
+            This brand will be registered for your store and reviewed with the product.
+          </p>
+        ) : null}
+      </div>
       <Input
         stackedLabel
         label="GST rate (%)"
@@ -2178,38 +2367,191 @@ export default function SellerInventoryPage() {
           Brand authorization certificate
           <span className="ml-0.5 text-danger-500">*</span>
         </label>
-        <div className="flex flex-wrap items-stretch gap-2">
-          <div className="min-w-[200px] flex-1">
-            <Input
-              value={formBrandCertificate}
-              onChange={(e) => setFormBrandCertificate(e.target.value)}
-            />
+        <input
+          ref={brandCertificateInputRef}
+          type="file"
+          accept="image/*"
+          className="sr-only"
+          onChange={(e) => {
+            const file = e.target.files?.[0] ?? null;
+            void uploadBrandCertificate(file);
+            e.target.value = '';
+          }}
+        />
+        {formBrandCertificate.trim() ? (
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-stretch gap-3">
+              <div className="relative h-40 min-w-[200px] max-w-sm flex-1 overflow-hidden rounded-xl border border-border bg-white">
+                {uploadingBrandCertificate ? (
+                  <div className="absolute inset-0 z-10 flex items-center justify-center bg-surface/80 backdrop-blur-sm">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary-500" />
+                  </div>
+                ) : null}
+                {!brandCertImageError ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={formBrandCertificate.trim()}
+                    alt="Brand authorization certificate"
+                    className="h-full w-full object-contain p-1"
+                    onError={() => setBrandCertImageError(true)}
+                  />
+                ) : (
+                  <div className="flex h-full min-h-[120px] flex-col items-center justify-center gap-2 p-3 text-center">
+                    <ImageIcon className="h-8 w-8 text-text-muted/60" />
+                    <p className="text-[11px] text-text-muted">Image preview is not available for this file.</p>
+                    <a
+                      href={formBrandCertificate.trim()}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-xs font-medium text-primary-600 hover:text-primary-700"
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" />
+                      Open certificate
+                    </a>
+                  </div>
+                )}
+              </div>
+              <div className="flex flex-col justify-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => brandCertificateInputRef.current?.click()}
+                  disabled={uploadingBrandCertificate}
+                >
+                  <Upload className="h-3.5 w-3.5 mr-1" />
+                  {uploadingBrandCertificate ? 'Uploading…' : 'Change'}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setFormBrandCertificate('');
+                    setShowBrandCertUrlField(false);
+                    setBrandCertLinkDraft('');
+                  }}
+                  disabled={uploadingBrandCertificate}
+                  className="border-border text-text-secondary"
+                >
+                  <Trash2 className="h-3.5 w-3.5 mr-1" />
+                  Remove
+                </Button>
+              </div>
+            </div>
+            <p className="text-[11px] text-text-muted">Certificate on file. Use Change to upload a different image or remove to clear.</p>
           </div>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => brandCertificateInputRef.current?.click()}
-            disabled={uploadingBrandCertificate}
-          >
-            {uploadingBrandCertificate ? 'Uploading…' : 'Upload'}
-          </Button>
-          <input
-            ref={brandCertificateInputRef}
-            type="file"
-            accept="image/*"
-            className="sr-only"
-            onChange={(e) => {
-              const file = e.target.files?.[0] ?? null;
-              void uploadBrandCertificate(file);
-              e.target.value = '';
-            }}
-          />
-        </div>
-        <p className="mt-1.5 text-[11px] text-text-muted">
-          Upload a clear certificate image proving authorization for this brand, or paste a URL above.
-        </p>
+        ) : (
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => brandCertificateInputRef.current?.click()}
+                disabled={uploadingBrandCertificate}
+              >
+                <Upload className="h-3.5 w-3.5 mr-1" />
+                {uploadingBrandCertificate ? 'Uploading…' : 'Upload certificate'}
+              </Button>
+              {!showBrandCertUrlField ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowBrandCertUrlField(true)}
+                  className="text-text-secondary"
+                >
+                  Use image link instead
+                </Button>
+              ) : null}
+            </div>
+            {showBrandCertUrlField ? (
+              <div className="flex flex-wrap items-stretch gap-2 pt-0.5">
+                <div className="min-w-[200px] flex-1">
+                  <Input
+                    value={brandCertLinkDraft}
+                    onChange={(e) => setBrandCertLinkDraft(e.target.value)}
+                    placeholder="https://…"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        applyBrandCertFromLink();
+                      }
+                    }}
+                  />
+                </div>
+                <Button type="button" size="sm" onClick={applyBrandCertFromLink}>
+                  Add
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setShowBrandCertUrlField(false);
+                    setBrandCertLinkDraft('');
+                  }}
+                >
+                  Cancel
+                </Button>
+              </div>
+            ) : null}
+            <p className="text-[11px] text-text-muted">
+              Upload a clear certificate image, or add a link to an image (not shown in the form after you save it).
+            </p>
+          </div>
+        )}
       </div>
+      {dealerAuthorizationRequired && (
+        <div className="rounded-xl border border-border bg-surface-muted/30 p-4">
+          <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-text-secondary">
+            Additional brand documents
+            <span className="ml-0.5 text-danger-500">*</span>
+          </label>
+          <p className="text-[11px] text-text-muted mb-2">
+            Add at least one link (e.g. dealer letter, purchase invoice, or distributor ID). This listing stays hidden
+            until an admin approves your documents.
+          </p>
+          <div className="space-y-2">
+            {formBrandAuthExtraUrls.map((url, idx) => (
+              <div key={idx} className="flex gap-2 items-start">
+                <div className="min-w-0 flex-1">
+                  <Input
+                    value={url}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setFormBrandAuthExtraUrls((prev) => prev.map((u, i) => (i === idx ? v : u)));
+                    }}
+                    placeholder="https://…"
+                  />
+                </div>
+                {formBrandAuthExtraUrls.length > 1 && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="shrink-0"
+                    onClick={() => setFormBrandAuthExtraUrls((prev) => prev.filter((_, i) => i !== idx))}
+                    title="Remove URL"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                )}
+              </div>
+            ))}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setFormBrandAuthExtraUrls((prev) => [...prev, ''])}
+            >
+              <Plus className="h-3.5 w-3.5 mr-1" />
+              Add another URL
+            </Button>
+          </div>
+        </div>
+      )}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Input
           stackedLabel
@@ -2224,23 +2566,37 @@ export default function SellerInventoryPage() {
         <Input
           stackedLabel
           label="MRP (₹), incl. GST"
+          required
           type="number"
           min={0}
           step="0.01"
           value={formCompare}
           onChange={(e) => setFormCompare(e.target.value)}
-          hint="Maximum retail price — shown as the strike-through original price."
+          hint="Maximum retail price — shown as the strike-through original price. Required for every product."
         />
       </div>
-      <Input
-        stackedLabel
-        label="Stock"
-        required
-        type="number"
-        min={0}
-        value={formStock}
-        onChange={(e) => setFormStock(e.target.value)}
-      />
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Input
+          stackedLabel
+          label="Stock"
+          required
+          type="number"
+          min={0}
+          step={1}
+          value={formStock}
+          onChange={(e) => setFormStock(e.target.value)}
+          hint="Total units available (whole number)."
+        />
+        <Input
+          stackedLabel
+          label="SKU"
+          required
+          value={formSku}
+          onChange={(e) => setFormSku(e.target.value)}
+          placeholder="e.g. BRAND-ITEM-01"
+          hint="Unique stock-keeping ID for this product (invoices, picking, and reports)."
+        />
+      </div>
 
       <ProductImageGallery
         images={formImages}
@@ -2254,8 +2610,8 @@ export default function SellerInventoryPage() {
           <div>
             <p className="text-xs font-semibold text-text-primary">Variants</p>
             <p className="text-[11px] text-text-muted mt-0.5">
-              Each option can set its own selling price and MRP — they override the product price above when filled; leave blank to use the base price and stock for that option.
-              Option prices and compare values are inclusive of GST, same as above.
+              Base price, MRP, stock, and SKU above apply to the listing overall. For every variant value, Price, MRP, Stock, and SKU are
+              required (GST-inclusive, same as above). The main &ldquo;product label&rdquo; is only the default title shown on the storefront.
             </p>
           </div>
           <Button type="button" variant="outline" size="sm" onClick={addVariantRow}>
@@ -2327,13 +2683,17 @@ export default function SellerInventoryPage() {
                         {row.kind === 'color' && <th className="pb-1.5 pr-2 font-medium w-[80px]">Hex</th>}
                         <th className="pb-1.5 pr-2 font-medium min-w-[300px]" title="1 main + up to 4 supporting images">Images</th>
                         <th className="pb-1.5 pr-2 font-medium w-[100px]" title="Inclusive of GST">
-                          Price (₹)
+                          Price (₹)<span className="text-danger-500">*</span>
                         </th>
                         <th className="pb-1.5 pr-2 font-medium w-[100px]" title="Inclusive of GST">
-                          MRP (₹)
+                          MRP (₹)<span className="text-danger-500">*</span>
                         </th>
-                        <th className="pb-1.5 pr-2 font-medium w-[70px]">Stock</th>
-                        <th className="pb-1.5 pr-2 font-medium w-[90px]">SKU</th>
+                        <th className="pb-1.5 pr-2 font-medium w-[70px]">
+                          Stock<span className="text-danger-500">*</span>
+                        </th>
+                        <th className="pb-1.5 pr-2 font-medium w-[90px]">
+                          SKU<span className="text-danger-500">*</span>
+                        </th>
                         <th className="pb-1.5 w-8" />
                       </tr>
                     </thead>
@@ -2444,8 +2804,9 @@ export default function SellerInventoryPage() {
                           </td>
                           <td className="py-2 pr-2 align-top">
                             <input
-                              type="text"
-                              inputMode="numeric"
+                              type="number"
+                              min={0}
+                              step={1}
                               value={val.stock}
                               onChange={(e) => updateVariantValue(row.id, val.id, { stock: e.target.value })}
                               className="w-full rounded-lg border border-border bg-surface-raised px-2 py-1.5 text-xs text-text-primary outline-none focus:border-primary-500"
@@ -2456,7 +2817,7 @@ export default function SellerInventoryPage() {
                               type="text"
                               value={val.sku}
                               onChange={(e) => updateVariantValue(row.id, val.id, { sku: e.target.value })}
-                              placeholder="optional"
+                              placeholder="e.g. SKU-01"
                               className="w-full rounded-lg border border-border bg-surface-raised px-2 py-1.5 text-xs text-text-primary outline-none focus:border-primary-500"
                             />
                           </td>

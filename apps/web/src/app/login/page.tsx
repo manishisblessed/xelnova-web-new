@@ -180,9 +180,10 @@ function LoginPageContent() {
     }
   };
 
-  const handleVerifyOtp = async () => {
-    const otpString = otp.join('');
+  const handleVerifyOtp = async (otpOverride?: string) => {
+    const otpString = otpOverride ?? otp.join('');
     if (otpString.length !== 6) return;
+    if (loading) return;
     setLoading(true);
     setError('');
     try {
@@ -212,12 +213,12 @@ function LoginPageContent() {
       const next = document.getElementById(`otp-${index + 1}`);
       next?.focus();
     }
-    // Auto-submit when all 6 digits are entered
-    if (value && newOtp.every((d) => d !== '') && newOtp.join('').length === 6) {
+    // Auto-submit when the 6th digit is in — pass the string directly; `otp` state is still stale in the same tick.
+    const complete = newOtp.join('');
+    if (complete.length === 6 && newOtp.every((d) => d !== '')) {
       setTimeout(() => {
-        const otpString = newOtp.join('');
-        if (otpString.length === 6) handleVerifyOtp();
-      }, 100);
+        void handleVerifyOtp(complete);
+      }, 0);
     }
   };
 
@@ -239,9 +240,10 @@ function LoginPageContent() {
     setOtp(newOtp);
     const focusIdx = Math.min(pasted.length, 5);
     document.getElementById(`otp-${focusIdx}`)?.focus();
-    // Auto-submit if pasted a full 6-digit OTP
     if (pasted.length === 6) {
-      setTimeout(() => handleVerifyOtp(), 100);
+      setTimeout(() => {
+        void handleVerifyOtp(pasted);
+      }, 0);
     }
   };
 
@@ -403,7 +405,8 @@ function LoginPageContent() {
                     </div>
                   </div>
                   <button
-                    onClick={handleVerifyOtp}
+                    type="button"
+                    onClick={() => void handleVerifyOtp()}
                     disabled={otp.some(d => !d) || loading}
                     className="w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-primary-500 to-primary-700 py-3.5 text-sm font-semibold text-white hover:from-primary-600 hover:to-primary-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-primary-500/25"
                   >

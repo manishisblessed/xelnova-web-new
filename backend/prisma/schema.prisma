@@ -48,6 +48,8 @@ enum ProductStatus {
   ACTIVE
   ON_HOLD
   PENDING
+  /** Seller listed under another seller’s registered brand; admin must approve cert + extra docs. */
+  PENDING_BRAND_AUTHORIZATION
   DRAFT
   REJECTED
 }
@@ -577,6 +579,13 @@ model Product {
   isReplaceable      Boolean @default(false) // Can be replaced (exchange)
   returnWindow       Int     @default(7) // Return window in days after delivery
   cancellationWindow Int     @default(0) // Hours after order placement (0 = until shipped)
+
+  /**
+   * Extra document URLs (distributor letter, etc.) when listing under a
+   * brand another seller registered — submitted with brandAuthorizationCertificate
+   * (stored in additionalDetails) for admin review.
+   */
+  brandAuthAdditionalDocumentUrls String[] @default([])
 
   reviews    Review[]
   orderItems OrderItem[]

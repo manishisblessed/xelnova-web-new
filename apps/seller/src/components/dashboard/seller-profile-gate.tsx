@@ -57,9 +57,14 @@ export function SellerProfileGate({ children }: { children: React.ReactNode }) {
           setState('incomplete');
         }
       })
-      .catch(async (err: any) => {
+      .catch(async (err: unknown) => {
         if (cancelled) return;
-        const status = err?.response?.status;
+        const message = err instanceof Error ? err.message : '';
+        // handleResponse() redirects to /login and throws on 401 — do not show dashboard
+        if (message === 'Session expired' || message.includes('Session expired')) {
+          return;
+        }
+        const status = (err as { response?: { status?: number } })?.response?.status;
         if (status === 401 || status === 403) {
           try {
             await fetch('/api/session', { method: 'DELETE', credentials: 'include' });
@@ -95,18 +100,16 @@ export function SellerProfileGate({ children }: { children: React.ReactNode }) {
           You haven&apos;t finished setting up your seller account.
           Complete all registration steps to access the seller dashboard.
         </p>
-        {status?.onboardingStep && (
-          <p className="text-sm text-gray-500">
-            You&apos;re on step {Math.min(status.onboardingStep, 3)} of 3
-          </p>
-        )}
+        <p className="text-sm text-gray-500">
+          Continue from account setup (step 1 of 3) — verify contact details and password.
+        </p>
         <button
           onClick={() => {
-            if (status?.sellerId && status?.onboardingStep) {
+            if (status?.sellerId) {
               try {
                 sessionStorage.setItem('xelnova-reg', JSON.stringify({
                   sellerId: status.sellerId,
-                  step: Math.min(status.onboardingStep, 3),
+                  step: 1,
                 }));
               } catch { /* ignore */ }
             }

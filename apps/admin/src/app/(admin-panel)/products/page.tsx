@@ -11,7 +11,14 @@ import { toast } from 'sonner';
 import type { Column } from '@/components/dashboard/data-table';
 import { apiDelete, apiUpdate, apiPost, apiGetAdminProduct } from '@/lib/api';
 
-const STATUS_OPTIONS = ['ACTIVE', 'PENDING', 'DRAFT', 'REJECTED', 'ON_HOLD'] as const;
+const STATUS_OPTIONS = [
+  'ACTIVE',
+  'PENDING',
+  'PENDING_BRAND_AUTHORIZATION',
+  'DRAFT',
+  'REJECTED',
+  'ON_HOLD',
+] as const;
 
 type ProductStatus = (typeof STATUS_OPTIONS)[number];
 
@@ -80,6 +87,8 @@ type AdminProductDetail = Product & {
   hsnCode?: string | null;
   gstRate?: number | null;
   lowStockThreshold?: number | null;
+  /** Extra proof URLs for authorized-dealer listings (brand registered by another seller). */
+  brandAuthAdditionalDocumentUrls?: string[];
   deliveredBy?: string | null;
   category?: { id: string; name: string } | null;
   seller?: { id?: string; storeName: string; email?: string | null; phone?: string | null } | null;
@@ -397,11 +406,20 @@ function CertificatePreview({ url }: { url: string }) {
   );
 }
 
+function formatProductStatusLabel(status: string): string {
+  return status
+    .split('_')
+    .map((w) => w.charAt(0) + w.slice(1).toLowerCase())
+    .join(' ');
+}
+
 function statusBadgeVariant(status: ProductStatus): 'success' | 'warning' | 'danger' | 'default' {
   switch (status) {
     case 'ACTIVE':
       return 'success';
     case 'PENDING':
+      return 'warning';
+    case 'PENDING_BRAND_AUTHORIZATION':
       return 'warning';
     case 'DRAFT':
       return 'default';
@@ -419,6 +437,8 @@ function StatusIcon({ status }: { status: ProductStatus }) {
     case 'ACTIVE':
       return <CheckCircle size={14} className="text-success-500" />;
     case 'PENDING':
+      return <Clock size={14} className="text-warning-500" />;
+    case 'PENDING_BRAND_AUTHORIZATION':
       return <Clock size={14} className="text-warning-500" />;
     case 'REJECTED':
       return <XCircle size={14} className="text-danger-500" />;
@@ -605,9 +625,14 @@ export default function ProductsPage() {
 
   const handleReject = async () => {
     if (!editing) return;
+    const reason = rejectionReason.trim();
+    if (!reason) {
+      toast.error('A rejection message is required so the seller can fix the issue.');
+      return;
+    }
     setSaving(true);
     try {
-      await apiPost(`products/${editing.id}/reject`, { rejectionReason });
+      await apiPost(`products/${editing.id}/reject`, { rejectionReason: reason });
       toast.success(`"${editing.name}" rejected`);
       setRejectOpen(false);
       setRefreshTrigger((n) => n + 1);
@@ -779,7 +804,7 @@ export default function ProductsPage() {
         <div className="flex items-center gap-1.5">
           <StatusIcon status={r.status} />
           <Badge variant={statusBadgeVariant(r.status)}>
-            {r.status.charAt(0) + r.status.slice(1).toLowerCase().replace('_', ' ')}
+            {formatProductStatusLabel(r.status)}
           </Badge>
         </div>
       ),
@@ -865,7 +890,7 @@ export default function ProductsPage() {
             >
               <Eye size={16} />
             </button>
-            {r.status === 'PENDING' && (
+            {(r.status === 'PENDING' || r.status === 'PENDING_BRAND_AUTHORIZATION') && (
               <>
                 <button
                   type="button"
@@ -1004,6 +1029,32 @@ export default function ProductsPage() {
                       </p>
                     )}
                   </div>
+                  {viewing.brandAuthAdditionalDocumentUrls &&
+                    viewing.brandAuthAdditionalDocumentUrls.length > 0 && (
+                      <div className="mt-3 text-text-secondary">
+                        <p className="font-semibold text-text-primary">Additional brand documents (dealer / proof)</p>
+                        <ul className="mt-1 list-disc list-inside space-y-1">
+                          {viewing.brandAuthAdditionalDocumentUrls.map((u, i) => (
+                            <li key={`${i}-${u.slice(0, 32)}`}>
+                              <a
+                                href={u}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-primary-600 hover:underline break-all"
+                              >
+                                {u}
+                              </a>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  {viewing.status === 'PENDING_BRAND_AUTHORIZATION' && (
+                    <p className="mt-2 text-[11px] text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5">
+                      This listing is in brand-authorization review: confirm the certificate and additional documents
+                      before publishing.
+                    </p>
+                  )}
                 </div>
               );
             })()}
@@ -1243,7 +1294,7 @@ export default function ProductsPage() {
               </p>
             )}
 
-            {viewing.status === 'PENDING' && (
+            {(viewing.status === 'PENDING' || viewing.status === 'PENDING_BRAND_AUTHORIZATION') && (
               <div className="space-y-3 pt-4 border-t border-border">
                 <div className="rounded-xl border border-border bg-surface-muted/50 px-3 py-3">
                   <label

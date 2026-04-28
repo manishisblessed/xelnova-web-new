@@ -155,6 +155,18 @@ export async function apiGetProduct(id: string) {
   return handleResponse(res);
 }
 
+export type BrandListingHint =
+  | { mode: 'empty' }
+  | { mode: 'new_brand' }
+  | { mode: 'direct' }
+  | { mode: 'dealer_authorization_required'; message: string };
+
+export async function apiGetBrandListingHint(brand: string) {
+  const q = new URLSearchParams({ brand: brand.trim() });
+  const res = await fetchWithRefresh(`${API_URL}/seller/brands/listing-hint?${q}`, { headers: authHeaders() });
+  return handleResponse(res) as Promise<BrandListingHint>;
+}
+
 export async function apiCreateProduct(body: Record<string, unknown>) {
   const res = await fetchWithRefresh(`${API_URL}/seller/products`, {
     method: 'POST',

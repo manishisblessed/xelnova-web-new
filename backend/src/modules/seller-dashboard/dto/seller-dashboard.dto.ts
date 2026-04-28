@@ -23,6 +23,11 @@ export class CreateProductDto {
   @ApiProperty() @IsNumber() @Type(() => Number) gstRate: number;
   @ApiPropertyOptional({ description: 'Seller uploaded brand authorization certificate URL' })
   @IsOptional() @IsString() brandAuthorizationCertificate?: string;
+  @ApiPropertyOptional({
+    description:
+      'Extra document URLs (distributor letter, etc.) when listing as an authorized dealer for a brand another seller registered',
+  })
+  @IsOptional() @IsArray() @IsString({ each: true }) brandAuthAdditionalDocumentUrls?: string[];
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Type(() => Number) lowStockThreshold?: number;
   @ApiPropertyOptional({ description: 'Weight in kg' }) @IsOptional() @IsNumber() @Type(() => Number) weight?: number;
   @ApiPropertyOptional({ description: 'Dimensions in LxWxH cm format (e.g., 30x20x15)' }) @IsOptional() @IsString() dimensions?: string;
@@ -68,6 +73,10 @@ export class UpdateProductDto {
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Type(() => Number) gstRate?: number;
   @ApiPropertyOptional({ description: 'Seller uploaded brand authorization certificate URL' })
   @IsOptional() @IsString() brandAuthorizationCertificate?: string;
+  @ApiPropertyOptional({
+    description: 'Extra document URLs when listing as an authorized dealer for a brand another seller registered',
+  })
+  @IsOptional() @IsArray() @IsString({ each: true }) brandAuthAdditionalDocumentUrls?: string[];
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Type(() => Number) lowStockThreshold?: number;
   @ApiPropertyOptional({ description: 'Weight in kg' }) @IsOptional() @IsNumber() @Type(() => Number) weight?: number;
   @ApiPropertyOptional({ description: 'Dimensions in LxWxH cm format (e.g., 30x20x15)' }) @IsOptional() @IsString() dimensions?: string;

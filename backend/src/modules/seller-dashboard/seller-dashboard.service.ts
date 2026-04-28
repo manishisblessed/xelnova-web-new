@@ -242,15 +242,22 @@ export class SellerDashboardService {
       throw new BadRequestException('Brand authorization certificate is required');
     }
 
-    // Route the brand entry through the Brand catalogue so the brand-cap rule
-    // (one free brand per seller, every additional brand needs a cert) cannot
-    // be bypassed via free-text brand names on the product form.
-    await this.ensureBrandClaim(
+    const extraDocUrls = (dto.brandAuthAdditionalDocumentUrls ?? [])
+      .map((u) => String(u).trim())
+      .filter((u) => u.length > 0);
+
+    const brandMode = await this.resolveBrandForProductListing(
       seller.id,
       userId,
       dto.brand,
       dto.brandAuthorizationCertificate,
+      extraDocUrls,
     );
+
+    const initialStatus =
+      brandMode === 'dealer_documents_pending'
+        ? ProductStatus.PENDING_BRAND_AUTHORIZATION
+        : ProductStatus.PENDING;
 
     const additionalDetailsBase =
       dto.additionalDetails && typeof dto.additionalDetails === 'object' && !Array.isArray(dto.additionalDetails)
@@ -298,7 +305,8 @@ export class SellerDashboardService {
         safetyInfo: dto.safetyInfo,
         regulatoryInfo: dto.regulatoryInfo,
         warrantyInfo: dto.warrantyInfo,
-        status: 'PENDING',
+        status: initialStatus,
+        brandAuthAdditionalDocumentUrls: extraDocUrls,
       },
       include: { category: { select: { name: true } } },
     });
@@ -309,8 +317,14 @@ export class SellerDashboardService {
     this.notificationService
       .notifyAllAdmins({
         type: 'ADMIN_PRODUCT_SUBMITTED',
-        title: 'New product submitted for review',
-        body: `${seller.storeName} submitted "${created.name}" for review.`,
+        title:
+          initialStatus === ProductStatus.PENDING_BRAND_AUTHORIZATION
+            ? 'Dealer brand authorization — product submitted'
+            : 'New product submitted for review',
+        body:
+          initialStatus === ProductStatus.PENDING_BRAND_AUTHORIZATION
+            ? `${seller.storeName} submitted "${created.name}" under a registered brand — review certificate and documents before go-live.`
+            : `${seller.storeName} submitted "${created.name}" for review.`,
         data: {
           productId: created.id,
           productName: created.name,
@@ -318,6 +332,7 @@ export class SellerDashboardService {
           sku: created.sku,
           sellerId: seller.id,
           storeName: seller.storeName,
+          pendingBrandAuthorization: initialStatus === ProductStatus.PENDING_BRAND_AUTHORIZATION,
         },
       })
       .catch(() => {});
@@ -380,6 +395,7 @@ export class SellerDashboardService {
       'metaTitle',
       'metaDescription',
       'sku',
+      'brandAuthAdditionalDocumentUrls',
     ] as const;
 
     const hasContentChange = REVIEW_TRIGGER_FIELDS.some(
@@ -408,12 +424,23 @@ export class SellerDashboardService {
       dto.brand !== undefined &&
       this.slugify(dto.brand) !== this.slugify(product.brand ?? '')
     ) {
-      await this.ensureBrandClaim(
-        seller.id,
-        userId,
-        dto.brand,
-        dto.brandAuthorizationCertificate,
-      );
+      const cert =
+        (dto.brandAuthorizationCertificate ?? '').trim() || this.getBrandCertFromProduct(product);
+      const extras =
+        dto.brandAuthAdditionalDocumentUrls !== undefined
+          ? (dto.brandAuthAdditionalDocumentUrls as string[]).map((u) => String(u).trim()).filter(Boolean)
+          : product.brandAuthAdditionalDocumentUrls ?? [];
+      const mode = await this.resolveBrandForProductListing(seller.id, userId, dto.brand, cert, extras);
+      data.brandAuthAdditionalDocumentUrls = extras;
+      if (mode === 'dealer_documents_pending') {
+        data.status = ProductStatus.PENDING_BRAND_AUTHORIZATION;
+        data.isActive = false;
+        data.rejectionReason = null;
+      }
+    } else if (dto.brandAuthAdditionalDocumentUrls !== undefined) {
+      data.brandAuthAdditionalDocumentUrls = (dto.brandAuthAdditionalDocumentUrls as string[])
+        .map((u) => String(u).trim())
+        .filter(Boolean);
     }
     if (dto.hsnCode !== undefined && !dto.hsnCode.trim()) {
       throw new BadRequestException('HSN code cannot be empty');
@@ -1053,46 +1080,85 @@ export class SellerDashboardService {
     });
   }
 
+  private getBrandCertFromProduct(product: { additionalDetails?: unknown }): string {
+    const ad = product.additionalDetails;
+    if (ad && typeof ad === 'object' && !Array.isArray(ad)) {
+      const v = (ad as Record<string, unknown>)['Brand Authorization Certificate'];
+      if (typeof v === 'string' && v.trim()) return v.trim();
+    }
+    return '';
+  }
+
   /**
-   * Enforces the brand cap at product create / update time so it cannot be
-   * bypassed by typing a free-text brand name on a product form.
+   * Resolves whether this seller may list under `brandName` and whether the
+   * listing requires dealer authorization review (cert + extra docs) because
+   * the brand is registered by another seller and not yet globally approved.
    *
-   * Behaviour:
-   *  - If a Brand record already exists for the given name (case-insensitive
-   *    via slug), the seller may use it only when:
-   *      a) they originally proposed it (proposedBy === sellerId), OR
-   *      b) admin has approved it for global use (approved === true).
-   *    Otherwise we reject — another seller has reserved that brand.
-   *  - If no Brand record exists, we implicitly call `proposeBrand` so the
-   *    seller's first brand is claimed and the existing cap (one brand free,
-   *    each subsequent brand requires a certificate) kicks in for any later
-   *    *different* brand on subsequent listings.
-   *
-   * This guarantees one source of truth (the Brand table) for brand ownership,
-   * which also makes the admin-side certificate lookup reliable.
+   * - New brand: implicit `proposeBrand` (same cap rules as before).
+   * - Own brand or admin-approved global brand: `standard`.
+   * - Another seller’s pending brand: needs certificate + ≥1 additional doc URL
+   *   → `dealer_documents_pending` (product status PENDING_BRAND_AUTHORIZATION).
    */
-  private async ensureBrandClaim(
+  private async resolveBrandForProductListing(
     sellerId: string,
     userId: string,
     brandName: string,
-    authorizationCertificate?: string | null,
-  ): Promise<void> {
+    authorizationCertificate: string | null | undefined,
+    brandAuthAdditionalDocumentUrls: string[],
+  ): Promise<'standard' | 'dealer_documents_pending'> {
     const name = brandName.trim();
-    if (!name) return;
+    if (!name) {
+      return 'standard';
+    }
     const slug = this.slugify(name);
-    const existing = await this.prisma.brand.findUnique({ where: { slug } });
+    const cert = (authorizationCertificate ?? '').trim();
+    const extras = brandAuthAdditionalDocumentUrls;
 
-    if (existing) {
-      const ownsIt = existing.proposedBy === sellerId;
-      const globallyApproved = existing.approved === true;
-      if (ownsIt || globallyApproved) return;
-      throw new BadRequestException(
-        `The brand "${name}" is reserved by another seller. Upload an authorisation certificate via the Brands page to request access.`,
-      );
+    const existing = await this.prisma.brand.findUnique({ where: { slug } });
+    if (!existing) {
+      await this.proposeBrand(userId, name, undefined, cert || undefined);
+      return 'standard';
     }
 
-    // Implicit claim — reuses the existing cap rules in proposeBrand.
-    await this.proposeBrand(userId, name, undefined, authorizationCertificate ?? undefined);
+    const ownsIt = existing.proposedBy === sellerId;
+    const globallyApproved = existing.approved === true;
+    if (ownsIt || globallyApproved) {
+      return 'standard';
+    }
+
+    if (!cert) {
+      throw new BadRequestException(
+        `The brand "${name}" is already registered. Provide a brand authorization certificate and at least one additional document (distributor letter, etc.) for admin review.`,
+      );
+    }
+    if (extras.length < 1) {
+      throw new BadRequestException(
+        `The brand "${name}" is already registered. Add at least one "additional document" URL in addition to the authorization certificate so we can verify you as an authorized dealer.`,
+      );
+    }
+    return 'dealer_documents_pending';
+  }
+
+  /** UI hint: whether a typed brand will need dealer document flow. */
+  async getBrandListingHint(userId: string, brandName: string) {
+    const seller = await this.getSellerProfile(userId);
+    const name = (brandName ?? '').trim();
+    if (!name) {
+      return { mode: 'empty' as const };
+    }
+    const slug = this.slugify(name);
+    const existing = await this.prisma.brand.findUnique({ where: { slug } });
+    if (!existing) {
+      return { mode: 'new_brand' as const };
+    }
+    if (existing.proposedBy === seller.id || existing.approved === true) {
+      return { mode: 'direct' as const };
+    }
+    return {
+      mode: 'dealer_authorization_required' as const,
+      message:
+        'This brand is registered to another seller. Upload your authorization certificate and at least one additional document; your product will be submitted for admin review before it can go live.',
+    };
   }
 
   async getSellerBrands(userId: string) {

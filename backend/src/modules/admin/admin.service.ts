@@ -112,7 +112,9 @@ export class AdminService {
       this.prisma.order.aggregate({ _sum: { total: true }, where: { status: { notIn: ['CANCELLED', 'REFUNDED'] } } }),
       this.prisma.order.aggregate({ _sum: { total: true }, where: { createdAt: { gte: monthStart }, status: { notIn: ['CANCELLED', 'REFUNDED'] } } }),
       this.prisma.sellerProfile.count({ where: { verified: true } }),
-      this.prisma.product.count({ where: { status: 'PENDING' } }),
+      this.prisma.product.count({
+        where: { status: { in: ['PENDING', 'PENDING_BRAND_AUTHORIZATION'] } },
+      }),
       this.prisma.review.count({ where: { approved: false } }),
     ]);
 

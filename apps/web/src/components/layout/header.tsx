@@ -403,7 +403,7 @@ export function Header() {
                   </div>
                   <span className="flex min-w-0 max-w-[9.5rem] items-center gap-1 text-left">
                     <span className="truncate font-display text-sm font-bold tracking-tight text-primary-900">
-                      Hi, {user.name?.split(/\s+/)[0] || 'there'}
+                      Hi, {user.name?.split(/\s+/)[0] || 'Customer'}
                     </span>
                     <ChevronDown
                       size={15}
@@ -662,7 +662,7 @@ export function Header() {
                         )}
                         <div className="min-w-0">
                           <p className="font-display text-base font-bold leading-tight text-white drop-shadow-sm">
-                            Hi, {user.name?.split(/\s+/)[0] || 'there'}
+                            Hi, {user.name?.split(/\s+/)[0] || 'Customer'}
                           </p>
                           <p className="mt-0.5 truncate text-xs text-primary-100/90">{user.email || user.phone || ''}</p>
                         </div>
