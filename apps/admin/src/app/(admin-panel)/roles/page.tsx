@@ -242,7 +242,7 @@ export default function RolesPage() {
         title={editing ? `Edit ${editing.name}` : 'Create Role'}
         onSubmit={handleSubmit}
         submitLabel={editing ? 'Save changes' : 'Create role'}
-        size="lg"
+        wide
       >
         <div className="space-y-4">
           {/* Show templates on create */}
@@ -260,7 +260,7 @@ export default function RolesPage() {
           )}
 
           {/* Basic info */}
-          <FormField label="Role Name" required>
+          <FormField label="Role Name">
             <FormInput
               value={form.name}
               onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
@@ -312,7 +312,7 @@ export default function RolesPage() {
         title="Delete Role"
         message={`Delete role "${editing?.name}"? This will affect ${editing?.users || 0} assigned user(s).`}
         confirmLabel="Delete"
-        isDangerous
+        destructive
       />
     </>
   );

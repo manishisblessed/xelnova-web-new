@@ -139,6 +139,7 @@ export function StorePage({ store }: StorePageProps) {
             <StoreAbout store={store} />
           )}
         </motion.div>
+      </div>
     </div>
   );
 }

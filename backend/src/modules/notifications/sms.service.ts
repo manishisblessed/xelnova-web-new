@@ -12,7 +12,7 @@ import { ConfigService } from '@nestjs/config';
  */
 export enum SmsTemplateType {
   // ═══════════════════════════════════════════════════════════════════
-  // APPROVED TEMPLATES (9) - Ready for production
+  // APPROVED TEMPLATES (24) - Ready for production
   // ═══════════════════════════════════════════════════════════════════
   
   // OTP/Auth
@@ -94,7 +94,7 @@ interface SmsTemplate {
  */
 const SMS_TEMPLATES: Record<SmsTemplateType, SmsTemplate> = {
   // ═══════════════════════════════════════════════════════════════════
-  // APPROVED TEMPLATES (9)
+  // APPROVED TEMPLATES (24)
   // ═══════════════════════════════════════════════════════════════════
 
   [SmsTemplateType.LOGIN_OTP]: {
@@ -166,76 +166,76 @@ const SMS_TEMPLATES: Record<SmsTemplateType, SmsTemplate> = {
 
   // --- Customer Account ---
   [SmsTemplateType.WELCOME_REGISTRATION]: {
-    templateId: '', // TODO: Get DLT approval
+    templateId: '1707177674832267633',
     message: 'XELNOVA: Welcome to Xelnova! Your account has been created successfully. Start shopping at xelnova.in',
     description: 'Welcome / Registration Success',
-    approved: false,
+    approved: true,
   },
 
   [SmsTemplateType.PASSWORD_RESET_OTP]: {
-    templateId: '', // TODO: Get DLT approval
+    templateId: '1707177748841266684',
     message: 'XELNOVA: Your password reset OTP is {#var#}. Valid for 10 minutes. Do not share with anyone.',
     description: 'Password Reset OTP',
-    approved: false,
+    approved: true,
   },
 
   // --- Customer Order Events ---
   [SmsTemplateType.ORDER_CANCELLED]: {
-    templateId: '', // TODO: Get DLT approval
+    templateId: '1707177674861414060',
     message: 'XELNOVA: Your order {#var#} has been cancelled. Refund of Rs. {#var#} will be processed within 5-7 days.',
     description: 'Order Cancelled',
-    approved: false,
+    approved: true,
   },
 
   [SmsTemplateType.ORDER_OUT_FOR_DELIVERY]: {
-    templateId: '', // TODO: Get DLT approval
+    templateId: '1707177674801577577',
     message: 'XELNOVA: Great news! Your order {#var#} is out for delivery today. Keep your phone handy.',
     description: 'Order Out for Delivery',
-    approved: false,
+    approved: true,
   },
 
   [SmsTemplateType.COD_DELIVERY_OTP]: {
-    templateId: '', // TODO: Get DLT approval
+    templateId: '1707177674897656507',
     message: 'XELNOVA: Your delivery OTP for order {#var#} is {#var#}. Share with delivery partner to receive your order.',
     description: 'COD Delivery OTP',
-    approved: false,
+    approved: true,
   },
 
   // --- Customer Returns/Refunds ---
   [SmsTemplateType.REFUND_PROCESSED]: {
-    templateId: '', // TODO: Get DLT approval
+    templateId: '1707177674912248789',
     message: 'XELNOVA: Refund of Rs. {#var#} for order {#var#} has been processed. It will reflect in 5-7 business days.',
     description: 'Refund Processed',
-    approved: false,
+    approved: true,
   },
 
   [SmsTemplateType.RETURN_APPROVED]: {
-    templateId: '', // TODO: Get DLT approval
+    templateId: '1707177674919994971',
     message: 'XELNOVA: Your return request for order {#var#} has been approved. Pickup will be scheduled shortly.',
     description: 'Return Request Approved',
-    approved: false,
+    approved: true,
   },
 
   [SmsTemplateType.RETURN_REJECTED]: {
-    templateId: '', // TODO: Get DLT approval
+    templateId: '1707177675186976130',
     message: 'XELNOVA: Your return request for order {#var#} was not approved. Reason: {#var#}. Contact support for help.',
     description: 'Return Request Rejected',
-    approved: false,
+    approved: true,
   },
 
   [SmsTemplateType.RETURN_PICKUP_SCHEDULED]: {
-    templateId: '', // TODO: Get DLT approval
+    templateId: '1707177674608633940',
     message: 'XELNOVA: Return pickup for order {#var#} scheduled for {#var#}. Keep the package ready.',
     description: 'Return Pickup Scheduled',
-    approved: false,
+    approved: true,
   },
 
   // --- Customer Wallet ---
   [SmsTemplateType.WALLET_CREDITED]: {
-    templateId: '', // TODO: Get DLT approval
+    templateId: '1707177674971656507',
     message: 'XELNOVA: Rs. {#var#} credited to your Xelnova wallet. New balance: Rs. {#var#}',
     description: 'Wallet Credit',
-    approved: false,
+    approved: true,
   },
 
   [SmsTemplateType.WALLET_DEBITED]: {
@@ -247,33 +247,33 @@ const SMS_TEMPLATES: Record<SmsTemplateType, SmsTemplate> = {
 
   // --- Seller Account ---
   [SmsTemplateType.SELLER_APPROVED]: {
-    templateId: '', // TODO: Get DLT approval
+    templateId: '1707177675093229314',
     message: 'XELNOVA: Congratulations! Your seller account {#var#} is now approved. Start selling at seller.xelnova.in',
     description: 'Seller Account Approved',
-    approved: false,
+    approved: true,
   },
 
   [SmsTemplateType.SELLER_REJECTED]: {
-    templateId: '', // TODO: Get DLT approval
+    templateId: '1707177675186976130',
     message: 'XELNOVA: Your seller verification for {#var#} needs attention. Reason: {#var#}. Update at seller.xelnova.in',
     description: 'Seller Account Rejected',
-    approved: false,
+    approved: true,
   },
 
   // --- Seller Orders ---
   [SmsTemplateType.NEW_ORDER_SELLER]: {
-    templateId: '', // TODO: Get DLT approval
+    templateId: '1707177675196681361',
     message: 'XELNOVA: New order! Order {#var#} worth Rs. {#var#} received. Ship by EOD. View at seller.xelnova.in',
     description: 'New Order for Seller',
-    approved: false,
+    approved: true,
   },
 
   // --- Seller Products ---
   [SmsTemplateType.PRODUCT_APPROVED]: {
-    templateId: '', // TODO: Get DLT approval
+    templateId: '1707177675205644311',
     message: 'XELNOVA: Your product {#var#} is now live on Xelnova marketplace.',
     description: 'Product Approved',
-    approved: false,
+    approved: true,
   },
 
   [SmsTemplateType.PRODUCT_REJECTED]: {
@@ -285,10 +285,10 @@ const SMS_TEMPLATES: Record<SmsTemplateType, SmsTemplate> = {
 
   // --- Seller Finance ---
   [SmsTemplateType.PAYOUT_PROCESSED]: {
-    templateId: '', // TODO: Get DLT approval
+    templateId: '1707177674912248789',
     message: 'XELNOVA: Payout of Rs. {#var#} processed to your bank account. Transaction ref: {#var#}',
     description: 'Payout Processed',
-    approved: false,
+    approved: true,
   },
 
   [SmsTemplateType.PAYOUT_REJECTED]: {
@@ -308,17 +308,17 @@ const SMS_TEMPLATES: Record<SmsTemplateType, SmsTemplate> = {
 
   // --- Support Tickets ---
   [SmsTemplateType.TICKET_CREATED]: {
-    templateId: '', // TODO: Get DLT approval
+    templateId: '1707177674992900265',
     message: 'XELNOVA: Support ticket {#var#} created. We will respond within 24 hours. Track at xelnova.in/support',
     description: 'Support Ticket Created',
-    approved: false,
+    approved: true,
   },
 
   [SmsTemplateType.TICKET_REPLY]: {
-    templateId: '', // TODO: Get DLT approval
+    templateId: '1707177675021951834',
     message: 'XELNOVA: New reply on your support ticket {#var#}. View at xelnova.in/support',
     description: 'Support Ticket Reply',
-    approved: false,
+    approved: true,
   },
 
   [SmsTemplateType.TICKET_RESOLVED]: {

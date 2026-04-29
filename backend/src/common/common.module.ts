@@ -1,4 +1,5 @@
-import { Global, Module, APP_GUARD } from '@nestjs/common';
+import { Global, Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { AccountUniquenessService } from './services/account-uniqueness.service';
 import { RbacGuard } from './guards/rbac.guard';
 import { PermissionsService } from '../modules/admin/permissions.service';

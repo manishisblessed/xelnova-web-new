@@ -1518,7 +1518,15 @@ export class SellerDashboardService {
     });
 
     // Send notification to customer
-    await this.notificationService.sendOrderCancelledNotification(updatedOrder.user, updatedOrder, reason);
+    await this.notificationService.sendOrderCancelledNotification(
+      {
+        id: updatedOrder.user.id,
+        email: updatedOrder.user.email ?? undefined,
+        name: updatedOrder.user.name ?? undefined,
+      },
+      updatedOrder,
+      reason,
+    );
 
     return {
       orderId: updatedOrder.id,
@@ -1570,7 +1578,11 @@ export class SellerDashboardService {
     // Notify customer about shipment cancellation
     const order = shipment.order;
     await this.notificationService.sendShipmentCancelledNotification(
-      order.user,
+      {
+        id: order.user.id,
+        email: order.user.email ?? undefined,
+        name: order.user.name ?? undefined,
+      },
       order,
       shipment,
       reason,
@@ -1631,7 +1643,11 @@ export class SellerDashboardService {
     // Notify customer about rescheduled shipment
     const order = shipment.order;
     await this.notificationService.sendShipmentRescheduledNotification(
-      order.user,
+      {
+        id: order.user.id,
+        email: order.user.email ?? undefined,
+        name: order.user.name ?? undefined,
+      },
       order,
       updatedShipment,
       newDate,

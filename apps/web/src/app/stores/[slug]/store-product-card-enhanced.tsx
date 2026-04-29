@@ -270,7 +270,7 @@ export const StoreProductCardEnhanced = memo(function StoreProductCardEnhanced({
             {/* Variant Badges */}
             {variantSummary.length > 0 && (
               <div className="flex flex-wrap gap-1.5 mt-1.5 pt-1.5 border-t border-border/40">
-                {variantSummary.map((v, i) => (
+                {variantSummary.map((v, i) => v && (
                   <motion.div
                     key={i}
                     initial={{ opacity: 0, scale: 0.9 }}

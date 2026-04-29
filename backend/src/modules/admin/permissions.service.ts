@@ -306,7 +306,7 @@ export class PermissionsService {
       permissionsData: Permission;
     }>
   > {
-    return this.prisma.adminRole.findMany({
+    const roles = await this.prisma.adminRole.findMany({
       where: { isTemplate: true },
       select: {
         id: true,
@@ -316,5 +316,10 @@ export class PermissionsService {
         permissionsData: true,
       },
     });
+    
+    return roles.map(role => ({
+      ...role,
+      permissionsData: role.permissionsData as Permission,
+    }));
   }
 }

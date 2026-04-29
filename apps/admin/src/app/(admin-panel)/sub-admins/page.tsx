@@ -32,7 +32,7 @@ interface SubAdmin {
   lastLoginAt: string | null;
   createdAt: string;
   adminRoleId: string | null;
-  adminRole: { id: string; name: string; permissions: string; level?: string; permissionsData?: Record<string, Record<string, boolean>>; isSystem: boolean } | null;
+  adminRole: { id: string; name: string; description?: string | null; permissions: string; level?: string; permissionsData?: Record<string, Record<string, boolean>>; isSystem: boolean } | null;
 }
 
 interface FormState {

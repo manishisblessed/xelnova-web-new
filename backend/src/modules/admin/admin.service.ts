@@ -5,6 +5,7 @@ import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
 import { LoggingService } from '../logging/logging.service';
 import { NotificationService } from '../notifications/notification.service';
+import { PermissionsService } from './permissions.service';
 import {
   AdminProductQueryDto, AdminUpdateProductDto,
   AdminOrderQueryDto, AdminUpdateOrderDto,

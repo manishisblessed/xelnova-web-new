@@ -416,7 +416,7 @@ function LoginFormInner() {
           </div>
         </div>
         <button
-          onClick={handleVerifyOtp}
+          onClick={() => handleVerifyOtp()}
           disabled={otp.some(d => !d) || loading}
           className="w-full flex items-center justify-center gap-2 rounded-xl bg-primary-500 py-3.5 text-sm font-semibold text-white hover:bg-primary-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-primary-500/25"
         >
