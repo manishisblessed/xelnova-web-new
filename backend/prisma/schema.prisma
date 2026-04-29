@@ -988,18 +988,34 @@ model ApiRequestLog {
 
 // ─── Admin Role (custom roles for RBAC) ───
 
+enum AdminRoleLevel {
+  SUPER_ADMIN
+  MANAGER
+  EDITOR
+  VIEWER
+}
+
 model AdminRole {
-  id          String  @id @default(cuid())
-  name        String  @unique
+  id               String          @id @default(cuid())
+  name             String          @unique
+  description      String?
+  /// Role level in hierarchy for permission inheritance
+  level            AdminRoleLevel  @default(VIEWER)
   /**
-   * Comma-separated list of permission tokens (e.g. "products,orders,reviews")
-   * understood by the backend RBAC guard and the admin UI.
+   * Legacy: comma-separated permissions (deprecated, kept for backward compatibility).
+   * Migrate to permissionsData for new roles.
    */
-  permissions String
-  isSystem    Boolean @default(false)
+  permissions      String          @default("")
+  /**
+   * Structured permissions by section and action.
+   * Format: { "section": { "action": true/false, ... }, ... }
+   */
+  permissionsData  Json            @default("{}")
+  isSystem         Boolean         @default(false)
+  isTemplate       Boolean         @default(false)
 
   /// Sub-admin users assigned to this role.
-  members     User[]  @relation("AdminRoleUsers")
+  members          User[]          @relation("AdminRoleUsers")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

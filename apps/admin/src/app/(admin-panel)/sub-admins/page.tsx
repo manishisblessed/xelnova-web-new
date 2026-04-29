@@ -6,7 +6,7 @@ import { AdminListPage } from '@/components/dashboard/admin-list-page';
 import { ActionModal } from '@/components/dashboard/action-modal';
 import { ConfirmDialog } from '@/components/dashboard/confirm-dialog';
 import { FormField, FormInput, FormSelect, FormToggle } from '@/components/dashboard/form-field';
-import { Pencil, Trash2, KeyRound, Copy, Check } from 'lucide-react';
+import { Pencil, Trash2, KeyRound, Copy, Check, Info } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiCreate, apiDelete, apiGet, apiPost, apiUpdate } from '@/lib/api';
 import { useDashboardAuth } from '@/lib/auth-context';
@@ -15,7 +15,10 @@ import type { Column } from '@/components/dashboard/data-table';
 interface AdminRole {
   id: string;
   name: string;
+  description?: string | null;
+  level?: string;
   permissions: string;
+  permissionsData?: Record<string, Record<string, boolean>>;
   isSystem: boolean;
 }
 
@@ -29,7 +32,7 @@ interface SubAdmin {
   lastLoginAt: string | null;
   createdAt: string;
   adminRoleId: string | null;
-  adminRole: { id: string; name: string; permissions: string; isSystem: boolean } | null;
+  adminRole: { id: string; name: string; permissions: string; level?: string; permissionsData?: Record<string, Record<string, boolean>>; isSystem: boolean } | null;
 }
 
 interface FormState {
@@ -47,6 +50,10 @@ export default function SubAdminsPage() {
   const [roles, setRoles] = useState<AdminRole[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [permissionsPreview, setPermissionsPreview] = useState<{
+    open: boolean;
+    adminRole: AdminRole | null;
+  }>({ open: false, adminRole: null });
   const [editing, setEditing] = useState<SubAdmin | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
@@ -55,10 +62,25 @@ export default function SubAdminsPage() {
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    apiGet<AdminRole[]>('roles').then(setRoles).catch(() => undefined);
+    apiGet<AdminRole[]>('admin/roles').then(setRoles).catch(() => undefined);
   }, [refreshKey]);
 
   const customRoles = useMemo(() => roles.filter((r) => !r.isSystem), [roles]);
+
+  const getLevelBadgeColor = (level?: string): string => {
+    switch (level) {
+      case 'SUPER_ADMIN':
+        return 'danger';
+      case 'MANAGER':
+        return 'warning';
+      case 'EDITOR':
+        return 'info';
+      case 'VIEWER':
+        return 'success';
+      default:
+        return 'default';
+    }
+  };
 
   const openAdd = () => {
     setEditing(null);
@@ -83,15 +105,14 @@ export default function SubAdminsPage() {
     try {
       if (editing) {
         const patch: Record<string, unknown> = { name: form.name, isActive: form.isActive };
-        // Send adminRoleId only when it changed; empty string means "clear role".
         if ((editing.adminRoleId ?? '') !== form.adminRoleId) {
           patch.adminRoleId = form.adminRoleId || null;
         }
-        await apiUpdate('sub-admins', editing.id, patch);
+        await apiUpdate('admin/sub-admins', editing.id, patch);
         toast.success('Sub-admin updated');
         setModalOpen(false);
       } else {
-        const result = await apiCreate<SubAdmin & { tempPassword?: string | null }>('sub-admins', {
+        const result = await apiCreate<SubAdmin & { tempPassword?: string | null }>('admin/sub-admins', {
           name: form.name,
           email: form.email.trim().toLowerCase(),
           password: form.password.trim() || undefined,
@@ -113,7 +134,7 @@ export default function SubAdminsPage() {
 
   const handleResetPassword = async (s: SubAdmin) => {
     try {
-      const res = await apiPost<{ tempPassword: string }>(`sub-admins/${s.id}/reset-password`, {});
+      const res = await apiPost<{ tempPassword: string }>(`admin/sub-admins/${s.id}/reset-password`, {});
       toast.success('Password reset');
       setTempPassword({ email: s.email ?? '', password: res.tempPassword });
     } catch (err) {
@@ -124,7 +145,7 @@ export default function SubAdminsPage() {
   const handleDelete = async () => {
     if (!editing) return;
     try {
-      await apiDelete('sub-admins', editing.id);
+      await apiDelete('admin/sub-admins', editing.id);
       toast.success('Sub-admin removed');
       setDeleteOpen(false);
       setRefreshKey((k) => k + 1);
@@ -142,6 +163,19 @@ export default function SubAdminsPage() {
     } catch {
       toast.error('Could not copy to clipboard');
     }
+  };
+
+  const getPermissionCount = (role: AdminRole): { enabled: number; total: number } => {
+    if (!role.permissionsData) return { enabled: 0, total: 0 };
+    let enabled = 0;
+    let total = 0;
+    Object.values(role.permissionsData).forEach((section) => {
+      Object.values(section).forEach((perm) => {
+        total++;
+        if (perm) enabled++;
+      });
+    });
+    return { enabled, total };
   };
 
   const columns: Column<SubAdmin>[] = [
@@ -162,11 +196,28 @@ export default function SubAdminsPage() {
         s.isSuperAdmin ? (
           <Badge variant="info">Super admin</Badge>
         ) : s.adminRole ? (
-          <div className="flex flex-col">
-            <span className="text-sm font-medium text-text-primary">{s.adminRole.name}</span>
-            <span className="text-xs text-text-muted truncate max-w-[18rem]">
-              {s.adminRole.permissions || 'No specific permissions'}
-            </span>
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-text-primary">{s.adminRole.name}</span>
+              {s.adminRole.level && (
+                <Badge variant={getLevelBadgeColor(s.adminRole.level) as any} className="text-xs">
+                  {s.adminRole.level}
+                </Badge>
+              )}
+            </div>
+            {s.adminRole.permissionsData && (
+              <button
+                type="button"
+                onClick={() => setPermissionsPreview({ open: true, adminRole: s.adminRole })}
+                className="text-xs text-primary-600 hover:text-primary-700 flex items-center gap-1 w-fit"
+              >
+                <Info size={12} />
+                View permissions
+              </button>
+            )}
+            {s.adminRole.description && (
+              <span className="text-xs text-text-muted">{s.adminRole.description}</span>
+            )}
           </div>
         ) : (
           <span className="text-text-muted text-sm">No role assigned</span>
@@ -200,7 +251,7 @@ export default function SubAdminsPage() {
     <>
       <AdminListPage<SubAdmin>
         title="Sub-admins"
-        section="sub-admins"
+        section="admin/sub-admins"
         columns={columns}
         keyExtractor={(s) => s.id}
         searchKeys={['name', 'email', 'adminRole.name']}
@@ -239,6 +290,7 @@ export default function SubAdminsPage() {
         )}
       />
 
+      {/* Create/Edit Modal */}
       <ActionModal
         open={modalOpen}
         onClose={() => setModalOpen(false)}
@@ -271,19 +323,22 @@ export default function SubAdminsPage() {
           hint={
             customRoles.length === 0
               ? 'No custom roles yet. Create one in the Roles tab to grant scoped access.'
-              : 'Determines which sections this sub-admin can access.'
+              : 'Determines which sections and actions this sub-admin can access.'
           }
         >
           <FormSelect
             value={form.adminRoleId}
             onChange={(e) => setForm((f) => ({ ...f, adminRoleId: e.target.value }))}
           >
-            <option value="">No role (limited access)</option>
-            {customRoles.map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.name}
-              </option>
-            ))}
+            <option value="">No role (super admin level)</option>
+            {customRoles.map((r) => {
+              const { enabled, total } = getPermissionCount(r);
+              return (
+                <option key={r.id} value={r.id}>
+                  {r.name} {r.level && `(${r.level})`} {enabled > 0 && `[${enabled}/${total}]`}
+                </option>
+              );
+            })}
           </FormSelect>
         </FormField>
 
@@ -310,6 +365,7 @@ export default function SubAdminsPage() {
         )}
       </ActionModal>
 
+      {/* Delete Confirmation */}
       <ConfirmDialog
         open={deleteOpen}
         onClose={() => setDeleteOpen(false)}
@@ -319,6 +375,42 @@ export default function SubAdminsPage() {
         confirmLabel="Remove access"
       />
 
+      {/* Permissions Preview Modal */}
+      <ActionModal
+        open={permissionsPreview.open}
+        onClose={() => setPermissionsPreview({ open: false, adminRole: null })}
+        title={`Permissions - ${permissionsPreview.adminRole?.name}`}
+      >
+        {permissionsPreview.adminRole?.permissionsData && (
+          <div className="space-y-4">
+            {Object.entries(permissionsPreview.adminRole.permissionsData).map(([section, actions]) => {
+              const enabled = Object.entries(actions).filter(([, perm]) => perm).length;
+              if (enabled === 0) return null;
+              return (
+                <div key={section}>
+                  <h4 className="font-medium text-text-primary capitalize mb-2">
+                    {section} ({enabled}/{Object.keys(actions).length})
+                  </h4>
+                  <div className="flex flex-wrap gap-2">
+                    {Object.entries(actions)
+                      .filter(([, perm]) => perm)
+                      .map(([action]) => (
+                        <span
+                          key={action}
+                          className="text-xs bg-primary-50 text-primary-700 px-2 py-1 rounded"
+                        >
+                          {action}
+                        </span>
+                      ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </ActionModal>
+
+      {/* Temporary Password Modal */}
       <ActionModal
         open={!!tempPassword}
         onClose={() => setTempPassword(null)}

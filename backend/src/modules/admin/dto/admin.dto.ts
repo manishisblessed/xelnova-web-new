@@ -188,12 +188,35 @@ export class UpdatePayoutDto {
 // ─── Admin Roles ───
 export class CreateRoleDto {
   @ApiProperty() @IsString() name: string;
-  @ApiPropertyOptional() @IsOptional() @IsString() permissions?: string;
+  @ApiPropertyOptional({ description: 'Role description for documentation' })
+  @IsOptional() @IsString() description?: string;
+  @ApiPropertyOptional({ description: 'Role level in hierarchy (SUPER_ADMIN, MANAGER, EDITOR, VIEWER)' })
+  @IsOptional() @IsString() level?: string;
+  @ApiPropertyOptional({ description: 'Structured permissions by section and action' })
+  @IsOptional() @Allow() permissionsData?: Record<string, Record<string, boolean>>;
+  @ApiPropertyOptional({ description: 'Legacy comma-separated permissions (deprecated)' })
+  @IsOptional() @IsString() permissions?: string;
 }
 
 export class UpdateRoleDto {
   @ApiPropertyOptional() @IsOptional() @IsString() name?: string;
-  @ApiPropertyOptional() @IsOptional() @IsString() permissions?: string;
+  @ApiPropertyOptional({ description: 'Role description' })
+  @IsOptional() @IsString() description?: string;
+  @ApiPropertyOptional({ description: 'Role level in hierarchy' })
+  @IsOptional() @IsString() level?: string;
+  @ApiPropertyOptional({ description: 'Structured permissions by section and action' })
+  @IsOptional() @Allow() permissionsData?: Record<string, Record<string, boolean>>;
+  @ApiPropertyOptional({ description: 'Legacy comma-separated permissions (deprecated)' })
+  @IsOptional() @IsString() permissions?: string;
+}
+
+/** Role template for quick role creation */
+export interface RoleTemplateDto {
+  id: string;
+  name: string;
+  description: string | null;
+  level: string;
+  permissionsData: Record<string, Record<string, boolean>>;
 }
 
 // ─── Sub-admin (admin user) management ───

@@ -1445,4 +1445,206 @@ export class SellerDashboardService {
       categoryBreakdown: categoryData,
     };
   }
+
+  /**
+   * Cancel an order by the seller with a reason
+   */
+  async cancelOrder(userId: string, orderId: string, reason: string) {
+    const seller = await this.getSellerProfile(userId);
+    const productIds = (
+      await this.prisma.product.findMany({ where: { sellerId: seller.id }, select: { id: true } })
+    ).map((p) => p.id);
+
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: { items: true, user: true, shipment: true },
+    });
+    if (!order) throw new NotFoundException('Order not found');
+
+    const hasSellerProducts = order.items.some((item) => productIds.includes(item.productId));
+    if (!hasSellerProducts) throw new ForbiddenException('Order has none of your products');
+
+    // Check if order can be cancelled
+    const cancellableStatuses = ['PENDING', 'PROCESSING', 'CONFIRMED'];
+    if (!cancellableStatuses.includes(order.status)) {
+      throw new BadRequestException(
+        `Cannot cancel order in ${order.status} status. Only Pending, Processing, or Confirmed orders can be cancelled.`,
+      );
+    }
+
+    // If shipment exists and is already booked, cancel it first
+    if (order.shipment && order.shipment.shipmentStatus !== 'CANCELLED') {
+      await this.prisma.shipment.update({
+        where: { id: order.shipment.id },
+        data: { shipmentStatus: 'CANCELLED' },
+      });
+    }
+
+    // Restore stock for seller's products
+    for (const item of order.items) {
+      if (!productIds.includes(item.productId)) continue;
+      await this.prisma.product.update({
+        where: { id: item.productId },
+        data: { stock: { increment: item.quantity } },
+      });
+    }
+
+    // Process refund if payment was made
+    if (order.paymentStatus === 'PAID') {
+      const refundAmount = Number(order.total) || 0;
+      if (refundAmount > 0) {
+        try {
+          await this.paymentService.refundToSource(
+            order.id,
+            refundAmount,
+            `Order cancelled by seller: ${reason}`,
+          );
+          this.logger.log(`Seller cancelled order ${order.orderNumber}, refund of ₹${refundAmount} initiated`);
+        } catch (error) {
+          this.logger.error(`Failed to refund order ${order.orderNumber}: ${error}`);
+          throw new BadRequestException('Failed to process refund. Order cancellation aborted.');
+        }
+      }
+    }
+
+    // Update order status
+    const updatedOrder = await this.prisma.order.update({
+      where: { id: orderId },
+      data: {
+        status: 'CANCELLED',
+        paymentStatus: order.paymentStatus === 'PAID' ? 'REFUNDED' : 'PENDING',
+      },
+      include: { items: true, user: true },
+    });
+
+    // Send notification to customer
+    await this.notificationService.sendOrderCancelledNotification(updatedOrder.user, updatedOrder, reason);
+
+    return {
+      orderId: updatedOrder.id,
+      orderNumber: updatedOrder.orderNumber,
+      status: updatedOrder.status,
+      cancelledAt: new Date(),
+      reason,
+    };
+  }
+
+  /**
+   * Cancel a shipment by the seller with a reason
+   */
+  async cancelShipment(userId: string, shipmentId: string, reason: string) {
+    const seller = await this.getSellerProfile(userId);
+
+    const shipment = await this.prisma.shipment.findUnique({
+      where: { id: shipmentId },
+      include: { order: { include: { items: true, user: true } }, seller: true },
+    });
+    if (!shipment) throw new NotFoundException('Shipment not found');
+
+    if (shipment.sellerId !== seller.id) {
+      throw new ForbiddenException('This shipment does not belong to you');
+    }
+
+    // Check if shipment can be cancelled
+    const cancellableStatuses = ['PENDING', 'BOOKED', 'PICKUP_SCHEDULED'];
+    if (!cancellableStatuses.includes(shipment.shipmentStatus)) {
+      throw new BadRequestException(
+        `Cannot cancel shipment in ${shipment.shipmentStatus} status. Only Pending, Booked, or Pickup Scheduled shipments can be cancelled.`,
+      );
+    }
+
+    const updatedShipment = await this.prisma.shipment.update({
+      where: { id: shipmentId },
+      data: {
+        shipmentStatus: 'CANCELLED',
+        statusHistory: {
+          push: {
+            status: 'CANCELLED',
+            timestamp: new Date(),
+            reason,
+          },
+        },
+      },
+    });
+
+    // Notify customer about shipment cancellation
+    const order = shipment.order;
+    await this.notificationService.sendShipmentCancelledNotification(
+      order.user,
+      order,
+      shipment,
+      reason,
+    );
+
+    return {
+      shipmentId: updatedShipment.id,
+      orderId: updatedShipment.orderId,
+      status: updatedShipment.shipmentStatus,
+      cancelledAt: new Date(),
+      reason,
+    };
+  }
+
+  /**
+   * Reschedule a shipment pickup by the seller
+   */
+  async rescheduleShipment(userId: string, shipmentId: string, newPickupDate: string, reason?: string) {
+    const seller = await this.getSellerProfile(userId);
+
+    const shipment = await this.prisma.shipment.findUnique({
+      where: { id: shipmentId },
+      include: { order: { include: { items: true, user: true } }, seller: true },
+    });
+    if (!shipment) throw new NotFoundException('Shipment not found');
+
+    if (shipment.sellerId !== seller.id) {
+      throw new ForbiddenException('This shipment does not belong to you');
+    }
+
+    // Check if shipment can be rescheduled
+    const reschedulableStatuses = ['PENDING', 'BOOKED', 'PICKUP_SCHEDULED'];
+    if (!reschedulableStatuses.includes(shipment.shipmentStatus)) {
+      throw new BadRequestException(
+        `Cannot reschedule shipment in ${shipment.shipmentStatus} status. Only Pending, Booked, or Pickup Scheduled shipments can be rescheduled.`,
+      );
+    }
+
+    const newDate = new Date(newPickupDate);
+    if (newDate <= new Date()) {
+      throw new BadRequestException('New pickup date must be in the future');
+    }
+
+    const updatedShipment = await this.prisma.shipment.update({
+      where: { id: shipmentId },
+      data: {
+        pickupDate: newDate,
+        statusHistory: {
+          push: {
+            status: 'PICKUP_SCHEDULED',
+            timestamp: new Date(),
+            reason: reason || `Rescheduled to ${newDate.toISOString()}`,
+          },
+        },
+      },
+    });
+
+    // Notify customer about rescheduled shipment
+    const order = shipment.order;
+    await this.notificationService.sendShipmentRescheduledNotification(
+      order.user,
+      order,
+      updatedShipment,
+      newDate,
+      reason,
+    );
+
+    return {
+      shipmentId: updatedShipment.id,
+      orderId: updatedShipment.orderId,
+      pickupDate: updatedShipment.pickupDate,
+      status: updatedShipment.shipmentStatus,
+      rescheduledAt: new Date(),
+      reason: reason || `Rescheduled to ${newDate.toISOString()}`,
+    };
+  }
 }

@@ -10,6 +10,9 @@ import {
   SellerProductQueryDto,
   SellerOrderQueryDto,
   UpdateOrderStatusDto,
+  CancelOrderDto,
+  CancelShipmentDto,
+  RescheduleShipmentDto,
   UpdateSellerProfileDto,
   RevenueQueryDto,
   ProposeBrandDto,
@@ -97,6 +100,36 @@ export class SellerDashboardController {
     @Body() dto: UpdateOrderStatusDto,
   ) {
     return successResponse(await this.service.updateOrderStatus(userId, id, dto.status), 'Order status updated');
+  }
+
+  @Post('orders/:id/cancel')
+  @ApiOperation({ summary: 'Cancel an order with reason' })
+  async cancelOrder(
+    @CurrentUser('id') userId: string,
+    @Param('id') id: string,
+    @Body() dto: CancelOrderDto,
+  ) {
+    return successResponse(await this.service.cancelOrder(userId, id, dto.reason), 'Order cancelled');
+  }
+
+  @Post('shipments/:shipmentId/cancel')
+  @ApiOperation({ summary: 'Cancel a shipment with reason' })
+  async cancelShipment(
+    @CurrentUser('id') userId: string,
+    @Param('shipmentId') shipmentId: string,
+    @Body() dto: CancelShipmentDto,
+  ) {
+    return successResponse(await this.service.cancelShipment(userId, shipmentId, dto.reason), 'Shipment cancelled');
+  }
+
+  @Post('shipments/:shipmentId/reschedule')
+  @ApiOperation({ summary: 'Reschedule a shipment pickup' })
+  async rescheduleShipment(
+    @CurrentUser('id') userId: string,
+    @Param('shipmentId') shipmentId: string,
+    @Body() dto: RescheduleShipmentDto,
+  ) {
+    return successResponse(await this.service.rescheduleShipment(userId, shipmentId, dto.newPickupDate, dto.reason), 'Shipment rescheduled');
   }
 
   // ─── Revenue & Analytics ───

@@ -12,10 +12,12 @@ interface LocationState {
   location: LocationData | null;
   autoDetected: boolean;
   promptDismissed: boolean;
+  shouldShowModal: boolean;
   setLocation: (data: LocationData) => void;
   clearLocation: () => void;
   setAutoDetected: (v: boolean) => void;
   setPromptDismissed: (v: boolean) => void;
+  setShouldShowModal: (v: boolean) => void;
 }
 
 export async function lookupPincode(pincode: string): Promise<LocationData> {
@@ -94,16 +96,46 @@ export async function autoDetectLocation(): Promise<LocationData | null> {
   }
 }
 
+export async function captureLocationFromIP(): Promise<{
+  ipAddress?: string;
+  city?: string;
+  region?: string;
+  postal?: string;
+  country?: string;
+  latitude?: number;
+  longitude?: number;
+} | null> {
+  try {
+    const res = await fetch('https://ipapi.co/json/', { signal: AbortSignal.timeout(5000) });
+    if (!res.ok) return null;
+    const data = await res.json();
+    
+    return {
+      ipAddress: data.ip,
+      city: data.city,
+      region: data.region,
+      postal: data.postal,
+      country: data.country_name,
+      latitude: data.latitude,
+      longitude: data.longitude,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export const useLocationStore = create<LocationState>()(
   persist(
     (set) => ({
       location: null,
       autoDetected: false,
       promptDismissed: false,
-      setLocation: (data) => set({ location: data, promptDismissed: true }),
+      shouldShowModal: false,
+      setLocation: (data) => set({ location: data, promptDismissed: true, shouldShowModal: false }),
       clearLocation: () => set({ location: null }),
       setAutoDetected: (v) => set({ autoDetected: v }),
       setPromptDismissed: (v) => set({ promptDismissed: v }),
+      setShouldShowModal: (v) => set({ shouldShowModal: v }),
     }),
     { name: 'xelnova-location' },
   ),

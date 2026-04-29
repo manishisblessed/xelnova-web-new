@@ -1293,4 +1293,66 @@ export class NotificationService {
   isWhatsAppEnabled(): boolean {
     return this.whatsapp.isEnabled();
   }
+
+  /**
+   * Notify customer when their order is cancelled by seller
+   */
+  async sendOrderCancelledNotification(user: { id: string; email?: string; name?: string }, order: any, reason?: string) {
+    await this.logNotification({
+      userId: user.id,
+      channel: 'in_app',
+      type: 'ORDER_CANCELLED',
+      title: 'Order Cancelled',
+      body: `Your order #${order.orderNumber} has been cancelled by the seller. ${reason ? `Reason: ${reason}` : ''}`,
+      data: { orderId: order.id, orderNumber: order.orderNumber, reason },
+    });
+
+    if (user.email) {
+      this.email.sendOrderCancelledNotification(user.email, user.name || 'Customer', order.orderNumber, reason).catch((err) =>
+        this.logger.warn(`Email failed for order cancellation to customer ${user.id}: ${err.message}`),
+      );
+    }
+  }
+
+  /**
+   * Notify customer when their shipment is cancelled by seller
+   */
+  async sendShipmentCancelledNotification(user: { id: string; email?: string; name?: string }, order: any, shipment: any, reason?: string) {
+    await this.logNotification({
+      userId: user.id,
+      channel: 'in_app',
+      type: 'SHIPMENT_CANCELLED',
+      title: 'Shipment Cancelled',
+      body: `The shipment for your order #${order.orderNumber} has been cancelled. ${reason ? `Reason: ${reason}` : ''}`,
+      data: { orderId: order.id, shipmentId: shipment.id, orderNumber: order.orderNumber, reason },
+    });
+
+    if (user.email) {
+      this.email.sendShipmentCancelledNotification(user.email, user.name || 'Customer', order.orderNumber, reason).catch((err) =>
+        this.logger.warn(`Email failed for shipment cancellation to customer ${user.id}: ${err.message}`),
+      );
+    }
+  }
+
+  /**
+   * Notify customer when their shipment is rescheduled
+   */
+  async sendShipmentRescheduledNotification(user: { id: string; email?: string; name?: string }, order: any, shipment: any, newDate: Date, reason?: string) {
+    const formattedDate = newDate.toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' });
+    
+    await this.logNotification({
+      userId: user.id,
+      channel: 'in_app',
+      type: 'SHIPMENT_RESCHEDULED',
+      title: 'Shipment Rescheduled',
+      body: `The shipment for your order #${order.orderNumber} has been rescheduled to ${formattedDate}. ${reason ? `Reason: ${reason}` : ''}`,
+      data: { orderId: order.id, shipmentId: shipment.id, orderNumber: order.orderNumber, newDate: newDate.toISOString(), reason },
+    });
+
+    if (user.email) {
+      this.email.sendShipmentRescheduledNotification(user.email, user.name || 'Customer', order.orderNumber, formattedDate, reason).catch((err) =>
+        this.logger.warn(`Email failed for shipment reschedule to customer ${user.id}: ${err.message}`),
+      );
+    }
+  }
 }

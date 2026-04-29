@@ -561,4 +561,55 @@ export class EmailService {
       `,
     });
   }
+
+  async sendOrderCancelledNotification(to: string, name: string, orderNumber: string, reason?: string) {
+    return this.sendEmail({
+      to,
+      subject: `Order #${orderNumber} Cancelled - XelNova`,
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+          <h1 style="color:#dc2626">Order Cancelled</h1>
+          <p>Hi ${this.cleanName(name)},</p>
+          <p>Your order <strong>#${orderNumber}</strong> has been cancelled by the seller.</p>
+          ${reason ? `<p><strong>Reason:</strong> ${reason}</p>` : ''}
+          <p>If you paid for this order, the amount will be refunded to your original payment method within 3-5 business days.</p>
+          <p>If you have any questions, please contact our support team.</p>
+        </div>
+      `,
+    });
+  }
+
+  async sendShipmentCancelledNotification(to: string, name: string, orderNumber: string, reason?: string) {
+    return this.sendEmail({
+      to,
+      subject: `Shipment Cancelled for Order #${orderNumber} - XelNova`,
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+          <h1 style="color:#dc2626">Shipment Cancelled</h1>
+          <p>Hi ${this.cleanName(name)},</p>
+          <p>The shipment for your order <strong>#${orderNumber}</strong> has been cancelled.</p>
+          ${reason ? `<p><strong>Reason:</strong> ${reason}</p>` : ''}
+          <p>You will receive a new shipment or refund shortly. We apologize for any inconvenience.</p>
+          <p>For more details, please check your order on XelNova or contact our support team.</p>
+        </div>
+      `,
+    });
+  }
+
+  async sendShipmentRescheduledNotification(to: string, name: string, orderNumber: string, newDate: string, reason?: string) {
+    return this.sendEmail({
+      to,
+      subject: `Shipment Rescheduled for Order #${orderNumber} - XelNova`,
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+          <h1 style="color:#7c3aed">Shipment Rescheduled</h1>
+          <p>Hi ${this.cleanName(name)},</p>
+          <p>The shipment for your order <strong>#${orderNumber}</strong> has been rescheduled.</p>
+          <p><strong>New Pickup Date:</strong> ${newDate}</p>
+          ${reason ? `<p><strong>Reason:</strong> ${reason}</p>` : ''}
+          <p>We will keep you updated on the new shipment status. You can track your order anytime on XelNova.</p>
+        </div>
+      `,
+    });
+  }
 }

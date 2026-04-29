@@ -2,6 +2,7 @@ import { Controller, Get, Post, Patch, Delete, Body, Param, Query, Req, Res } fr
 import { Request, Response } from 'express';
 import { Role } from '@prisma/client';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 import { ApiTags, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { AdminService } from './admin.service';
 import { ReportsService } from './reports.service';
@@ -408,24 +409,35 @@ export class AdminController {
   // ─── Admin Roles ───
   @Get('roles')
   @ApiOperation({ summary: 'List admin roles' })
+  @RequirePermission({ section: 'roles', action: 'view' })
   async getRoles() {
     return successResponse(await this.service.getRoles(), 'Roles fetched');
   }
 
+  @Get('roles/templates')
+  @ApiOperation({ summary: 'Get role templates for quick role creation' })
+  @RequirePermission({ section: 'roles', action: 'view' })
+  async getRoleTemplates() {
+    return successResponse(await this.service.getRoleTemplates(), 'Role templates fetched');
+  }
+
   @Post('roles')
   @ApiOperation({ summary: 'Create admin role' })
+  @RequirePermission({ section: 'roles', action: 'create' })
   async createRole(@Body() dto: CreateRoleDto) {
     return successResponse(await this.service.createRole(dto), 'Role created');
   }
 
   @Patch('roles/:id')
   @ApiOperation({ summary: 'Update admin role' })
+  @RequirePermission({ section: 'roles', action: 'edit' })
   async updateRole(@Param('id') id: string, @Body() dto: UpdateRoleDto) {
     return successResponse(await this.service.updateRole(id, dto), 'Role updated');
   }
 
   @Delete('roles/:id')
   @ApiOperation({ summary: 'Delete admin role' })
+  @RequirePermission({ section: 'roles', action: 'delete' })
   async deleteRole(@Param('id') id: string) {
     return successResponse(await this.service.deleteRole(id), 'Role deleted');
   }

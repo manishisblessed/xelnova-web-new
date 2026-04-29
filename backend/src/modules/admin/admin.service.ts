@@ -39,6 +39,7 @@ export class AdminService {
     private readonly logging: LoggingService,
     private readonly notifications: NotificationService,
     private readonly shipping: ShippingService,
+    private readonly permissions: PermissionsService,
   ) {}
 
   private slugify(text: string): string {
@@ -1282,8 +1283,12 @@ export class AdminService {
     return rows.map((r) => ({
       id: r.id,
       name: r.name,
+      description: r.description,
+      level: r.level,
       permissions: r.permissions,
+      permissionsData: r.permissionsData,
       isSystem: r.isSystem,
+      isTemplate: r.isTemplate,
       users: r._count.members,
       createdAt: r.createdAt,
       updatedAt: r.updatedAt,
@@ -1291,13 +1296,24 @@ export class AdminService {
   }
 
   async createRole(dto: CreateRoleDto) {
-    return this.prisma.adminRole.create({
-      data: { name: dto.name, permissions: dto.permissions || '' },
-    });
+    const data: any = { 
+      name: dto.name,
+      description: dto.description || null,
+      level: dto.level || 'VIEWER',
+      permissions: dto.permissions || '',
+      permissionsData: dto.permissionsData || {},
+    };
+    return this.prisma.adminRole.create({ data });
   }
 
   async updateRole(id: string, dto: UpdateRoleDto) {
-    return this.prisma.adminRole.update({ where: { id }, data: dto as any });
+    const data: any = {};
+    if (dto.name !== undefined) data.name = dto.name;
+    if (dto.description !== undefined) data.description = dto.description;
+    if (dto.level !== undefined) data.level = dto.level;
+    if (dto.permissions !== undefined) data.permissions = dto.permissions;
+    if (dto.permissionsData !== undefined) data.permissionsData = dto.permissionsData;
+    return this.prisma.adminRole.update({ where: { id }, data });
   }
 
   async deleteRole(id: string) {
@@ -1307,6 +1323,7 @@ export class AdminService {
     });
     if (!role) throw new NotFoundException('Role not found');
     if (role.isSystem) throw new BadRequestException('Cannot delete system roles');
+    if (role.isTemplate) throw new BadRequestException('Cannot delete template roles');
     if (role._count.members > 0) {
       throw new BadRequestException(
         `Cannot delete: ${role._count.members} sub-admin(s) are assigned to this role. Reassign them first.`,
@@ -1314,6 +1331,10 @@ export class AdminService {
     }
     await this.prisma.adminRole.delete({ where: { id } });
     return { deleted: true };
+  }
+
+  async getRoleTemplates() {
+    return this.permissions.getRoleTemplates();
   }
 
   // ─── Sub-admins (admin users with optional custom RBAC role) ───

@@ -121,6 +121,19 @@ export class UpdateOrderStatusDto {
   @ApiProperty() @IsString() status: string;
 }
 
+export class CancelOrderDto {
+  @ApiProperty() @IsString() reason: string;
+}
+
+export class CancelShipmentDto {
+  @ApiProperty() @IsString() reason: string;
+}
+
+export class RescheduleShipmentDto {
+  @ApiProperty() @IsString() newPickupDate: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() reason?: string;
+}
+
 export class UpdateSellerProfileDto {
   @ApiPropertyOptional() @IsOptional() @IsString() storeName?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() description?: string;
