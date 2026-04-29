@@ -1,7 +1,7 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { ProductCard } from '@/components/marketplace/product-card';
+import { StoreProductCardEnhanced } from './store-product-card-enhanced';
 import type { Product } from '@/lib/data/products';
 
 interface StoreFeaturedProps {
@@ -26,9 +26,9 @@ export function StoreFeatured({ products, title, showAll = false }: StoreFeature
         )}
       </div>
 
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+      <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {displayProducts.map((product, i) => (
-          <ProductCard key={product.id} product={product} index={i} />
+          <StoreProductCardEnhanced key={product.id} product={product} index={i} />
         ))}
       </div>
     </section>

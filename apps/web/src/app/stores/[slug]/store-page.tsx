@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { motion } from 'framer-motion';
 import { storesApi } from '@xelnova/api';
 import type { SellerStore, Product } from '@xelnova/api';
 import { StoreHero } from './store-hero';
@@ -24,6 +25,7 @@ export function StorePage({ store }: StorePageProps) {
   const [deals, setDeals] = useState<Product[]>([]);
   const [bestsellers, setBestsellers] = useState<Product[]>([]);
   const [loadingDeals, setLoadingDeals] = useState(true);
+  const [total, setTotal] = useState(store.productCount || 0);
 
   useEffect(() => {
     Promise.all([
@@ -59,70 +61,84 @@ export function StorePage({ store }: StorePageProps) {
       />
 
       {/* Main Content */}
-      <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-        {activeTab === 'products' && (
-          <div className="space-y-12">
-            {/* Featured Products */}
-            {hasFeaturedProducts && (
-              <StoreFeatured 
-                products={store.featuredProducts.map((p: any) => mapProduct(p))} 
-                title="Featured Products"
-              />
-            )}
+      <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.2 }}
+        >
+          {activeTab === 'products' && (
+            <div className="space-y-12">
+              {/* Featured Products */}
+              {hasFeaturedProducts && (
+                <StoreFeatured 
+                  products={store.featuredProducts.map((p: any) => mapProduct(p))} 
+                  title="⭐ Featured Products"
+                />
+              )}
 
-            {/* Bestsellers */}
-            {hasBestsellers && (
-              <StoreFeatured 
-                products={bestsellers.map((p: any) => mapProduct(p))} 
-                title="Best Sellers"
-              />
-            )}
+              {/* Bestsellers */}
+              {hasBestsellers && (
+                <StoreFeatured 
+                  products={bestsellers.map((p: any) => mapProduct(p))} 
+                  title="🏆 Best Sellers"
+                />
+              )}
 
-            {/* Deals */}
-            {hasDeals && (
-              <StoreFeatured 
-                products={deals.map((p: any) => mapProduct(p))} 
-                title="Deals & Offers"
-              />
-            )}
+              {/* Deals */}
+              {hasDeals && (
+                <StoreFeatured 
+                  products={deals.map((p: any) => mapProduct(p))} 
+                  title="🔥 Deals & Offers"
+                />
+              )}
 
-            {/* All Products */}
-            <StoreProducts slug={store.slug} />
-          </div>
-        )}
-
-        {activeTab === 'categories' && (
-          <StoreCategories categories={store.categories} slug={store.slug} />
-        )}
-
-        {activeTab === 'deals' && (
-          <div>
-            {loadingDeals ? (
-              <div className="flex items-center justify-center py-20">
-                <div className="h-8 w-8 animate-spin rounded-full border-4 border-gold-400 border-t-transparent" />
+              {/* All Products */}
+              <div>
+                <div className="mb-6">
+                  <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+                    <span>📦 All Products</span>
+                    <span className="text-lg font-medium text-surface-100 ml-auto">({total})</span>
+                  </h2>
+                  <p className="mt-2 text-surface-200">Explore the complete collection with all available variants and options</p>
+                </div>
+                <StoreProducts slug={store.slug} />
               </div>
-            ) : deals.length > 0 ? (
-              <StoreFeatured 
-                products={deals.map((p: any) => mapProduct(p))} 
-                title="All Deals & Offers"
-                showAll
-              />
-            ) : (
-              <div className="flex flex-col items-center justify-center py-20 text-center">
-                <div className="mb-4 text-4xl">🏷️</div>
-                <h3 className="text-lg font-semibold text-white">No active deals</h3>
-                <p className="mt-1 text-sm text-surface-100">
-                  Check back later for exciting offers from {store.storeName}
-                </p>
-              </div>
-            )}
-          </div>
-        )}
+            </div>
+          )}
 
-        {activeTab === 'about' && (
-          <StoreAbout store={store} />
-        )}
-      </div>
+          {activeTab === 'categories' && (
+            <StoreCategories categories={store.categories} slug={store.slug} />
+          )}
+
+          {activeTab === 'deals' && (
+            <div>
+              {loadingDeals ? (
+                <div className="flex items-center justify-center py-20">
+                  <div className="h-8 w-8 animate-spin rounded-full border-4 border-gold-400 border-t-transparent" />
+                </div>
+              ) : deals.length > 0 ? (
+                <StoreFeatured 
+                  products={deals.map((p: any) => mapProduct(p))} 
+                  title="🔥 All Deals & Offers"
+                  showAll
+                />
+              ) : (
+                <div className="flex flex-col items-center justify-center py-20 text-center">
+                  <div className="mb-4 text-4xl">🏷️</div>
+                  <h3 className="text-lg font-semibold text-white">No active deals</h3>
+                  <p className="mt-1 text-sm text-surface-100">
+                    Check back later for exciting offers from {store.storeName}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'about' && (
+            <StoreAbout store={store} />
+          )}
+        </motion.div>
     </div>
   );
 }

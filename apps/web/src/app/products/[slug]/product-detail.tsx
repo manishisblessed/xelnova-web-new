@@ -793,12 +793,12 @@ export default function ProductDetail() {
                 <Link
                   href={
                     product.seller.slug
-                      ? `/stores/${product.seller.slug}`
+                      ? `/stores/${product.seller.slug}?utm_source=pdp&utm_medium=visit-store`
                       : `/search?seller=${encodeURIComponent(product.seller.name)}`
                   }
-                  className="mt-2 flex items-center justify-center gap-1.5 w-full rounded-lg bg-white border border-border py-2 text-xs font-medium text-primary-600 hover:bg-primary-50 hover:border-primary-200 transition-colors"
+                  className="mt-2 flex items-center justify-center gap-1.5 w-full rounded-xl bg-gradient-to-r from-primary-50 to-primary-100 border border-primary-200 py-2.5 text-xs font-bold text-primary-700 hover:from-primary-100 hover:to-primary-200 hover:border-primary-300 transition-all duration-300 shadow-sm hover:shadow-md group"
                 >
-                  <Store size={12} />
+                  <Store size={14} className="group-hover:scale-110 transition-transform" />
                   Visit the Store
                 </Link>
               </div>

@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search, ShoppingCart, Menu, X, Heart, Package, User, LogIn, LogOut,
@@ -79,6 +79,7 @@ const categoryIcons: Record<string, string> = {
 
 export function Header() {
   const router = useRouter();
+  const pathname = usePathname();
   const [searchQuery, setSearchQuery] = useState('');
   const [searchCategory, setSearchCategory] = useState('All Categories');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -154,14 +155,15 @@ export function Header() {
     return () => { cancelled = true; };
   }, [mounted, location, autoDetected, setLocation, setAutoDetected]);
 
-  // Auto-show location modal after 2 seconds if no location is set and user hasn't dismissed it
+  // Auto-show location modal only on home page if no location is set and user hasn't dismissed it
   useEffect(() => {
-    if (!mounted || location || promptDismissed || locationModalOpen) return;
+    const isHomePage = pathname === '/';
+    if (!mounted || location || promptDismissed || locationModalOpen || !isHomePage) return;
     const timer = setTimeout(() => {
       setLocationModalOpen(true);
     }, 2000);
     return () => clearTimeout(timer);
-  }, [mounted, location, promptDismissed, locationModalOpen]);
+  }, [mounted, location, promptDismissed, locationModalOpen, pathname]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {

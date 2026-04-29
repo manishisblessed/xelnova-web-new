@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronDown, SlidersHorizontal, X, Loader2 } from 'lucide-react';
 import { storesApi } from '@xelnova/api';
 import { cn } from '@xelnova/utils';
-import { ProductCard } from '@/components/marketplace/product-card';
+import { StoreProductCardEnhanced } from './store-product-card-enhanced';
 import { mapProduct } from '@/lib/api';
 import type { Product } from '@/lib/data/products';
 
@@ -190,9 +190,9 @@ export function StoreProducts({ slug, initialCategory }: StoreProductsProps) {
         </div>
       ) : products.length > 0 ? (
         <>
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {products.map((product, i) => (
-              <ProductCard key={product.id} product={product} index={i} />
+              <StoreProductCardEnhanced key={product.id} product={product} index={i} />
             ))}
           </div>
 
