@@ -409,10 +409,29 @@ export class SellerDashboardService {
       dto.status !== ProductStatus.ON_HOLD;
 
     const data: any = { ...dto };
+    
     if (triggerReapproval) {
-      data.status = ProductStatus.PENDING;
-      data.isActive = false;
-      data.rejectionReason = null;
+      // Instead of hiding the product, store changes for admin review
+      // Product stays ACTIVE and visible with OLD content until admin approves
+      const pendingChanges: Record<string, unknown> = {};
+      for (const field of REVIEW_TRIGGER_FIELDS) {
+        if ((dto as Record<string, unknown>)[field] !== undefined) {
+          pendingChanges[field] = (dto as Record<string, unknown>)[field];
+        }
+      }
+      
+      // Store pending changes instead of applying them immediately
+      data.hasPendingChanges = true;
+      data.pendingChangesData = pendingChanges;
+      data.pendingChangesSubmittedAt = new Date();
+      
+      // Remove the actual changes from data - they'll be applied only after admin approval
+      for (const field of REVIEW_TRIGGER_FIELDS) {
+        delete data[field];
+      }
+      
+      // Notify admin that there are pending changes to review
+      this.logger.log(`Product ${productId} has pending changes submitted by seller ${seller.id}`);
     }
     if (dto.brand !== undefined && !dto.brand.trim()) {
       throw new BadRequestException('Brand cannot be empty');

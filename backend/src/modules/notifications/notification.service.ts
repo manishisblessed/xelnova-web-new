@@ -908,6 +908,115 @@ export class NotificationService {
   }
 
   /**
+   * Notify seller when admin requests new/better product images without rejecting the entire listing
+   */
+  async notifyProductImageFeedback(sellerId: string, productName: string, feedback: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: sellerId },
+      select: { phone: true, email: true, name: true },
+    });
+
+    // In-app notification
+    await this.logNotification({
+      userId: sellerId,
+      channel: 'in_app',
+      type: 'PRODUCT_IMAGE_FEEDBACK',
+      title: 'Product Images Need Attention',
+      body: `Please update the images for "${productName}". ${feedback}`,
+      data: { productName, feedback },
+    });
+
+    // Email
+    if (user?.email) {
+      this.email.sendGenericEmail(
+        user.email,
+        'Product Images Need Improvement',
+        `
+        <p>Hello ${user.name || 'Seller'},</p>
+        <p>Your product <strong>"${productName}"</strong> needs better images.</p>
+        <p><strong>Feedback:</strong> ${feedback}</p>
+        <p>Please upload new images from your seller dashboard to ensure your product looks its best.</p>
+        <p><a href="${this.sellerUrl}/inventory">Update Product Images</a></p>
+        `,
+      ).catch((err) =>
+        this.logger.warn(`Email failed for product image feedback: ${err.message}`),
+      );
+    }
+  }
+
+  /**
+   * Notify seller when admin approves their product edit changes
+   */
+  async notifyProductChangesApproved(sellerId: string, productName: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: sellerId },
+      select: { phone: true, email: true, name: true },
+    });
+
+    // In-app notification
+    await this.logNotification({
+      userId: sellerId,
+      channel: 'in_app',
+      type: 'PRODUCT_CHANGES_APPROVED',
+      title: 'Product Updates Approved',
+      body: `Your changes to "${productName}" have been approved and are now live.`,
+      data: { productName },
+    });
+
+    // Email
+    if (user?.email) {
+      this.email.sendGenericEmail(
+        user.email,
+        'Product Updates Approved',
+        `
+        <p>Hello ${user.name || 'Seller'},</p>
+        <p>Your updates to <strong>"${productName}"</strong> have been approved and are now live on the marketplace.</p>
+        <p><a href="${this.sellerUrl}/inventory">View Your Products</a></p>
+        `,
+      ).catch((err) =>
+        this.logger.warn(`Email failed for product changes approved: ${err.message}`),
+      );
+    }
+  }
+
+  /**
+   * Notify seller when admin rejects their product edit changes
+   */
+  async notifyProductChangesRejected(sellerId: string, productName: string, reason?: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: sellerId },
+      select: { phone: true, email: true, name: true },
+    });
+
+    // In-app notification
+    await this.logNotification({
+      userId: sellerId,
+      channel: 'in_app',
+      type: 'PRODUCT_CHANGES_REJECTED',
+      title: 'Product Updates Not Approved',
+      body: `Your changes to "${productName}" were not approved.${reason ? ` Reason: ${reason}` : ''}`,
+      data: { productName, reason },
+    });
+
+    // Email
+    if (user?.email) {
+      this.email.sendGenericEmail(
+        user.email,
+        'Product Updates Not Approved',
+        `
+        <p>Hello ${user.name || 'Seller'},</p>
+        <p>Your updates to <strong>"${productName}"</strong> were not approved.</p>
+        ${reason ? `<p><strong>Reason:</strong> ${reason}</p>` : ''}
+        <p>Please review our guidelines and submit again if needed.</p>
+        <p><a href="${this.sellerUrl}/inventory">Edit Product</a></p>
+        `,
+      ).catch((err) =>
+        this.logger.warn(`Email failed for product changes rejected: ${err.message}`),
+      );
+    }
+  }
+
+  /**
    * Notify user when ticket is created
    * Channels: In-app, Email, SMS (when approved)
    */

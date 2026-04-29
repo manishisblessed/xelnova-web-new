@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useSearchParams } from 'next/navigation';
 import { motion, AnimatePresence, Reorder, useDragControls } from 'framer-motion';
-import { ImagePlus, Pencil, Plus, Trash2, X, Crown, Loader2, Layers, GripVertical, Upload, Camera, Ruler, Image as ImageIcon, Pause, Play, Search, ChevronLeft as ChevronLeftIcon, ChevronRight as ChevronRightIcon, ChevronDown, ExternalLink } from 'lucide-react';
+import { ImagePlus, Pencil, Plus, Trash2, X, Crown, Loader2, Layers, GripVertical, Upload, Camera, Ruler, Image as ImageIcon, Pause, Play, Search, ChevronLeft as ChevronLeftIcon, ChevronRight as ChevronRightIcon, ChevronDown, ExternalLink, Film } from 'lucide-react';
 import { toast } from 'sonner';
 import { DashboardHeader } from '@/components/dashboard/dashboard-header';
 import { DataTable, type Column } from '@/components/dashboard/data-table';
@@ -19,12 +19,16 @@ import {
   apiUpdateProduct,
   apiUploadImage,
   apiUploadImages,
+  apiUploadVideo,
+  apiDeleteVideo,
   type BrandListingHint,
 } from '@/lib/api';
 import { useSellerProfile } from '@/lib/seller-profile-context';
 import { VerificationBanner } from '@/components/dashboard/verification-banner';
 import { publicApiBase } from '@/lib/public-api-base';
 import { resolveStorefrontPreviewUrl } from '@/lib/storefront-url';
+import { ProductVariantsExpansion } from '@/components/product-variants-expansion';
+import { CategorySelector } from '@/components/category-selector';
 import {
   formRowsToVariantGroups,
   makeImageId,
@@ -138,7 +142,8 @@ function validateVariantRowsCommerce(rows: FormVariantRow[]): string | null {
 interface CategoryNode {
   id: string;
   name: string;
-  children?: { id: string; name: string }[];
+  slug: string;
+  children?: CategoryNode[];
 }
 
 interface SellerProduct {
@@ -153,6 +158,8 @@ interface SellerProduct {
   stock: number;
   status: string;
   images?: string[];
+  video?: string | null;
+  videoPublicId?: string | null;
   variants?: unknown;
   categoryId?: string;
   category?: { name: string } | null;
@@ -394,18 +401,6 @@ function productStatusLabel(status: string): string {
   return status;
 }
 
-function flattenCategories(nodes: CategoryNode[]): { id: string; name: string }[] {
-  const out: { id: string; name: string }[] = [];
-  for (const c of nodes) {
-    out.push({ id: c.id, name: c.name });
-    if (c.children?.length) {
-      for (const ch of c.children) {
-        out.push({ id: ch.id, name: `${c.name} › ${ch.name}` });
-      }
-    }
-  }
-  return out;
-}
 
 function normalizeProducts(res: unknown): SellerProduct[] {
   if (Array.isArray(res)) return res as SellerProduct[];
@@ -597,6 +592,145 @@ function GalleryThumbnailItem({
         </div>
       </div>
     </Reorder.Item>
+  );
+}
+
+function ProductVideoUpload({
+  videoUrl,
+  videoPublicId,
+  onVideoChange,
+  onVideoPublicIdChange,
+  uploading,
+  setUploading,
+}: {
+  videoUrl: string;
+  videoPublicId: string;
+  onVideoChange: (url: string) => void;
+  onVideoPublicIdChange: (id: string) => void;
+  uploading: boolean;
+  setUploading: (v: boolean) => void;
+}) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [dragOver, setDragOver] = useState(false);
+
+  const handleFile = async (file: File) => {
+    const MAX_FILE_SIZE = 15 * 1024 * 1024;
+    
+    if (!file.type.startsWith('video/')) {
+      toast.error('Please select a video file (MP4, WebM, MOV)');
+      return;
+    }
+
+    if (file.size > MAX_FILE_SIZE) {
+      toast.error('Video file must be less than 15MB');
+      return;
+    }
+
+    setUploading(true);
+    try {
+      const result = await apiUploadVideo(file);
+      onVideoChange(result.url);
+      onVideoPublicIdChange(result.publicId);
+      toast.success('Video uploaded successfully');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to upload video');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) void handleFile(file);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer.files[0];
+    if (file) void handleFile(file);
+  };
+
+  const handleRemove = async () => {
+    if (videoPublicId) {
+      try {
+        await apiDeleteVideo(videoPublicId);
+      } catch (error) {
+        console.error('Failed to delete video:', error);
+      }
+    }
+    onVideoChange('');
+    onVideoPublicIdChange('');
+  };
+
+  return (
+    <div className="rounded-xl border border-border bg-surface-muted/40 p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-xs font-semibold text-text-primary flex items-center gap-1.5">
+            <Film className="h-3.5 w-3.5 text-primary-500" />
+            Product Video <span className="text-text-muted font-normal">(Optional)</span>
+          </p>
+          <p className="text-[11px] text-text-muted mt-0.5">
+            Upload a product video (MP4, WebM, MOV). Max 15MB. Video helps customers understand your product better.
+          </p>
+        </div>
+      </div>
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="video/mp4,video/webm,video/quicktime"
+        onChange={handleFileSelect}
+        className="hidden"
+      />
+
+      {videoUrl ? (
+        <div className="relative rounded-lg overflow-hidden border border-border bg-surface">
+          <video
+            src={videoUrl}
+            controls
+            className="w-full max-h-64 object-contain"
+          />
+          <button
+            type="button"
+            onClick={handleRemove}
+            disabled={uploading}
+            className="absolute top-2 right-2 p-1.5 rounded-md bg-red-500 hover:bg-red-600 text-white transition-colors disabled:opacity-50"
+            title="Remove video"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      ) : (
+        <div
+          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={handleDrop}
+          className={`relative flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed p-8 transition-all ${
+            dragOver ? 'border-primary-500 bg-primary-50/50' : 'border-border bg-surface hover:border-primary-300'
+          } ${uploading ? 'opacity-50 pointer-events-none' : 'cursor-pointer'}`}
+          onClick={() => !uploading && fileInputRef.current?.click()}
+        >
+          {uploading ? (
+            <>
+              <Loader2 className="h-8 w-8 animate-spin text-primary-500" />
+              <p className="text-sm text-text-muted">Uploading video...</p>
+            </>
+          ) : (
+            <>
+              <div className="p-3 rounded-full bg-primary-50 border border-primary-200">
+                <Film className="h-6 w-6 text-primary-600" />
+              </div>
+              <div className="text-center">
+                <p className="text-sm font-medium text-text-primary">Click to upload or drag & drop</p>
+                <p className="text-xs text-text-muted mt-1">MP4, WebM, or MOV (max 15MB)</p>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -1279,7 +1413,7 @@ export default function SellerInventoryPage() {
   const initialSearch = searchParams?.get('search') ?? '';
   const [products, setProducts] = useState<SellerProduct[]>([]);
   const [loading, setLoading] = useState(true);
-  const [categories, setCategories] = useState<{ id: string; name: string }[]>([]);
+  const [categories, setCategories] = useState<CategoryNode[]>([]);
   const [search, setSearch] = useState(initialSearch);
 
   useEffect(() => {
@@ -1313,6 +1447,9 @@ export default function SellerInventoryPage() {
   const [formCategoryId, setFormCategoryId] = useState('');
   const [formShort, setFormShort] = useState('');
   const [formImages, setFormImages] = useState<ProductImage[]>([]);
+  const [formVideo, setFormVideo] = useState('');
+  const [formVideoPublicId, setFormVideoPublicId] = useState('');
+  const [uploadingVideo, setUploadingVideo] = useState(false);
   const [formVariantRows, setFormVariantRows] = useState<FormVariantRow[]>([]);
   const [uploading, setUploading] = useState(false);
   const [formMetaTitle, setFormMetaTitle] = useState('');
@@ -1571,7 +1708,7 @@ export default function SellerInventoryPage() {
       .then((r) => r.json())
       .then((json) => {
         if (json.success && Array.isArray(json.data)) {
-          setCategories(flattenCategories(json.data as CategoryNode[]));
+          setCategories(json.data as CategoryNode[]);
         }
       })
       .catch(() => toast.error('Could not load categories'));
@@ -1587,6 +1724,8 @@ export default function SellerInventoryPage() {
     setFormCategoryId('');
     setFormShort('');
     setFormImages([]);
+    setFormVideo('');
+    setFormVideoPublicId('');
     setFormVariantRows([]);
     setFormMetaTitle('');
     setFormMetaKeywords([]);
@@ -1632,6 +1771,8 @@ export default function SellerInventoryPage() {
     setFormCategoryId('');
     setFormShort('');
     setFormImages(urlsToProductImages(p.images));
+    setFormVideo('');
+    setFormVideoPublicId('');
     setFormVariantRows([]);
     setEditLoading(true);
     apiGetProduct(p.id)
@@ -1648,6 +1789,8 @@ export default function SellerInventoryPage() {
         setFormCategoryId(String(full.categoryId ?? ''));
         setFormShort(String(full.shortDescription ?? ''));
         setFormImages(urlsToProductImages(full.images as string[] | undefined));
+        setFormVideo(typeof full.video === 'string' ? full.video : '');
+        setFormVideoPublicId(typeof full.videoPublicId === 'string' ? full.videoPublicId : '');
         setFormVariantRows(variantGroupsToFormRows(full.variants));
         setFormMetaTitle(String(full.metaTitle ?? ''));
         setFormMetaKeywords(splitMetaKeywords(String(full.metaTitle ?? '')));
@@ -1842,6 +1985,69 @@ export default function SellerInventoryPage() {
     );
   };
 
+  const handleVariantVideoUpload = async (rowId: string, valId: string, file: File) => {
+    const MAX_FILE_SIZE = 15 * 1024 * 1024;
+
+    if (!file.type.startsWith('video/')) {
+      toast.error('Please select a video file (MP4, WebM, MOV)');
+      return;
+    }
+
+    if (file.size > MAX_FILE_SIZE) {
+      toast.error('Video file must be less than 15MB');
+      return;
+    }
+
+    setUploading(true);
+    try {
+      const result = await apiUploadVideo(file);
+      setFormVariantRows((prev) =>
+        prev.map((r) =>
+          r.id === rowId
+            ? {
+                ...r,
+                values: r.values.map((v) =>
+                  v.id === valId ? { ...v, video: result.url, videoPublicId: result.publicId } : v,
+                ),
+              }
+            : r,
+        ),
+      );
+      toast.success('Variant video uploaded successfully');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to upload video');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const removeVariantVideo = async (rowId: string, valId: string) => {
+    const variant = formVariantRows
+      .find((r) => r.id === rowId)
+      ?.values.find((v) => v.id === valId);
+
+    if (variant?.videoPublicId) {
+      try {
+        await apiDeleteVideo(variant.videoPublicId);
+      } catch (error) {
+        console.error('Failed to delete video:', error);
+      }
+    }
+
+    setFormVariantRows((prev) =>
+      prev.map((r) =>
+        r.id === rowId
+          ? {
+              ...r,
+              values: r.values.map((v) =>
+                v.id === valId ? { ...v, video: '', videoPublicId: '' } : v,
+              ),
+            }
+          : r,
+      ),
+    );
+  };
+
   const promoteVariantImage = (rowId: string, valId: string, imgIdx: number) => {
     if (imgIdx === 0) return;
     setFormVariantRows((prev) =>
@@ -2000,6 +2206,8 @@ export default function SellerInventoryPage() {
         compareAtPrice,
         shortDescription: formShort.trim() || undefined,
         images: imgs.length ? imgs : undefined,
+        video: formVideo.trim() || undefined,
+        videoPublicId: formVideoPublicId.trim() || undefined,
         variants: variantPayload.length ? variantPayload : undefined,
         metaTitle: metaTitleValue || undefined,
         metaDescription: formMetaDesc.trim() || undefined,
@@ -2105,6 +2313,8 @@ export default function SellerInventoryPage() {
         compareAtPrice,
         shortDescription: formShort.trim() || undefined,
         images: imgs,
+        video: formVideo.trim() || undefined,
+        videoPublicId: formVideoPublicId.trim() || undefined,
         variants: variantPayload.length ? variantPayload : [],
         ...(formCategoryId ? { categoryId: formCategoryId } : {}),
         metaTitle: metaTitleValue || undefined,
@@ -2605,6 +2815,15 @@ export default function SellerInventoryPage() {
         setUploading={setUploading}
       />
 
+      <ProductVideoUpload
+        videoUrl={formVideo}
+        videoPublicId={formVideoPublicId}
+        onVideoChange={setFormVideo}
+        onVideoPublicIdChange={setFormVideoPublicId}
+        uploading={uploadingVideo}
+        setUploading={setUploadingVideo}
+      />
+
       <div className="rounded-xl border border-border bg-surface-muted/30 p-4 space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
@@ -2682,6 +2901,7 @@ export default function SellerInventoryPage() {
                         <th className="pb-1.5 pr-2 font-medium min-w-[110px]">Label</th>
                         {row.kind === 'color' && <th className="pb-1.5 pr-2 font-medium w-[80px]">Hex</th>}
                         <th className="pb-1.5 pr-2 font-medium min-w-[300px]" title="1 main + up to 4 supporting images">Images</th>
+                        <th className="pb-1.5 pr-2 font-medium min-w-[140px]" title="Optional product video (max 15MB)">Video <span className="text-text-muted font-normal">(optional)</span></th>
                         <th className="pb-1.5 pr-2 font-medium w-[100px]" title="Inclusive of GST">
                           Price (₹)<span className="text-danger-500">*</span>
                         </th>
@@ -2783,6 +3003,46 @@ export default function SellerInventoryPage() {
                                 </label>
                               )}
                             </div>
+                          </td>
+                          <td className="py-2 pr-2 align-top">
+                            {val.video ? (
+                              <div className="relative h-16 w-24 rounded-lg overflow-hidden border border-border bg-surface group/video">
+                                <video
+                                  src={val.video}
+                                  className="h-full w-full object-cover"
+                                  muted
+                                />
+                                <div className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover/video:opacity-100 transition-opacity">
+                                  <button
+                                    type="button"
+                                    onClick={() => removeVariantVideo(row.id, val.id)}
+                                    className="rounded p-1 text-white hover:bg-white/20"
+                                    title="Remove video"
+                                  >
+                                    <X className="h-4 w-4" />
+                                  </button>
+                                </div>
+                                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                  <div className="bg-black/60 rounded-full p-1.5">
+                                    <Film className="h-4 w-4 text-white" />
+                                  </div>
+                                </div>
+                              </div>
+                            ) : (
+                              <label className="flex h-16 w-24 shrink-0 cursor-pointer items-center justify-center rounded-lg border-2 border-dashed border-border bg-surface-muted/40 text-text-muted hover:border-primary-400 hover:text-primary-500 hover:bg-primary-50/50 transition-colors group" title="Add video (max 15MB)">
+                                <Film className="h-6 w-6 group-hover:scale-110 transition-transform" />
+                                <input
+                                  type="file"
+                                  accept="video/mp4,video/webm,video/quicktime"
+                                  className="sr-only"
+                                  onChange={(e) => {
+                                    const file = e.target.files?.[0];
+                                    if (file) void handleVariantVideoUpload(row.id, val.id, file);
+                                    e.target.value = '';
+                                  }}
+                                />
+                              </label>
+                            )}
                           </td>
                           <td className="py-2 pr-2 align-top">
                             <input
@@ -2949,18 +3209,13 @@ export default function SellerInventoryPage() {
             Category
             <span className="ml-0.5 text-danger-500">*</span>
           </label>
-          <select
-            className="w-full rounded-xl border border-border bg-surface-raised px-3 py-2.5 text-sm text-text-primary outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30"
+          <CategorySelector
+            categories={categories}
             value={formCategoryId}
-            onChange={(e) => setFormCategoryId(e.target.value)}
-          >
-            <option value="">Select category</option>
-            {categories.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
+            onChange={setFormCategoryId}
+            required
+            placeholder="Select category"
+          />
         </div>
       )}
       {editProduct && (
@@ -2968,19 +3223,13 @@ export default function SellerInventoryPage() {
           <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-text-secondary">
             Change category
           </label>
-          <select
-            className="w-full rounded-xl border border-border bg-surface-raised px-3 py-2.5 text-sm text-text-primary outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30"
+          <CategorySelector
+            categories={categories}
             value={formCategoryId}
-            onChange={(e) => setFormCategoryId(e.target.value)}
-          >
-            <option value="">Keep current</option>
-            {categories.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-          <p className="mt-1 text-xs text-text-muted">Leave as &ldquo;Keep current&rdquo; to retain the existing category.</p>
+            onChange={setFormCategoryId}
+            placeholder="Keep current category"
+          />
+          <p className="mt-1 text-xs text-text-muted">Leave empty to retain the existing category.</p>
         </div>
       )}
       <div>
@@ -3221,6 +3470,19 @@ export default function SellerInventoryPage() {
           />
         </div>
       </div>
+
+      {/* Variant Details Expansion - Shows all variants in a detailed table view */}
+      {editProduct && (
+        <ProductVariantsExpansion
+          productId={editProduct.id}
+          productName={editProduct.name}
+          basePrice={editProduct.price}
+          baseStock={editProduct.stock}
+          baseSku={formSku || undefined}
+          variants={editProduct.variants}
+          className="mt-4"
+        />
+      )}
     </div>
   );
 
@@ -3334,10 +3596,10 @@ export default function SellerInventoryPage() {
         </div>
         {formFields}
         <div className="flex justify-end gap-2 mt-6">
-          <Button type="button" variant="outline" onClick={() => setCreateOpen(false)} disabled={saving || uploading || uploadingBrandCertificate}>
+          <Button type="button" variant="outline" onClick={() => setCreateOpen(false)} disabled={saving || uploading || uploadingBrandCertificate || uploadingVideo}>
             Cancel
           </Button>
-          <Button type="button" onClick={submitCreate} disabled={saving || uploading || uploadingBrandCertificate}>
+          <Button type="button" onClick={submitCreate} disabled={saving || uploading || uploadingBrandCertificate || uploadingVideo}>
             {saving ? 'Saving…' : 'Create'}
           </Button>
         </div>
@@ -3362,10 +3624,10 @@ export default function SellerInventoryPage() {
         )}
         {formFields}
         <div className="flex justify-end gap-2 mt-6">
-          <Button type="button" variant="outline" onClick={() => setEditProduct(null)} disabled={saving || uploading || uploadingBrandCertificate}>
+          <Button type="button" variant="outline" onClick={() => setEditProduct(null)} disabled={saving || uploading || uploadingBrandCertificate || uploadingVideo}>
             Cancel
           </Button>
-          <Button type="button" onClick={submitEdit} disabled={saving || uploading || editLoading || uploadingBrandCertificate}>
+          <Button type="button" onClick={submitEdit} disabled={saving || uploading || editLoading || uploadingBrandCertificate || uploadingVideo}>
             {saving ? 'Saving…' : 'Save changes'}
           </Button>
         </div>

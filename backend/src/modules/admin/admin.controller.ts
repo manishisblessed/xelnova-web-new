@@ -111,6 +111,18 @@ export class AdminController {
     return successResponse(await this.service.deleteProduct(id), 'Product deleted');
   }
 
+  @Post('products/:id/approve-changes')
+  @ApiOperation({ summary: 'Approve pending changes for a product' })
+  async approvePendingChanges(@Param('id') id: string) {
+    return successResponse(await this.service.approvePendingChanges(id), 'Pending changes approved');
+  }
+
+  @Post('products/:id/reject-changes')
+  @ApiOperation({ summary: 'Reject pending changes for a product' })
+  async rejectPendingChanges(@Param('id') id: string, @Body() body: { reason?: string }) {
+    return successResponse(await this.service.rejectPendingChanges(id, body.reason), 'Pending changes rejected');
+  }
+
   // ─── Orders ───
   @Get('orders')
   @ApiOperation({ summary: 'List all orders' })

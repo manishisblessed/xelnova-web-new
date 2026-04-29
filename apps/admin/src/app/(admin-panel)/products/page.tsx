@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Badge, Button } from '@xelnova/ui';
 import { AdminListPage } from '@/components/dashboard/admin-list-page';
 import { ActionModal } from '@/components/dashboard/action-modal';
@@ -10,6 +10,7 @@ import { Pencil, Trash2, CheckCircle, XCircle, Clock, AlertTriangle, Eye, Loader
 import { toast } from 'sonner';
 import type { Column } from '@/components/dashboard/data-table';
 import { apiDelete, apiUpdate, apiPost, apiGetAdminProduct } from '@/lib/api';
+import { ProductVariantsExpansion } from '@/components/product-variants-expansion';
 
 const STATUS_OPTIONS = [
   'ACTIVE',
@@ -45,6 +46,9 @@ interface Product {
   category: { name: string } | null;
   seller: { storeName: string } | null;
   bestSellersRank?: number | null;
+  hasPendingChanges?: boolean;
+  pendingChangesData?: unknown;
+  pendingChangesSubmittedAt?: string | null;
 }
 
 interface BrandRecord {
@@ -539,6 +543,13 @@ export default function ProductsPage() {
       return;
     }
 
+    // Check brand approval before proceeding
+    const fullProduct = viewing || product;
+    if ((fullProduct as AdminProductDetail)?.brandRecord && !(fullProduct as AdminProductDetail)?.brandRecord?.approved) {
+      toast.error(`Brand "${(fullProduct as AdminProductDetail).brandRecord?.name}" must be approved first`);
+      return;
+    }
+
     let rank: number | null = null;
     const rawRank = approveBestSellersRank.trim();
     if (rawRank) {
@@ -837,6 +848,17 @@ export default function ProductsPage() {
       ),
     },
     {
+      key: 'hasPendingChanges',
+      header: 'Changes',
+      className: 'whitespace-nowrap text-center w-[100px]',
+      render: (r) =>
+        r.hasPendingChanges ? (
+          <Badge variant="warning">Pending Review</Badge>
+        ) : (
+          <span className="text-text-muted">—</span>
+        ),
+    },
+    {
       key: 'imageRejectionReason',
       header: 'Image rejection',
       className: 'min-w-[200px]',
@@ -979,42 +1001,42 @@ export default function ProductsPage() {
             )}
 
             {/* Brand authorisation block — visible when reviewing the product. */}
-            {(() => {
-              const brandRecordCert = viewing.brandRecord?.authorizationCertificate ?? null;
-              const sellerUploadedCert = extractAdditionalCertUrl(viewing.additionalDetails);
-              const certUrl = brandRecordCert ?? sellerUploadedCert;
-              return (
-                <div className="rounded-xl border border-border bg-surface-muted/30 p-3 text-xs">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="font-semibold text-text-primary">
-                      Brand: {viewing.brand?.trim() ? viewing.brand : <span className="text-text-muted">— not set —</span>}
-                    </p>
-                    {viewing.brandRecord ? (
-                      <Badge variant={viewing.brandRecord.approved ? 'success' : 'warning'}>
-                        {viewing.brandRecord.approved ? 'Brand approved' : 'Brand pending'}
-                      </Badge>
-                    ) : viewing.brand?.trim() ? (
-                      <Badge variant="default">Free-text brand</Badge>
-                    ) : null}
-                  </div>
+            {(viewing.brand || viewing.brandRecord ? (
+              <div className="rounded-xl border border-border bg-surface-muted/30 p-3 text-xs">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="font-semibold text-text-primary">
+                    Brand: {viewing.brand?.trim() ? viewing.brand : <span className="text-text-muted">— not set —</span>}
+                  </p>
+                  {viewing.brandRecord ? (
+                    <Badge variant={viewing.brandRecord.approved ? 'success' : 'warning'}>
+                      {viewing.brandRecord.approved ? 'Brand approved' : 'Brand pending'}
+                    </Badge>
+                  ) : viewing.brand?.trim() ? (
+                    <Badge variant="default">Free-text brand</Badge>
+                  ) : null}
+                </div>
 
-                  {viewing.brandRecord?.proposer && (
-                    <p className="mt-2 text-text-secondary">
-                      Proposed by:{' '}
-                      <span className="font-medium text-text-primary">
-                        {viewing.brandRecord.proposer.storeName ?? '—'}
+                {viewing.brandRecord?.proposer && (
+                  <p className="mt-2 text-text-secondary">
+                    Proposed by:{' '}
+                    <span className="font-medium text-text-primary">
+                      {viewing.brandRecord.proposer.storeName ?? '—'}
+                    </span>
+                    {viewing.brandRecord.proposer.user?.email && (
+                      <span className="ml-1 text-text-muted">
+                        ({viewing.brandRecord.proposer.user.email})
                       </span>
-                      {viewing.brandRecord.proposer.user?.email && (
-                        <span className="ml-1 text-text-muted">
-                          ({viewing.brandRecord.proposer.user.email})
-                        </span>
-                      )}
-                    </p>
-                  )}
+                    )}
+                  </p>
+                )}
 
-                  <div className="mt-2 text-text-secondary">
-                    <p className="font-semibold text-text-primary">Brand authorisation certificate</p>
-                    {certUrl ? (
+                <div className="mt-2 text-text-secondary">
+                  <p className="font-semibold text-text-primary">Brand authorisation certificate</p>
+                  {(() => {
+                    const brandRecordCert = viewing.brandRecord?.authorizationCertificate ?? null;
+                    const sellerUploadedCert = extractAdditionalCertUrl(viewing.additionalDetails);
+                    const certUrl = brandRecordCert ?? sellerUploadedCert;
+                    return certUrl ? (
                       <>
                         {!brandRecordCert && sellerUploadedCert && (
                           <p className="mt-1 text-[11px] text-text-muted">
@@ -1027,37 +1049,130 @@ export default function ProductsPage() {
                       <p className="mt-1 text-warning-600">
                         No brand authorisation certificate found on this listing.
                       </p>
-                    )}
-                  </div>
-                  {viewing.brandAuthAdditionalDocumentUrls &&
-                    viewing.brandAuthAdditionalDocumentUrls.length > 0 && (
-                      <div className="mt-3 text-text-secondary">
-                        <p className="font-semibold text-text-primary">Additional brand documents (dealer / proof)</p>
-                        <ul className="mt-1 list-disc list-inside space-y-1">
-                          {viewing.brandAuthAdditionalDocumentUrls.map((u, i) => (
-                            <li key={`${i}-${u.slice(0, 32)}`}>
-                              <a
-                                href={u}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-primary-600 hover:underline break-all"
-                              >
-                                {u}
-                              </a>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-                  {viewing.status === 'PENDING_BRAND_AUTHORIZATION' && (
-                    <p className="mt-2 text-[11px] text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5">
-                      This listing is in brand-authorization review: confirm the certificate and additional documents
-                      before publishing.
-                    </p>
-                  )}
+                    );
+                  })()}
                 </div>
-              );
-            })()}
+                {viewing.brandAuthAdditionalDocumentUrls &&
+                  viewing.brandAuthAdditionalDocumentUrls.length > 0 && (
+                    <div className="mt-3 text-text-secondary">
+                      <p className="font-semibold text-text-primary">Additional brand documents (dealer / proof)</p>
+                      <ul className="mt-1 list-disc list-inside space-y-1">
+                        {viewing.brandAuthAdditionalDocumentUrls.map((u: string, i: number) => (
+                          <li key={`${i}-${u.slice(0, 32)}`}>
+                            <a
+                              href={u}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-primary-600 hover:underline break-all"
+                            >
+                              {u}
+                            </a>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                {viewing.status === 'PENDING_BRAND_AUTHORIZATION' && (
+                  <p className="mt-2 text-[11px] text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5">
+                    This listing is in brand-authorization review: confirm the certificate and additional documents
+                    before publishing.
+                  </p>
+                )}
+              </div>
+            ) : null) as any}
+
+            {/* Pending Changes Review Block */}
+            {viewing.hasPendingChanges && viewing.pendingChangesData && (
+              <div className="rounded-xl border-2 border-warning-300 bg-warning-50 p-4">
+                <div className="flex items-start justify-between mb-3">
+                  <div>
+                    <p className="text-sm font-semibold text-warning-900 flex items-center gap-2">
+                      <AlertTriangle size={18} className="text-warning-600" />
+                      Pending Changes Awaiting Approval
+                    </p>
+                    <p className="text-xs text-warning-700 mt-1">
+                      Seller submitted changes{' '}
+                      {viewing.pendingChangesSubmittedAt && new Date(viewing.pendingChangesSubmittedAt).toLocaleString()}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-lg border border-warning-200 p-3 space-y-2">
+                  <p className="text-xs font-semibold text-text-primary uppercase tracking-wide mb-2">
+                    Proposed Changes:
+                  </p>
+                  {(() => {
+                    const changes = viewing.pendingChangesData as Record<string, unknown>;
+                    return (
+                      <div className="space-y-3 text-xs">
+                        {Object.entries(changes).map(([key, value]) => (
+                          <div key={key} className="border-l-2 border-warning-400 pl-3">
+                            <p className="font-semibold text-text-secondary capitalize">
+                              {key.replace(/([A-Z])/g, ' $1').trim()}:
+                            </p>
+                            <div className="mt-1 space-y-1">
+                              <div className="bg-danger-50 border border-danger-200 rounded px-2 py-1">
+                                <span className="text-[10px] text-danger-700 font-medium">OLD:</span>
+                                <p className="text-text-primary mt-0.5">
+                                  {typeof (viewing as any)[key] === 'object'
+                                    ? JSON.stringify((viewing as any)[key], null, 2)
+                                    : String((viewing as any)[key] ?? 'Not set')}
+                                </p>
+                              </div>
+                              <div className="bg-success-50 border border-success-200 rounded px-2 py-1">
+                                <span className="text-[10px] text-success-700 font-medium">NEW:</span>
+                                <p className="text-text-primary mt-0.5">
+                                  {typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value ?? '')}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                <div className="flex gap-2 mt-3">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={async () => {
+                      if (!confirm('Reject these changes? The product will remain in its current state.')) return;
+                      const reason = prompt('Rejection reason (optional):');
+                      try {
+                        await apiPost(`products/${viewing.id}/reject-changes`, { reason: reason || undefined });
+                        toast.success('Changes rejected');
+                        setViewOpen(false);
+                        setRefreshTrigger((n) => n + 1);
+                      } catch (err) {
+                        toast.error(err instanceof Error ? err.message : 'Failed to reject changes');
+                      }
+                    }}
+                  >
+                    Reject Changes
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={async () => {
+                      if (!confirm('Approve and apply these changes? They will go live immediately.')) return;
+                      try {
+                        await apiPost(`products/${viewing.id}/approve-changes`, {});
+                        toast.success('Changes approved and applied');
+                        setViewOpen(false);
+                        setRefreshTrigger((n) => n + 1);
+                      } catch (err) {
+                        toast.error(err instanceof Error ? err.message : 'Failed to approve changes');
+                      }
+                    }}
+                  >
+                    Approve & Apply Changes
+                  </Button>
+                </div>
+              </div>
+            )}
 
             {viewing.images && viewing.images.length > 0 ? (
               <div className="space-y-2">
@@ -1094,98 +1209,105 @@ export default function ProductsPage() {
             )}
 
             {/* Image-only rejection: ask the seller to redo just the photos
-                without changing listing status. Available regardless of status
-                so admins can flag images on already-active listings too. */}
-            <div className="rounded-xl border border-border bg-surface-muted/20 p-3">
-              <div className="flex flex-wrap items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="text-xs font-semibold text-text-primary">Image feedback</p>
-                  <p className="text-[11px] text-text-muted mt-0.5">
-                    Ask the seller to redo only the product photos. The listing status will not change.
-                  </p>
-                </div>
-                {viewing.imageRejectionReason ? (
-                  <Badge variant="warning">Images flagged</Badge>
-                ) : (
-                  <Badge variant="default">No issues</Badge>
-                )}
-              </div>
-
-              {viewing.imageRejectionReason && !imageRejectOpen && (
-                <p className="mt-2 text-xs text-text-secondary whitespace-pre-wrap">
-                  <span className="text-text-muted">Last note:</span> {viewing.imageRejectionReason}
-                </p>
-              )}
-
-              {imageRejectOpen ? (
-                <div className="mt-2 space-y-2">
-                  <FormTextarea
-                    value={imageRejectReason}
-                    onChange={(e) => setImageRejectReason(e.target.value)}
-                    placeholder="e.g., Cover image is blurry, please re-upload at 1024x1024 on a white background."
-                    rows={3}
-                  />
-                  <div className="flex flex-wrap items-center justify-end gap-2">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        setImageRejectOpen(false);
-                        setImageRejectReason(viewing.imageRejectionReason || '');
-                      }}
-                      disabled={savingImageReject}
-                    >
-                      Cancel
-                    </Button>
-                    {viewing.imageRejectionReason && (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => void handleImageRejectClear()}
-                        loading={savingImageReject}
-                      >
-                        Clear flag
-                      </Button>
-                    )}
-                    <Button
-                      type="button"
-                      size="sm"
-                      onClick={() => void handleImageReject()}
-                      loading={savingImageReject}
-                    >
-                      Send to seller
-                    </Button>
+                without changing listing status. Only relevant during review/pending status. */}
+            {(viewing.status === 'PENDING' || viewing.status === 'PENDING_BRAND_AUTHORIZATION' || viewing.status === 'ON_HOLD' || viewing.imageRejectionReason) && (
+              <div className="rounded-xl border border-border bg-surface-muted/20 p-3">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold text-text-primary">Image feedback</p>
+                    <p className="text-[11px] text-text-muted mt-0.5">
+                      {viewing.status === 'ACTIVE' || viewing.status === 'REJECTED' || viewing.status === 'DRAFT'
+                        ? 'Image feedback from previous review. This field is only active during product review.'
+                        : 'Ask the seller to redo only the product photos. The listing status will not change.'}
+                    </p>
                   </div>
-                </div>
-              ) : (
-                <div className="mt-2 flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setImageRejectOpen(true);
-                      setImageRejectReason(viewing.imageRejectionReason || '');
-                    }}
-                  >
-                    {viewing.imageRejectionReason ? 'Edit image feedback' : 'Ask for new images'}
-                  </Button>
-                  {viewing.imageRejectionReason && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => void handleImageRejectClear()}
-                      loading={savingImageReject}
-                    >
-                      Clear flag
-                    </Button>
+                  {viewing.imageRejectionReason ? (
+                    <Badge variant="warning">Images flagged</Badge>
+                  ) : (
+                    <Badge variant="default">No issues</Badge>
                   )}
                 </div>
-              )}
-            </div>
+
+                {viewing.imageRejectionReason && !imageRejectOpen && (
+                  <p className="mt-2 text-xs text-text-secondary whitespace-pre-wrap">
+                    <span className="text-text-muted">Last note:</span> {viewing.imageRejectionReason}
+                  </p>
+                )}
+
+                {(viewing.status === 'PENDING' || viewing.status === 'PENDING_BRAND_AUTHORIZATION' || viewing.status === 'ON_HOLD') && (
+                  <>
+                    {imageRejectOpen ? (
+                      <div className="mt-2 space-y-2">
+                        <FormTextarea
+                          value={imageRejectReason}
+                          onChange={(e) => setImageRejectReason(e.target.value)}
+                          placeholder="e.g., Cover image is blurry, please re-upload at 1024x1024 on a white background."
+                          rows={3}
+                        />
+                        <div className="flex flex-wrap items-center justify-end gap-2">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setImageRejectOpen(false);
+                              setImageRejectReason(viewing.imageRejectionReason || '');
+                            }}
+                            disabled={savingImageReject}
+                          >
+                            Cancel
+                          </Button>
+                          {viewing.imageRejectionReason && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => void handleImageRejectClear()}
+                              loading={savingImageReject}
+                            >
+                              Clear flag
+                            </Button>
+                          )}
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={() => void handleImageReject()}
+                            loading={savingImageReject}
+                          >
+                            Send to seller
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setImageRejectOpen(true);
+                            setImageRejectReason(viewing.imageRejectionReason || '');
+                          }}
+                        >
+                          {viewing.imageRejectionReason ? 'Edit image feedback' : 'Ask for new images'}
+                        </Button>
+                        {viewing.imageRejectionReason && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => void handleImageRejectClear()}
+                            loading={savingImageReject}
+                          >
+                            Clear flag
+                          </Button>
+                        )}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
 
             {viewing.shortDescription?.trim() && (
               <div>
@@ -1294,8 +1416,44 @@ export default function ProductsPage() {
               </p>
             )}
 
+            {/* Amazon-style expandable variant table */}
+            <ProductVariantsExpansion
+              productId={viewing.id}
+              productName={viewing.name}
+              basePrice={viewing.price}
+              baseStock={viewing.stock}
+              baseSku={viewing.sku || undefined}
+              variants={viewing.variants}
+            />
+
             {(viewing.status === 'PENDING' || viewing.status === 'PENDING_BRAND_AUTHORIZATION') && (
               <div className="space-y-3 pt-4 border-t border-border">
+                {/* Brand approval warning */}
+                {viewing.brandRecord && !viewing.brandRecord.approved && (
+                  <div className="rounded-xl border-2 border-danger-200 bg-danger-50 px-3 py-3">
+                    <p className="text-sm font-semibold text-danger-900 flex items-center gap-2">
+                      <AlertTriangle size={16} />
+                      Brand Not Approved
+                    </p>
+                    <p className="mt-1 text-xs text-danger-800">
+                      Brand &quot;{viewing.brandRecord.name}&quot; is pending approval. You must approve the brand first before approving this product.
+                      {viewing.brandRecord.proposer && (
+                        <span className="block mt-1">
+                          Proposed by: <span className="font-medium">{viewing.brandRecord.proposer.storeName ?? '—'}</span>
+                        </span>
+                      )}
+                    </p>
+                    <a
+                      href="/brands"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-danger-700 hover:text-danger-900 underline"
+                    >
+                      Review brands →
+                    </a>
+                  </div>
+                )}
+
                 <div className="rounded-xl border border-border bg-surface-muted/50 px-3 py-3">
                   <label
                     htmlFor="approve-commission"
@@ -1365,6 +1523,12 @@ export default function ProductsPage() {
                     size="sm"
                     loading={approving === viewing.id}
                     onClick={() => handleApprove(viewing, { closeView: true })}
+                    disabled={!!(viewing.brandRecord && !viewing.brandRecord.approved)}
+                    title={
+                      viewing.brandRecord && !viewing.brandRecord.approved
+                        ? `Brand "${viewing.brandRecord.name}" must be approved first`
+                        : undefined
+                    }
                   >
                     Approve & publish
                   </Button>
@@ -1412,17 +1576,19 @@ export default function ProductsPage() {
             />
           </FormField>
         )}
-        <FormField
-          label="Image rejection reason"
-          hint="Use this to ask the seller to redo only the product photos without rejecting the listing. Leave blank if images are fine."
-        >
-          <FormTextarea
-            value={form.imageRejectionReason}
-            onChange={(e) => setForm((f) => ({ ...f, imageRejectionReason: e.target.value }))}
-            placeholder="e.g., Cover image is blurry, please re-upload at 1024×1024 on a white background."
-            rows={2}
-          />
-        </FormField>
+        {(form.status === 'PENDING' || form.status === 'PENDING_BRAND_AUTHORIZATION' || form.status === 'ON_HOLD') && (
+          <FormField
+            label="Image rejection reason"
+            hint="Use this to ask the seller to redo only the product photos without rejecting the listing. Leave blank if images are fine."
+          >
+            <FormTextarea
+              value={form.imageRejectionReason}
+              onChange={(e) => setForm((f) => ({ ...f, imageRejectionReason: e.target.value }))}
+              placeholder="e.g., Cover image is blurry, please re-upload at 1024×1024 on a white background."
+              rows={2}
+            />
+          </FormField>
+        )}
         <div className="space-y-3 pt-1">
           <FormToggle
             label="Featured"

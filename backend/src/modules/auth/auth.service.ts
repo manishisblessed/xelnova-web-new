@@ -300,17 +300,13 @@ export class AuthService {
     let createdNewPhoneUser = false;
 
     if (!user) {
-      // Customer storefront: phone-only signup is fine — auto-create a
-      // CUSTOMER row, email stays NULL until the user provides one (e.g.
-      // at checkout). For sellers / business / admin we never auto-create:
-      // those personas require explicit registration / KYC, so we surface
-      // a clear error and the frontend can route the user to the right
-      // signup screen.
-      if (appRole !== 'CUSTOMER') {
+      // Phone-only signup: auto-create user for CUSTOMER and SELLER roles.
+      // CUSTOMER: email stays NULL until provided (e.g. at checkout).
+      // SELLER: will be redirected to onboarding to complete profile (email, business details, etc.).
+      // BUSINESS / ADMIN: require explicit registration / KYC, surface a clear error.
+      if (appRole === 'BUSINESS' || appRole === 'ADMIN') {
         throw new BadRequestException(
-          appRole === 'SELLER'
-            ? 'No seller account is registered with this number. Please complete seller signup first.'
-            : `No ${appRole.toLowerCase()} account is registered with this number.`,
+          `No ${appRole.toLowerCase()} account is registered with this number.`,
         );
       }
 
@@ -336,7 +332,7 @@ export class AuthService {
             phone,
             password: tempPassword,
             avatar: null,
-            role: 'CUSTOMER',
+            role: appRole,
             phoneVerified: true,
             authProvider: 'PHONE',
           },
@@ -347,7 +343,7 @@ export class AuthService {
           err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002';
         if (!unique) throw err;
         user = await this.prisma.user.findFirst({
-          where: { phone: { in: phoneVariants }, role: 'CUSTOMER' },
+          where: { phone: { in: phoneVariants }, role: appRole },
         });
         if (!user) throw err;
       }

@@ -224,14 +224,54 @@ export class AdminService {
   async updateProduct(id: string, dto: AdminUpdateProductDto) {
     const data: any = {};
 
+    // Fetch the product to get seller info for notifications
+    const product = await this.prisma.product.findUnique({
+      where: { id },
+      select: { 
+        id: true, 
+        name: true, 
+        brand: true, 
+        status: true,
+        rejectionReason: true,
+        imageRejectionReason: true,
+        seller: { select: { userId: true, storeName: true } },
+      },
+    });
+
+    if (!product) {
+      throw new NotFoundException('Product not found');
+    }
+
     if (dto.status) {
       data.status = dto.status;
 
-      // When approving: set isActive to true and clear rejection reason
+      // When approving: validate brand approval, set isActive to true and clear rejection reason
       if (dto.status === 'ACTIVE') {
+        // If product has a brand, check if it's approved
+        if (product.brand?.trim()) {
+          const brandRecord = await this.prisma.brand.findUnique({
+            where: { name: product.brand },
+            select: { approved: true, name: true },
+          });
+
+          if (brandRecord && !brandRecord.approved) {
+            throw new BadRequestException(
+              `Cannot approve product: Brand "${brandRecord.name}" is pending approval. Please approve the brand first.`,
+            );
+          }
+        }
+
         data.isActive = true;
         data.rejectionReason = null;
         data.imageRejectionReason = null;
+
+        // Notify seller of product approval
+        if (product.seller?.userId) {
+          this.notifications.notifyProductApproved(
+            product.seller.userId,
+            product.name,
+          ).catch((err) => this.logger.warn(`Product approval notification failed: ${err.message}`));
+        }
       }
 
       // When rejecting: set isActive to false and require rejection reason
@@ -244,6 +284,15 @@ export class AdminService {
         }
         data.isActive = false;
         data.rejectionReason = reason;
+
+        // Notify seller of product rejection
+        if (product.seller?.userId) {
+          this.notifications.notifyProductRejected(
+            product.seller.userId,
+            product.name,
+            reason,
+          ).catch((err) => this.logger.warn(`Product rejection notification failed: ${err.message}`));
+        }
       }
     }
 
@@ -257,7 +306,17 @@ export class AdminService {
     }
     if (dto.imageRejectionReason !== undefined) {
       const trimmed = dto.imageRejectionReason?.trim() ?? '';
+      const oldImageReason = product.imageRejectionReason;
       data.imageRejectionReason = trimmed === '' ? null : trimmed;
+
+      // Notify seller if image rejection reason is being set (not just cleared)
+      if (trimmed && trimmed !== oldImageReason && product.seller?.userId) {
+        this.notifications.notifyProductImageFeedback(
+          product.seller.userId,
+          product.name,
+          trimmed,
+        ).catch((err) => this.logger.warn(`Image feedback notification failed: ${err.message}`));
+      }
     }
     if (dto.commissionRate !== undefined && dto.commissionRate !== null) {
       const rate = Number(dto.commissionRate);
@@ -279,7 +338,7 @@ export class AdminService {
       }
     }
 
-    const product = await this.prisma.product.update({ 
+    const updatedProduct = await this.prisma.product.update({ 
       where: { id }, 
       data,
       include: {
@@ -288,19 +347,19 @@ export class AdminService {
       },
     });
 
-    if (product.seller?.userId && dto.status) {
+    if (updatedProduct.seller?.userId && dto.status) {
       if (dto.status === 'ACTIVE') {
-        this.notifications.notifyProductApproved(product.seller.userId, product.name).catch((err) =>
+        this.notifications.notifyProductApproved(updatedProduct.seller.userId, updatedProduct.name).catch((err) =>
           this.logger.error(`Failed to notify product approval: ${err.message}`),
         );
       } else if (dto.status === 'REJECTED') {
-        this.notifications.notifyProductRejected(product.seller.userId, product.name, dto.rejectionReason).catch((err) =>
+        this.notifications.notifyProductRejected(updatedProduct.seller.userId, updatedProduct.name, dto.rejectionReason).catch((err) =>
           this.logger.error(`Failed to notify product rejection: ${err.message}`),
         );
       }
     }
 
-    return product;
+    return updatedProduct;
   }
 
   async deleteProduct(id: string) {
@@ -333,6 +392,110 @@ export class AdminService {
     // No orders - safe to hard delete
     await this.prisma.product.delete({ where: { id } });
     return { deleted: true };
+  }
+
+  /**
+   * Approve pending changes submitted by seller on an ACTIVE product.
+   * Applies the stored changes and clears the pending flag.
+   */
+  async approvePendingChanges(id: string) {
+    const product = await this.prisma.product.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        name: true,
+        hasPendingChanges: true,
+        pendingChangesData: true,
+        seller: { select: { userId: true } },
+      },
+    });
+
+    if (!product) {
+      throw new NotFoundException('Product not found');
+    }
+
+    if (!product.hasPendingChanges || !product.pendingChangesData) {
+      throw new BadRequestException('No pending changes to approve');
+    }
+
+    const changes = product.pendingChangesData as Record<string, unknown>;
+
+    // Apply the pending changes
+    await this.prisma.product.update({
+      where: { id },
+      data: {
+        ...changes,
+        hasPendingChanges: false,
+        pendingChangesData: Prisma.DbNull,
+        pendingChangesSubmittedAt: null,
+      },
+    });
+
+    // Notify seller
+    if (product.seller?.userId) {
+      this.notifications.notifyProductChangesApproved(
+        product.seller.userId,
+        product.name,
+      ).catch((err) => this.logger.warn(`Product changes approval notification failed: ${err.message}`));
+    }
+
+    await this.logActivity('admin', 'product_changes_approved', `Approved pending changes for product ${product.name}`, undefined, {
+      productId: id,
+      changes: Object.keys(changes),
+    });
+
+    return { approved: true, message: 'Pending changes have been approved and applied' };
+  }
+
+  /**
+   * Reject pending changes submitted by seller.
+   * Clears the pending changes without applying them.
+   */
+  async rejectPendingChanges(id: string, reason?: string) {
+    const product = await this.prisma.product.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        name: true,
+        hasPendingChanges: true,
+        pendingChangesData: true,
+        seller: { select: { userId: true } },
+      },
+    });
+
+    if (!product) {
+      throw new NotFoundException('Product not found');
+    }
+
+    if (!product.hasPendingChanges || !product.pendingChangesData) {
+      throw new BadRequestException('No pending changes to reject');
+    }
+
+    // Clear pending changes
+    await this.prisma.product.update({
+      where: { id },
+      data: {
+        hasPendingChanges: false,
+        pendingChangesData: Prisma.DbNull,
+        pendingChangesSubmittedAt: null,
+      },
+    });
+
+    // Notify seller
+    if (product.seller?.userId) {
+      this.notifications.notifyProductChangesRejected(
+        product.seller.userId,
+        product.name,
+        reason,
+      ).catch((err) => this.logger.warn(`Product changes rejection notification failed: ${err.message}`));
+    }
+
+    await this.logActivity('admin', 'product_changes_rejected', `Rejected pending changes for product ${product.name}`, undefined, {
+      productId: id,
+      reason,
+    });
+
+    return { rejected: true, message: 'Pending changes have been rejected' };
   }
 
   // ─── Orders ───

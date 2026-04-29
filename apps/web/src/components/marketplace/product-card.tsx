@@ -39,6 +39,28 @@ function pluralizeVariantLabel(type: string, label: string | undefined): string 
   return /s$/i.test(base) ? base : `${base}s`;
 }
 
+/**
+ * Collect all unique images from product variants.
+ * This is used to show variant thumbnails on the product card.
+ */
+function getVariantImages(variants: Product['variants'] | undefined): string[] {
+  if (!Array.isArray(variants) || variants.length === 0) return [];
+  const images: string[] = [];
+  for (const axis of variants) {
+    const options = Array.isArray(axis?.options) ? axis.options : [];
+    for (const option of options) {
+      if (option?.available !== false && Array.isArray(option?.images)) {
+        for (const img of option.images) {
+          if (img && !images.includes(img)) {
+            images.push(img);
+          }
+        }
+      }
+    }
+  }
+  return images;
+}
+
 export function summarizeVariants(
   variants: Product['variants'] | undefined,
 ): { count: number; label: string } | null {
@@ -67,6 +89,7 @@ export const ProductCard = memo(function ProductCard({ product, index = 0 }: Pro
   const priceIncl = priceInclusiveOfGst(product.price, product.gstRate);
   const compareIncl = priceInclusiveOfGst(product.comparePrice, product.gstRate);
   const variantSummary = summarizeVariants(product.variants);
+  const variantImages = getVariantImages(product.variants);
 
   const handleAddToCart = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -210,6 +233,31 @@ export const ProductCard = memo(function ProductCard({ product, index = 0 }: Pro
                 </span>
               )}
             </div>
+
+            {/* Variant Images Preview */}
+            {variantImages.length > 0 && (
+              <div className="flex items-center gap-1.5 mt-2 overflow-x-auto scrollbar-hide">
+                {variantImages.slice(0, 5).map((img, idx) => (
+                  <div
+                    key={idx}
+                    className="relative flex-shrink-0 w-9 h-9 rounded-lg overflow-hidden border border-border/50 bg-surface-raised group-hover:border-primary-200 transition-colors"
+                  >
+                    <Image
+                      src={img}
+                      alt={`Variant ${idx + 1}`}
+                      fill
+                      sizes="36px"
+                      className="object-cover"
+                    />
+                  </div>
+                ))}
+                {variantImages.length > 5 && (
+                  <span className="text-[10px] text-text-muted font-semibold px-1.5 py-0.5 bg-surface-raised rounded-md border border-border/30 flex-shrink-0">
+                    +{variantImages.length - 5}
+                  </span>
+                )}
+              </div>
+            )}
 
             <div className="mt-auto pt-1.5">
               <div className="flex items-baseline gap-2 flex-wrap">

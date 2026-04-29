@@ -507,6 +507,8 @@ model Product {
   price            Float
   compareAtPrice   Float?
   images           String[]
+  video            String?  // Optional product video URL
+  videoPublicId    String?  // Cloudinary public ID for video deletion
 
   categoryId String
   category   Category @relation(fields: [categoryId], references: [id])
@@ -549,6 +551,16 @@ model Product {
    * overall product rejection reason so the seller knows exactly what to fix.
    */
   imageRejectionReason String?
+  
+  /**
+   * Pending changes system: When a seller edits an ACTIVE product, the changes
+   * are stored here for admin review. Product remains visible on web with original
+   * content until admin approves/rejects the changes.
+   */
+  hasPendingChanges         Boolean   @default(false)
+  pendingChangesData        Json?
+  pendingChangesSubmittedAt DateTime?
+
   sku             String?
 
   metaTitle         String?

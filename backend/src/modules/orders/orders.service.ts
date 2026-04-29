@@ -366,6 +366,37 @@ export class OrdersService {
       });
     }
 
+    // Stock will be decremented only after payment is captured:
+    // - For wallet/COD: immediately (payment is instant)
+    // - For online payment (Razorpay): after verifyPayment succeeds
+    const confirmNow = payMethod === 'wallet' || payMethod === 'cod';
+    if (confirmNow) {
+      // Deduct stock immediately for wallet and COD
+      await this.decrementProductStock(productUpdates);
+      this.dispatchOrderPlacedSideEffects(userId, order);
+    }
+
+    // Clear user's cart after order is created (regardless of payment status)
+    await this.prisma.cartItem.deleteMany({ where: { userId } });
+
+    // Mark abandoned cart reminder as converted (fire-and-forget)
+    this.abandonedCartService.markConverted(userId).catch(() => {});
+
+    return order;
+  }
+
+  /**
+   * Decrement stock on products and variant options.
+   * Called after payment is confirmed (immediately for wallet/COD, after gateway verification for online payment).
+   */
+  private async decrementProductStock(
+    productUpdates: Array<{
+      productId: string;
+      stockDelta: number;
+      variantValue?: string;
+      variants: unknown;
+    }>,
+  ): Promise<void> {
     // Decrement stock on products and variant options
     for (const upd of productUpdates) {
       const updateData: Record<string, unknown> = {
@@ -394,26 +425,10 @@ export class OrdersService {
         data: updateData as any,
       });
     }
-
-    // Clear user's cart after order
-    await this.prisma.cartItem.deleteMany({ where: { userId } });
-
-    // Mark abandoned cart reminder as converted (fire-and-forget)
-    this.abandonedCartService.markConverted(userId).catch(() => {});
-
-    // Customer confirmation email, seller "new order", fraud, loyalty:
-    // — run immediately for wallet (already paid) and COD (order placed without online payment)
-    // — for Razorpay/online, defer until payment is verified in PaymentService.verifyPayment
-    const confirmNow = payMethod === 'wallet' || payMethod === 'cod';
-    if (confirmNow) {
-      this.dispatchOrderPlacedSideEffects(userId, order);
-    }
-
-    return order;
   }
 
   /**
-   * After Razorpay (or other online) payment is captured: send order emails, notify sellers, etc.
+   * After Razorpay (or other online) payment is captured: deduct stock and send order emails, notify sellers, etc.
    * Idempotent with verifyPayment: skipped for wallet/COD and safe if payment already PAID from a retry.
    */
   async finalizeOnlineOrderAfterPayment(orderId: string): Promise<void> {
@@ -425,7 +440,55 @@ export class OrdersService {
     const pm = (order.paymentMethod || '').toLowerCase();
     if (pm === 'wallet' || pm === 'cod') return;
 
+    // Deduct stock for online payments after payment is captured
+    await this.decrementStockForOrder(orderId);
+
     this.dispatchOrderPlacedSideEffects(order.userId, order);
+  }
+
+  /**
+   * Decrement stock for an order based on its order items.
+   * Used for online payments after payment is confirmed.
+   */
+  async decrementStockForOrder(orderId: string): Promise<void> {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: { items: true },
+    });
+
+    if (!order) {
+      this.logger.warn(`Cannot decrement stock: Order ${orderId} not found`);
+      return;
+    }
+
+    const productUpdates: Array<{
+      productId: string;
+      stockDelta: number;
+      variantValue?: string;
+      variants: unknown;
+    }> = [];
+
+    // Rebuild product updates from order items
+    for (const item of order.items) {
+      const product = await this.prisma.product.findUnique({
+        where: { id: item.productId },
+        select: { variants: true },
+      });
+
+      if (!product) {
+        this.logger.warn(`Product ${item.productId} not found when decrementing stock for order ${orderId}`);
+        continue;
+      }
+
+      productUpdates.push({
+        productId: item.productId,
+        stockDelta: item.quantity,
+        variantValue: item.variant || undefined,
+        variants: product.variants,
+      });
+    }
+
+    await this.decrementProductStock(productUpdates);
   }
 
   private dispatchOrderPlacedSideEffects(

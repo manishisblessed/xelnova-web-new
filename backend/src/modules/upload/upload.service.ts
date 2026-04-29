@@ -66,6 +66,40 @@ export class UploadService {
     return Promise.all(files.map((file) => this.uploadImage(file, folder)));
   }
 
+  async uploadVideo(file: Express.Multer.File, folder = 'xelnova/videos'): Promise<{ url: string; publicId: string }> {
+    if (!file) throw new BadRequestException('No file provided');
+
+    const allowedMimes = ['video/mp4', 'video/webm', 'video/ogg', 'video/quicktime'];
+    if (!allowedMimes.includes(file.mimetype)) {
+      throw new BadRequestException('Invalid file type. Allowed: mp4, webm, ogg, mov');
+    }
+
+    if (file.size > 15 * 1024 * 1024) {
+      throw new BadRequestException('File too large. Max 15MB');
+    }
+
+    return new Promise((resolve, reject) => {
+      const uploadStream = cloudinary.uploader.upload_stream(
+        {
+          folder,
+          resource_type: 'video',
+          transformation: [
+            { quality: 'auto' },
+          ],
+        },
+        (error, result) => {
+          if (error) return reject(new BadRequestException('Upload failed: ' + error.message));
+          resolve({ url: result!.secure_url, publicId: result!.public_id });
+        },
+      );
+      uploadStream.end(file.buffer);
+    });
+  }
+
+  async deleteVideo(publicId: string): Promise<void> {
+    await cloudinary.uploader.destroy(publicId, { resource_type: 'video' });
+  }
+
   async deleteImage(publicId: string): Promise<void> {
     await cloudinary.uploader.destroy(publicId);
   }

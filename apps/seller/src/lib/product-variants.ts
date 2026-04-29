@@ -13,6 +13,9 @@ export type VariantOptionJson = {
   hex?: string;
   /** Option images — first is the main/thumbnail, rest are supporting (up to 5 total) */
   images?: string[];
+  /** Optional variant video URL (max 15MB) */
+  video?: string;
+  videoPublicId?: string;
   price?: number;
   compareAtPrice?: number;
   stock?: number;
@@ -43,6 +46,9 @@ export type FormVariantValue = {
   hex: string;
   /** Up to 5 images — first is main/thumbnail, rest are supporting */
   images: string[];
+  /** Optional video URL (max 15MB) */
+  video: string;
+  videoPublicId: string;
   price: string;
   compareAtPrice: string;
   stock: string;
@@ -138,6 +144,8 @@ export function newFormValue(): FormVariantValue {
     label: '',
     hex: '',
     images: [],
+    video: '',
+    videoPublicId: '',
     price: '',
     compareAtPrice: '',
     stock: '',
@@ -195,6 +203,10 @@ export function formRowsToVariantGroups(rows: FormVariantRow[]): VariantGroupJso
           }
           const imgs = v.images.filter((u) => u.trim());
           if (imgs.length > 0) opt.images = imgs;
+          if (v.video.trim()) {
+            opt.video = v.video.trim();
+            if (v.videoPublicId.trim()) opt.videoPublicId = v.videoPublicId.trim();
+          }
           const price = optNum(v.price);
           if (price !== undefined) opt.price = price;
           const compare = optNum(v.compareAtPrice);
@@ -269,6 +281,8 @@ export function variantGroupsToFormRows(raw: unknown): FormVariantRow[] {
               ...(typeof x.bigImage === 'string' && x.bigImage ? [x.bigImage] : []),
               ...(typeof x.image === 'string' && x.image && x.image !== x.bigImage ? [x.image] : []),
             ],
+        video: typeof x.video === 'string' ? x.video : '',
+        videoPublicId: typeof x.videoPublicId === 'string' ? x.videoPublicId : '',
         price: x.price != null ? String(x.price) : '',
         compareAtPrice: x.compareAtPrice != null ? String(x.compareAtPrice) : '',
         stock: x.stock != null ? String(x.stock) : '',

@@ -269,9 +269,10 @@ function LoginFormInner() {
     }
   };
 
-  const handleVerifyOtp = async () => {
-    const otpString = otp.join('');
+  const handleVerifyOtp = useCallback(async (otpOverride?: string) => {
+    const otpString = otpOverride ?? otp.join('');
     if (otpString.length !== 6) return;
+    if (loading) return;
     setLoading(true);
     setError('');
     try {
@@ -307,9 +308,9 @@ function LoginFormInner() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [otp, phone, loading, createSessionAndRedirect]);
 
-  const handleOtpChange = (index: number, value: string) => {
+  const handleOtpChange = useCallback((index: number, value: string) => {
     if (value.length > 1) return;
     const newOtp = [...otp];
     newOtp[index] = value;
@@ -319,13 +320,13 @@ function LoginFormInner() {
       next?.focus();
     }
     // Auto-submit when all 6 digits are entered
-    if (value && newOtp.every((d) => d !== '') && newOtp.join('').length === 6) {
+    const complete = newOtp.join('');
+    if (complete.length === 6 && newOtp.every((d) => d !== '')) {
       setTimeout(() => {
-        const otpString = newOtp.join('');
-        if (otpString.length === 6) handleVerifyOtp();
-      }, 100);
+        void handleVerifyOtp(complete);
+      }, 150);
     }
-  };
+  }, [otp, handleVerifyOtp]);
 
   const handleOtpKeyDown = (index: number, e: React.KeyboardEvent) => {
     if (e.key === 'Backspace' && !otp[index] && index > 0) {
@@ -347,7 +348,9 @@ function LoginFormInner() {
     document.getElementById(`seller-otp-${focusIdx}`)?.focus();
     // Auto-submit if pasted a full 6-digit OTP
     if (pasted.length === 6) {
-      setTimeout(() => handleVerifyOtp(), 100);
+      setTimeout(() => {
+        void handleVerifyOtp(pasted);
+      }, 150);
     }
   };
 

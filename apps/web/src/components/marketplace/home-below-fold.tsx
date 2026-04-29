@@ -16,7 +16,7 @@ import { FlashDealCard } from '@/components/marketplace/flash-deal-card';
 import { SectionHeader } from '@/components/marketplace/section-header';
 import { CategoryImageOrIcon } from '@/components/marketplace/category-image-or-icon';
 import { BrandTile } from '@/components/marketplace/brand-tile';
-import { useProducts, useFlashDeals, useCategories } from '@/lib/api';
+import { useProducts, useFlashDeals, useFeaturedProducts, useCategories } from '@/lib/api';
 import { priceInclusiveOfGst } from '@xelnova/utils';
 
 const trustFeatures = [
@@ -60,6 +60,7 @@ function useDealCountdown(endAt?: string) {
 export function HomeBelowFold() {
   const { data: productsData } = useProducts({ limit: 50 });
   const { data: flashDeals, loading: flashDealsLoading } = useFlashDeals();
+  const { data: featuredProducts, loading: featuredProductsLoading } = useFeaturedProducts();
   const { data: categories } = useCategories();
   const [promoBanners, setPromoBanners] = useState<Banner[]>([]);
   const [brands, setBrands] = useState<{ id: string; name: string; slug: string; logo: string | null; featured: boolean }[]>([]);
@@ -179,7 +180,23 @@ export function HomeBelowFold() {
         </div>
       </section>
 
-      {/* ─── 6. TRENDING PRODUCTS ─── */}
+      {/* ─── 6. FEATURED PRODUCTS ─── */}
+      {(featuredProducts && featuredProducts.length > 0) && (
+        <section className="py-6">
+          <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
+            <div className="panel-glass p-5 md:p-6">
+              <SectionHeader title="Featured Products" subtitle="Handpicked by our team" seeAllHref="/products?featured=true" />
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 md:gap-4">
+                {featuredProducts.slice(0, 8).map((product, i) => (
+                  <ProductCard key={product.id} product={product} index={i} />
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* ─── 7. TRENDING PRODUCTS ─── */}
       <section className="py-6">
         <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
             <div className="panel-glass p-5 md:p-6">
@@ -193,7 +210,7 @@ export function HomeBelowFold() {
         </div>
       </section>
 
-      {/* ─── NEW ARRIVALS ─── */}
+      {/* ─── 8. NEW ARRIVALS ─── */}
       {newArrivals.length > 0 && (
         <section className="py-6">
           <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
@@ -211,7 +228,7 @@ export function HomeBelowFold() {
         </section>
       )}
 
-      {/* ─── 7. PROMO BANNERS ─── */}
+      {/* ─── 9. PROMO BANNERS ─── */}
       {promoBanners.length > 0 && (
         <section className="py-4">
           <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
@@ -242,7 +259,7 @@ export function HomeBelowFold() {
         </section>
       )}
 
-      {/* ─── 8. DEAL OF THE DAY ─── */}
+      {/* ─── 10. DEAL OF THE DAY ─── */}
       {dealProduct && (
         <section className="py-6">
           <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
@@ -329,7 +346,7 @@ export function HomeBelowFold() {
         </section>
       )}
 
-      {/* ─── 9. BEST SELLERS ─── */}
+      {/* ─── 11. BEST SELLERS ─── */}
       {bestSellers.length > 0 && (
         <section className="py-6">
           <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
@@ -347,7 +364,7 @@ export function HomeBelowFold() {
         </section>
       )}
 
-      {/* ─── 10. TOP SELECTIONS ─── */}
+      {/* ─── 12. TOP SELECTIONS ─── */}
       <section className="py-4">
         <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
           <SectionHeader title="Top Selection" subtitle="Curated picks at great prices" />
@@ -374,7 +391,7 @@ export function HomeBelowFold() {
         </div>
       </section>
 
-      {/* ─── 11. RECOMMENDED ─── */}
+      {/* ─── 13. RECOMMENDED ─── */}
       {recommended.length > 0 && (
         <section className="py-6">
           <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
@@ -473,7 +490,7 @@ export function HomeBelowFold() {
         </div>
       </section>
 
-      {/* ─── 12. BRAND SHOWCASE ─── */}
+      {/* ─── 14. BRAND SHOWCASE ─── */}
       {brands.length > 0 && (
         <section className="py-6">
           <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
@@ -487,7 +504,7 @@ export function HomeBelowFold() {
         </section>
       )}
 
-      {/* ─── 13. CUSTOMER TESTIMONIALS ─── */}
+      {/* ─── 15. CUSTOMER TESTIMONIALS ─── */}
       {topReviews.length > 0 && (
         <section className="py-8">
           <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
@@ -526,7 +543,7 @@ export function HomeBelowFold() {
         </section>
       )}
 
-      {/* ─── 14. APP DOWNLOAD CTA ─── */}
+      {/* ─── 16. APP DOWNLOAD CTA ─── */}
       <section className="py-6">
         <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
           <div className="relative bg-gradient-to-br from-primary-600 via-primary-700 to-primary-900 rounded-3xl p-8 md:p-12 overflow-hidden">
@@ -573,7 +590,7 @@ export function HomeBelowFold() {
         </div>
       </section>
 
-      {/* ─── 15. TRUST FEATURES ─── */}
+      {/* ─── 17. TRUST FEATURES ─── */}
       <section className="mt-4 border-t border-border/60 bg-gradient-to-b from-white via-primary-50/20 to-surface-raised py-10">
         <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-8 md:gap-12">
@@ -648,7 +665,7 @@ export function HomeBelowFold() {
         </div>
       </section>
 
-      {/* ─── 16. RECENTLY VIEWED ─── */}
+      {/* ─── 18. RECENTLY VIEWED ─── */}
       <section className="py-6 pb-10">
         <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
           <SectionHeader title="Recently Viewed" />

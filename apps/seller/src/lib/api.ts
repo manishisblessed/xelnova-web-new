@@ -593,6 +593,25 @@ export async function apiDeleteImage(publicId: string): Promise<void> {
   await handleResponse(res);
 }
 
+export async function apiUploadVideo(file: File): Promise<{ url: string; publicId: string }> {
+  const form = new FormData();
+  form.append('file', file);
+  const res = await fetchWithRefresh(`${API_URL}/upload/video`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: form,
+  });
+  return handleResponse<{ url: string; publicId: string }>(res);
+}
+
+export async function apiDeleteVideo(publicId: string): Promise<void> {
+  const res = await fetchWithRefresh(`${API_URL}/upload/video/${encodeURIComponent(publicId)}`, {
+    method: 'DELETE',
+    headers: authHeaders(),
+  });
+  await handleResponse(res);
+}
+
 // ─── Wallet ───
 
 export async function apiGetWalletBalance() {
