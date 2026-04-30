@@ -499,6 +499,8 @@ export class SellerOnboardingService {
           slug,
           onboardingStatus: 'EMAIL_VERIFIED',
           onboardingStep: 2,
+          selectedCategories: [],
+          featuredProductIds: [],
         },
       });
 

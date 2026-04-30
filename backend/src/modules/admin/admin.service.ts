@@ -80,6 +80,8 @@ export class AdminService {
         slug,
         onboardingStatus: 'EMAIL_VERIFIED',
         onboardingStep: 2,
+        selectedCategories: [],
+        featuredProductIds: [],
       },
     });
   }

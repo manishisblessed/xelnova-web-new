@@ -325,7 +325,7 @@ model SellerProfile {
 
   // Category Selection
   categorySelectionType String?
-  selectedCategories    String[]
+  selectedCategories    String[] @default([])
 
   // Bank Details
   bankAccountName    String?
@@ -375,7 +375,7 @@ model SellerProfile {
   heroBannerMobile   String?
   aboutTitle         String?
   aboutDescription   String?  @db.Text
-  featuredProductIds String[]
+  featuredProductIds String[] @default([])
   storeThemeColor    String?  @default("#7c3aed")
 
   products        Product[]

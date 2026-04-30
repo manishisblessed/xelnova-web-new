@@ -738,6 +738,8 @@ export class AuthService {
           slug,
           onboardingStatus: 'EMAIL_VERIFIED',
           onboardingStep: 2,
+          selectedCategories: [],
+          featuredProductIds: [],
         },
       });
     } catch (err: any) {
