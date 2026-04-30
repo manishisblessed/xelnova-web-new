@@ -453,8 +453,8 @@ function InlineProductExpansion({
   const hasVariants = Array.isArray(variants) && variants.length > 0;
 
   const flatVariants = hasVariants
-    ? (variants as Array<{ type?: string; label?: string; options?: Array<{ label?: string; value?: string; sku?: string; price?: number; compareAtPrice?: number; stock?: number; images?: string[]; available?: boolean }> }>).flatMap((group) =>
-        (group.options ?? []).map((opt) => ({
+    ? (variants as Array<{ type?: string; label?: string; options?: Array<{ label?: string; value?: string; sku?: string; price?: number; compareAtPrice?: number; stock?: number; images?: string[]; available?: boolean }> }>).flatMap((group, groupIndex) =>
+        (group.options ?? []).map((opt, optionIndex) => ({
           variant: opt.label || opt.value || '—',
           groupLabel: group.label || group.type || 'Option',
           sku: opt.sku || '—',
@@ -463,9 +463,23 @@ function InlineProductExpansion({
           stock: opt.stock,
           image: opt.images?.[0],
           active: opt.available !== false,
+          groupIndex,
+          optionIndex,
         })),
       )
     : [];
+
+  const handleVariantUpdate = async (groupIndex: number, optionIndex: number, updates: { price?: number; stock?: number; available?: boolean }) => {
+    // Clone the variants array and update the specific option
+    const updatedVariants = JSON.parse(JSON.stringify(variants)) as Array<{ type?: string; label?: string; options?: Array<{ label?: string; value?: string; sku?: string; price?: number; compareAtPrice?: number; stock?: number; images?: string[]; available?: boolean }> }>;
+    const group = updatedVariants[groupIndex];
+    if (group?.options?.[optionIndex]) {
+      if (updates.price !== undefined) group.options[optionIndex].price = updates.price;
+      if (updates.stock !== undefined) group.options[optionIndex].stock = updates.stock;
+      if (updates.available !== undefined) group.options[optionIndex].available = updates.available;
+    }
+    await apiUpdateProduct(product.id, { variants: updatedVariants });
+  };
 
   const handleSaveMainProduct = async () => {
     const stockN = parseInt(inlineStock, 10);
@@ -629,7 +643,17 @@ function InlineProductExpansion({
             </div>
           </div>
           {flatVariants.map((v, idx) => (
-            <VariantDetailRow key={idx} variant={v} fallbackPrice={product.price} fallbackStock={product.stock} isLast={idx === flatVariants.length - 1} />
+            <VariantDetailRow
+              key={idx}
+              variant={v}
+              fallbackPrice={product.price}
+              fallbackStock={product.stock}
+              isLast={idx === flatVariants.length - 1}
+              productId={product.id}
+              groupIndex={v.groupIndex}
+              optionIndex={v.optionIndex}
+              onVariantUpdate={handleVariantUpdate}
+            />
           ))}
         </>
       )}
@@ -642,18 +666,58 @@ function VariantDetailRow({
   fallbackPrice,
   fallbackStock,
   isLast,
+  productId,
+  groupIndex,
+  optionIndex,
+  onVariantUpdate,
 }: {
   variant: { variant: string; groupLabel: string; sku: string; price?: number; mrp?: number; stock?: number; image?: string; active: boolean };
   fallbackPrice: number;
   fallbackStock: number;
   isLast: boolean;
+  productId: string;
+  groupIndex: number;
+  optionIndex: number;
+  onVariantUpdate: (groupIndex: number, optionIndex: number, updates: { price?: number; stock?: number; available?: boolean }) => Promise<void>;
 }) {
-  const [price, setPrice] = useState(String(variant.price ?? fallbackPrice));
-  const [stock, setStock] = useState(String(variant.stock ?? fallbackStock));
-  const [active, setActive] = useState(variant.active);
+  const originalPrice = variant.price ?? fallbackPrice;
+  const originalStock = variant.stock ?? fallbackStock;
+  const originalActive = variant.active;
+
+  const [price, setPrice] = useState(String(originalPrice));
+  const [stock, setStock] = useState(String(originalStock));
+  const [active, setActive] = useState(originalActive);
+  const [saving, setSaving] = useState(false);
+
+  const priceChanged = String(originalPrice) !== price;
+  const stockChanged = String(originalStock) !== stock;
+  const activeChanged = originalActive !== active;
+  const hasChanges = priceChanged || stockChanged || activeChanged;
+
+  const handleSave = async () => {
+    const stockN = parseInt(stock, 10);
+    const priceN = parseFloat(price);
+    if (isNaN(stockN) || stockN < 0 || isNaN(priceN) || priceN < 0) {
+      toast.error('Enter valid price and stock values');
+      return;
+    }
+    setSaving(true);
+    try {
+      await onVariantUpdate(groupIndex, optionIndex, {
+        price: priceN,
+        stock: stockN,
+        available: active,
+      });
+      toast.success('Variant updated');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Update failed');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
-    <div className={`grid grid-cols-[auto_1fr_auto_auto] gap-0 ${!isLast ? 'border-b border-gray-100' : ''} ${!active ? 'opacity-50' : ''}`}>
+    <div className={`grid grid-cols-[auto_1fr_auto_auto_auto] gap-0 ${!isLast ? 'border-b border-gray-100' : ''} ${!active ? 'opacity-50' : ''}`}>
       {/* Variant image */}
       <div className="flex items-start p-3 border-r border-gray-50">
         <div className="h-12 w-12 rounded-lg border border-gray-200 bg-gray-50 overflow-hidden">
@@ -689,7 +753,7 @@ function VariantDetailRow({
               value={stock}
               onChange={(e) => setStock(e.target.value)}
               onClick={(e) => e.stopPropagation()}
-              className="w-16 rounded border border-gray-300 bg-white text-center px-2 py-1 text-xs font-medium text-gray-900 focus:outline-none focus:ring-1 focus:ring-primary-400 focus:border-primary-400"
+              className={`w-16 rounded border text-center px-2 py-1 text-xs font-medium text-gray-900 focus:outline-none focus:ring-1 focus:ring-primary-400 focus:border-primary-400 ${stockChanged ? 'border-primary-300 bg-primary-50' : 'border-gray-300 bg-white'}`}
             />
           </div>
           <div className="flex items-center justify-between gap-3">
@@ -701,7 +765,7 @@ function VariantDetailRow({
                 active
                   ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                   : 'bg-gray-100 text-gray-500 border border-gray-200'
-              }`}
+              } ${activeChanged ? 'ring-2 ring-primary-300' : ''}`}
             >
               <span className={`inline-block h-1.5 w-1.5 rounded-full ${active ? 'bg-emerald-500' : 'bg-gray-400'}`} />
               {active ? 'Active' : 'Inactive'}
@@ -711,7 +775,7 @@ function VariantDetailRow({
       </div>
 
       {/* Variant pricing */}
-      <div className="p-3 min-w-[180px]">
+      <div className="p-3 border-r border-gray-50 min-w-[140px]">
         <div className="space-y-1.5">
           <div className="flex items-center justify-between gap-3">
             <span className="text-[11px] text-gray-500">Price</span>
@@ -722,7 +786,7 @@ function VariantDetailRow({
                 value={price}
                 onChange={(e) => setPrice(e.target.value)}
                 onClick={(e) => e.stopPropagation()}
-                className="w-20 rounded border border-gray-300 bg-white text-right px-2 py-1 text-xs font-medium text-gray-900 focus:outline-none focus:ring-1 focus:ring-primary-400 focus:border-primary-400"
+                className={`w-20 rounded border text-right px-2 py-1 text-xs font-medium text-gray-900 focus:outline-none focus:ring-1 focus:ring-primary-400 focus:border-primary-400 ${priceChanged ? 'border-primary-300 bg-primary-50' : 'border-gray-300 bg-white'}`}
               />
             </div>
           </div>
@@ -731,6 +795,22 @@ function VariantDetailRow({
             <span className="text-xs text-gray-600 tabular-nums pr-1">₹{variant.mrp != null ? variant.mrp.toLocaleString('en-IN') : '—'}</span>
           </div>
         </div>
+      </div>
+
+      {/* Save button column */}
+      <div className="p-3 min-w-[100px] flex items-center justify-center">
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); handleSave(); }}
+          disabled={saving || !hasChanges}
+          className={`w-full rounded-md py-1.5 px-2 text-xs font-semibold transition-all ${
+            hasChanges
+              ? 'bg-primary-600 text-white hover:bg-primary-700 shadow-sm'
+              : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+          } disabled:opacity-50`}
+        >
+          {saving ? <Loader2 size={12} className="animate-spin mx-auto" /> : 'Save changes'}
+        </button>
       </div>
     </div>
   );
