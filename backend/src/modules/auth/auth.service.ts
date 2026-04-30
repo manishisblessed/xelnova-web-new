@@ -723,6 +723,10 @@ export class AuthService {
       .substring(0, 40);
     const uniqueSuffix = Math.random().toString(36).substring(2, 8);
     const slug = `${baseSlug || 'seller'}-${uniqueSuffix}`;
+    
+    // Ensure storeName is never empty - use phone as fallback if name is missing
+    const fallbackName = phone ? phone.slice(-4) : 'User';
+    const finalStoreName = safeName ? `${safeName}'s Store` : `Store-${fallbackName}`;
 
     try {
       await this.prisma.sellerProfile.create({
@@ -730,7 +734,7 @@ export class AuthService {
           userId,
           email: email || null,
           phone: phone || null,
-          storeName: `${safeName || 'My'}'s Store`,
+          storeName: finalStoreName,
           slug,
           onboardingStatus: 'EMAIL_VERIFIED',
           onboardingStep: 2,
