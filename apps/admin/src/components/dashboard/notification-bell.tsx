@@ -70,6 +70,11 @@ function getNotificationHref(n: Notification): string | null {
       return productSku
         ? `/products?status=PENDING&search=${encodeURIComponent(productSku)}`
         : '/products?status=PENDING';
+    case 'ADMIN_PRODUCT_IMAGES_UPDATED':
+      // Seller updated images for a previously flagged product — link to that product
+      return productSku
+        ? `/products?search=${encodeURIComponent(productSku)}`
+        : '/products';
     case 'REVIEW_PENDING':
       return '/reviews';
     default:

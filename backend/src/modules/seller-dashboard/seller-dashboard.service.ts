@@ -348,6 +348,10 @@ export class SellerDashboardService {
     if (!product) throw new NotFoundException('Product not found');
     if (product.sellerId !== seller.id) throw new ForbiddenException('Not your product');
 
+    // Track if product had flagged images before update
+    const hadImageRejection = !!product.imageRejectionReason;
+    const imageRejectionReason = product.imageRejectionReason;
+
     if (dto.variants !== undefined) {
       dto.variants = sanitizeVariants(dto.variants) as any;
     }
@@ -524,6 +528,26 @@ export class SellerDashboardService {
             sellerId: seller.id,
             storeName: seller.storeName,
             reapproval: true,
+          },
+        })
+        .catch(() => {});
+    }
+
+    // Notify admins when seller updates a product that had flagged images
+    if (hadImageRejection && dto.images !== undefined) {
+      this.notificationService
+        .notifyAllAdmins({
+          type: 'ADMIN_PRODUCT_IMAGES_UPDATED',
+          title: 'Flagged product images updated',
+          body: `${seller.storeName} updated images for "${updated.name}" (previously flagged: "${imageRejectionReason}"). Please review the new images.`,
+          data: {
+            productId: updated.id,
+            productName: updated.name,
+            slug: updated.slug,
+            sku: updated.sku,
+            sellerId: seller.id,
+            storeName: seller.storeName,
+            previousImageRejection: imageRejectionReason,
           },
         })
         .catch(() => {});
