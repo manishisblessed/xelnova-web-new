@@ -197,10 +197,12 @@ export class AdminService {
     // see the brand-authorisation certificate while reviewing a product. The
     // Product model only stores the brand as a free-text field, so we resolve
     // it lazily here instead of via a Prisma relation.
+    // Order by approved DESC to prioritize approved brands if duplicates exist.
     let brandRecord: any = null;
     if (product.brand?.trim()) {
       const found = await this.prisma.brand.findFirst({
         where: { name: { equals: product.brand.trim(), mode: 'insensitive' } },
+        orderBy: { approved: 'desc' },
         select: {
           id: true,
           name: true,
@@ -253,10 +255,11 @@ export class AdminService {
 
       // When approving: validate brand approval, set isActive to true and clear rejection reason
       if (dto.status === 'ACTIVE') {
-        // If product has a brand, check if it's approved
+        // If product has a brand, check if it's approved (case-insensitive lookup, prioritize approved)
         if (product.brand?.trim()) {
-          const brandRecord = await this.prisma.brand.findUnique({
-            where: { name: product.brand },
+          const brandRecord = await this.prisma.brand.findFirst({
+            where: { name: { equals: product.brand.trim(), mode: 'insensitive' } },
+            orderBy: { approved: 'desc' },
             select: { approved: true, name: true },
           });
 
