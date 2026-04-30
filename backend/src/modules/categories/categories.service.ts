@@ -9,7 +9,14 @@ export class CategoriesService {
     const categories = await this.prisma.category.findMany({
       where: { parentId: null },
       include: {
-        children: true,
+        children: {
+          include: {
+            children: {
+              orderBy: { name: 'asc' },
+            },
+          },
+          orderBy: { name: 'asc' },
+        },
         _count: { select: { products: { where: { isActive: true } } } },
       },
       orderBy: { name: 'asc' },

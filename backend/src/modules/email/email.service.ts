@@ -226,6 +226,55 @@ export class EmailService {
     });
   }
 
+  async sendSubAdminWelcome(to: string, name: string, tempPassword: string, roleName?: string) {
+    const loginUrl = 'https://admin.xelnova.in/login';
+    return this.sendEmail({
+      to,
+      subject: "You've been added as an Admin — XelNova",
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:0;background:#ffffff">
+          <div style="background:linear-gradient(135deg,#7c3aed 0%,#4f46e5 100%);padding:32px 24px;text-align:center">
+            <h1 style="color:#ffffff;margin:0;font-size:24px">Welcome to XelNova Admin</h1>
+          </div>
+          <div style="padding:32px 24px">
+            <p style="color:#1e293b;font-size:16px;margin:0 0 16px">Hi ${this.cleanName(name)},</p>
+            <p style="color:#475569;font-size:14px;line-height:1.6;margin:0 0 24px">
+              You have been added as an admin${roleName ? ` with the <strong>${roleName}</strong> role` : ''} on XelNova.
+              Use the credentials below to log in and set your new password.
+            </p>
+            <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:20px;margin:0 0 24px">
+              <table style="width:100%;border-collapse:collapse">
+                <tr>
+                  <td style="padding:8px 0;color:#64748b;font-size:13px;width:120px">Email</td>
+                  <td style="padding:8px 0;color:#0f172a;font-size:14px;font-weight:600">${to}</td>
+                </tr>
+                <tr>
+                  <td style="padding:8px 0;color:#64748b;font-size:13px">Temp Password</td>
+                  <td style="padding:8px 0;color:#0f172a;font-size:14px;font-weight:600;font-family:monospace;letter-spacing:1px">${tempPassword}</td>
+                </tr>
+              </table>
+            </div>
+            <div style="text-align:center;margin:0 0 24px">
+              <a href="${loginUrl}"
+                 style="display:inline-block;padding:14px 32px;background:#7c3aed;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:600;font-size:14px">
+                Log In to Admin Panel
+              </a>
+            </div>
+            <div style="background:#fef3c7;border:1px solid #fbbf24;border-radius:8px;padding:12px 16px;margin:0 0 24px">
+              <p style="color:#92400e;font-size:13px;margin:0;line-height:1.5">
+                <strong>Important:</strong> You will be required to change your password on first login.
+                Do not share these credentials with anyone.
+              </p>
+            </div>
+            <p style="color:#94a3b8;font-size:12px;margin:0;text-align:center">
+              This is an automated message from XelNova. Please do not reply to this email.
+            </p>
+          </div>
+        </div>
+      `,
+    });
+  }
+
   async sendGenericEmail(to: string, subject: string, textBody: string, from?: string) {
     const html = `
       <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">

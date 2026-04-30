@@ -27,6 +27,7 @@ import {
   apiDownloadShippingLabel,
   apiDownloadCustomerInvoice,
   apiGetShippingRates,
+  apiCheckServiceability,
   apiUpdateProfile,
   apiListPickupLocations,
   type ShippingRates,
@@ -725,14 +726,24 @@ function OrderDetail({
             </div>
             <div className="flex items-center gap-2">
               {['CONFIRMED', 'SHIPPED', 'DELIVERED'].includes(order.status) && (
-                <button
-                  onClick={handleDownloadLabel}
-                  disabled={labelDownloading}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-purple-700 border border-purple-200 rounded-lg bg-purple-50 hover:bg-purple-100 transition-colors disabled:opacity-50"
-                >
-                  {labelDownloading ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
-                  {labelDownloading ? 'Generating…' : 'Shipping Label'}
-                </button>
+                <>
+                  <button
+                    onClick={handleDownloadLabel}
+                    disabled={labelDownloading}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-purple-700 border border-purple-200 rounded-lg bg-purple-50 hover:bg-purple-100 transition-colors disabled:opacity-50"
+                  >
+                    {labelDownloading ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+                    Shipping Label
+                  </button>
+                  <button
+                    onClick={handleDownloadInvoice}
+                    disabled={labelDownloading}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-blue-700 border border-blue-200 rounded-lg bg-blue-50 hover:bg-blue-100 transition-colors disabled:opacity-50"
+                  >
+                    {labelDownloading ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+                    Download Invoice
+                  </button>
+                </>
               )}
               <Badge variant={cfg.variant} className="text-sm px-3 py-1">
                 <StatusIcon size={13} className="mr-1" />
@@ -1361,6 +1372,18 @@ interface CourierConfig {
   isActive: boolean;
 }
 
+interface ServiceabilityRate {
+  provider: string;
+  providerKey: string;
+  service: string;
+  cost: number | null;
+  estimatedDays: number | null;
+  estimatedDelivery: string | null;
+  serviceable: boolean;
+}
+
+type ShipTab = 'own' | 'xelgo' | 'partners';
+
 function ShipOrderModal({
   open,
   onClose,
@@ -1375,9 +1398,11 @@ function ShipOrderModal({
   onSuccess: () => void;
 }) {
   const [step, setStep] = useState<
-    'loading' | 'select' | 'details' | 'pickup' | 'selfship' | 'add-phone' | 'result'
+    'loading' | 'rates' | 'pickup' | 'add-phone' | 'result'
   >('loading');
+  const [activeTab, setActiveTab] = useState<ShipTab>('xelgo');
   const [selectedCourier, setSelectedCourier] = useState<string>('');
+  const [selectedRate, setSelectedRate] = useState<ServiceabilityRate | null>(null);
   const [weight, setWeight] = useState('');
   const [dimensions, setDimensions] = useState('');
   const [awbNumber, setAwbNumber] = useState('');
@@ -1387,47 +1412,27 @@ function ShipOrderModal({
   const [configuredProviders, setConfiguredProviders] = useState<string[]>([]);
   const [loadingConfigs, setLoadingConfigs] = useState(true);
   const [shippingRates, setShippingRates] = useState<ShippingRates | null>(null);
+  const [serviceabilityRates, setServiceabilityRates] = useState<ServiceabilityRate[]>([]);
+  const [ratesLoading, setRatesLoading] = useState(false);
 
-  // ─── Pickup scheduling (per Delhivery B2B docs) ───
-  // Per https://one.delhivery.com/developer-portal/documents/b2b/, the
-  // manifest creation and pickup request are TWO separate API calls. The
-  // seller must own the pickup slot — Delhivery's same-day cutoff is
-  // ~2 PM IST, so the safe default is "today @ 4 PM" before 1 PM IST,
-  // otherwise "next working day @ 11 AM IST".
   const [shipPickupDate, setShipPickupDate] = useState<string>('');
   const [shipPickupTime, setShipPickupTime] = useState<string>('');
   const [shipPickupPackages, setShipPickupPackages] = useState<number>(1);
   const [skipPickupAtBooking, setSkipPickupAtBooking] = useState(false);
 
-  // ─── Pickup location selection (multi-warehouse) ───
-  // Populated from /seller/pickup-locations when the modal opens. Default
-  // selection is whichever location has `isDefault: true`. If the seller
-  // has just one location we still load it but hide the dropdown — there's
-  // nothing to choose between.
   const [pickupLocations, setPickupLocations] = useState<SellerPickupLocation[]>([]);
   const [selectedPickupLocationId, setSelectedPickupLocationId] = useState<string>('');
-  // Inline pickup-phone capture — when the backend rejects the booking
-  // because the seller's pickup phone is missing, we collect it right
-  // here instead of pushing the user to the Profile page (per UX feedback
-  // — the seller is already on the "Ship Order" task and shouldn't have
-  // to switch context just to type 10 digits).
   const [pickupPhone, setPickupPhone] = useState('');
   const [phoneSaving, setPhoneSaving] = useState(false);
   const [phoneError, setPhoneError] = useState<string | null>(null);
-  // Remember which step we came from so the "Back" affordance returns
-  // the seller to the right form (regular courier vs self-ship). For
-  // courier bookings the seller triggers the API call from the
-  // "pickup" step, so we send them back there — not to "details".
   const [phoneReturnStep, setPhoneReturnStep] =
-    useState<'details' | 'pickup' | 'selfship'>('pickup');
+    useState<'rates' | 'pickup'>('pickup');
 
   const getDefaultShippingInfo = useCallback(() => {
     if (!orderItems?.length) return { weight: '', dimensions: '' };
-    
     let totalWeight = 0;
     let hasDimensions = false;
     let maxDimensions = '';
-    
     for (const item of orderItems) {
       const productWeight = item.product?.weight;
       if (productWeight && productWeight > 0) {
@@ -1439,20 +1444,28 @@ function ShipOrderModal({
         hasDimensions = true;
       }
     }
-    
     return {
       weight: totalWeight > 0 ? totalWeight.toFixed(2) : '',
       dimensions: maxDimensions,
     };
   }, [orderItems]);
 
-  const loadConfigs = useCallback(async () => {
+  const computeEstDeliveryDate = (days: number | null | undefined) => {
+    if (!days) return null;
+    const d = new Date();
+    d.setDate(d.getDate() + days);
+    return d.toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' });
+  };
+
+  const loadData = useCallback(async () => {
     setLoadingConfigs(true);
+    setRatesLoading(true);
     try {
-      const [configs, rates, locations] = await Promise.allSettled([
+      const [configs, rates, locations, serviceability] = await Promise.allSettled([
         apiGetCourierConfigs(),
         apiGetShippingRates(),
         apiListPickupLocations(),
+        apiCheckServiceability(orderId),
       ]);
       const providers = configs.status === 'fulfilled' && Array.isArray(configs.value)
         ? (configs.value as CourierConfig[]).filter((c) => c.isActive).map((c) => c.provider)
@@ -1464,27 +1477,62 @@ function ShipOrderModal({
         ? locations.value
         : [];
       setPickupLocations(locs);
-      // Pre-select the default location (or the first one if no default
-      // is marked) so the seller doesn't have to click a dropdown when
-      // they only have one address.
       const def = locs.find((l) => l.isDefault) || locs[0];
       setSelectedPickupLocationId(def?.id || '');
 
+      // Build rates table from serviceability response
+      const svcData = serviceability.status === 'fulfilled' ? serviceability.value as Record<string, any> : {};
+      const ratesList: ServiceabilityRate[] = [];
+
+      for (const [key, val] of Object.entries(svcData)) {
+        if (!val) continue;
+        if (val.availableCouriers && Array.isArray(val.availableCouriers)) {
+          for (const courier of val.availableCouriers) {
+            ratesList.push({
+              provider: key.toLowerCase(),
+              providerKey: key,
+              service: courier.name || val.provider || key,
+              cost: courier.charges ?? null,
+              estimatedDays: courier.estimatedDays ?? null,
+              estimatedDelivery: computeEstDeliveryDate(courier.estimatedDays),
+              serviceable: true,
+            });
+          }
+        } else if (val.serviceable) {
+          ratesList.push({
+            provider: val.provider || key,
+            providerKey: key,
+            service: key === 'XELNOVA_COURIER' ? 'Surface' : (val.provider || key),
+            cost: val.charges ?? null,
+            estimatedDays: val.estimatedDays ?? null,
+            estimatedDelivery: computeEstDeliveryDate(val.estimatedDays),
+            serviceable: true,
+          });
+        }
+      }
+      setServiceabilityRates(ratesList);
+
+      if (providers.length > 0 || ratesList.length > 0) {
+        setActiveTab(ratesList.some(r => r.providerKey !== 'XELNOVA_COURIER') ? 'partners' : 'xelgo');
+      }
       return providers;
     } catch {
       setConfiguredProviders([]);
       setPickupLocations([]);
       setSelectedPickupLocationId('');
+      setServiceabilityRates([]);
       return [];
     } finally {
       setLoadingConfigs(false);
+      setRatesLoading(false);
     }
-  }, []);
+  }, [orderId]);
 
   useEffect(() => {
     if (open) {
       setStep('loading');
       setSelectedCourier('');
+      setSelectedRate(null);
       const defaults = getDefaultShippingInfo();
       setWeight(defaults.weight);
       setDimensions(defaults.dimensions);
@@ -1494,11 +1542,8 @@ function ShipOrderModal({
       setPickupPhone('');
       setPhoneError(null);
       setPhoneReturnStep('pickup');
+      setActiveTab('xelgo');
 
-      // Default pickup slot: today @ 16:00 IST if it's still before 1 PM
-      // IST (gives the rider plenty of room before the ~2 PM Delhivery
-      // cutoff), otherwise the next working day at 11:00. We deliberately
-      // surface this to the seller so they can override it.
       const nowIst = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
       const istHour = nowIst.getUTCHours();
       const istDay = nowIst.getUTCDay();
@@ -1520,67 +1565,19 @@ function ShipOrderModal({
       setShipPickupPackages(1);
       setSkipPickupAtBooking(false);
 
-      loadConfigs().then((providers) => {
-        if (providers.length > 0) {
-          setSelectedCourier(providers[0]);
-          setStep('details');
-        } else {
-          setStep('select');
-        }
+      loadData().then(() => {
+        setStep('rates');
       });
     }
-  }, [open, getDefaultShippingInfo, loadConfigs]);
+  }, [open, getDefaultShippingInfo, loadData]);
 
-  // Per testing observations #28 & #29:
-  //   • Self-ship: no shipping/dimension charge is computed by the platform.
-  //   • Xelgo (XELNOVA_COURIER): show a single consolidated amount that
-  //     already includes the 10% surcharge (do NOT break it down for the
-  //     seller — the breakdown stays internal). The customer statement also
-  //     receives the consolidated value via the order's stored shipping fee.
-  //   • Any other configured courier: rate comes from the courier itself,
-  //     so we don't synthesise an estimate here.
-  const estimatedShipping = (() => {
-    if (!shippingRates) return null;
-    if (selectedCourier !== 'XELNOVA_COURIER') return null;
+  const xelgoRates = serviceabilityRates.filter(r => r.providerKey === 'XELNOVA_COURIER');
+  const partnerRates = serviceabilityRates.filter(r => r.providerKey !== 'XELNOVA_COURIER');
 
-    const w = parseFloat(weight);
-    const parts = dimensions.split(/[x×X,\s]+/).map(Number);
-    const vol = parts.length === 3 && parts.every(n => n > 0) ? parts[0] * parts[1] * parts[2] : 0;
+  const getProviderName = (id: string) => COURIER_PROVIDERS.find((c) => c.id === id)?.name || id;
 
-    let weightCharge = 0;
-    if (w > 0) {
-      const slab = shippingRates.weightSlabs.find(s => w <= s.upToKg);
-      weightCharge = slab ? slab.rate : (shippingRates.weightSlabs[shippingRates.weightSlabs.length - 1]?.rate ?? 0);
-    }
-
-    let dimSurcharge = 0;
-    if (vol > 0) {
-      const slab = shippingRates.dimensionSlabs.find(s => vol <= s.upToCm3);
-      dimSurcharge = slab ? slab.rate : (shippingRates.dimensionSlabs[shippingRates.dimensionSlabs.length - 1]?.rate ?? 0);
-    }
-
-    const baseTotal = weightCharge + dimSurcharge;
-    if (baseTotal <= 0) return null;
-    // Xelgo applies a flat 10% platform surcharge, presented as part of the
-    // single delivery charge.
-    const total = Math.round(baseTotal * 1.1);
-    return { total };
-  })();
-
-  const handleSelectCourier = (courier: string) => {
-    if (courier === 'SELF_SHIP') {
-      setStep('selfship');
-    } else {
-      setSelectedCourier(courier);
-      setStep('details');
-    }
-  };
-
-  /** Builds the booking payload from the current modal state. Pulled
-   *  out of `handleShip` so we can replay the request after the seller
-   *  fills in their pickup phone in the inline rescue step. */
   const buildShipBody = useCallback(
-    (mode: 'details' | 'selfship') => {
+    (mode: 'courier' | 'selfship') => {
       const body: any = {
         shippingMode: mode === 'selfship' ? 'SELF_SHIP' : selectedCourier,
       };
@@ -1590,18 +1587,9 @@ function ShipOrderModal({
       } else {
         body.weight = weight ? parseFloat(weight) : undefined;
         body.dimensions = dimensions.trim() || undefined;
-        // Tell the backend which warehouse to dispatch from. If the
-        // seller has only one location we still send it explicitly so
-        // the backend doesn't have to fall back to default-resolution
-        // (the dropdown is hidden in that case but the value is still
-        // pre-filled from `loadConfigs`).
         if (selectedPickupLocationId) {
           body.pickupLocationId = selectedPickupLocationId;
         }
-        // Per Delhivery's two-call flow, only ask the backend to schedule
-        // a pickup if the seller actually confirmed a date. If they
-        // chose "Skip" we send no pickup fields and the shipment lands
-        // at status BOOKED — they can schedule from order details later.
         if (!skipPickupAtBooking && shipPickupDate) {
           body.pickupDate = shipPickupDate;
           body.pickupTime = shipPickupTime
@@ -1626,17 +1614,13 @@ function ShipOrderModal({
     ],
   );
 
-  /** Heuristic: backend currently throws this exact "Pickup phone number"
-   *  string from `ShippingService.createCourierShipment`. We match on
-   *  the substring rather than the whole sentence so wording tweaks
-   *  on the server don't silently break this rescue flow. */
   const isPickupPhoneError = (err: unknown): boolean => {
     if (!(err instanceof Error)) return false;
     const m = err.message.toLowerCase();
     return m.includes('pickup phone') || m.includes('pickup contact');
   };
 
-  const submitShipment = async (mode: 'details' | 'selfship'): Promise<boolean> => {
+  const submitShipment = async (mode: 'courier' | 'selfship'): Promise<boolean> => {
     setSaving(true);
     try {
       const body = buildShipBody(mode);
@@ -1646,11 +1630,6 @@ function ShipOrderModal({
       return true;
     } catch (err: unknown) {
       if (isPickupPhoneError(err) && mode !== 'selfship') {
-        // Self-ship doesn't actually call the courier, so the only way
-        // to land in the phone-rescue is via an integrated courier.
-        // Couriers are submitted from the "pickup" step now, so that's
-        // where the seller should return to retry once the phone is
-        // saved.
         setPhoneReturnStep('pickup');
         setPhoneError(null);
         setStep('add-phone');
@@ -1663,38 +1642,20 @@ function ShipOrderModal({
     }
   };
 
-  const handleShip = async () => {
-    await submitShipment(step === 'selfship' ? 'selfship' : 'details');
+  const handleBookShipment = async () => {
+    if (activeTab === 'own') {
+      await submitShipment('selfship');
+    } else {
+      await submitShipment('courier');
+    }
   };
 
-  /** Validates the weight/dimensions inputs on the "details" step and
-   *  advances to the pickup-scheduling step. Pulled out so the button
-   *  handler stays small and we surface validation errors as toasts. */
-  const handleDetailsContinue = () => {
-    if (!selectedCourier) {
-      toast.error('Pick a courier to continue');
-      return;
-    }
-    const w = parseFloat(weight);
-    if (!weight || Number.isNaN(w) || w <= 0) {
-      toast.error('Enter the package weight in kg');
-      return;
-    }
-    const dims = dimensions
-      .trim()
-      .split(/[x×X]/i)
-      .map((s) => Number(s.trim()))
-      .filter((n) => !Number.isNaN(n));
-    if (dimensions.trim() && (dims.length !== 3 || dims.some((n) => n <= 0))) {
-      toast.error('Dimensions must be like 30x20x15 (cm)');
-      return;
-    }
+  const handleSelectRateAndContinue = (rate: ServiceabilityRate) => {
+    setSelectedRate(rate);
+    setSelectedCourier(rate.providerKey);
     setStep('pickup');
   };
 
-  /** Save the typed pickup phone to the seller profile and immediately
-   *  retry the original booking, so the seller goes from "missing phone"
-   *  to "shipment booked" with a single click. */
   const handleSavePhoneAndShip = async () => {
     const digits = pickupPhone.replace(/[^\d+]/g, '');
     const cleanLen = digits.replace(/[^\d]/g, '').length;
@@ -1707,15 +1668,9 @@ function ShipOrderModal({
     try {
       await apiUpdateProfile({ phone: digits });
       toast.success('Pickup phone saved');
-      // Replay the original booking in the same modal. The "pickup"
-      // step still submits via the regular courier ('details') mode —
-      // it just lives behind a different UI step.
-      const submitMode: 'details' | 'selfship' =
-        phoneReturnStep === 'selfship' ? 'selfship' : 'details';
+      const submitMode: 'courier' | 'selfship' = 'courier';
       const success = await submitShipment(submitMode);
       if (!success) {
-        // Phone was saved but shipment still failed (e.g., courier API error).
-        // Navigate back to the right step so the user sees the error.
         setStep(phoneReturnStep);
       }
     } catch (err: unknown) {
@@ -1726,11 +1681,23 @@ function ShipOrderModal({
     }
   };
 
-  const availableCouriers = COURIER_PROVIDERS.filter(
-    (cp) => cp.alwaysAvailable || configuredProviders.includes(cp.id)
-  );
+  const handleDownloadLabel = async () => {
+    try {
+      await apiDownloadShippingLabel(orderId);
+      toast.success('Shipping label downloaded');
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Failed to download label');
+    }
+  };
 
-  const getProviderName = (id: string) => COURIER_PROVIDERS.find((c) => c.id === id)?.name || id;
+  const handleDownloadInvoice = async () => {
+    try {
+      await apiDownloadCustomerInvoice(orderId);
+      toast.success('Invoice downloaded');
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Failed to download invoice');
+    }
+  };
 
   return (
     <Modal open={open} onClose={onClose} title="Ship Order" size="lg">
@@ -1738,128 +1705,194 @@ function ShipOrderModal({
         {step === 'loading' && (
           <motion.div key="loading" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="py-12 flex flex-col items-center gap-3">
             <Loader2 size={28} className="animate-spin text-primary-500" />
-            <p className="text-sm text-text-muted">Loading your courier partners...</p>
+            <p className="text-sm text-text-muted">Fetching shipping rates...</p>
           </motion.div>
         )}
 
-        {step === 'select' && (
-          <motion.div key="select" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
-            <div className="rounded-xl bg-amber-50 border border-amber-200 p-3">
-              <p className="text-xs text-amber-700">
-                <strong>No courier partners connected.</strong> Connect your Delhivery, ShipRocket, XpressBees, or Ekart account in{' '}
-                <a href="/shipping" className="underline font-medium">Shipping Settings</a> for automated shipping with AWB generation.
-              </p>
+        {step === 'rates' && (
+          <motion.div key="rates" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-4">
+            {/* Tabs */}
+            <div className="flex border-b border-border">
+              <button
+                onClick={() => setActiveTab('own')}
+                className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+                  activeTab === 'own'
+                    ? 'border-primary-500 text-primary-700'
+                    : 'border-transparent text-text-muted hover:text-text-primary'
+                }`}
+              >
+                Ship By Own
+              </button>
+              <button
+                onClick={() => setActiveTab('xelgo')}
+                className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+                  activeTab === 'xelgo'
+                    ? 'border-primary-500 text-primary-700'
+                    : 'border-transparent text-text-muted hover:text-text-primary'
+                }`}
+              >
+                Ship By Xelgo
+              </button>
+              <button
+                onClick={() => setActiveTab('partners')}
+                className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+                  activeTab === 'partners'
+                    ? 'border-primary-500 text-primary-700'
+                    : 'border-transparent text-text-muted hover:text-text-primary'
+                }`}
+              >
+                Delivery Partners
+              </button>
             </div>
-            <p className="text-sm text-text-muted">Select a shipping method:</p>
-            {loadingConfigs ? (
-              <div className="flex justify-center py-8"><Loader2 size={20} className="animate-spin text-primary-500" /></div>
-            ) : (
-              <div className="grid gap-3">
-                <button onClick={() => handleSelectCourier('XELNOVA_COURIER')}
-                  className="flex items-start gap-4 p-4 rounded-xl border-2 border-primary-200 bg-primary-50/30 hover:border-primary-400 transition-all text-left"
-                >
-                  <div className="rounded-lg bg-primary-100 p-2.5"><Truck size={20} className="text-primary-600" /></div>
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <h4 className="text-sm font-bold text-text-primary">Xelgo</h4>
-                      <Badge variant="success">Always Available</Badge>
-                    </div>
-                    <p className="text-xs text-text-muted mt-0.5">Our platform courier — we handle pickup, delivery, AWB &amp; tracking. Charges shown to customer include shipping + applicable surcharges as a single amount.</p>
-                  </div>
-                  <ArrowRight size={14} className="text-text-muted mt-3" />
-                </button>
-                <button onClick={() => handleSelectCourier('SELF_SHIP')}
-                  className="flex items-start gap-4 p-4 rounded-xl border-2 border-border hover:border-gray-300 hover:bg-gray-50/50 transition-all text-left"
-                >
-                  <div className="rounded-lg bg-gray-100 p-2.5"><Package size={20} className="text-gray-600" /></div>
-                  <div className="flex-1">
-                    <h4 className="text-sm font-bold text-text-primary">Ship By Own</h4>
-                    <p className="text-xs text-text-muted mt-0.5">Ship using your own courier. Enter AWB and update status manually.</p>
-                  </div>
-                  <ArrowRight size={14} className="text-text-muted mt-3" />
-                </button>
-              </div>
-            )}
-          </motion.div>
-        )}
 
-        {step === 'details' && (
-          <motion.div key="details" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
-            {availableCouriers.length > 1 && (
-              <div className="space-y-2">
-                <label className="block text-xs font-medium text-text-muted">Ship via</label>
-                <div className="flex flex-wrap gap-2">
-                  {availableCouriers.map((cp) => (
-                    <button
-                      key={cp.id}
-                      onClick={() => setSelectedCourier(cp.id)}
-                      className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-all ${
-                        selectedCourier === cp.id
-                          ? 'border-primary-500 bg-primary-50 text-primary-700'
-                          : 'border-border bg-white text-text-secondary hover:border-gray-300'
-                      }`}
-                    >
-                      {cp.name}
-                      {configuredProviders.includes(cp.id) && (
-                        <CheckCircle size={10} className="inline ml-1 text-emerald-500" />
-                      )}
-                    </button>
-                  ))}
-                  <button
-                    onClick={() => setStep('selfship')}
-                    className="px-3 py-1.5 text-xs font-medium rounded-lg border border-border bg-white text-text-secondary hover:border-gray-300 transition-all"
-                  >
-                    Ship By Own
-                  </button>
+            {/* Ship By Own */}
+            {activeTab === 'own' && (
+              <div className="space-y-4">
+                <div className="rounded-xl border border-border overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-gray-50 border-b border-border">
+                        <th className="text-left px-4 py-3 text-xs font-semibold text-text-muted uppercase tracking-wider">Provider</th>
+                        <th className="text-left px-4 py-3 text-xs font-semibold text-text-muted uppercase tracking-wider">Service</th>
+                        <th className="text-left px-4 py-3 text-xs font-semibold text-text-muted uppercase tracking-wider">Cost</th>
+                        <th className="text-left px-4 py-3 text-xs font-semibold text-text-muted uppercase tracking-wider">Est. Delivery</th>
+                        <th className="px-4 py-3"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr className="border-b border-border last:border-b-0 hover:bg-gray-50/50 transition-colors">
+                        <td className="px-4 py-3 font-medium text-text-primary">Self Ship</td>
+                        <td className="px-4 py-3 text-text-secondary">—</td>
+                        <td className="px-4 py-3 text-text-secondary">—</td>
+                        <td className="px-4 py-3 text-text-secondary">—</td>
+                        <td className="px-4 py-3 text-right">
+                          <Button size="sm" onClick={handleBookShipment} loading={saving}>
+                            Book Shipment
+                          </Button>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div className="rounded-xl bg-amber-50 border border-amber-200 p-3">
+                  <p className="text-xs text-amber-700">
+                    You&apos;ll ship this order yourself. After booking, add AWB number and update status from the order details page.
+                  </p>
                 </div>
               </div>
             )}
 
-            <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-3">
-              <div className="flex items-center gap-2">
-                <CheckCircle size={14} className="text-emerald-600" />
-                <p className="text-xs text-emerald-700 font-medium">
-                  Shipping via {getProviderName(selectedCourier)}
-                </p>
-              </div>
-              <p className="text-xs text-emerald-600/80 mt-1">
-                {selectedCourier === 'XELNOVA_COURIER'
-                  ? 'Xelnova will handle pickup, delivery, and all status updates automatically.'
-                  : 'Shipment will be booked automatically. AWB number and tracking will be generated instantly.'}
-              </p>
-            </div>
-
-            <Input
-              stackedLabel
-              label="Package Weight (kg)"
-              type="number"
-              value={weight}
-              onChange={(e) => setWeight(e.target.value)}
-              placeholder="e.g. 0.5"
-              icon={<Weight size={14} />}
-            />
-            <Input
-              stackedLabel
-              label="Dimensions L × B × H (cm)"
-              value={dimensions}
-              onChange={(e) => setDimensions(e.target.value)}
-              placeholder="e.g. 30x20x15"
-              icon={<Ruler size={14} />}
-            />
-            {estimatedShipping && (
-              <div className="rounded-xl border border-primary-200 bg-primary-50/60 p-3">
-                <p className="text-sm font-semibold text-primary-700">
-                  Delivery charge: ₹{estimatedShipping.total}
-                </p>
+            {/* Ship By Xelgo */}
+            {activeTab === 'xelgo' && (
+              <div className="space-y-4">
+                {ratesLoading ? (
+                  <div className="flex justify-center py-8"><Loader2 size={20} className="animate-spin text-primary-500" /></div>
+                ) : xelgoRates.length > 0 ? (
+                  <div className="rounded-xl border border-border overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-gray-50 border-b border-border">
+                          <th className="text-left px-4 py-3 text-xs font-semibold text-text-muted uppercase tracking-wider">Provider</th>
+                          <th className="text-left px-4 py-3 text-xs font-semibold text-text-muted uppercase tracking-wider">Service</th>
+                          <th className="text-left px-4 py-3 text-xs font-semibold text-text-muted uppercase tracking-wider">Cost</th>
+                          <th className="text-left px-4 py-3 text-xs font-semibold text-text-muted uppercase tracking-wider">Est. Delivery</th>
+                          <th className="px-4 py-3"></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {xelgoRates.map((rate, i) => (
+                          <tr key={i} className="border-b border-border last:border-b-0 hover:bg-gray-50/50 transition-colors">
+                            <td className="px-4 py-3 font-medium text-text-primary">Xelgo</td>
+                            <td className="px-4 py-3 text-text-secondary">{rate.service}</td>
+                            <td className="px-4 py-3 font-semibold text-text-primary">
+                              {rate.cost != null ? `₹${rate.cost}` : '—'}
+                            </td>
+                            <td className="px-4 py-3 text-text-secondary">
+                              {rate.estimatedDelivery || (rate.estimatedDays ? `${rate.estimatedDays} days` : '—')}
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <Button size="sm" onClick={() => handleSelectRateAndContinue(rate)}>
+                                Book Shipment
+                              </Button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-border p-6 text-center">
+                    <Truck size={28} className="mx-auto text-primary-400 mb-2" />
+                    <p className="text-sm text-text-muted">Xelgo shipping is always available.</p>
+                    <Button
+                      className="mt-3"
+                      onClick={() => {
+                        setSelectedCourier('XELNOVA_COURIER');
+                        setStep('pickup');
+                      }}
+                    >
+                      Ship via Xelgo
+                    </Button>
+                  </div>
+                )}
+                <div className="rounded-xl bg-blue-50 border border-blue-200 p-3">
+                  <p className="text-xs text-blue-700">
+                    Xelgo handles pickup, delivery, AWB &amp; tracking automatically. Charges include shipping + platform surcharge as a single amount.
+                  </p>
+                </div>
               </div>
             )}
-            <div className="flex justify-end gap-2 pt-2">
-              <Button variant="outline" onClick={onClose}>Cancel</Button>
-              <Button onClick={handleDetailsContinue}>
-                <Calendar size={14} />
-                Next: pickup slot
-              </Button>
-            </div>
+
+            {/* Delivery Partners */}
+            {activeTab === 'partners' && (
+              <div className="space-y-4">
+                {ratesLoading ? (
+                  <div className="flex justify-center py-8"><Loader2 size={20} className="animate-spin text-primary-500" /></div>
+                ) : partnerRates.length > 0 ? (
+                  <div className="rounded-xl border border-border overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-gray-50 border-b border-border">
+                          <th className="text-left px-4 py-3 text-xs font-semibold text-text-muted uppercase tracking-wider">Provider</th>
+                          <th className="text-left px-4 py-3 text-xs font-semibold text-text-muted uppercase tracking-wider">Service</th>
+                          <th className="text-left px-4 py-3 text-xs font-semibold text-text-muted uppercase tracking-wider">Cost</th>
+                          <th className="text-left px-4 py-3 text-xs font-semibold text-text-muted uppercase tracking-wider">Est. Delivery</th>
+                          <th className="px-4 py-3"></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {partnerRates.map((rate, i) => (
+                          <tr key={i} className="border-b border-border last:border-b-0 hover:bg-gray-50/50 transition-colors">
+                            <td className="px-4 py-3 font-medium text-text-primary">{getProviderName(rate.providerKey)}</td>
+                            <td className="px-4 py-3 text-text-secondary">{rate.service}</td>
+                            <td className="px-4 py-3 font-semibold text-text-primary">
+                              {rate.cost != null ? `₹${rate.cost}` : '—'}
+                            </td>
+                            <td className="px-4 py-3 text-text-secondary">
+                              {rate.estimatedDelivery || (rate.estimatedDays ? `${rate.estimatedDays} days` : '—')}
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <Button size="sm" onClick={() => handleSelectRateAndContinue(rate)}>
+                                Book Shipment
+                              </Button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-border p-6 text-center">
+                    <Package size={28} className="mx-auto text-gray-400 mb-2" />
+                    <p className="text-sm text-text-muted mb-1">No delivery partners connected.</p>
+                    <p className="text-xs text-text-muted">
+                      Connect Delhivery, ShipRocket, XpressBees, or Ekart in{' '}
+                      <a href="/shipping" className="text-primary-600 underline font-medium">Shipping Settings</a>
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
           </motion.div>
         )}
 
@@ -1873,16 +1906,49 @@ function ShipOrderModal({
           >
             <div className="flex items-center gap-2">
               <button
-                onClick={() => setStep('details')}
+                onClick={() => setStep('rates')}
                 disabled={saving}
                 className="p-1 rounded hover:bg-gray-100 text-text-muted disabled:opacity-50"
-                aria-label="Back to details"
+                aria-label="Back"
               >
                 <ChevronLeft size={16} />
               </button>
               <p className="text-sm font-semibold text-text-primary">
-                When should the rider come for pickup?
+                Package details &amp; pickup schedule
               </p>
+            </div>
+
+            {selectedRate && (
+              <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-3">
+                <div className="flex items-center gap-2">
+                  <CheckCircle size={14} className="text-emerald-600" />
+                  <p className="text-xs text-emerald-700 font-medium">
+                    Shipping via {selectedRate.providerKey === 'XELNOVA_COURIER' ? 'Xelgo' : selectedRate.service}
+                    {selectedRate.cost != null && ` · ₹${selectedRate.cost}`}
+                    {selectedRate.estimatedDays && ` · ${selectedRate.estimatedDays} day${selectedRate.estimatedDays > 1 ? 's' : ''}`}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-3">
+              <Input
+                stackedLabel
+                label="Package Weight (kg)"
+                type="number"
+                value={weight}
+                onChange={(e) => setWeight(e.target.value)}
+                placeholder="e.g. 0.5"
+                icon={<Weight size={14} />}
+              />
+              <Input
+                stackedLabel
+                label="Dimensions L×B×H (cm)"
+                value={dimensions}
+                onChange={(e) => setDimensions(e.target.value)}
+                placeholder="e.g. 30x20x15"
+                icon={<Ruler size={14} />}
+              />
             </div>
 
             {pickupLocations.length > 0 && (() => {
@@ -1894,12 +1960,7 @@ function ShipOrderModal({
                     <label className="block text-xs font-medium text-text-muted">
                       Pickup from
                     </label>
-                    <a
-                      href="/shipping"
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-[11px] text-primary-600 hover:underline"
-                    >
+                    <a href="/shipping" target="_blank" rel="noreferrer" className="text-[11px] text-primary-600 hover:underline">
                       Manage locations
                     </a>
                   </div>
@@ -1911,10 +1972,7 @@ function ShipOrderModal({
                     >
                       {pickupLocations.map((loc) => (
                         <option key={loc.id} value={loc.id}>
-                          {loc.label}
-                          {loc.isDefault ? ' (default)' : ''}
-                          {' — '}
-                          {loc.city}, {loc.pincode}
+                          {loc.label}{loc.isDefault ? ' (default)' : ''} — {loc.city}, {loc.pincode}
                         </option>
                       ))}
                     </select>
@@ -1922,97 +1980,53 @@ function ShipOrderModal({
                     selected && (
                       <p className="text-sm font-medium text-text-primary">
                         {selected.label}
-                        <span className="text-xs text-text-muted font-normal ml-1">
-                          (only address — add more in Shipping Settings)
-                        </span>
+                        <span className="text-xs text-text-muted font-normal ml-1">(only address)</span>
                       </p>
                     )
                   )}
                   {selected && (
                     <p className="text-[11px] text-text-muted leading-relaxed">
                       {selected.addressLine}, {selected.city}, {selected.state} – {selected.pincode}
-                      {selected.phone && <> · 📞 {selected.phone}</>}
-                    </p>
-                  )}
-                  {selected && !selected.registered && (
-                    <p className="text-[11px] text-amber-700">
-                      This location isn&apos;t registered with the courier yet — we&apos;ll register it automatically when you ship.
+                      {selected.phone && <> · {selected.phone}</>}
                     </p>
                   )}
                 </div>
               );
             })()}
 
-            {pickupLocations.length === 0 && !loadingConfigs && (
-              <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
-                You don&apos;t have any pickup locations yet.&nbsp;
-                <a href="/shipping" className="underline font-medium">
-                  Add one in Shipping Settings
-                </a>
-                {' '}so the courier knows where to come for pickup.
-              </div>
-            )}
-
             <div className="rounded-xl bg-blue-50 border border-blue-200 p-3">
               <p className="text-xs text-blue-800 leading-relaxed">
                 {selectedCourier === 'XELNOVA_COURIER' ? (
-                  <>Tell <strong>Xelgo</strong> when the partner courier should
-                    arrive at your warehouse. We&apos;ll book the shipment and
-                    request the pickup in one go.</>
+                  <>Tell <strong>Xelgo</strong> when the partner courier should arrive at your warehouse.</>
                 ) : (
-                  <>Tell <strong>{getProviderName(selectedCourier)}</strong>
-                    {' '}when to send a rider to your registered warehouse.
-                    Same-day pickup needs to be requested before <strong>2 PM IST</strong>;
-                    after that, the carrier rolls over to the next working day.</>
+                  <>Tell <strong>{getProviderName(selectedCourier)}</strong> when to send a rider. Same-day cutoff is <strong>2 PM IST</strong>.</>
                 )}
               </p>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-medium text-text-muted mb-1.5">
-                  Pickup date *
-                </label>
+                <label className="block text-xs font-medium text-text-muted mb-1.5">Pickup date *</label>
                 <input
                   type="date"
                   value={shipPickupDate}
                   min={new Date().toISOString().slice(0, 10)}
-                  onChange={(e) => {
-                    setShipPickupDate(e.target.value);
-                    setSkipPickupAtBooking(false);
-                  }}
+                  onChange={(e) => { setShipPickupDate(e.target.value); setSkipPickupAtBooking(false); }}
                   disabled={skipPickupAtBooking}
                   className="w-full rounded-xl border border-border bg-surface-raised px-4 py-3 text-sm text-text-primary outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30 disabled:opacity-50"
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-text-muted mb-1.5">
-                  Pickup time (IST)
-                </label>
+                <label className="block text-xs font-medium text-text-muted mb-1.5">Pickup time (IST)</label>
                 <input
                   type="time"
                   value={shipPickupTime}
-                  onChange={(e) => {
-                    setShipPickupTime(e.target.value);
-                    setSkipPickupAtBooking(false);
-                  }}
+                  onChange={(e) => { setShipPickupTime(e.target.value); setSkipPickupAtBooking(false); }}
                   disabled={skipPickupAtBooking}
                   className="w-full rounded-xl border border-border bg-surface-raised px-4 py-3 text-sm text-text-primary outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30 disabled:opacity-50"
                 />
               </div>
             </div>
-
-            <Input
-              stackedLabel
-              label="Number of packages"
-              type="number"
-              min={1}
-              value={String(shipPickupPackages)}
-              onChange={(e) =>
-                setShipPickupPackages(Math.max(1, Number(e.target.value) || 1))
-              }
-              disabled={skipPickupAtBooking}
-            />
 
             <label className="flex items-start gap-2 cursor-pointer select-none rounded-xl border border-border p-3 hover:bg-gray-50/50">
               <input
@@ -2022,65 +2036,26 @@ function ShipOrderModal({
                 className="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
               />
               <span className="text-xs text-text-secondary leading-relaxed">
-                <span className="font-medium text-text-primary">
-                  Book shipment only — schedule pickup later.
-                </span>
-                <br />
-                The shipment will be created with an AWB but no rider will be
-                booked yet. You can schedule the pickup any time from the order
-                details panel.
+                <span className="font-medium text-text-primary">Book shipment only — schedule pickup later.</span>
               </span>
             </label>
 
             <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" onClick={() => setStep('rates')} disabled={saving}>Back</Button>
               <Button
-                variant="outline"
-                onClick={() => setStep('details')}
+                onClick={async () => {
+                  const w = parseFloat(weight);
+                  if (!weight || Number.isNaN(w) || w <= 0) {
+                    toast.error('Enter the package weight in kg');
+                    return;
+                  }
+                  await submitShipment('courier');
+                }}
+                loading={saving}
                 disabled={saving}
               >
-                Back
-              </Button>
-              <Button onClick={handleShip} loading={saving} disabled={saving}>
                 <Truck size={14} />
-                {skipPickupAtBooking
-                  ? 'Book shipment'
-                  : 'Book shipment & schedule pickup'}
-              </Button>
-            </div>
-          </motion.div>
-        )}
-
-        {step === 'selfship' && (
-          <motion.div key="selfship" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
-            <div className="flex items-center gap-2">
-              <button onClick={() => configuredProviders.length > 0 ? setStep('details') : setStep('select')} className="p-1 rounded hover:bg-gray-100 text-text-muted"><ChevronLeft size={16} /></button>
-              <p className="text-sm text-text-muted">Ship By Own</p>
-            </div>
-            <div className="rounded-xl bg-amber-50 border border-amber-200 p-3">
-              <p className="text-xs text-amber-700">
-                You&apos;ll ship this order yourself. Enter the AWB number now or add it later from the order details.
-              </p>
-            </div>
-            <Input
-              stackedLabel
-              label="Carrier Name"
-              value={carrierName}
-              onChange={(e) => setCarrierName(e.target.value)}
-              placeholder="e.g. BlueDart, DTDC, India Post"
-            />
-            <Input
-              stackedLabel
-              label="AWB / Tracking Number"
-              value={awbNumber}
-              onChange={(e) => setAwbNumber(e.target.value)}
-              placeholder="Enter AWB number (optional, can add later)"
-              icon={<Hash size={14} />}
-            />
-            <div className="flex justify-end gap-2 pt-2">
-              <Button variant="outline" onClick={onClose}>Cancel</Button>
-              <Button onClick={handleShip} loading={saving}>
-                <PackageCheck size={14} />
-                Confirm Self-Ship
+                {skipPickupAtBooking ? 'Book Shipment' : 'Book Shipment & Schedule Pickup'}
               </Button>
             </div>
           </motion.div>
@@ -2112,13 +2087,9 @@ function ShipOrderModal({
                   <Phone size={16} className="text-amber-700" />
                 </div>
                 <div className="min-w-0">
-                  <p className="text-sm font-semibold text-amber-900">
-                    Add a pickup phone number
-                  </p>
+                  <p className="text-sm font-semibold text-amber-900">Add a pickup phone number</p>
                   <p className="text-xs text-amber-800/90 mt-1 leading-relaxed">
-                    Our courier partner needs a contact number for the rider who
-                    picks up your shipment. Add it once here and we&apos;ll book
-                    this shipment right away — you won&apos;t be asked again.
+                    Our courier partner needs a contact number for the rider who picks up your shipment.
                   </p>
                 </div>
               </div>
@@ -2129,39 +2100,19 @@ function ShipOrderModal({
                 stackedLabel
                 label="Pickup phone number"
                 value={pickupPhone}
-                onChange={(e) => {
-                  setPickupPhone(e.target.value);
-                  if (phoneError) setPhoneError(null);
-                }}
+                onChange={(e) => { setPickupPhone(e.target.value); if (phoneError) setPhoneError(null); }}
                 placeholder="10-digit mobile, e.g. 9876543210"
                 type="tel"
                 inputMode="tel"
                 icon={<Phone size={14} />}
                 autoFocus
               />
-              {phoneError ? (
-                <p className="mt-1.5 text-xs text-red-600">{phoneError}</p>
-              ) : (
-                <p className="mt-1.5 text-[11px] text-text-muted">
-                  Saved to your profile so future shipments book in one click.
-                  Use a number the rider can actually reach during pickup hours.
-                </p>
-              )}
+              {phoneError && <p className="mt-1.5 text-xs text-red-600">{phoneError}</p>}
             </div>
 
             <div className="flex justify-end gap-2 pt-2">
-              <Button
-                variant="outline"
-                onClick={() => setStep(phoneReturnStep)}
-                disabled={phoneSaving || saving}
-              >
-                Back
-              </Button>
-              <Button
-                onClick={handleSavePhoneAndShip}
-                loading={phoneSaving || saving}
-                disabled={phoneSaving || saving}
-              >
+              <Button variant="outline" onClick={() => setStep(phoneReturnStep)} disabled={phoneSaving || saving}>Back</Button>
+              <Button onClick={handleSavePhoneAndShip} loading={phoneSaving || saving} disabled={phoneSaving || saving}>
                 <Truck size={14} />
                 Save &amp; book shipment
               </Button>
@@ -2196,10 +2147,6 @@ function ShipOrderModal({
               </p>
             )}
 
-            {/* Pickup status — surfaced separately so the seller knows
-                whether the carrier actually accepted the pickup request,
-                not just the manifest. Saves them from chasing an empty
-                "Ready For Pickup" tab on Delhivery One. */}
             {result.pickup && (
               <div
                 className={`rounded-xl border p-3 text-left ${
@@ -2210,54 +2157,48 @@ function ShipOrderModal({
                       : 'border-blue-200 bg-blue-50'
                 }`}
               >
-                <p
-                  className={`text-xs font-semibold ${
-                    result.pickup.scheduled
-                      ? 'text-emerald-800'
-                      : result.pickup.requested
-                        ? 'text-amber-800'
-                        : 'text-blue-800'
-                  }`}
-                >
-                  {result.pickup.scheduled
-                    ? 'Pickup scheduled'
-                    : result.pickup.requested
-                      ? 'Pickup not scheduled'
-                      : 'Schedule pickup separately'}
+                <p className={`text-xs font-semibold ${
+                  result.pickup.scheduled ? 'text-emerald-800' : result.pickup.requested ? 'text-amber-800' : 'text-blue-800'
+                }`}>
+                  {result.pickup.scheduled ? 'Pickup scheduled' : result.pickup.requested ? 'Pickup not scheduled' : 'Schedule pickup separately'}
                 </p>
-                <p className="text-[11px] text-text-secondary mt-1 leading-relaxed">
-                  {result.pickup.message}
-                </p>
+                <p className="text-[11px] text-text-secondary mt-1 leading-relaxed">{result.pickup.message}</p>
                 {result.pickup.scheduledFor && (
                   <p className="text-[11px] text-text-muted mt-1">
-                    Slot:{' '}
-                    {new Date(result.pickup.scheduledFor).toLocaleString('en-IN', {
-                      timeZone: 'Asia/Kolkata',
-                      weekday: 'short',
-                      day: 'numeric',
-                      month: 'short',
-                      hour: 'numeric',
-                      minute: '2-digit',
-                      hour12: true,
-                    })}{' '}
-                    (IST)
-                    {result.pickup.pickupId ? ` · ref ${result.pickup.pickupId}` : ''}
+                    Slot: {new Date(result.pickup.scheduledFor).toLocaleString('en-IN', {
+                      timeZone: 'Asia/Kolkata', weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true,
+                    })} (IST){result.pickup.pickupId ? ` · ref ${result.pickup.pickupId}` : ''}
                   </p>
                 )}
               </div>
             )}
 
-            {result.trackingUrl ? (
+            {result.trackingUrl && (
               <a href={result.trackingUrl} target="_blank" rel="noopener noreferrer"
                 className="inline-flex items-center gap-1 text-sm text-primary-600 hover:underline"
               >
                 <ExternalLink size={13} /> Track Shipment
               </a>
-            ) : (
-              <p className="text-xs text-text-muted">
-                You can track this shipment from the order details page.
-              </p>
             )}
+
+            {/* Download Shipping Label & Invoice buttons */}
+            <div className="flex gap-3 pt-2">
+              <button
+                onClick={handleDownloadLabel}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-purple-700 border border-purple-200 rounded-xl bg-purple-50 hover:bg-purple-100 transition-colors"
+              >
+                <Download size={14} />
+                Download Shipping Label
+              </button>
+              <button
+                onClick={handleDownloadInvoice}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-blue-700 border border-blue-200 rounded-xl bg-blue-50 hover:bg-blue-100 transition-colors"
+              >
+                <Download size={14} />
+                Download Invoice
+              </button>
+            </div>
+
             <Button onClick={onSuccess} fullWidth>Done</Button>
           </motion.div>
         )}

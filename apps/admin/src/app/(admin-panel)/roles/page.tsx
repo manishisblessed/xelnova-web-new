@@ -84,7 +84,7 @@ export default function RolesPage() {
   const loadTemplates = async () => {
     setTemplatesLoading(true);
     try {
-      const data = await apiGet<RoleTemplate[]>('admin/roles/templates');
+      const data = await apiGet<RoleTemplate[]>('roles/templates');
       setTemplates(data || []);
     } catch (err) {
       console.error('Failed to load templates:', err);
@@ -134,10 +134,10 @@ export default function RolesPage() {
       };
 
       if (editing) {
-        await apiUpdate('admin/roles', editing.id, payload);
+        await apiUpdate('roles', editing.id, payload);
         toast.success('Role updated');
       } else {
-        await apiCreate('admin/roles', payload);
+        await apiCreate('roles', payload);
         toast.success('Role created');
       }
       setModalOpen(false);
@@ -150,7 +150,7 @@ export default function RolesPage() {
   const handleDelete = async () => {
     if (!editing) return;
     try {
-      await apiDelete('admin/roles', editing.id);
+      await apiDelete('roles', editing.id);
       toast.success('Role deleted');
       setDeleteOpen(false);
       setRefreshKey((k) => k + 1);
@@ -203,7 +203,7 @@ export default function RolesPage() {
     <>
       <AdminListPage<Role>
         title="Admin Roles"
-        section="admin/roles"
+        section="roles"
         columns={columns}
         keyExtractor={(r) => r.id}
         searchKeys={['name', 'description']}

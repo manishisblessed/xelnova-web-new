@@ -56,7 +56,12 @@ async function fetchWithRefresh(
   if (res.status === 401 && typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
     const refreshed = await refreshSession();
     if (refreshed) {
-      return fetch(input, { ...init, headers: authHeaders() });
+      const retryHeaders = { ...authHeaders() };
+      const existing = init?.headers;
+      if (existing && typeof existing === 'object' && !Array.isArray(existing)) {
+        Object.assign(retryHeaders, existing, { Authorization: retryHeaders.Authorization });
+      }
+      return fetch(input, { ...init, headers: retryHeaders });
     }
   }
   return res;
@@ -75,13 +80,13 @@ let sessionExpiredHandled = false;
 
 function looksLikeExpiredSession(status: number, message?: string): boolean {
   if (status === 401) return true;
+  if (status === 403) return false;
   if (!message) return false;
   const lower = message.toLowerCase();
   return (
     lower.includes('expired token') ||
     lower.includes('invalid token') ||
-    lower.includes('jwt expired') ||
-    lower.includes('unauthorized')
+    lower.includes('jwt expired')
   );
 }
 
@@ -156,7 +161,16 @@ export async function apiLogin(email: string, password: string) {
     headers: { 'Content-Type': 'application/json', ...APP_ROLE_HEADER },
     body: JSON.stringify({ email, password }),
   });
-  return handleResponse<{ user: any; accessToken: string; refreshToken: string }>(res);
+  return handleResponse<{ user: any; accessToken: string; refreshToken: string; mustChangePassword?: boolean }>(res);
+}
+
+export async function apiChangePassword(currentPassword: string, newPassword: string) {
+  const res = await fetchWithRefresh(`${API_URL}/auth/change-password`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ currentPassword, newPassword }),
+  });
+  return handleResponse<{ message: string }>(res);
 }
 
 // ─── Dashboard ───

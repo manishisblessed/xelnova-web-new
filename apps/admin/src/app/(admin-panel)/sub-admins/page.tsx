@@ -62,7 +62,7 @@ export default function SubAdminsPage() {
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    apiGet<AdminRole[]>('admin/roles').then(setRoles).catch(() => undefined);
+    apiGet<AdminRole[]>('roles').then(setRoles).catch(() => undefined);
   }, [refreshKey]);
 
   const customRoles = useMemo(() => roles.filter((r) => !r.isSystem), [roles]);
@@ -108,11 +108,11 @@ export default function SubAdminsPage() {
         if ((editing.adminRoleId ?? '') !== form.adminRoleId) {
           patch.adminRoleId = form.adminRoleId || null;
         }
-        await apiUpdate('admin/sub-admins', editing.id, patch);
+        await apiUpdate('sub-admins', editing.id, patch);
         toast.success('Sub-admin updated');
         setModalOpen(false);
       } else {
-        const result = await apiCreate<SubAdmin & { tempPassword?: string | null }>('admin/sub-admins', {
+        const result = await apiCreate<SubAdmin & { tempPassword?: string | null }>('sub-admins', {
           name: form.name,
           email: form.email.trim().toLowerCase(),
           password: form.password.trim() || undefined,
@@ -134,7 +134,7 @@ export default function SubAdminsPage() {
 
   const handleResetPassword = async (s: SubAdmin) => {
     try {
-      const res = await apiPost<{ tempPassword: string }>(`admin/sub-admins/${s.id}/reset-password`, {});
+      const res = await apiPost<{ tempPassword: string }>(`sub-admins/${s.id}/reset-password`, {});
       toast.success('Password reset');
       setTempPassword({ email: s.email ?? '', password: res.tempPassword });
     } catch (err) {
@@ -145,7 +145,7 @@ export default function SubAdminsPage() {
   const handleDelete = async () => {
     if (!editing) return;
     try {
-      await apiDelete('admin/sub-admins', editing.id);
+      await apiDelete('sub-admins', editing.id);
       toast.success('Sub-admin removed');
       setDeleteOpen(false);
       setRefreshKey((k) => k + 1);
@@ -251,7 +251,7 @@ export default function SubAdminsPage() {
     <>
       <AdminListPage<SubAdmin>
         title="Sub-admins"
-        section="admin/sub-admins"
+        section="sub-admins"
         columns={columns}
         keyExtractor={(s) => s.id}
         searchKeys={['name', 'email', 'adminRole.name']}
@@ -298,6 +298,7 @@ export default function SubAdminsPage() {
         onSubmit={handleSubmit}
         loading={saving}
         submitLabel={editing ? 'Save changes' : 'Create sub-admin'}
+        wide
       >
         <FormField label="Full name">
           <FormInput
@@ -319,28 +320,92 @@ export default function SubAdminsPage() {
         </FormField>
 
         <FormField
-          label="Role"
-          hint={
-            customRoles.length === 0
-              ? 'No custom roles yet. Create one in the Roles tab to grant scoped access.'
-              : 'Determines which sections and actions this sub-admin can access.'
-          }
+          label="Role & Permissions"
+          hint="Assign a role to control what this sub-admin can view, modify, and delete across all sections."
         >
-          <FormSelect
-            value={form.adminRoleId}
-            onChange={(e) => setForm((f) => ({ ...f, adminRoleId: e.target.value }))}
-          >
-            <option value="">No role (super admin level)</option>
-            {customRoles.map((r) => {
-              const { enabled, total } = getPermissionCount(r);
-              return (
-                <option key={r.id} value={r.id}>
-                  {r.name} {r.level && `(${r.level})`} {enabled > 0 && `[${enabled}/${total}]`}
-                </option>
-              );
-            })}
-          </FormSelect>
+          {customRoles.length === 0 ? (
+            <div className="rounded-lg border border-warning-200 bg-warning-50 p-4 space-y-2">
+              <p className="text-sm font-medium text-warning-800">No roles created yet</p>
+              <p className="text-xs text-warning-700">
+                You need to create a role first with specific permissions (View, Create, Edit, Delete, Approve, etc.) for different sections (Products, Orders, Customers, Reports, Settings...).
+              </p>
+              <a
+                href="/roles"
+                className="inline-flex items-center gap-1.5 mt-1 rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-700 transition-colors"
+              >
+                <KeyRound size={13} />
+                Go to Roles → Create a Role with Permissions
+              </a>
+            </div>
+          ) : (
+            <FormSelect
+              value={form.adminRoleId}
+              onChange={(e) => setForm((f) => ({ ...f, adminRoleId: e.target.value }))}
+            >
+              <option value="">No role (full super admin access)</option>
+              {customRoles.map((r) => {
+                const { enabled, total } = getPermissionCount(r);
+                return (
+                  <option key={r.id} value={r.id}>
+                    {r.name} {r.level && `(${r.level})`} — {enabled}/{total} permissions enabled
+                  </option>
+                );
+              })}
+            </FormSelect>
+          )}
         </FormField>
+
+        {/* Show selected role's permissions preview */}
+        {form.adminRoleId && (() => {
+          const selectedRole = roles.find((r) => r.id === form.adminRoleId);
+          if (!selectedRole?.permissionsData) return null;
+          return (
+            <div className="rounded-lg border border-border bg-surface-muted/30 p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-text-primary">
+                  Permissions for: {selectedRole.name}
+                </p>
+                {selectedRole.level && (
+                  <Badge variant={getLevelBadgeColor(selectedRole.level) as any} className="text-xs">
+                    {selectedRole.level}
+                  </Badge>
+                )}
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {Object.entries(selectedRole.permissionsData).map(([section, actions]) => {
+                  const enabledActions = Object.entries(actions).filter(([, v]) => v);
+                  if (enabledActions.length === 0) return null;
+                  return (
+                    <div key={section} className="space-y-1">
+                      <p className="text-xs font-semibold text-text-primary capitalize">{section}</p>
+                      <div className="flex flex-wrap gap-1">
+                        {enabledActions.map(([action]) => (
+                          <span
+                            key={action}
+                            className="text-[10px] bg-primary-50 text-primary-700 border border-primary-200 px-1.5 py-0.5 rounded font-medium"
+                          >
+                            {action}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              {selectedRole.description && (
+                <p className="text-xs text-text-muted italic">{selectedRole.description}</p>
+              )}
+            </div>
+          );
+        })()}
+
+        {!form.adminRoleId && customRoles.length > 0 && (
+          <div className="rounded-lg border border-blue-100 bg-blue-50/50 p-3">
+            <p className="text-xs text-blue-800">
+              <strong>No role selected</strong> — This sub-admin will have <strong>full super admin access</strong> to all sections. Select a role above to restrict their permissions.
+            </p>
+          </div>
+        )}
 
         {!editing && (
           <FormField

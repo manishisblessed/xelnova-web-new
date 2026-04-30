@@ -1,8 +1,15 @@
--- AlterEnum
-ALTER TYPE "AdminRoleLevel" ADD VALUE 'SUPER_ADMIN';
-ALTER TYPE "AdminRoleLevel" ADD VALUE 'MANAGER';
-ALTER TYPE "AdminRoleLevel" ADD VALUE 'EDITOR';
-ALTER TYPE "AdminRoleLevel" ADD VALUE 'VIEWER';
+-- CreateEnum (if not exists) then add values
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'AdminRoleLevel') THEN
+    CREATE TYPE "AdminRoleLevel" AS ENUM ('SUPER_ADMIN', 'MANAGER', 'EDITOR', 'VIEWER');
+  ELSE
+    BEGIN ALTER TYPE "AdminRoleLevel" ADD VALUE IF NOT EXISTS 'SUPER_ADMIN'; EXCEPTION WHEN duplicate_object THEN NULL; END;
+    BEGIN ALTER TYPE "AdminRoleLevel" ADD VALUE IF NOT EXISTS 'MANAGER'; EXCEPTION WHEN duplicate_object THEN NULL; END;
+    BEGIN ALTER TYPE "AdminRoleLevel" ADD VALUE IF NOT EXISTS 'EDITOR'; EXCEPTION WHEN duplicate_object THEN NULL; END;
+    BEGIN ALTER TYPE "AdminRoleLevel" ADD VALUE IF NOT EXISTS 'VIEWER'; EXCEPTION WHEN duplicate_object THEN NULL; END;
+  END IF;
+END $$;
 
 -- AlterTable
 ALTER TABLE "admin_roles" ADD COLUMN "description" TEXT,

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useSearchParams } from 'next/navigation';
 import { motion, AnimatePresence, Reorder, useDragControls } from 'framer-motion';
-import { ImagePlus, Pencil, Plus, Trash2, X, Crown, Loader2, Layers, GripVertical, Upload, Camera, Ruler, Image as ImageIcon, Pause, Play, Search, ChevronLeft as ChevronLeftIcon, ChevronRight as ChevronRightIcon, ChevronDown, ExternalLink, Film } from 'lucide-react';
+import { ImagePlus, Pencil, Plus, Trash2, X, Crown, Loader2, Layers, GripVertical, Upload, Camera, Ruler, Image as ImageIcon, Pause, Play, Search, ChevronLeft as ChevronLeftIcon, ChevronRight as ChevronRightIcon, ChevronDown, ExternalLink, Film, Package2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { DashboardHeader } from '@/components/dashboard/dashboard-header';
 import { DataTable, type Column } from '@/components/dashboard/data-table';
@@ -26,7 +26,6 @@ import {
 import { useSellerProfile } from '@/lib/seller-profile-context';
 import { VerificationBanner } from '@/components/dashboard/verification-banner';
 import { publicApiBase } from '@/lib/public-api-base';
-import { resolveStorefrontPreviewUrl } from '@/lib/storefront-url';
 import { ProductVariantsExpansion } from '@/components/product-variants-expansion';
 import { CategorySelector } from '@/components/category-selector';
 import {
@@ -425,6 +424,316 @@ function keyValueArrayToObject(arr: { key: string; value: string }[]): Record<st
   );
   if (filtered.length === 0) return undefined;
   return Object.fromEntries(filtered.map((item) => [item.key.trim(), item.value.trim()]));
+}
+
+/**
+ * Compact inline expansion panel shown below a product row.
+ * Amazon Seller Central-style: editable variant rows with price/stock/MRP/status.
+ */
+function InlineProductExpansion({
+  product,
+  onEdit,
+  onToggleHold,
+  onDelete,
+  canHold,
+  onStockUpdate,
+}: {
+  product: SellerProduct;
+  onEdit: () => void;
+  onToggleHold: () => void;
+  onDelete: () => void;
+  canHold: boolean;
+  onStockUpdate: (id: string, stock: number, price: number) => void;
+}) {
+  const [savingInline, setSavingInline] = useState(false);
+  const [inlinePrice, setInlinePrice] = useState(String(product.price));
+  const [inlineStock, setInlineStock] = useState(String(product.stock));
+
+  const variants = product.variants;
+  const hasVariants = Array.isArray(variants) && variants.length > 0;
+
+  const flatVariants = hasVariants
+    ? (variants as Array<{ type?: string; label?: string; options?: Array<{ label?: string; value?: string; sku?: string; price?: number; compareAtPrice?: number; stock?: number; images?: string[]; available?: boolean }> }>).flatMap((group) =>
+        (group.options ?? []).map((opt) => ({
+          variant: opt.label || opt.value || '—',
+          groupLabel: group.label || group.type || 'Option',
+          sku: opt.sku || '—',
+          price: opt.price,
+          mrp: opt.compareAtPrice,
+          stock: opt.stock,
+          image: opt.images?.[0],
+          active: opt.available !== false,
+        })),
+      )
+    : [];
+
+  const handleSaveMainProduct = async () => {
+    const stockN = parseInt(inlineStock, 10);
+    const priceN = parseFloat(inlinePrice);
+    if (isNaN(stockN) || stockN < 0 || isNaN(priceN) || priceN < 0) {
+      toast.error('Enter valid price and stock values');
+      return;
+    }
+    setSavingInline(true);
+    try {
+      await apiUpdateProduct(product.id, { stock: stockN, price: priceN });
+      onStockUpdate(product.id, stockN, priceN);
+      toast.success('Updated successfully');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Update failed');
+    } finally {
+      setSavingInline(false);
+    }
+  };
+
+  const priceChanged = String(product.price) !== inlinePrice;
+  const stockChanged = String(product.stock) !== inlineStock;
+  const hasChanges = priceChanged || stockChanged;
+
+  return (
+    <div className="border-t border-gray-200 bg-white" onClick={(e) => e.stopPropagation()}>
+      {/* Action bar */}
+      <div className="flex items-center justify-between gap-3 px-4 py-2 bg-gray-50 border-b border-gray-200">
+        <div className="flex items-center gap-2 text-xs text-gray-500">
+          <span className="font-medium text-gray-700">SKU:</span>
+          <code className="font-mono text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded text-[11px]">{product.slug || '—'}</code>
+          {product.gstRate != null && (
+            <>
+              <span className="text-gray-300 mx-1">|</span>
+              <span className="font-medium text-gray-700">GST:</span>
+              <span>{product.gstRate}%</span>
+            </>
+          )}
+        </div>
+        <div className="flex items-center gap-1.5">
+          <button type="button" onClick={onEdit} className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 shadow-sm transition-colors">
+            <Pencil size={12} /> Edit
+          </button>
+          {canHold && (
+            <button
+              type="button"
+              onClick={onToggleHold}
+              className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium shadow-sm transition-colors ${
+                product.status === 'ON_HOLD'
+                  ? 'border-primary-300 bg-white text-primary-600 hover:bg-primary-50'
+                  : 'border-amber-300 bg-white text-amber-600 hover:bg-amber-50'
+              }`}
+            >
+              {product.status === 'ON_HOLD' ? <><Play size={12} /> Activate</> : <><Pause size={12} /> Hold</>}
+            </button>
+          )}
+          <button type="button" onClick={onDelete} className="inline-flex items-center gap-1.5 rounded-md border border-red-300 bg-white px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 shadow-sm transition-colors">
+            <Trash2 size={12} /> Delete
+          </button>
+        </div>
+      </div>
+
+      {/* Main product detail row — Amazon SC style: image | details | inventory | pricing */}
+      <div className="grid grid-cols-[auto_1fr_auto_auto] gap-0 border-b border-gray-200">
+        {/* Product image */}
+        <div className="flex items-start p-3 border-r border-gray-100">
+          <div className="h-16 w-16 rounded-lg border border-gray-200 bg-gray-50 overflow-hidden shrink-0">
+            {product.images?.[0] ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={product.images[0]} alt="" className="h-full w-full object-cover" />
+            ) : (
+              <div className="h-full w-full flex items-center justify-center">
+                <Package2 size={20} className="text-gray-300" />
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Product details */}
+        <div className="p-3 border-r border-gray-100 min-w-0">
+          <p className="text-xs font-semibold text-gray-900 line-clamp-2 leading-snug">{product.name}</p>
+          <div className="mt-1.5 space-y-0.5 text-[11px] text-gray-500">
+            {product.brand && (
+              <p>Brand: <span className="text-gray-700 font-medium">{product.brand}</span></p>
+            )}
+            {product.category?.name && (
+              <p>Category: <span className="text-gray-700 font-medium">{product.category.name}</span></p>
+            )}
+          </div>
+        </div>
+
+        {/* Inventory section */}
+        <div className="p-3 border-r border-gray-100 min-w-[140px]">
+          <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">Inventory</p>
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-[11px] text-gray-500">Available</span>
+              <input
+                type="number"
+                value={inlineStock}
+                onChange={(e) => setInlineStock(e.target.value)}
+                className={`w-16 rounded border text-center px-2 py-1 text-xs font-medium text-gray-900 focus:outline-none focus:ring-1 focus:ring-primary-400 focus:border-primary-400 ${stockChanged ? 'border-primary-300 bg-primary-50' : 'border-gray-300 bg-white'}`}
+              />
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-[11px] text-gray-500">Status</span>
+              <Badge variant={productStatusVariant(product.status)} className="text-[10px]">
+                {productStatusLabel(product.status)}
+              </Badge>
+            </div>
+          </div>
+        </div>
+
+        {/* Pricing section */}
+        <div className="p-3 min-w-[180px]">
+          <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">Pricing</p>
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-[11px] text-gray-500">Price</span>
+              <div className="flex items-center gap-1">
+                <span className="text-[11px] text-gray-400">₹</span>
+                <input
+                  type="number"
+                  value={inlinePrice}
+                  onChange={(e) => setInlinePrice(e.target.value)}
+                  className={`w-20 rounded border text-right px-2 py-1 text-xs font-medium text-gray-900 focus:outline-none focus:ring-1 focus:ring-primary-400 focus:border-primary-400 ${priceChanged ? 'border-primary-300 bg-primary-50' : 'border-gray-300 bg-white'}`}
+                />
+              </div>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-[11px] text-gray-500">MRP</span>
+              <span className="text-xs text-gray-600 tabular-nums pr-1">₹{product.compareAtPrice != null ? product.compareAtPrice.toLocaleString('en-IN') : '—'}</span>
+            </div>
+            <div className="pt-1">
+              <button
+                type="button"
+                onClick={handleSaveMainProduct}
+                disabled={savingInline || !hasChanges}
+                className={`w-full rounded-md py-1.5 text-xs font-semibold transition-all ${
+                  hasChanges
+                    ? 'bg-primary-600 text-white hover:bg-primary-700 shadow-sm'
+                    : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                } disabled:opacity-50`}
+              >
+                {savingInline ? <Loader2 size={12} className="animate-spin mx-auto" /> : 'Save changes'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Variant rows — each variant gets its own full detail row */}
+      {hasVariants && (
+        <>
+          <div className="px-4 py-2 bg-blue-50/60 border-b border-blue-100">
+            <div className="flex items-center gap-2">
+              <Layers size={13} className="text-primary-600" />
+              <span className="text-xs font-semibold text-gray-700">
+                Related to {flatVariants.length} variation{flatVariants.length === 1 ? '' : 's'}
+              </span>
+            </div>
+          </div>
+          {flatVariants.map((v, idx) => (
+            <VariantDetailRow key={idx} variant={v} fallbackPrice={product.price} fallbackStock={product.stock} isLast={idx === flatVariants.length - 1} />
+          ))}
+        </>
+      )}
+    </div>
+  );
+}
+
+function VariantDetailRow({
+  variant,
+  fallbackPrice,
+  fallbackStock,
+  isLast,
+}: {
+  variant: { variant: string; groupLabel: string; sku: string; price?: number; mrp?: number; stock?: number; image?: string; active: boolean };
+  fallbackPrice: number;
+  fallbackStock: number;
+  isLast: boolean;
+}) {
+  const [price, setPrice] = useState(String(variant.price ?? fallbackPrice));
+  const [stock, setStock] = useState(String(variant.stock ?? fallbackStock));
+  const [active, setActive] = useState(variant.active);
+
+  return (
+    <div className={`grid grid-cols-[auto_1fr_auto_auto] gap-0 ${!isLast ? 'border-b border-gray-100' : ''} ${!active ? 'opacity-50' : ''}`}>
+      {/* Variant image */}
+      <div className="flex items-start p-3 border-r border-gray-50">
+        <div className="h-12 w-12 rounded-lg border border-gray-200 bg-gray-50 overflow-hidden">
+          {variant.image ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={variant.image} alt={variant.variant} className="h-full w-full object-cover" />
+          ) : (
+            <div className="h-full w-full flex items-center justify-center">
+              <Package2 size={16} className="text-gray-300" />
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Variant details */}
+      <div className="p-3 border-r border-gray-50 min-w-0">
+        <p className="text-xs font-semibold text-gray-900">{variant.variant}</p>
+        <div className="mt-1 space-y-0.5 text-[11px] text-gray-500">
+          <p>{variant.groupLabel}</p>
+          {variant.sku !== '—' && (
+            <p>SKU: <code className="font-mono text-gray-600">{variant.sku}</code></p>
+          )}
+        </div>
+      </div>
+
+      {/* Variant inventory */}
+      <div className="p-3 border-r border-gray-50 min-w-[140px]">
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-[11px] text-gray-500">Available</span>
+            <input
+              type="number"
+              value={stock}
+              onChange={(e) => setStock(e.target.value)}
+              onClick={(e) => e.stopPropagation()}
+              className="w-16 rounded border border-gray-300 bg-white text-center px-2 py-1 text-xs font-medium text-gray-900 focus:outline-none focus:ring-1 focus:ring-primary-400 focus:border-primary-400"
+            />
+          </div>
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-[11px] text-gray-500">Status</span>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); setActive(!active); }}
+              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold transition-colors ${
+                active
+                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                  : 'bg-gray-100 text-gray-500 border border-gray-200'
+              }`}
+            >
+              <span className={`inline-block h-1.5 w-1.5 rounded-full ${active ? 'bg-emerald-500' : 'bg-gray-400'}`} />
+              {active ? 'Active' : 'Inactive'}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Variant pricing */}
+      <div className="p-3 min-w-[180px]">
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-[11px] text-gray-500">Price</span>
+            <div className="flex items-center gap-1">
+              <span className="text-[11px] text-gray-400">₹</span>
+              <input
+                type="number"
+                value={price}
+                onChange={(e) => setPrice(e.target.value)}
+                onClick={(e) => e.stopPropagation()}
+                className="w-20 rounded border border-gray-300 bg-white text-right px-2 py-1 text-xs font-medium text-gray-900 focus:outline-none focus:ring-1 focus:ring-primary-400 focus:border-primary-400"
+              />
+            </div>
+          </div>
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-[11px] text-gray-500">MRP</span>
+            <span className="text-xs text-gray-600 tabular-nums pr-1">₹{variant.mrp != null ? variant.mrp.toLocaleString('en-IN') : '—'}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function splitMetaKeywords(raw: string): string[] {
@@ -2394,31 +2703,42 @@ export default function SellerInventoryPage() {
       key: 'name',
       header: 'Product',
       render: (row) => {
-        const slug = row.slug?.trim();
-        const productUrl = slug ? resolveStorefrontPreviewUrl(`/products/${encodeURIComponent(slug)}`) : null;
+        const variantGroups = Array.isArray(row.variants) ? row.variants as Array<{ options?: unknown[] }> : [];
+        const variantCount = variantGroups.reduce((sum, g) => sum + (g.options?.length ?? 0), 0);
         return (
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="h-10 w-10 rounded-lg bg-surface-muted overflow-hidden shrink-0">
+          <div className="flex items-center gap-3 min-w-0 w-full py-0.5">
+            <div className="h-11 w-11 rounded-xl bg-gradient-to-br from-gray-100 to-gray-50 overflow-hidden shrink-0 border border-gray-200/60 shadow-sm">
               {row.images?.[0] ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={row.images[0]} alt="" className="h-full w-full object-cover" />
-              ) : null}
-            </div>
-            <div className="min-w-0">
-              {productUrl ? (
-                <a
-                  href={productUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="font-medium text-primary-600 hover:text-primary-700 hover:underline line-clamp-2 text-left"
-                  title="View on marketplace (opens in new tab)"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  {row.name}
-                </a>
               ) : (
-                <span className="font-medium line-clamp-2">{row.name}</span>
+                <div className="h-full w-full flex items-center justify-center">
+                  <Package2 size={18} className="text-gray-300" />
+                </div>
               )}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="font-semibold text-[13px] line-clamp-2 leading-snug text-text-primary" title={row.name}>
+                {row.name}
+              </p>
+              <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                {row.brand && (
+                  <span className="text-[11px] text-text-muted">{row.brand}</span>
+                )}
+                {row.brand && row.category?.name && <span className="text-gray-300">·</span>}
+                {row.category?.name && (
+                  <span className="text-[11px] text-text-muted">{row.category.name}</span>
+                )}
+                {variantCount > 0 && (
+                  <>
+                    <span className="text-gray-300">·</span>
+                    <span className="inline-flex items-center gap-1 text-[11px] text-primary-600 font-medium">
+                      <Layers className="h-3 w-3" />
+                      {variantCount} variant{variantCount === 1 ? '' : 's'}
+                    </span>
+                  </>
+                )}
+              </div>
             </div>
           </div>
         );
@@ -2427,23 +2747,47 @@ export default function SellerInventoryPage() {
     {
       key: 'price',
       header: 'Price',
-      render: (row) => `₹${Number(row.price).toLocaleString('en-IN')}`,
+      className: 'w-[100px]',
+      render: (row) => (
+        <div>
+          <p className="font-semibold text-text-primary">₹{Number(row.price).toLocaleString('en-IN')}</p>
+          {row.compareAtPrice != null && row.compareAtPrice > row.price && (
+            <p className="text-[11px] text-text-muted line-through">₹{Number(row.compareAtPrice).toLocaleString('en-IN')}</p>
+          )}
+        </div>
+      ),
     },
-    { key: 'stock', header: 'Stock' },
+    {
+      key: 'stock',
+      header: 'Stock',
+      className: 'w-[80px]',
+      render: (row) => {
+        const isLow = row.stock > 0 && row.stock <= 5;
+        const isOut = row.stock === 0;
+        return (
+          <span className={`font-medium tabular-nums ${isOut ? 'text-danger-600' : isLow ? 'text-warning-600' : 'text-text-primary'}`}>
+            {row.stock}
+            {isOut && <span className="block text-[10px] font-normal">Out of stock</span>}
+            {isLow && <span className="block text-[10px] font-normal">Low stock</span>}
+          </span>
+        );
+      },
+    },
     {
       key: 'status',
       header: 'Status',
+      className: 'w-[120px]',
       render: (row) => (
         <div className="flex flex-col gap-0.5">
           <Badge variant={productStatusVariant(row.status)}>{productStatusLabel(row.status)}</Badge>
           {row.status === 'PENDING' && (
-            <span className="text-[10px] text-warning-600">Awaiting admin review</span>
+            <span className="text-[10px] text-warning-600">Awaiting review</span>
           )}
           {row.status === 'PENDING_BRAND_AUTHORIZATION' && (
-            <span className="text-[10px] text-warning-600">Brand documents under review</span>
+            <span className="text-[10px] text-warning-600">Brand docs under review</span>
           )}
           {row.status === 'REJECTED' && row.rejectionReason && (
-            <span className="text-[10px] text-danger-600 max-w-[140px] truncate" title={row.rejectionReason}>
+            <span className="text-[10px] text-danger-600 max-w-[120px] truncate" title={row.rejectionReason}>
               {row.rejectionReason}
             </span>
           )}
@@ -2451,52 +2795,43 @@ export default function SellerInventoryPage() {
       ),
     },
     {
-      key: 'brand',
-      header: 'Brand',
-      render: (row) =>
-        row.brand?.trim() ? (
-          <span className="inline-flex items-center rounded-md bg-surface-muted px-2 py-0.5 text-xs font-medium text-text-primary border border-border">
-            {row.brand}
-          </span>
-        ) : (
-          <span className="text-xs text-text-muted">—</span>
-        ),
-    },
-    {
-      key: 'category',
-      header: 'Category',
-      render: (row) => row.category?.name ?? '—',
-    },
-    {
-      key: 'variants',
-      header: 'Variants',
-      render: (row) => <VariantsCell variants={row.variants} />,
-    },
-    {
       key: 'createdAt',
       header: 'Created',
-      render: (row) => new Date(row.createdAt).toLocaleDateString(),
+      className: 'w-[90px]',
+      render: (row) => (
+        <span className="text-text-muted text-xs tabular-nums">
+          {new Date(row.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit' })}
+        </span>
+      ),
     },
     {
       key: 'actions',
       header: '',
-      className: 'w-[180px]',
+      className: 'w-[120px]',
       render: (row) => {
         const isToggling = togglingHoldId === row.id;
         return (
-          <div className="flex gap-1">
-            <Button type="button" variant="outline" size="sm" onClick={() => openEdit(row)} title="Edit" disabled={isToggling}>
+          <div className="flex items-center gap-1 justify-end" onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              onClick={() => openEdit(row)}
+              disabled={isToggling}
+              title="Edit"
+              className="inline-flex items-center justify-center h-8 w-8 rounded-lg border border-border text-text-muted hover:text-text-primary hover:bg-surface-muted transition-colors"
+            >
               <Pencil className="h-3.5 w-3.5" />
-            </Button>
+            </button>
             {canToggleHold(row) && (
-              <Button
+              <button
                 type="button"
-                variant="outline"
-                size="sm"
                 onClick={() => toggleHold(row)}
                 disabled={isToggling}
                 title={row.status === 'ON_HOLD' ? 'Activate' : 'Put on hold'}
-                className={row.status === 'ON_HOLD' ? 'border-primary-300 text-primary-600 hover:bg-primary-50' : 'border-warning-300 text-warning-600 hover:bg-warning-50'}
+                className={`inline-flex items-center justify-center h-8 w-8 rounded-lg border transition-colors ${
+                  row.status === 'ON_HOLD'
+                    ? 'border-primary-200 text-primary-600 hover:bg-primary-50'
+                    : 'border-warning-200 text-warning-600 hover:bg-warning-50'
+                }`}
               >
                 {isToggling ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -2505,11 +2840,17 @@ export default function SellerInventoryPage() {
                 ) : (
                   <Pause className="h-3.5 w-3.5" />
                 )}
-              </Button>
+              </button>
             )}
-            <Button type="button" variant="danger" size="sm" onClick={() => setDeleteProduct(row)} title="Delete" disabled={isToggling}>
+            <button
+              type="button"
+              onClick={() => setDeleteProduct(row)}
+              disabled={isToggling}
+              title="Delete"
+              className="inline-flex items-center justify-center h-8 w-8 rounded-lg border border-danger-200 text-danger-500 hover:text-danger-600 hover:bg-danger-50 transition-colors"
+            >
               <Trash2 className="h-3.5 w-3.5" />
-            </Button>
+            </button>
           </div>
         );
       },
@@ -3557,6 +3898,20 @@ export default function SellerInventoryPage() {
             keyExtractor={(row) => row.id}
             loading={loading}
             emptyMessage={search ? `No products match "${search}"` : 'No products yet'}
+            renderExpanded={(row) => (
+              <InlineProductExpansion
+                product={row}
+                onEdit={() => openEdit(row)}
+                onToggleHold={() => toggleHold(row)}
+                onDelete={() => setDeleteProduct(row)}
+                canHold={canToggleHold(row)}
+                onStockUpdate={(id, stock, price) => {
+                  setProducts((prev) =>
+                    prev.map((p) => (p.id === id ? { ...p, stock, price } : p)),
+                  );
+                }}
+              />
+            )}
           />
         </motion.div>
       </div>
@@ -3647,6 +4002,7 @@ export default function SellerInventoryPage() {
           </Button>
         </div>
       </Modal>
+
     </>
   );
 }

@@ -77,6 +77,8 @@ export const config = {
     '/pages/:path*',
     '/roles',
     '/roles/:path*',
+    '/sub-admins',
+    '/sub-admins/:path*',
     '/settings',
     '/settings/:path*',
   ],

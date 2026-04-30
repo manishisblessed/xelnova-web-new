@@ -32,9 +32,10 @@ export class RbacGuard implements CanActivate {
     const request = context.switchToHttp().getRequest();
     const user = request.user;
 
-    // Must be authenticated
+    // If user isn't populated yet (global guard runs before controller-level
+    // JwtAuthGuard), skip RBAC and let the auth guard handle rejection.
     if (!user || !user.id) {
-      throw new ForbiddenException('Unauthorized: No user context');
+      return true;
     }
 
     // Super admin (no assigned role) always has access

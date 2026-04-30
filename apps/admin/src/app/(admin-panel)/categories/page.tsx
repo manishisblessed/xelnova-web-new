@@ -9,6 +9,7 @@ import { Pencil, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Column } from '@/components/dashboard/data-table';
 import { apiCreate, apiUpdate, apiDelete, apiGet } from '@/lib/api';
+import { CategorySelector } from '@/components/category-selector';
 
 export interface Category {
   id: string;
@@ -37,10 +38,31 @@ function flattenCategoryTree(nodes: Category[]): Category[] {
 
 function normalizeCategories(rows: Category[]): CategoryRow[] {
   const flat = flattenCategoryTree(rows);
+  
+  // Build a map to get the full parent path for each category
+  const getParentPath = (categoryId: string, nameById: Map<string, string>, parentById: Map<string, string>): string => {
+    const path: string[] = [];
+    let currentId: string | undefined = categoryId;
+    
+    while (currentId) {
+      const parentId = parentById.get(currentId);
+      if (!parentId) break;
+      const parentName = nameById.get(parentId);
+      if (parentName) {
+        path.unshift(parentName);
+      }
+      currentId = parentId;
+    }
+    
+    return path.length > 0 ? path.join(' › ') : '—';
+  };
+  
   const nameById = new Map(flat.map((c) => [c.id, c.name]));
+  const parentById = new Map(flat.map((c) => [c.id, c.parentId]).filter(([, p]) => p !== null) as [string, string][]);
+  
   return flat.map((c) => ({
     ...c,
-    parentDisplay: c.parentId ? nameById.get(c.parentId) ?? '—' : '—',
+    parentDisplay: c.parentId ? getParentPath(c.id, nameById, parentById) : '—',
   }));
 }
 
@@ -156,9 +178,19 @@ export default function CategoriesPage() {
   };
 
   const parentOptions = useMemo(() => {
-    const flat = flattenCategoryTree(categoryTree);
     const exclude = editing ? descendantIdSet(categoryTree, editing.id) : new Set<string>();
-    return flat.filter((c) => !exclude.has(c.id));
+    
+    // Filter out the editing category and its descendants from the tree
+    const filterTree = (nodes: Category[]): Category[] => {
+      return nodes
+        .filter((c) => !exclude.has(c.id))
+        .map((c) => ({
+          ...c,
+          children: c.children ? filterTree(c.children) : undefined,
+        }));
+    };
+    
+    return filterTree(categoryTree);
   }, [categoryTree, editing]);
 
   const columns: Column<CategoryRow>[] = [
@@ -220,6 +252,19 @@ export default function CategoriesPage() {
         onSubmit={handleSave}
         loading={saving}
       >
+        {!editing && (
+          <div className="mb-4 rounded-lg bg-primary-50 border border-primary-200 p-3">
+            <h4 className="text-sm font-semibold text-primary-900 mb-1">
+              Creating Hierarchical Categories
+            </h4>
+            <p className="text-xs text-primary-700 leading-relaxed">
+              <strong>Root Category:</strong> Leave parent empty (e.g., &quot;Electronics&quot;)<br />
+              <strong>Subcategory:</strong> Select a parent (e.g., &quot;Mobile Phones&quot; under &quot;Electronics&quot;)<br />
+              <strong>Sub-subcategory:</strong> Select a subcategory as parent (e.g., &quot;Accessories&quot; under &quot;Mobile Phones&quot;)<br />
+              <span className="text-primary-600 mt-1 inline-block">Example: Electronics › Mobile Phones › Accessories</span>
+            </p>
+          </div>
+        )}
         <FormField label="Name">
           <FormInput
             value={form.name}
@@ -244,18 +289,17 @@ export default function CategoriesPage() {
             placeholder="https://..."
           />
         </FormField>
-        <FormField label="Parent">
-          <FormSelect
+        <FormField label="Parent Category">
+          <CategorySelector
+            categories={parentOptions}
             value={form.parentId}
-            onChange={(e) => setForm((f) => ({ ...f, parentId: e.target.value }))}
-          >
-            <option value="">None (root)</option>
-            {parentOptions.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </FormSelect>
+            onChange={(id) => setForm((f) => ({ ...f, parentId: id }))}
+            placeholder="None (root category)"
+            allowParentSelection
+          />
+          <p className="mt-1.5 text-xs text-text-muted">
+            Leave empty to create a root category, or select a parent to create a subcategory.
+          </p>
         </FormField>
       </ActionModal>
       <ConfirmDialog

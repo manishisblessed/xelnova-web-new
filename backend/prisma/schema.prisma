@@ -155,6 +155,7 @@ model User {
   aadhaarVerifiedAt   DateTime?
   aadhaarVerifiedData Json?
 
+  mustChangePassword   Boolean   @default(false)
   passwordResetToken   String?   @unique
   passwordResetExpires DateTime?
 

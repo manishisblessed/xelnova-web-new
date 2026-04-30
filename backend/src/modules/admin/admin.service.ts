@@ -29,6 +29,7 @@ import {
   type ProductAttributePresetSection,
 } from './default-product-attribute-presets';
 import { ShippingService } from '../shipping/shipping.service';
+import { EmailService } from '../email/email.service';
 import { DEFAULT_PLATFORM_LOGISTICS } from '../../common/platform-logistics';
 
 @Injectable()
@@ -41,6 +42,7 @@ export class AdminService {
     private readonly notifications: NotificationService,
     private readonly shipping: ShippingService,
     private readonly permissions: PermissionsService,
+    private readonly emailService: EmailService,
   ) {}
 
   private slugify(text: string): string {
@@ -1408,6 +1410,7 @@ export class AdminService {
         emailVerified: true,
         authProvider: 'EMAIL',
         adminRoleId,
+        mustChangePassword: true,
       },
       select: {
         id: true, name: true, email: true, role: true, isActive: true,
@@ -1433,9 +1436,11 @@ export class AdminService {
         .catch(() => undefined);
     }
 
-    // Return the temp password only when we generated it ourselves so the
-    // creating admin can hand it off out-of-band. We never echo back a
-    // user-supplied password.
+    const roleName = user.adminRole?.name;
+    this.emailService
+      .sendSubAdminWelcome(email, name, rawPassword, roleName ?? undefined)
+      .catch((err) => this.logger.error(`Failed to send sub-admin welcome email to ${email}:`, err));
+
     return { ...user, tempPassword: dto.password ? null : rawPassword };
   }
 

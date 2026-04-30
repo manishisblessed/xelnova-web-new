@@ -13,6 +13,7 @@ import {
   GoogleTokenDto,
   ForgotPasswordDto,
   ResetPasswordDto,
+  ChangePasswordDto,
 } from './dto/auth.dto';
 import { successResponse } from '../../common/helpers/response.helper';
 import { Auth } from '../../common/decorators/auth.decorator';
@@ -125,6 +126,18 @@ export class AuthController {
   @ApiOperation({ summary: 'Reset password with token' })
   async resetPassword(@Body() dto: ResetPasswordDto) {
     const result = await this.authService.resetPassword(dto.token, dto.newPassword);
+    return successResponse(result, result.message);
+  }
+
+  @Post('change-password')
+  @Auth()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Change password (requires current password)' })
+  async changePassword(
+    @Body() dto: ChangePasswordDto,
+    @CurrentUser('id') userId: string,
+  ) {
+    const result = await this.authService.changePassword(userId, dto.currentPassword, dto.newPassword);
     return successResponse(result, result.message);
   }
 

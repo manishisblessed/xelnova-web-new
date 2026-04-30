@@ -129,6 +129,7 @@ export class AuthService {
       },
       ...tokens,
       hasSellerProfile,
+      mustChangePassword: user.mustChangePassword ?? false,
     };
   }
 
@@ -980,5 +981,33 @@ export class AuthService {
     });
 
     return { message: 'Password has been reset successfully' };
+  }
+
+  async changePassword(userId: string, currentPassword: string, newPassword: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      throw new BadRequestException('User not found');
+    }
+
+    const isPasswordValid = await bcrypt.compare(currentPassword, user.password);
+    if (!isPasswordValid) {
+      throw new BadRequestException('Current password is incorrect');
+    }
+
+    if (currentPassword === newPassword) {
+      throw new BadRequestException('New password must be different from your current password');
+    }
+
+    const hashed = await bcrypt.hash(newPassword, 12);
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        password: hashed,
+        mustChangePassword: false,
+      },
+    });
+
+    return { message: 'Password changed successfully' };
   }
 }

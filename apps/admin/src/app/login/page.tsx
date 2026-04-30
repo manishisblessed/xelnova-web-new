@@ -67,7 +67,12 @@ function LoginFormInner() {
         body: JSON.stringify({ token: data.accessToken, role: 'admin', user: data.user, refreshToken: data.refreshToken }),
       });
       if (!sessionRes.ok) throw new Error('Session failed');
-      router.push(redirectTo);
+
+      if (data.mustChangePassword) {
+        router.push('/change-password');
+      } else {
+        router.push(redirectTo);
+      }
       router.refresh();
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Login failed';

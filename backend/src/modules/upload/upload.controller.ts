@@ -41,17 +41,17 @@ export class UploadController {
     return successResponse(result, 'Video uploaded');
   }
 
-  @Delete(':publicId')
-  @ApiOperation({ summary: 'Delete an image by public ID' })
-  async deleteImage(@Param('publicId') publicId: string) {
-    await this.uploadService.deleteImage(decodeURIComponent(publicId));
-    return successResponse(null, 'Image deleted');
-  }
-
   @Delete('video/:publicId')
   @ApiOperation({ summary: 'Delete a video by public ID' })
   async deleteVideo(@Param('publicId') publicId: string) {
     await this.uploadService.deleteVideo(decodeURIComponent(publicId));
     return successResponse(null, 'Video deleted');
+  }
+
+  @Delete(':publicId')
+  @ApiOperation({ summary: 'Delete an image by public ID' })
+  async deleteImage(@Param('publicId') publicId: string) {
+    await this.uploadService.deleteImage(decodeURIComponent(publicId));
+    return successResponse(null, 'Image deleted');
   }
 }

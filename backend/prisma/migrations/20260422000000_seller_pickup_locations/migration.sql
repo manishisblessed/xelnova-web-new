@@ -45,17 +45,18 @@ ALTER TABLE "seller_pickup_locations"
   FOREIGN KEY ("sellerId") REFERENCES "seller_profiles"("id")
   ON DELETE CASCADE ON UPDATE CASCADE;
 
--- ── 2. Add the FK column on shipments ───────────────────────────────
-ALTER TABLE "shipments"
-  ADD COLUMN IF NOT EXISTS "pickupLocationId" TEXT;
-
-CREATE INDEX IF NOT EXISTS "shipments_pickupLocationId_idx"
-    ON "shipments" ("pickupLocationId");
-
-ALTER TABLE "shipments"
-  ADD CONSTRAINT "shipments_pickupLocationId_fkey"
-  FOREIGN KEY ("pickupLocationId") REFERENCES "seller_pickup_locations"("id")
-  ON DELETE SET NULL ON UPDATE CASCADE;
+-- ── 2. Add the FK column on shipments (only if table exists) ────────
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'shipments') THEN
+    ALTER TABLE "shipments" ADD COLUMN IF NOT EXISTS "pickupLocationId" TEXT;
+    CREATE INDEX IF NOT EXISTS "shipments_pickupLocationId_idx" ON "shipments" ("pickupLocationId");
+    ALTER TABLE "shipments"
+      ADD CONSTRAINT "shipments_pickupLocationId_fkey"
+      FOREIGN KEY ("pickupLocationId") REFERENCES "seller_pickup_locations"("id")
+      ON DELETE SET NULL ON UPDATE CASCADE;
+  END IF;
+END $$;
 
 -- ── 3. Backfill: one default location per seller ────────────────────
 --
@@ -132,15 +133,15 @@ WHERE
     );
 
 -- ── 4. Backfill shipments.pickupLocationId for already-shipped orders ─
---
--- Every shipment that pre-dates this migration was booked from the
--- seller's single (now default) pickup location. Pointing them at it
--- preserves the shipment timeline / tracking history filtering UI we
--- expose per location.
-UPDATE "shipments" s
-SET "pickupLocationId" = pl."id"
-FROM "seller_pickup_locations" pl
-WHERE
-    pl."sellerId" = s."sellerId"
-    AND pl."isDefault" = TRUE
-    AND s."pickupLocationId" IS NULL;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'shipments') THEN
+    UPDATE "shipments" s
+    SET "pickupLocationId" = pl."id"
+    FROM "seller_pickup_locations" pl
+    WHERE
+        pl."sellerId" = s."sellerId"
+        AND pl."isDefault" = TRUE
+        AND s."pickupLocationId" IS NULL;
+  END IF;
+END $$;
