@@ -3,7 +3,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Bell, ChevronRight } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
+import { toast } from 'sonner';
 import { useDashboardAuth } from '@/lib/auth-context';
+import { useSellerProfile } from '@/lib/seller-profile-context';
 import { publicApiBase } from '@/lib/public-api-base';
 
 const API_URL = publicApiBase();
@@ -74,12 +76,14 @@ function getNotificationHref(n: Notification): string | null {
 
 export function NotificationBell() {
   const { isAuthenticated } = useDashboardAuth();
+  const { refresh: refreshProfile, isApproved } = useSellerProfile();
   const router = useRouter();
   const pathname = usePathname();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unread, setUnread] = useState(0);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const shownVerifiedToastRef = useRef(false);
 
   const fetchNotifications = useCallback(async () => {
     try {
@@ -92,13 +96,27 @@ export function NotificationBell() {
       }
       const data = await res.json();
       if (data.success) {
-        setNotifications(data.data?.notifications || []);
+        const newNotifications: Notification[] = data.data?.notifications || [];
+        setNotifications(newNotifications);
         setUnread(data.data?.unread || 0);
+
+        // Auto-refresh profile and show toast when SELLER_VERIFIED notification arrives
+        const hasVerifiedNotification = newNotifications.some(
+          (n) => n.type === 'SELLER_VERIFIED' && !n.read
+        );
+        if (hasVerifiedNotification && !isApproved && !shownVerifiedToastRef.current) {
+          shownVerifiedToastRef.current = true;
+          toast.success('Your seller account has been verified!', {
+            description: 'You can now start adding products to your store.',
+            duration: 6000,
+          });
+          refreshProfile();
+        }
       }
     } catch (err) {
       console.warn('[NotificationBell] fetch error:', err);
     }
-  }, []);
+  }, [isApproved, refreshProfile]);
 
   useEffect(() => {
     if (!isAuthenticated) return;

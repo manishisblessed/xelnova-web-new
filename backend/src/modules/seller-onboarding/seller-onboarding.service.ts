@@ -1076,6 +1076,7 @@ export class SellerOnboardingService {
   async verifySignature(sellerId: string, adminId: string, decision: 'VERIFIED' | 'REJECTED', comment?: string) {
     const seller = await this.prisma.sellerProfile.findUnique({
       where: { id: sellerId },
+      include: { documents: { where: { type: 'SIGNATURE' } } },
     });
 
     if (!seller) {
@@ -1104,6 +1105,17 @@ export class SellerOnboardingService {
       where: { id: sellerId },
       data: updateData,
     });
+
+    // Also update the SIGNATURE document record's verified status
+    if (seller.documents?.length > 0) {
+      await this.prisma.sellerDocument.updateMany({
+        where: { sellerId, type: 'SIGNATURE' },
+        data: {
+          verified: decision === 'VERIFIED',
+          verifiedAt: decision === 'VERIFIED' ? new Date() : null,
+        },
+      });
+    }
 
     return {
       success: true,

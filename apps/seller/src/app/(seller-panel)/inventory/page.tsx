@@ -3921,7 +3921,7 @@ export default function SellerInventoryPage() {
         onClose={() => !saving && setCreateOpen(false)}
         title="Add product"
         size="lg"
-        className="max-w-3xl max-h-[92vh] overflow-y-auto"
+        className="max-w-5xl w-[95vw] max-h-[92vh] overflow-y-auto"
       >
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-200 bg-emerald-50/70 px-3 py-2 text-xs">
           <div className="flex items-center gap-2 text-emerald-800">
@@ -3965,7 +3965,7 @@ export default function SellerInventoryPage() {
         onClose={() => !saving && !editLoading && setEditProduct(null)}
         title="Edit product"
         size="lg"
-        className="max-w-3xl max-h-[92vh] overflow-y-auto"
+        className="max-w-5xl w-[95vw] max-h-[92vh] overflow-y-auto"
       >
         {editProduct?.status === 'ACTIVE' && (
           <div className="mb-4 rounded-lg border border-warning-200 bg-warning-50 p-3 text-xs text-warning-800">

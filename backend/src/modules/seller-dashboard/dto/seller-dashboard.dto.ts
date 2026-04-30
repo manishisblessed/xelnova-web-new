@@ -12,6 +12,8 @@ export class CreateProductDto {
   @ApiProperty() @IsString() @IsNotEmpty() brand: string;
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Type(() => Number) stock?: number;
   @ApiPropertyOptional() @IsOptional() @IsArray() @IsString({ each: true }) images?: string[];
+  @ApiPropertyOptional({ description: 'Product video URL' }) @IsOptional() @IsString() video?: string;
+  @ApiPropertyOptional({ description: 'Cloudinary public ID for video deletion' }) @IsOptional() @IsString() videoPublicId?: string;
   @ApiPropertyOptional() @IsOptional() @IsArray() @IsString({ each: true }) highlights?: string[];
   @ApiPropertyOptional() @IsOptional() @IsArray() @IsString({ each: true }) tags?: string[];
   @ApiPropertyOptional() @IsOptional() @Allow() variants?: any;
@@ -60,6 +62,8 @@ export class UpdateProductDto {
   @ApiPropertyOptional() @IsOptional() @IsString() @IsNotEmpty() brand?: string;
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Type(() => Number) stock?: number;
   @ApiPropertyOptional() @IsOptional() @IsArray() @IsString({ each: true }) images?: string[];
+  @ApiPropertyOptional({ description: 'Product video URL' }) @IsOptional() @IsString() video?: string;
+  @ApiPropertyOptional({ description: 'Cloudinary public ID for video deletion' }) @IsOptional() @IsString() videoPublicId?: string;
   @ApiPropertyOptional() @IsOptional() @IsArray() @IsString({ each: true }) highlights?: string[];
   @ApiPropertyOptional() @IsOptional() @IsArray() @IsString({ each: true }) tags?: string[];
   @ApiPropertyOptional() @IsOptional() @Allow() variants?: any;
