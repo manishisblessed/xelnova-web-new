@@ -699,26 +699,51 @@ export class AuthService {
       }
     }
 
-    const baseSlug = name
+    // Also check by phone — a profile may exist from a previous phone-only
+    // signup that didn't have a userId linked.
+    if (phone) {
+      const phoneVariants = this.getPhoneVariants(phone);
+      const byPhone = await this.prisma.sellerProfile.findFirst({
+        where: { phone: { in: phoneVariants }, userId: null },
+      });
+      if (byPhone) {
+        await this.prisma.sellerProfile.update({
+          where: { id: byPhone.id },
+          data: { userId },
+        });
+        return;
+      }
+    }
+
+    const safeName = (name || '').trim();
+    const baseSlug = safeName
       .toLowerCase()
-      .trim()
       .replace(/[^\w\s-]/g, '')
       .replace(/\s+/g, '-')
       .substring(0, 40);
     const uniqueSuffix = Math.random().toString(36).substring(2, 8);
     const slug = `${baseSlug || 'seller'}-${uniqueSuffix}`;
 
-    await this.prisma.sellerProfile.create({
-      data: {
-        userId,
-        email: email ?? null,
-        phone,
-        storeName: `${name || 'My'}'s Store`,
-        slug,
-        onboardingStatus: 'EMAIL_VERIFIED',
-        onboardingStep: 2,
-      },
-    });
+    try {
+      await this.prisma.sellerProfile.create({
+        data: {
+          userId,
+          email: email || null,
+          phone: phone || null,
+          storeName: `${safeName || 'My'}'s Store`,
+          slug,
+          onboardingStatus: 'EMAIL_VERIFIED',
+          onboardingStep: 2,
+        },
+      });
+    } catch (err: any) {
+      // P2002 = unique constraint (race condition / duplicate), P2011 = null constraint
+      if (err?.code === 'P2002') {
+        const recheck = await this.prisma.sellerProfile.findUnique({ where: { userId } });
+        if (recheck) return;
+      }
+      console.warn(`ensureSellerProfileForSellerUser failed for ${userId}: ${err?.message}`);
+    }
   }
 
   /**
