@@ -57,6 +57,7 @@ export function AdminListPage<T extends object>({
   const searchParams = useSearchParams();
   const initialSearch = searchParams?.get('search') ?? '';
   const initialFilter = searchParams?.get('status') ?? '';
+  const hasPendingChangesFilter = searchParams?.get('hasPendingChanges') === 'true';
   const [data, setData] = useState<T[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState(initialSearch);
@@ -96,6 +97,10 @@ export function AdminListPage<T extends object>({
   }
   if (filter && filterKey) {
     filtered = filtered.filter(row => String((row as Record<string, unknown>)[filterKey as string]) === filter);
+  }
+  // Filter by hasPendingChanges if specified in URL
+  if (hasPendingChangesFilter) {
+    filtered = filtered.filter(row => (row as Record<string, unknown>).hasPendingChanges === true);
   }
 
   const allColumns = renderActions
@@ -140,6 +145,12 @@ export function AdminListPage<T extends object>({
               <option value="">All</option>
               {filterOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
             </select>
+          )}
+          {hasPendingChangesFilter && (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-warning-100 text-warning-800 border border-warning-200">
+              <span className="w-2 h-2 rounded-full bg-warning-500 animate-pulse" />
+              Showing products with pending changes
+            </span>
           )}
           <button
             onClick={() => { setLoading(true); fetchData(); }}

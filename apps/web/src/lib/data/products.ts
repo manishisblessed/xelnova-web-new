@@ -83,4 +83,6 @@ export interface Product {
   returnWindow?: number;
   /** GST % from API; consumer prices include this (see `priceInclusiveOfGst`). */
   gstRate?: number | null;
+  /** Product video URL */
+  video?: string;
 }

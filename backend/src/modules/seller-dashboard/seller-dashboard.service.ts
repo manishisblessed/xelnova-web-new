@@ -364,6 +364,50 @@ export class SellerDashboardService {
     }
 
     /**
+     * Check if variant changes are inventory-only (stock, price, available).
+     * These should be allowed without re-approval.
+     */
+    const isVariantInventoryOnlyChange = (oldVariants: unknown, newVariants: unknown): boolean => {
+      if (!Array.isArray(oldVariants) || !Array.isArray(newVariants)) return false;
+      if (oldVariants.length !== newVariants.length) return false;
+
+      for (let gi = 0; gi < oldVariants.length; gi++) {
+        const oldGroup = oldVariants[gi] as Record<string, unknown>;
+        const newGroup = newVariants[gi] as Record<string, unknown>;
+
+        // Check if group structure changed (type, label)
+        if (oldGroup.type !== newGroup.type || oldGroup.label !== newGroup.label) return false;
+
+        const oldOpts = (oldGroup.options ?? []) as Record<string, unknown>[];
+        const newOpts = (newGroup.options ?? []) as Record<string, unknown>[];
+
+        if (oldOpts.length !== newOpts.length) return false;
+
+        for (let oi = 0; oi < oldOpts.length; oi++) {
+          const oldOpt = oldOpts[oi];
+          const newOpt = newOpts[oi];
+
+          // Only allow changes to: stock, price, compareAtPrice, available
+          const inventoryFields = ['stock', 'price', 'compareAtPrice', 'available'];
+          const structuralFields = ['label', 'value', 'sku', 'images', 'video', 'videoPublicId'];
+
+          for (const field of structuralFields) {
+            if (JSON.stringify(oldOpt[field]) !== JSON.stringify(newOpt[field])) {
+              return false; // Structural change detected
+            }
+          }
+        }
+      }
+      return true; // Only inventory changes
+    };
+
+    // Check if this is a variant-only update with just inventory changes
+    const isOnlyVariantInventoryUpdate =
+      dto.variants !== undefined &&
+      Object.keys(dto).filter((k) => k !== 'variants' && k !== 'stock').length === 0 &&
+      isVariantInventoryOnlyChange(product.variants, dto.variants);
+
+    /**
      * Re-approval guard.
      *
      * If the seller edits any of these *catalog content* fields on a product
@@ -414,7 +458,9 @@ export class SellerDashboardService {
       product.status === ProductStatus.ACTIVE &&
       // Don't bounce back into review if seller is also explicitly
       // putting the listing on hold (their own pause action).
-      dto.status !== ProductStatus.ON_HOLD;
+      dto.status !== ProductStatus.ON_HOLD &&
+      // Variant inventory-only updates (stock, price, available) don't need re-approval
+      !isOnlyVariantInventoryUpdate;
 
     const data: any = { ...dto };
     

@@ -42,6 +42,8 @@ function getNotificationHref(n: Notification): string | null {
   const ticketId = typeof data?.ticketId === 'string' ? data.ticketId : null;
   const sellerId = typeof data?.sellerId === 'string' ? data.sellerId : null;
   const productSku = typeof data?.sku === 'string' ? data.sku : null;
+  const productId = typeof data?.productId === 'string' ? data.productId : null;
+  const isReapproval = data?.reapproval === true;
 
   switch (n.type) {
     case 'ADMIN_NEW_ORDER':
@@ -65,8 +67,13 @@ function getNotificationHref(n: Notification): string | null {
     case 'ADMIN_TICKET_CUSTOMER_REPLY':
       return ticketId ? `/tickets?ticketId=${encodeURIComponent(ticketId)}` : '/tickets';
     case 'ADMIN_PRODUCT_SUBMITTED':
-      // The admin Products list reads `?status=` and `?search=` from the
-      // URL, so prefilling SKU lands the reviewer on the exact pending row.
+      // For re-approval (edited products), link without status filter since product stays ACTIVE
+      // For new products, filter by PENDING status
+      if (isReapproval) {
+        return productSku
+          ? `/products?hasPendingChanges=true&search=${encodeURIComponent(productSku)}`
+          : '/products?hasPendingChanges=true';
+      }
       return productSku
         ? `/products?status=PENDING&search=${encodeURIComponent(productSku)}`
         : '/products?status=PENDING';

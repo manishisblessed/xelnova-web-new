@@ -171,6 +171,9 @@ export interface SellerStore extends SellerProfile {
   categories: SellerStoreCategory[];
   featuredProducts: Product[];
   productCount: number;
+  followers?: number;
+  memberSince?: string;
+  responseTime?: string;
 }
 
 export interface SellerStoreSettings {

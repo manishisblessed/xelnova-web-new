@@ -9,6 +9,7 @@ import {
   Star, Heart, Share2, ShieldCheck, Truck, RotateCcw, ChevronRight,
   Minus, Plus, ThumbsUp, Check, ShoppingCart, Package, Loader2, Ruler, X,
   RefreshCw, Lock, ChevronDown, ChevronUp, AlertTriangle, FileText, Store,
+  Play,
 } from "lucide-react";
 import { cn } from "@xelnova/utils";
 import { formatCurrency, formatDate, priceInclusiveOfGst } from "@xelnova/utils";
@@ -36,6 +37,7 @@ export default function ProductDetail() {
   const [justAdded, setJustAdded] = useState(false);
   const [sizeChartModal, setSizeChartModal] = useState<{ label: string; rows: SizeChartRow[] } | null>(null);
   const [variantGallery, setVariantGallery] = useState<string[] | null>(null);
+  const [variantVideo, setVariantVideo] = useState<string | null>(null);
   const [hoverPreviewImage, setHoverPreviewImage] = useState<string | null>(null);
   const [shareCopied, setShareCopied] = useState(false);
   const [pendingQty, setPendingQty] = useState(1);
@@ -52,6 +54,7 @@ export default function ProductDetail() {
       if (first) next[v.type] = first.value;
     }
     setSelectedVariants(next);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- re-run only when the product itself changes, not on every variant reference shift
   }, [product?.id]);
 
   const setItemQuantity = useCartStore((s) => s.setItemQuantity);
@@ -156,13 +159,15 @@ export default function ProductDetail() {
       : 0;
   const effectiveInStock = effectiveStock > 0;
 
-  const handleVariantSelect = (type: string, value: string, opt?: { images?: string[] }) => {
+  const handleVariantSelect = (type: string, value: string, opt?: { images?: string[]; video?: string }) => {
     setSelectedVariants((prev) => ({ ...prev, [type]: value }));
     setHoverPreviewImage(null);
     if (opt?.images && opt.images.length > 0) {
       setVariantGallery(opt.images);
       setSelectedImage(0);
     }
+    // Track variant video
+    setVariantVideo(opt?.video || null);
   };
 
   const handleVariantHover = (opt: { images?: string[] }) => {
@@ -293,6 +298,17 @@ export default function ProductDetail() {
   const hasImages = activeGallery.length > 0;
   const deliveryDate = new Date(Date.now() + 3 * 86400000).toLocaleDateString("en-IN", { weekday: "long", month: "short", day: "numeric" });
 
+  // Media gallery: images first, then video (if exists)
+  // Use variant video if available, otherwise fall back to product video
+  type MediaItem = { type: 'image'; url: string } | { type: 'video'; url: string };
+  const activeVideo = variantVideo || product.video;
+  const mediaGallery: MediaItem[] = [
+    ...activeGallery.map((url): MediaItem => ({ type: 'image', url })),
+    ...(activeVideo ? [{ type: 'video' as const, url: activeVideo }] : []),
+  ];
+  const hasMedia = mediaGallery.length > 0;
+  const selectedMedia = mediaGallery[selectedImage] ?? mediaGallery[0];
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Breadcrumb */}
@@ -320,15 +336,18 @@ export default function ProductDetail() {
           {/* ─── Image Gallery ─── */}
           <div className="lg:col-span-5 xl:col-span-5">
             <div className="sticky top-28">
-              {/* Main image */}
+              {/* Main image/video */}
               <motion.div
-                className="relative aspect-square overflow-hidden rounded-2xl border border-border bg-white cursor-crosshair shadow-sm"
-                onMouseEnter={() => setIsZooming(true)}
+                className={cn(
+                  "relative aspect-square overflow-hidden rounded-2xl border border-border bg-white shadow-sm",
+                  selectedMedia?.type !== 'video' && "cursor-crosshair"
+                )}
+                onMouseEnter={() => selectedMedia?.type !== 'video' && setIsZooming(true)}
                 onMouseLeave={() => setIsZooming(false)}
-                onMouseMove={handleMouseMove}
+                onMouseMove={selectedMedia?.type !== 'video' ? handleMouseMove : undefined}
               >
-                {/* Hover preview layer — instant swap, no animation */}
-                {hoverPreviewImage && (
+                {/* Hover preview layer — instant swap, no animation (only for images) */}
+                {hoverPreviewImage && selectedMedia?.type !== 'video' && (
                   <div className="absolute inset-0 z-10">
                     <Image
                       src={hoverPreviewImage}
@@ -350,9 +369,18 @@ export default function ProductDetail() {
                     transition={{ duration: 0.2 }}
                     className="relative h-full w-full"
                   >
-                    {hasImages ? (
+                    {selectedMedia?.type === 'video' ? (
+                      <video
+                        src={selectedMedia.url}
+                        controls
+                        autoPlay
+                        loop
+                        playsInline
+                        className="absolute inset-0 w-full h-full object-contain bg-black"
+                      />
+                    ) : hasMedia ? (
                       <Image
-                        src={activeGallery[selectedImage] ?? activeGallery[0]}
+                        src={selectedMedia?.url ?? activeGallery[0]}
                         alt={product.name}
                         fill
                         priority
@@ -368,21 +396,21 @@ export default function ProductDetail() {
                     )}
                   </motion.div>
                 </AnimatePresence>
-                {product.discount > 0 && (
+                {product.discount > 0 && selectedMedia?.type !== 'video' && (
                   <span className="absolute left-3 top-3 rounded-lg bg-danger-600 px-2.5 py-1 text-xs font-bold text-white shadow-sm">
                     -{product.discount}%
                   </span>
                 )}
               </motion.div>
 
-              {/* Thumbnails */}
-              {activeGallery.length > 1 && (
+              {/* Thumbnails (images + video) */}
+              {mediaGallery.length > 1 && (
                 <div className="flex gap-2.5 mt-3 overflow-x-auto pb-1 scrollbar-hide">
-                  {activeGallery.map((img, i) => (
+                  {mediaGallery.map((media, i) => (
                     <button
-                      key={`${variantGallery ? 'v' : 'p'}-${i}`}
+                      key={`${variantGallery ? 'v' : 'p'}-${media.type}-${i}`}
                       onClick={() => setSelectedImage(i)}
-                      onMouseEnter={() => setSelectedImage(i)}
+                      onMouseEnter={() => media.type === 'image' && setSelectedImage(i)}
                       className={cn(
                         "relative h-16 w-16 shrink-0 overflow-hidden rounded-xl border-2 transition-all",
                         selectedImage === i
@@ -390,7 +418,23 @@ export default function ProductDetail() {
                           : "border-border hover:border-gray-300"
                       )}
                     >
-                      <Image src={img} alt={`View ${i + 1}`} fill sizes="64px" className="object-cover" />
+                      {media.type === 'video' ? (
+                        <>
+                          <video
+                            src={media.url}
+                            muted
+                            playsInline
+                            className="absolute inset-0 w-full h-full object-cover"
+                          />
+                          <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+                            <div className="w-7 h-7 rounded-full bg-white/90 flex items-center justify-center shadow-sm">
+                              <Play size={14} className="text-primary-600 ml-0.5" fill="currentColor" />
+                            </div>
+                          </div>
+                        </>
+                      ) : (
+                        <Image src={media.url} alt={`View ${i + 1}`} fill sizes="64px" className="object-cover" />
+                      )}
                     </button>
                   ))}
                 </div>

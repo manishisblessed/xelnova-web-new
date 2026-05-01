@@ -8,6 +8,7 @@ import { Zap, ShoppingCart, Check } from 'lucide-react';
 import type { Product } from '@/lib/data/products';
 import { priceInclusiveOfGst, calculateDiscount } from '@xelnova/utils';
 import { useCartStore } from '@/lib/store/cart-store';
+import { summarizeVariants } from './product-card';
 
 function useCountdown(endAt: string) {
   const [timeLeft, setTimeLeft] = useState({ h: 0, m: 0, s: 0, expired: false });
@@ -42,6 +43,7 @@ export const FlashDealCard = memo(function FlashDealCard({ product }: { product:
   const [imgLoaded, setImgLoaded] = useState(false);
   const [added, setAdded] = useState(false);
   const addItem = useCartStore((s) => s.addItem);
+  const variantSummary = summarizeVariants(product.variants);
 
   const handleAddToCart = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -118,6 +120,14 @@ export const FlashDealCard = memo(function FlashDealCard({ product }: { product:
             <span className="absolute bottom-2 left-2 rounded-md bg-primary-600 px-2 py-0.5 text-xs font-bold text-white shadow-sm">
               {discount}% OFF
             </span>
+          )}
+          {/* Variant indicator */}
+          {variantSummary && variantSummary.count >= 2 && (
+            <div className="absolute top-2 right-2 z-10 flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-white/95 backdrop-blur-sm border border-gray-200 shadow-sm">
+              <span className="text-[9px] font-bold text-gray-700">
+                {variantSummary.count} {variantSummary.label}
+              </span>
+            </div>
           )}
         </div>
 

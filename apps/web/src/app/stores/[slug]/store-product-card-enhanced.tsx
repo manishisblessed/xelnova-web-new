@@ -169,6 +169,25 @@ export const StoreProductCardEnhanced = memo(function StoreProductCardEnhanced({
               )}
             </div>
 
+            {/* Variant indicator badge (always visible) */}
+            {hasVariants && variantSummary.length > 0 && !showVariants && (
+              <div className="absolute bottom-3 left-3 z-10 flex items-center gap-1.5 px-2 py-1 rounded-lg bg-white/95 backdrop-blur-sm border border-gray-200 shadow-sm">
+                <div className="flex -space-x-1.5">
+                  {variantImages.slice(0, 3).map((img, idx) => (
+                    <div
+                      key={idx}
+                      className="relative w-5 h-5 rounded-full border-2 border-white overflow-hidden shadow-sm"
+                    >
+                      <Image src={img} alt="" fill sizes="20px" className="object-cover" />
+                    </div>
+                  ))}
+                </div>
+                <span className="text-[10px] font-bold text-gray-700">
+                  {variantSummary[0]?.count} {variantSummary[0]?.label}
+                </span>
+              </div>
+            )}
+
             {/* Wishlist Button */}
             <motion.button
               whileTap={{ scale: 0.85 }}

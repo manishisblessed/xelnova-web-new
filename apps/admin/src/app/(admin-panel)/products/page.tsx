@@ -453,6 +453,266 @@ function StatusIcon({ status }: { status: ProductStatus }) {
   }
 }
 
+// Field display names for better readability
+const FIELD_LABELS: Record<string, string> = {
+  name: 'Product Name',
+  shortDescription: 'Short Description',
+  description: 'Description',
+  productDescription: 'Product Description',
+  price: 'Price',
+  compareAtPrice: 'Compare At Price (MRP)',
+  images: 'Images',
+  video: 'Video',
+  videoPublicId: 'Video Public ID',
+  variants: 'Variants',
+  categoryId: 'Category',
+  brand: 'Brand',
+  brandAuthorizationCertificate: 'Brand Auth Certificate',
+  highlights: 'Highlights',
+  tags: 'Tags',
+  featuresAndSpecs: 'Features & Specifications',
+  materialsAndCare: 'Materials & Care',
+  itemDetails: 'Item Details',
+  additionalDetails: 'Additional Details',
+  safetyInfo: 'Safety Information',
+  regulatoryInfo: 'Regulatory Information',
+  warrantyInfo: 'Warranty Information',
+  weight: 'Weight (kg)',
+  dimensions: 'Dimensions',
+  hsnCode: 'HSN Code',
+  gstRate: 'GST Rate (%)',
+  metaTitle: 'Meta Title',
+  metaDescription: 'Meta Description',
+  sku: 'SKU',
+  brandAuthAdditionalDocumentUrls: 'Additional Brand Documents',
+  stock: 'Stock',
+};
+
+interface VariantOption {
+  label?: string;
+  value?: string;
+  sku?: string;
+  price?: number;
+  compareAtPrice?: number;
+  stock?: number;
+  images?: string[];
+  available?: boolean;
+}
+
+interface VariantGroup {
+  type?: string;
+  label?: string;
+  options?: VariantOption[];
+}
+
+function PendingChangesDisplay({
+  changes,
+  currentProduct,
+}: {
+  changes: Record<string, unknown>;
+  currentProduct: Record<string, unknown>;
+}) {
+  const renderSimpleChange = (key: string, oldVal: unknown, newVal: unknown) => {
+    const formatValue = (v: unknown): string => {
+      if (v === null || v === undefined) return 'Not set';
+      if (typeof v === 'number') return key === 'price' || key === 'compareAtPrice' ? `₹${v}` : String(v);
+      if (Array.isArray(v)) return v.length === 0 ? 'None' : `${v.length} items`;
+      return String(v);
+    };
+
+    return (
+      <div className="flex items-center gap-3 text-sm">
+        <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded line-through">
+          {formatValue(oldVal)}
+        </span>
+        <span className="text-gray-400">→</span>
+        <span className="bg-green-100 text-green-700 px-2 py-0.5 rounded font-medium">
+          {formatValue(newVal)}
+        </span>
+      </div>
+    );
+  };
+
+  const renderVariantChanges = (oldVariants: VariantGroup[] | null, newVariants: VariantGroup[]) => {
+    const changes: { variantName: string; sku: string; field: string; oldVal: unknown; newVal: unknown }[] = [];
+
+    // Build a map of old variants by SKU for comparison
+    const oldMap = new Map<string, VariantOption>();
+    (oldVariants ?? []).forEach((group) => {
+      (group.options ?? []).forEach((opt) => {
+        const key = opt.sku || opt.label || opt.value || '';
+        if (key) oldMap.set(key, opt);
+      });
+    });
+
+    // Compare with new variants
+    newVariants.forEach((group) => {
+      (group.options ?? []).forEach((opt) => {
+        const key = opt.sku || opt.label || opt.value || '';
+        const variantName = opt.label || opt.value || key;
+        const oldOpt = oldMap.get(key);
+
+        if (!oldOpt) {
+          changes.push({ variantName, sku: key, field: 'New Variant', oldVal: null, newVal: 'Added' });
+        } else {
+          // Check each field
+          if (oldOpt.price !== opt.price) {
+            changes.push({ variantName, sku: key, field: 'Price', oldVal: oldOpt.price, newVal: opt.price });
+          }
+          if (oldOpt.stock !== opt.stock) {
+            changes.push({ variantName, sku: key, field: 'Stock', oldVal: oldOpt.stock, newVal: opt.stock });
+          }
+          if (oldOpt.compareAtPrice !== opt.compareAtPrice) {
+            changes.push({ variantName, sku: key, field: 'MRP', oldVal: oldOpt.compareAtPrice, newVal: opt.compareAtPrice });
+          }
+          if (oldOpt.available !== opt.available) {
+            changes.push({ variantName, sku: key, field: 'Status', oldVal: oldOpt.available ? 'Active' : 'Inactive', newVal: opt.available ? 'Active' : 'Inactive' });
+          }
+        }
+      });
+    });
+
+    if (changes.length === 0) {
+      return <p className="text-xs text-gray-500 italic">No specific changes detected in variants</p>;
+    }
+
+    // Group changes by variant
+    const byVariant = new Map<string, typeof changes>();
+    changes.forEach((c) => {
+      const key = c.variantName;
+      if (!byVariant.has(key)) byVariant.set(key, []);
+      byVariant.get(key)!.push(c);
+    });
+
+    return (
+      <div className="space-y-3">
+        {Array.from(byVariant.entries()).map(([variantName, variantChanges]) => (
+          <div key={variantName} className="bg-gray-50 rounded-lg p-3 border border-gray-200">
+            <p className="text-sm font-semibold text-gray-800 mb-2 flex items-center gap-2">
+              <span className="bg-primary-100 text-primary-700 px-2 py-0.5 rounded text-xs">Variant</span>
+              {variantName}
+              {variantChanges[0]?.sku && variantChanges[0].sku !== variantName && (
+                <code className="text-xs text-gray-500 font-normal">({variantChanges[0].sku})</code>
+              )}
+            </p>
+            <div className="space-y-1.5">
+              {variantChanges.map((c, i) => (
+                <div key={i} className="flex items-center gap-2 text-xs">
+                  <span className="text-gray-600 min-w-[60px]">{c.field}:</span>
+                  {c.oldVal !== null ? (
+                    <>
+                      <span className="bg-red-100 text-red-700 px-1.5 py-0.5 rounded line-through">
+                        {c.field === 'Price' || c.field === 'MRP' ? `₹${c.oldVal}` : String(c.oldVal ?? 'None')}
+                      </span>
+                      <span className="text-gray-400">→</span>
+                    </>
+                  ) : null}
+                  <span className="bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-medium">
+                    {c.field === 'Price' || c.field === 'MRP' ? `₹${c.newVal}` : String(c.newVal ?? 'None')}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  const renderArrayChange = (key: string, oldArr: unknown[], newArr: unknown[]) => {
+    if (key === 'images') {
+      const added = newArr.filter((img) => !oldArr.includes(img));
+      const removed = oldArr.filter((img) => !newArr.includes(img));
+      return (
+        <div className="space-y-2 text-xs">
+          {removed.length > 0 && (
+            <div>
+              <span className="text-red-600 font-medium">Removed {removed.length} image(s)</span>
+            </div>
+          )}
+          {added.length > 0 && (
+            <div>
+              <span className="text-green-600 font-medium">Added {added.length} image(s)</span>
+            </div>
+          )}
+          <div className="text-gray-500">
+            Total: {oldArr.length} → {newArr.length}
+          </div>
+        </div>
+      );
+    }
+    return renderSimpleChange(key, oldArr, newArr);
+  };
+
+  const renderObjectChange = (key: string, oldObj: Record<string, unknown> | null, newObj: Record<string, unknown>) => {
+    const changes: { field: string; oldVal: unknown; newVal: unknown }[] = [];
+    const allKeys = new Set([...Object.keys(oldObj ?? {}), ...Object.keys(newObj)]);
+
+    allKeys.forEach((k) => {
+      const oldVal = oldObj?.[k];
+      const newVal = newObj[k];
+      if (JSON.stringify(oldVal) !== JSON.stringify(newVal)) {
+        changes.push({ field: k, oldVal, newVal });
+      }
+    });
+
+    if (changes.length === 0) {
+      return <p className="text-xs text-gray-500 italic">No changes detected</p>;
+    }
+
+    return (
+      <div className="space-y-1.5 text-xs">
+        {changes.map((c, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <span className="text-gray-600 min-w-[100px] capitalize">{c.field.replace(/([A-Z])/g, ' $1')}:</span>
+            {c.oldVal !== undefined && (
+              <>
+                <span className="bg-red-100 text-red-700 px-1.5 py-0.5 rounded line-through max-w-[150px] truncate">
+                  {String(c.oldVal ?? 'None')}
+                </span>
+                <span className="text-gray-400">→</span>
+              </>
+            )}
+            <span className="bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-medium max-w-[150px] truncate">
+              {String(c.newVal ?? 'None')}
+            </span>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  return (
+    <div className="space-y-4">
+      {Object.entries(changes).map(([key, newValue]) => {
+        const oldValue = currentProduct[key];
+        const label = FIELD_LABELS[key] || key.replace(/([A-Z])/g, ' $1').trim();
+
+        return (
+          <div key={key} className="border-l-4 border-primary-400 pl-3 py-2 bg-primary-50/30 rounded-r-lg">
+            <p className="text-sm font-bold text-gray-800 mb-2 flex items-center gap-2">
+              <span className="bg-primary-600 text-white px-2 py-0.5 rounded text-xs uppercase tracking-wide">
+                Changed
+              </span>
+              {label}
+            </p>
+
+            {key === 'variants' && Array.isArray(newValue) ? (
+              renderVariantChanges(oldValue as VariantGroup[] | null, newValue as VariantGroup[])
+            ) : Array.isArray(newValue) && Array.isArray(oldValue) ? (
+              renderArrayChange(key, oldValue, newValue)
+            ) : typeof newValue === 'object' && newValue !== null && !Array.isArray(newValue) ? (
+              renderObjectChange(key, oldValue as Record<string, unknown> | null, newValue as Record<string, unknown>)
+            ) : (
+              renderSimpleChange(key, oldValue, newValue)
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function ProductsPage() {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [modalOpen, setModalOpen] = useState(false);
@@ -1097,40 +1357,14 @@ export default function ProductsPage() {
                   </div>
                 </div>
 
-                <div className="bg-white rounded-lg border border-warning-200 p-3 space-y-2">
+                <div className="bg-white rounded-lg border border-warning-200 p-3 space-y-3 max-h-[60vh] overflow-y-auto">
                   <p className="text-xs font-semibold text-text-primary uppercase tracking-wide mb-2">
                     Proposed Changes:
                   </p>
-                  {(() => {
-                    const changes = viewing.pendingChangesData as Record<string, unknown>;
-                    return (
-                      <div className="space-y-3 text-xs">
-                        {Object.entries(changes).map(([key, value]) => (
-                          <div key={key} className="border-l-2 border-warning-400 pl-3">
-                            <p className="font-semibold text-text-secondary capitalize">
-                              {key.replace(/([A-Z])/g, ' $1').trim()}:
-                            </p>
-                            <div className="mt-1 space-y-1">
-                              <div className="bg-danger-50 border border-danger-200 rounded px-2 py-1">
-                                <span className="text-[10px] text-danger-700 font-medium">OLD:</span>
-                                <p className="text-text-primary mt-0.5">
-                                  {typeof (viewing as any)[key] === 'object'
-                                    ? JSON.stringify((viewing as any)[key], null, 2)
-                                    : String((viewing as any)[key] ?? 'Not set')}
-                                </p>
-                              </div>
-                              <div className="bg-success-50 border border-success-200 rounded px-2 py-1">
-                                <span className="text-[10px] text-success-700 font-medium">NEW:</span>
-                                <p className="text-text-primary mt-0.5">
-                                  {typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value ?? '')}
-                                </p>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    );
-                  })()}
+                  <PendingChangesDisplay
+                    changes={viewing.pendingChangesData as Record<string, unknown>}
+                    currentProduct={viewing as unknown as Record<string, unknown>}
+                  />
                 </div>
 
                 <div className="flex gap-2 mt-3">

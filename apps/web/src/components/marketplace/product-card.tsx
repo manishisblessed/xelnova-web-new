@@ -163,6 +163,32 @@ export const ProductCard = memo(function ProductCard({ product, index = 0 }: Pro
               )}
             </div>
 
+            {/* Variant indicator on image */}
+            {variantSummary && variantSummary.count >= 2 && (
+              <div className="absolute bottom-3 left-3 z-10 flex items-center gap-1.5 px-2 py-1 rounded-lg bg-white/95 backdrop-blur-sm border border-gray-200 shadow-sm">
+                <div className="flex -space-x-1.5">
+                  {variantImages.slice(0, 3).map((img, idx) => (
+                    <div
+                      key={idx}
+                      className="w-5 h-5 rounded-full border-2 border-white overflow-hidden shadow-sm"
+                    >
+                      <Image src={img} alt="" fill sizes="20px" className="object-cover" />
+                    </div>
+                  ))}
+                  {variantImages.length === 0 && (
+                    <>
+                      <div className="w-5 h-5 rounded-full border-2 border-white bg-primary-100 shadow-sm" />
+                      <div className="w-5 h-5 rounded-full border-2 border-white bg-primary-200 shadow-sm" />
+                      <div className="w-5 h-5 rounded-full border-2 border-white bg-primary-300 shadow-sm" />
+                    </>
+                  )}
+                </div>
+                <span className="text-[10px] font-bold text-gray-700">
+                  {variantSummary.count} {variantSummary.label}
+                </span>
+              </div>
+            )}
+
             {/* Wishlist */}
             <motion.button
               whileTap={{ scale: 0.85 }}
