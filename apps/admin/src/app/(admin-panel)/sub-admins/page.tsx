@@ -183,45 +183,74 @@ export default function SubAdminsPage() {
       key: 'name',
       header: 'Sub-admin',
       render: (s) => (
-        <div className="flex flex-col">
-          <span className="font-medium text-text-primary">{s.name || '—'}</span>
-          <span className="text-xs text-text-muted">{s.email}</span>
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-primary-100 to-primary-200 flex items-center justify-center shrink-0">
+            <span className="text-sm font-bold text-primary-700">
+              {(s.name || s.email || '?').charAt(0).toUpperCase()}
+            </span>
+          </div>
+          <div className="flex flex-col">
+            <span className="font-semibold text-text-primary">{s.name || '—'}</span>
+            <span className="text-xs text-text-muted">{s.email}</span>
+          </div>
         </div>
       ),
     },
     {
       key: 'role',
       header: 'Access',
-      render: (s) =>
-        s.isSuperAdmin ? (
-          <Badge variant="info">Super admin</Badge>
-        ) : s.adminRole ? (
-          <div className="flex flex-col gap-1">
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-medium text-text-primary">{s.adminRole.name}</span>
-              {s.adminRole.level && (
-                <Badge variant={getLevelBadgeColor(s.adminRole.level) as any} className="text-xs">
-                  {s.adminRole.level}
-                </Badge>
-              )}
+      render: (s) => {
+        if (s.isSuperAdmin) {
+          return (
+            <div className="flex flex-col gap-1">
+              <Badge variant="info">Super admin</Badge>
+              <span className="text-[10px] text-text-muted">Full platform access</span>
             </div>
-            {s.adminRole.permissionsData && (
-              <button
-                type="button"
-                onClick={() => setPermissionsPreview({ open: true, adminRole: s.adminRole })}
-                className="text-xs text-primary-600 hover:text-primary-700 flex items-center gap-1 w-fit"
-              >
-                <Info size={12} />
-                View permissions
-              </button>
-            )}
-            {s.adminRole.description && (
-              <span className="text-xs text-text-muted">{s.adminRole.description}</span>
-            )}
-          </div>
-        ) : (
-          <span className="text-text-muted text-sm">No role assigned</span>
-        ),
+          );
+        }
+        if (s.adminRole) {
+          const levelLabels: Record<string, string> = {
+            SUPER_ADMIN: 'Super Admin',
+            MANAGER: 'Manager',
+            EDITOR: 'Editor',
+            VIEWER: 'Viewer',
+          };
+          const permCount = s.adminRole.permissionsData
+            ? Object.values(s.adminRole.permissionsData).reduce(
+                (acc, actions) => acc + Object.values(actions).filter(Boolean).length,
+                0,
+              )
+            : 0;
+          return (
+            <div className="flex flex-col gap-1.5">
+              <div className="flex items-center gap-2">
+                <Badge variant={getLevelBadgeColor(s.adminRole.level) as any}>
+                  {levelLabels[s.adminRole.level || ''] || s.adminRole.level || s.adminRole.name}
+                </Badge>
+                {permCount > 0 && (
+                  <span className="text-[10px] font-medium text-text-muted bg-surface-muted px-1.5 py-0.5 rounded">
+                    {permCount} perms
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium text-text-primary">{s.adminRole.name}</span>
+                {s.adminRole.permissionsData && (
+                  <button
+                    type="button"
+                    onClick={() => setPermissionsPreview({ open: true, adminRole: s.adminRole })}
+                    className="text-[10px] text-primary-600 hover:text-primary-700 hover:underline flex items-center gap-0.5"
+                  >
+                    <Info size={10} />
+                    details
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        }
+        return <span className="text-text-muted text-xs italic">No role assigned</span>;
+      },
     },
     {
       key: 'isActive',
@@ -237,13 +266,19 @@ export default function SubAdminsPage() {
     },
     {
       key: 'lastLoginAt',
-      header: 'Last login',
-      render: (s) => (s.lastLoginAt ? new Date(s.lastLoginAt).toLocaleString() : 'Never'),
+      header: 'Last Login',
+      render: (s) => (
+        <span className="text-sm text-text-muted">
+          {s.lastLoginAt ? new Date(s.lastLoginAt).toLocaleString() : <span className="italic">Never</span>}
+        </span>
+      ),
     },
     {
       key: 'createdAt',
       header: 'Added',
-      render: (s) => new Date(s.createdAt).toLocaleDateString(),
+      render: (s) => (
+        <span className="text-sm text-text-muted">{new Date(s.createdAt).toLocaleDateString()}</span>
+      ),
     },
   ];
 

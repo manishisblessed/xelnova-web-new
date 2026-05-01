@@ -694,6 +694,16 @@ export default function CheckoutPage() {
     };
 
     try {
+      // Persist contact info to user profile so it's pre-filled on future checkouts
+      if (showContactBlock) {
+        const profilePatch: { name?: string; email?: string } = {};
+        if (needsName && contactName.trim()) profilePatch.name = contactName.trim();
+        if (needsEmail && contactEmail.trim()) profilePatch.email = contactEmail.trim();
+        if (Object.keys(profilePatch).length > 0) {
+          await usersApi.updateProfile(profilePatch).catch(() => {});
+        }
+      }
+
       const order = await ordersApi.createOrder({
         items: items.map((item) => ({
           productId: item.productId,

@@ -159,14 +159,34 @@ export default function RolesPage() {
     }
   };
 
+  const getPermissionSummary = (perms: PermissionData): { enabled: number; total: number; sections: string[] } => {
+    let enabled = 0;
+    let total = 0;
+    const sections: string[] = [];
+    Object.entries(perms).forEach(([section, actions]) => {
+      let sectionEnabled = 0;
+      Object.values(actions).forEach((v) => { total++; if (v) { enabled++; sectionEnabled++; } });
+      if (sectionEnabled > 0) sections.push(section);
+    });
+    return { enabled, total, sections };
+  };
+
   const columns: Column<Role>[] = [
     {
       key: 'name',
       header: 'Role',
       render: (r) => (
-        <div className="flex flex-col">
-          <span className="font-medium">{r.name}</span>
-          {r.description && <span className="text-xs text-text-muted">{r.description}</span>}
+        <div className="flex flex-col gap-0.5">
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-text-primary">{r.name}</span>
+            {r.isSystem && (
+              <span className="text-[10px] uppercase font-bold tracking-wider text-text-muted bg-surface-muted px-1.5 py-0.5 rounded">System</span>
+            )}
+            {r.isTemplate && (
+              <span className="text-[10px] uppercase font-bold tracking-wider text-primary-600 bg-primary-50 px-1.5 py-0.5 rounded">Template</span>
+            )}
+          </div>
+          {r.description && <span className="text-xs text-text-muted line-clamp-1">{r.description}</span>}
         </div>
       ),
     },
@@ -180,22 +200,57 @@ export default function RolesPage() {
           EDITOR: 'info',
           VIEWER: 'success',
         };
-        return <Badge variant={colors[r.level] as any}>{r.level}</Badge>;
+        const labels: Record<string, string> = {
+          SUPER_ADMIN: 'Super Admin',
+          MANAGER: 'Manager',
+          EDITOR: 'Editor',
+          VIEWER: 'Viewer',
+        };
+        return <Badge variant={colors[r.level] as any}>{labels[r.level] || r.level}</Badge>;
+      },
+    },
+    {
+      key: 'permissions',
+      header: 'Permissions',
+      render: (r) => {
+        if (!r.permissionsData) return <span className="text-text-muted text-xs">—</span>;
+        const { enabled, total, sections } = getPermissionSummary(r.permissionsData);
+        if (enabled === 0) return <span className="text-text-muted text-xs">No permissions</span>;
+        return (
+          <div className="flex flex-col gap-1">
+            <span className="text-xs font-medium text-text-primary">
+              {enabled}/{total} enabled
+            </span>
+            <div className="flex flex-wrap gap-1 max-w-[200px]">
+              {sections.slice(0, 4).map((s) => (
+                <span key={s} className="text-[10px] bg-primary-50 text-primary-700 px-1.5 py-0.5 rounded capitalize">{s}</span>
+              ))}
+              {sections.length > 4 && (
+                <span className="text-[10px] text-text-muted">+{sections.length - 4} more</span>
+              )}
+            </div>
+          </div>
+        );
       },
     },
     {
       key: 'users',
       header: 'Assigned To',
       render: (r) => (
-        <span className={r.users > 0 ? 'font-medium' : 'text-text-muted'}>
-          {r.users} user{r.users !== 1 ? 's' : ''}
-        </span>
+        <div className="flex items-center gap-1.5">
+          <span className={`text-sm ${r.users > 0 ? 'font-semibold text-text-primary' : 'text-text-muted'}`}>
+            {r.users}
+          </span>
+          <span className="text-xs text-text-muted">user{r.users !== 1 ? 's' : ''}</span>
+        </div>
       ),
     },
     {
       key: 'createdAt',
       header: 'Created',
-      render: (r) => new Date(r.createdAt).toLocaleDateString(),
+      render: (r) => (
+        <span className="text-sm text-text-muted">{new Date(r.createdAt).toLocaleDateString()}</span>
+      ),
     },
   ];
 
