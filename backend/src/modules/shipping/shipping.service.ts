@@ -1554,12 +1554,15 @@ export class ShippingService {
     const seller = await this.getSellerProfile(userId);
     const order = await this.ensureOrderBelongsToSeller(orderId, seller.id);
 
-    // Check if shipment already exists
+    // Check if an active shipment already exists (allow re-shipping if previous was cancelled)
     const existing = await this.prisma.shipment.findUnique({
       where: { orderId },
     });
-    if (existing) {
+    if (existing && existing.shipmentStatus !== ShipmentStatus.CANCELLED) {
       throw new BadRequestException('Shipment already exists for this order');
+    }
+    if (existing && existing.shipmentStatus === ShipmentStatus.CANCELLED) {
+      await this.prisma.shipment.delete({ where: { id: existing.id } });
     }
 
     // Validate order status
@@ -2394,7 +2397,7 @@ export class ShippingService {
     history.push({
       status: 'CANCELLED',
       timestamp: new Date().toISOString(),
-      remark: 'Shipment cancelled',
+      remark: 'Shipment cancelled by seller',
     });
 
     await this.prisma.shipment.update({
@@ -2405,12 +2408,21 @@ export class ShippingService {
       },
     });
 
-    await this.prisma.order.update({
+    // Revert order to PROCESSING so the seller can re-ship with the
+    // correct option. Only revert if the order was SHIPPED — if it's
+    // already in a terminal state (DELIVERED, CANCELLED) leave it.
+    const order = await this.prisma.order.findUnique({
       where: { id: shipment.orderId },
-      data: { status: OrderStatus.CANCELLED },
+      select: { status: true },
     });
+    if (order && order.status === OrderStatus.SHIPPED) {
+      await this.prisma.order.update({
+        where: { id: shipment.orderId },
+        data: { status: OrderStatus.PROCESSING },
+      });
+    }
 
-    return { success: true, message: 'Shipment cancelled' };
+    return { success: true, message: 'Shipment cancelled. You can now re-ship this order.' };
   }
 
   // ─── Serviceability Check ───
@@ -2429,14 +2441,196 @@ export class ShippingService {
 
     const results: Record<string, any> = {};
 
-    // Check Xelnova Courier (always available)
-    results['XELNOVA_COURIER'] = {
-      serviceable: true,
-      estimatedDays: 5,
-      provider: 'Xelnova Courier',
+    // ── Xelgo: check ALL platform carriers with admin credentials ──
+    const pl = await this.getMergedPlatformLogistics();
+
+    const synthetic = (
+      provider: ShippingMode,
+      patch: Partial<SellerCourierConfig> & { apiKey: string },
+    ): SellerCourierConfig =>
+      ({
+        id: `platform-${provider.toLowerCase()}`,
+        sellerId: 'platform',
+        provider,
+        apiSecret: null,
+        accountId: null,
+        warehouseId: null,
+        isActive: true,
+        metadata: {},
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        ...patch,
+      }) as unknown as SellerCourierConfig;
+
+    type PlatformCandidate = {
+      mode: ShippingMode;
+      label: string;
+      config: SellerCourierConfig;
+    };
+    const platformCandidates: PlatformCandidate[] = [];
+
+    // Delhivery
+    {
+      const envToken =
+        this.config.get<string>('DELHIVERY_API_TOKEN')?.trim() ||
+        this.config.get<string>('DELHIVERY_TOKEN')?.trim() ||
+        '';
+      const envClient = this.config.get<string>('DELHIVERY_CLIENT_NAME')?.trim() || '';
+      const envWh = this.config.get<string>('DELHIVERY_WAREHOUSE_NAME')?.trim() || '';
+      const apiKey = this.safeDecrypt(pl.delhivery?.apiTokenEnc) || envToken;
+      const clientName = pl.delhivery?.clientName?.trim() || envClient;
+      const warehouseName = pl.delhivery?.warehouseName?.trim() || envWh;
+      if (apiKey && clientName && warehouseName) {
+        const envDelhiveryEnv = this.config.get<string>('DELHIVERY_ENV')?.trim().toLowerCase();
+        const delhiveryEnvironment =
+          pl.delhivery?.environment === 'staging' || pl.delhivery?.environment === 'production'
+            ? pl.delhivery.environment
+            : envDelhiveryEnv === 'staging' ? 'staging' : 'production';
+        const shippingModeRaw = pl.delhivery?.shippingMode?.trim() || 'Surface';
+        const delhiveryShippingMode = shippingModeRaw.toLowerCase() === 'express' ? 'Express' : 'Surface';
+        platformCandidates.push({
+          mode: ShippingMode.DELHIVERY,
+          label: `Delhivery ${delhiveryShippingMode}`,
+          config: synthetic(ShippingMode.DELHIVERY, {
+            apiKey,
+            accountId: clientName,
+            warehouseId: warehouseName,
+            metadata: { delhiveryEnvironment, delhiveryShippingMode },
+          }),
+        });
+      }
+    }
+
+    // XpressBees
+    {
+      const email = pl.xpressbees?.email?.trim() || this.config.get<string>('XPRESSBEES_EMAIL')?.trim() || '';
+      const password = this.safeDecrypt(pl.xpressbees?.passwordEnc) || this.config.get<string>('XPRESSBEES_PASSWORD')?.trim() || '';
+      if (email && password) {
+        platformCandidates.push({
+          mode: ShippingMode.XPRESSBEES,
+          label: 'XpressBees Surface',
+          config: synthetic(ShippingMode.XPRESSBEES, {
+            apiKey: '',
+            accountId: email,
+            apiSecret: password,
+            warehouseId: pl.xpressbees?.warehouseName?.trim() || 'default',
+            metadata: {
+              authType: 'NEW',
+              businessName: pl.xpressbees?.businessName?.trim() || '',
+            },
+          }),
+        });
+      }
+    }
+
+    // Ekart
+    {
+      const clientId = pl.ekart?.clientId?.trim() || this.config.get<string>('EKART_CLIENT_ID')?.trim() || '';
+      const username = pl.ekart?.username?.trim() || this.config.get<string>('EKART_USERNAME')?.trim() || '';
+      const password = this.safeDecrypt(pl.ekart?.passwordEnc) || this.config.get<string>('EKART_PASSWORD')?.trim() || '';
+      if (clientId && username && password) {
+        platformCandidates.push({
+          mode: ShippingMode.EKART,
+          label: 'Ekart Surface',
+          config: synthetic(ShippingMode.EKART, {
+            apiKey: username,
+            accountId: clientId,
+            apiSecret: password,
+            warehouseId: pl.ekart?.pickupAlias?.trim() || null,
+          }),
+        });
+      }
+    }
+
+    // ShipRocket
+    {
+      const email = pl.shiprocket?.email?.trim() || this.config.get<string>('SHIPROCKET_EMAIL')?.trim() || '';
+      const password = this.safeDecrypt(pl.shiprocket?.passwordEnc) || this.config.get<string>('SHIPROCKET_PASSWORD')?.trim() || '';
+      if (email && password) {
+        platformCandidates.push({
+          mode: ShippingMode.SHIPROCKET,
+          label: 'ShipRocket',
+          config: synthetic(ShippingMode.SHIPROCKET, {
+            apiKey: password,
+            accountId: email,
+            warehouseId: pl.shiprocket?.pickupLocation?.trim() || 'Primary',
+          }),
+        });
+      }
+    }
+
+    const xelgoCouriers: Array<{ name: string; estimatedDays: number; charges: number | null; estimatedDelivery: string | null }> = [];
+
+    const computeEstDeliveryDate = (days: number | null | undefined): string | null => {
+      if (!days) return null;
+      const d = new Date();
+      d.setDate(d.getDate() + days);
+      return d.toISOString().split('T')[0];
     };
 
-    // Check each configured courier
+    // Xelgo adds a flat platform fee on top of the raw carrier rate so
+    // small sellers without their own accounts can still use Xelnova's
+    // carrier relationships. Configurable via `XELGO_MARKUP_INR`.
+    const xelgoMarkup = Math.max(
+      0,
+      parseInt(this.config.get<string>('XELGO_MARKUP_INR') ?? '50', 10) || 0,
+    );
+    const applyMarkup = (raw: number | null | undefined): number | null => {
+      if (raw == null) return null;
+      return Math.round((raw + xelgoMarkup) * 100) / 100;
+    };
+
+    const platformChecks = platformCandidates.map(async (candidate) => {
+      const provider = this.providers.get(candidate.mode);
+      if (!provider) return;
+      try {
+        const result = await provider.checkServiceability(
+          pickupPincode,
+          deliveryPincode,
+          candidate.config,
+        );
+        if (!result.serviceable) return;
+        if (result.availableCouriers?.length) {
+          for (const c of result.availableCouriers) {
+            xelgoCouriers.push({
+              name: `${candidate.label} · ${c.name}`,
+              estimatedDays: c.estimatedDays,
+              charges: applyMarkup(c.charges ?? null),
+              estimatedDelivery: computeEstDeliveryDate(c.estimatedDays),
+            });
+          }
+        } else {
+          const days = result.estimatedDays ?? 5;
+          xelgoCouriers.push({
+            name: candidate.label,
+            estimatedDays: days,
+            charges: applyMarkup(result.charges ?? null),
+            estimatedDelivery: computeEstDeliveryDate(days),
+          });
+        }
+      } catch (err) {
+        this.logger.warn(`Xelgo serviceability check failed for ${candidate.mode}: ${err}`);
+      }
+    });
+
+    await Promise.allSettled(platformChecks);
+
+    if (xelgoCouriers.length > 0) {
+      results['XELNOVA_COURIER'] = {
+        serviceable: true,
+        provider: 'Xelgo',
+        availableCouriers: xelgoCouriers,
+      };
+    } else {
+      results['XELNOVA_COURIER'] = {
+        serviceable: true,
+        estimatedDays: 5,
+        estimatedDelivery: computeEstDeliveryDate(5),
+        provider: 'Xelgo',
+      };
+    }
+
+    // ── Seller's own configured couriers ──
     const configs = await this.prisma.sellerCourierConfig.findMany({
       where: { sellerId: seller.id, isActive: true },
     });
@@ -2459,6 +2653,8 @@ export class ShippingService {
         results[cfg.provider] = {
           ...result,
           provider: provider.providerName,
+          estimatedDelivery: computeEstDeliveryDate(result.estimatedDays),
+          charges: result.charges ?? null,
         };
       } catch (err) {
         this.logger.warn(

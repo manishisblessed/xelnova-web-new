@@ -103,6 +103,9 @@ function LoginFormInner() {
     if (hasSellerProfile === false) {
       window.location.href = '/register';
     } else {
+      if (hasSellerProfile === true) {
+        try { sessionStorage.setItem('xelnova-seller-gate-ok', '1'); } catch {}
+      }
       window.location.href = redirectTo;
     }
   }, [setUser, redirectTo]);

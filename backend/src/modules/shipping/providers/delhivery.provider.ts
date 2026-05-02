@@ -55,6 +55,7 @@ export class DelhiveryProvider implements CourierProvider {
 
     const globalEnv = this.config.get<string>('DELHIVERY_ENV')?.trim().toLowerCase();
     if (globalEnv === 'staging') return this.stagingBase;
+    if (globalEnv === 'production') return this.prodBase;
 
     return this.config.get('NODE_ENV') === 'production' ? this.prodBase : this.stagingBase;
   }
@@ -447,7 +448,7 @@ export class DelhiveryProvider implements CourierProvider {
   }
 
   async checkServiceability(
-    _pickupPincode: string,
+    pickupPincode: string,
     deliveryPincode: string,
     config: SellerCourierConfig,
   ): Promise<ServiceabilityResult> {
@@ -469,9 +470,47 @@ export class DelhiveryProvider implements CourierProvider {
       return { serviceable: false };
     }
 
+    const estimatedDays = deliveryInfo.max_days || deliveryInfo.estimated_delivery_days || 3;
+
+    // Fetch actual shipping charges for a baseline 500g parcel so the UI
+    // can show a real cost instead of "Price at booking".
+    let charges: number | undefined;
+    try {
+      const shippingMode = this.getDelhiveryShipmentExtras(config).shippingMode;
+      const md = shippingMode?.toLowerCase() === 'express' ? 'E' : 'S';
+      const params = new URLSearchParams({
+        md,
+        ss: 'Delivered',
+        d_pin: deliveryPincode,
+        o_pin: pickupPincode,
+        cgm: '500',
+        pt: 'Pre-paid',
+        cod: '0',
+      });
+      const rateRes = await fetch(
+        `${base}/api/kinko/v1/invoice/charges/.json?${params}`,
+        { headers: this.authHeaders(config) },
+      );
+      if (rateRes.ok) {
+        const rateData = await rateRes.json();
+        const payload = Array.isArray(rateData) ? rateData[0] : rateData;
+        const total = typeof payload?.total_amount === 'number'
+          ? payload.total_amount
+          : typeof payload?.gross_amount === 'number'
+            ? payload.gross_amount
+            : undefined;
+        if (typeof total === 'number' && total > 0) {
+          charges = Math.round(total * 100) / 100;
+        }
+      }
+    } catch (err) {
+      this.logger.warn(`Delhivery rate calc failed: ${err}`);
+    }
+
     return {
       serviceable: true,
-      estimatedDays: deliveryInfo.max_days || deliveryInfo.estimated_delivery_days || 5,
+      estimatedDays,
+      charges,
     };
   }
 

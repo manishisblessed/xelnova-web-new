@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { User, Mail, Phone, Loader2 } from "lucide-react";
-import { usersApi, setAccessToken, type AuthUser } from "@xelnova/api";
+import { usersApi, setAccessToken, useAuth, type AuthUser } from "@xelnova/api";
 
 function syncTokenFromCookie() {
   if (typeof document === "undefined") return;
@@ -12,6 +12,7 @@ function syncTokenFromCookie() {
 }
 
 export default function ProfilePage() {
+  const { updateUser: updateAuthUser } = useAuth();
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -44,10 +45,8 @@ export default function ProfilePage() {
         phone: user.phone?.trim() ? user.phone : undefined,
       });
       setUser(updated);
+      updateAuthUser(updated);
       setSuccess(true);
-      if (typeof window !== "undefined") {
-        localStorage.setItem("xelnova-user", JSON.stringify(updated));
-      }
       setTimeout(() => setSuccess(false), 3000);
     } catch (e: unknown) {
       const err = e as { response?: { data?: { message?: string } }; message?: string };

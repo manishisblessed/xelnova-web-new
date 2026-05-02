@@ -24,6 +24,7 @@ interface RegistrationStatus {
  */
 export function SellerProfileGate({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+
   const [state, setState] = useState<GateState>('checking');
   const [status, setStatus] = useState<RegistrationStatus | null>(null);
 
@@ -33,12 +34,20 @@ export function SellerProfileGate({ children }: { children: React.ReactNode }) {
       router.replace('/login');
       return;
     }
+
+    try {
+      if (sessionStorage.getItem('xelnova-seller-gate-ok') === '1') {
+        setState('ok');
+      }
+    } catch {}
+
     apiSellerRegistrationStatus()
       .then(async (res: RegistrationStatus) => {
         if (cancelled) return;
         setStatus(res);
 
         if (!res.hasSellerProfile) {
+          try { sessionStorage.removeItem('xelnova-seller-gate-ok'); } catch {}
           try {
             await fetch('/api/session', { method: 'DELETE', credentials: 'include' });
           } catch { /* best effort */ }
@@ -48,24 +57,28 @@ export function SellerProfileGate({ children }: { children: React.ReactNode }) {
         }
 
         if (res.onboardingComplete) {
+          try { sessionStorage.setItem('xelnova-seller-gate-ok', '1'); } catch {}
           setState('ok');
         } else if (res.onboardingStatus === 'UNDER_REVIEW') {
+          try { sessionStorage.removeItem('xelnova-seller-gate-ok'); } catch {}
           setState('under_review');
         } else if (res.onboardingStatus === 'REJECTED') {
+          try { sessionStorage.removeItem('xelnova-seller-gate-ok'); } catch {}
           setState('rejected');
         } else {
+          try { sessionStorage.removeItem('xelnova-seller-gate-ok'); } catch {}
           setState('incomplete');
         }
       })
       .catch(async (err: unknown) => {
         if (cancelled) return;
         const message = err instanceof Error ? err.message : '';
-        // handleResponse() redirects to /login and throws on 401 — do not show dashboard
         if (message === 'Session expired' || message.includes('Session expired')) {
           return;
         }
         const status = (err as { response?: { status?: number } })?.response?.status;
         if (status === 401 || status === 403) {
+          try { sessionStorage.removeItem('xelnova-seller-gate-ok'); } catch {}
           try {
             await fetch('/api/session', { method: 'DELETE', credentials: 'include' });
           } catch { /* best effort */ }

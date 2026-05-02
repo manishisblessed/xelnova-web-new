@@ -234,6 +234,44 @@ export class XpressBeesProvider implements CourierProvider {
   ): Promise<ServiceabilityResult> {
     const headers = await this.authHeaders(config);
 
+    // Try the rate calculator first since it returns both serviceability AND real charges.
+    try {
+      const rateRes = await fetch(`${this.baseUrl}/courier/serviceability`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          origin: pickupPincode,
+          destination: deliveryPincode,
+          payment_type: 'prepaid',
+          order_amount: '1000',
+          weight: '500',
+          length: '10',
+          breadth: '10',
+          height: '10',
+        }),
+      });
+
+      if (rateRes.ok) {
+        const rateData = await rateRes.json();
+        const services = Array.isArray(rateData?.data) ? rateData.data : [];
+        if (rateData?.status === true && services.length > 0) {
+          // Pick cheapest "surface" ≤ 500g service as the baseline offer.
+          const baseline = services
+            .filter((s: any) => s.min_weight <= 500)
+            .sort((a: any, b: any) => (a.total_charges ?? 0) - (b.total_charges ?? 0))[0]
+            || services[0];
+          return {
+            serviceable: true,
+            estimatedDays: 4,
+            charges: baseline.total_charges ?? baseline.freight_charges ?? undefined,
+          };
+        }
+      }
+    } catch (err) {
+      this.logger.warn(`XpressBees rate calc failed: ${err}`);
+    }
+
+    // Fallback to simple pincode serviceability (no pricing).
     const res = await fetch(
       `${this.baseUrl}/pincode/serviceability?pickup_pincode=${pickupPincode}&delivery_pincode=${deliveryPincode}`,
       { headers },

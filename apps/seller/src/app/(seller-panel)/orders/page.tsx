@@ -565,7 +565,11 @@ function OrderDetail({
   const statusSteps = ['PENDING', 'CONFIRMED', 'SHIPPED', 'DELIVERED'];
   const currentStepIdx = statusSteps.indexOf(order.status);
   const isCancelled = ['CANCELLED', 'RETURNED', 'REFUNDED'].includes(order.status);
-  const showShipAction = order.status === 'CONFIRMED' && isPaid;
+  const shipmentCancelled = shipment?.shipmentStatus === 'CANCELLED';
+  const showShipAction = (
+    (['CONFIRMED', 'PROCESSING'].includes(order.status) && isPaid && !shipment) ||
+    (shipmentCancelled && isPaid)
+  );
 
   const loadShipment = useCallback(async () => {
     setShipmentLoading(true);
@@ -580,7 +584,7 @@ function OrderDetail({
   }, [order.id]);
 
   useEffect(() => {
-    if (['SHIPPED', 'DELIVERED'].includes(order.status)) {
+    if (['CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED'].includes(order.status)) {
       loadShipment();
     }
   }, [order.id, order.status, loadShipment]);
@@ -599,10 +603,10 @@ function OrderDetail({
   };
 
   const handleCancelShipment = async () => {
-    if (!confirm('Are you sure you want to cancel this shipment?')) return;
+    if (!confirm('Are you sure you want to cancel this shipment? You can re-ship with the correct option afterwards.')) return;
     try {
       await apiCancelShipment(order.id);
-      toast.success('Shipment cancellation requested');
+      toast.success('Shipment cancelled. You can now re-ship this order.');
       loadShipment();
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Failed to cancel shipment');
@@ -871,7 +875,7 @@ function OrderDetail({
         )}
 
         {/* Shipment Info Panel */}
-        {shipment && (
+        {shipment && !shipmentCancelled && (
           <ShipmentInfoPanel
             shipment={shipment}
             trackingData={trackingData}
@@ -886,6 +890,25 @@ function OrderDetail({
             labelDownloading={labelDownloading}
             copyText={copyText}
           />
+        )}
+
+        {/* Cancelled Shipment Notice */}
+        {shipmentCancelled && (
+          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+            className="rounded-2xl border border-red-200 bg-red-50/50 p-4"
+          >
+            <div className="flex items-center gap-2">
+              <XCircle size={16} className="text-red-500" />
+              <p className="text-sm font-medium text-red-800">
+                Previous shipment was cancelled
+              </p>
+            </div>
+            <p className="text-xs text-red-600/80 mt-1 ml-6">
+              {shipment.courierProvider && <>Carrier: {shipment.courierProvider}</>}
+              {shipment.awbNumber && <> &middot; AWB: {shipment.awbNumber}</>}
+              {' '}&middot; You can re-ship this order using the correct option above.
+            </p>
+          </motion.div>
         )}
 
         <div className="grid gap-5 lg:grid-cols-3">
@@ -1219,9 +1242,12 @@ function ShipmentInfoPanel({
             </Button>
           )}
           {canCancel && (
-            <Button size="sm" variant="danger" onClick={onCancelShipment}>
+            <button
+              onClick={onCancelShipment}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors"
+            >
               <X size={12} /> Cancel
-            </Button>
+            </button>
           )}
           {/* Customer invoice (replaces seller-side shipping-label PDF per
               testing observation #7). The actual delivery-partner shipping
@@ -1315,6 +1341,24 @@ function ShipmentInfoPanel({
         </div>
       )}
 
+      {/* Cancel & Re-ship action */}
+      {canCancel && (
+        <div className="mt-4 rounded-xl border border-red-200 bg-red-50/60 p-3 flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-xs font-medium text-red-800">Wrong shipping option?</p>
+            <p className="text-[11px] text-red-600/80 mt-0.5">
+              Cancel this shipment and choose a different method to re-ship this order.
+            </p>
+          </div>
+          <button
+            onClick={onCancelShipment}
+            className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-red-600 hover:bg-red-700 active:bg-red-800 rounded-lg transition-colors shadow-sm"
+          >
+            <X size={12} /> Cancel Shipment
+          </button>
+        </div>
+      )}
+
       {/* Action links */}
       <div className="flex flex-wrap items-center gap-3 mt-4 pt-3 border-t border-border">
         {shipment.trackingUrl && (
@@ -1382,8 +1426,6 @@ interface ServiceabilityRate {
   serviceable: boolean;
 }
 
-type ShipTab = 'own' | 'xelgo' | 'partners';
-
 function ShipOrderModal({
   open,
   onClose,
@@ -1400,7 +1442,6 @@ function ShipOrderModal({
   const [step, setStep] = useState<
     'loading' | 'rates' | 'pickup' | 'add-phone' | 'result'
   >('loading');
-  const [activeTab, setActiveTab] = useState<ShipTab>('xelgo');
   const [selectedCourier, setSelectedCourier] = useState<string>('');
   const [selectedRate, setSelectedRate] = useState<ServiceabilityRate | null>(null);
   const [weight, setWeight] = useState('');
@@ -1450,6 +1491,13 @@ function ShipOrderModal({
     };
   }, [orderItems]);
 
+  const formatDeliveryDate = (isoDate: string | null | undefined) => {
+    if (!isoDate) return null;
+    const d = new Date(isoDate + 'T00:00:00');
+    if (isNaN(d.getTime())) return null;
+    return d.toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' });
+  };
+
   const computeEstDeliveryDate = (days: number | null | undefined) => {
     if (!days) return null;
     const d = new Date();
@@ -1494,7 +1542,7 @@ function ShipOrderModal({
               service: courier.name || val.provider || key,
               cost: courier.charges ?? null,
               estimatedDays: courier.estimatedDays ?? null,
-              estimatedDelivery: computeEstDeliveryDate(courier.estimatedDays),
+              estimatedDelivery: formatDeliveryDate(courier.estimatedDelivery) || computeEstDeliveryDate(courier.estimatedDays),
               serviceable: true,
             });
           }
@@ -1502,19 +1550,33 @@ function ShipOrderModal({
           ratesList.push({
             provider: val.provider || key,
             providerKey: key,
-            service: key === 'XELNOVA_COURIER' ? 'Surface' : (val.provider || key),
+            service: key === 'XELNOVA_COURIER' ? 'Surface' : (val.service || val.provider || key),
             cost: val.charges ?? null,
             estimatedDays: val.estimatedDays ?? null,
-            estimatedDelivery: computeEstDeliveryDate(val.estimatedDays),
+            estimatedDelivery: formatDeliveryDate(val.estimatedDelivery) || computeEstDeliveryDate(val.estimatedDays),
             serviceable: true,
+          });
+        }
+      }
+
+      // For configured providers that returned serviceable:false but ARE
+      // connected, add them as unavailable so the seller sees them
+      for (const p of providers) {
+        const hasRate = ratesList.some(r => r.providerKey === p);
+        if (!hasRate && svcData[p] && !svcData[p].serviceable) {
+          ratesList.push({
+            provider: svcData[p].provider || p,
+            providerKey: p,
+            service: svcData[p].provider || p,
+            cost: null,
+            estimatedDays: null,
+            estimatedDelivery: null,
+            serviceable: false,
           });
         }
       }
       setServiceabilityRates(ratesList);
 
-      if (providers.length > 0 || ratesList.length > 0) {
-        setActiveTab(ratesList.some(r => r.providerKey !== 'XELNOVA_COURIER') ? 'partners' : 'xelgo');
-      }
       return providers;
     } catch {
       setConfiguredProviders([]);
@@ -1542,7 +1604,6 @@ function ShipOrderModal({
       setPickupPhone('');
       setPhoneError(null);
       setPhoneReturnStep('pickup');
-      setActiveTab('xelgo');
 
       const nowIst = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
       const istHour = nowIst.getUTCHours();
@@ -1572,7 +1633,9 @@ function ShipOrderModal({
   }, [open, getDefaultShippingInfo, loadData]);
 
   const xelgoRates = serviceabilityRates.filter(r => r.providerKey === 'XELNOVA_COURIER');
-  const partnerRates = serviceabilityRates.filter(r => r.providerKey !== 'XELNOVA_COURIER');
+  const partnerRatesAll = serviceabilityRates.filter(r => r.providerKey !== 'XELNOVA_COURIER');
+  const partnerRates = partnerRatesAll.filter(r => r.serviceable);
+  const partnerRatesUnavailable = partnerRatesAll.filter(r => !r.serviceable);
 
   const getProviderName = (id: string) => COURIER_PROVIDERS.find((c) => c.id === id)?.name || id;
 
@@ -1642,12 +1705,8 @@ function ShipOrderModal({
     }
   };
 
-  const handleBookShipment = async () => {
-    if (activeTab === 'own') {
-      await submitShipment('selfship');
-    } else {
-      await submitShipment('courier');
-    }
+  const handleBookSelfShip = async () => {
+    await submitShipment('selfship');
   };
 
   const handleSelectRateAndContinue = (rate: ServiceabilityRate) => {
@@ -1700,7 +1759,7 @@ function ShipOrderModal({
   };
 
   return (
-    <Modal open={open} onClose={onClose} title="Ship Order" size="lg">
+    <Modal open={open} onClose={onClose} title="Ship Order" size="2xl">
       <AnimatePresence mode="wait">
         {step === 'loading' && (
           <motion.div key="loading" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="py-12 flex flex-col items-center gap-3">
@@ -1710,187 +1769,213 @@ function ShipOrderModal({
         )}
 
         {step === 'rates' && (
-          <motion.div key="rates" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-4">
-            {/* Tabs */}
-            <div className="flex border-b border-border">
-              <button
-                onClick={() => setActiveTab('own')}
-                className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
-                  activeTab === 'own'
-                    ? 'border-primary-500 text-primary-700'
-                    : 'border-transparent text-text-muted hover:text-text-primary'
-                }`}
-              >
-                Ship By Own
-              </button>
-              <button
-                onClick={() => setActiveTab('xelgo')}
-                className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
-                  activeTab === 'xelgo'
-                    ? 'border-primary-500 text-primary-700'
-                    : 'border-transparent text-text-muted hover:text-text-primary'
-                }`}
-              >
-                Ship By Xelgo
-              </button>
-              <button
-                onClick={() => setActiveTab('partners')}
-                className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
-                  activeTab === 'partners'
-                    ? 'border-primary-500 text-primary-700'
-                    : 'border-transparent text-text-muted hover:text-text-primary'
-                }`}
-              >
-                Delivery Partners
-              </button>
-            </div>
-
-            {/* Ship By Own */}
-            {activeTab === 'own' && (
-              <div className="space-y-4">
-                <div className="rounded-xl border border-border overflow-hidden">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="bg-gray-50 border-b border-border">
-                        <th className="text-left px-4 py-3 text-xs font-semibold text-text-muted uppercase tracking-wider">Provider</th>
-                        <th className="text-left px-4 py-3 text-xs font-semibold text-text-muted uppercase tracking-wider">Service</th>
-                        <th className="text-left px-4 py-3 text-xs font-semibold text-text-muted uppercase tracking-wider">Cost</th>
-                        <th className="text-left px-4 py-3 text-xs font-semibold text-text-muted uppercase tracking-wider">Est. Delivery</th>
-                        <th className="px-4 py-3"></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr className="border-b border-border last:border-b-0 hover:bg-gray-50/50 transition-colors">
-                        <td className="px-4 py-3 font-medium text-text-primary">Self Ship</td>
-                        <td className="px-4 py-3 text-text-secondary">—</td>
-                        <td className="px-4 py-3 text-text-secondary">—</td>
-                        <td className="px-4 py-3 text-text-secondary">—</td>
-                        <td className="px-4 py-3 text-right">
-                          <Button size="sm" onClick={handleBookShipment} loading={saving}>
-                            Book Shipment
-                          </Button>
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-                <div className="rounded-xl bg-amber-50 border border-amber-200 p-3">
-                  <p className="text-xs text-amber-700">
-                    You&apos;ll ship this order yourself. After booking, add AWB number and update status from the order details page.
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {/* Ship By Xelgo */}
-            {activeTab === 'xelgo' && (
-              <div className="space-y-4">
-                {ratesLoading ? (
-                  <div className="flex justify-center py-8"><Loader2 size={20} className="animate-spin text-primary-500" /></div>
-                ) : xelgoRates.length > 0 ? (
-                  <div className="rounded-xl border border-border overflow-hidden">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="bg-gray-50 border-b border-border">
-                          <th className="text-left px-4 py-3 text-xs font-semibold text-text-muted uppercase tracking-wider">Provider</th>
-                          <th className="text-left px-4 py-3 text-xs font-semibold text-text-muted uppercase tracking-wider">Service</th>
-                          <th className="text-left px-4 py-3 text-xs font-semibold text-text-muted uppercase tracking-wider">Cost</th>
-                          <th className="text-left px-4 py-3 text-xs font-semibold text-text-muted uppercase tracking-wider">Est. Delivery</th>
-                          <th className="px-4 py-3"></th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {xelgoRates.map((rate, i) => (
-                          <tr key={i} className="border-b border-border last:border-b-0 hover:bg-gray-50/50 transition-colors">
-                            <td className="px-4 py-3 font-medium text-text-primary">Xelgo</td>
-                            <td className="px-4 py-3 text-text-secondary">{rate.service}</td>
-                            <td className="px-4 py-3 font-semibold text-text-primary">
-                              {rate.cost != null ? `₹${rate.cost}` : '—'}
-                            </td>
-                            <td className="px-4 py-3 text-text-secondary">
-                              {rate.estimatedDelivery || (rate.estimatedDays ? `${rate.estimatedDays} days` : '—')}
-                            </td>
-                            <td className="px-4 py-3 text-right">
-                              <Button size="sm" onClick={() => handleSelectRateAndContinue(rate)}>
-                                Book Shipment
-                              </Button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+          <motion.div key="rates" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-5">
+            {ratesLoading ? (
+              <div className="flex justify-center py-8"><Loader2 size={20} className="animate-spin text-primary-500" /></div>
+            ) : (
+              <div className="space-y-5">
+                {/* ── Ship via Xelgo ── */}
+                <div>
+                  <div className="flex items-center gap-2 mb-2.5">
+                    <div className="h-5 w-5 rounded-md bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center">
+                      <Truck size={11} className="text-white" />
+                    </div>
+                    <h4 className="text-xs font-bold text-blue-700 uppercase tracking-wider">Ship via Xelgo</h4>
+                    <span className="text-[10px] text-blue-400 font-normal">Xelgo handles pickup, AWB &amp; tracking</span>
                   </div>
-                ) : (
-                  <div className="rounded-xl border border-border p-6 text-center">
-                    <Truck size={28} className="mx-auto text-primary-400 mb-2" />
-                    <p className="text-sm text-text-muted">Xelgo shipping is always available.</p>
-                    <Button
-                      className="mt-3"
-                      onClick={() => {
-                        setSelectedCourier('XELNOVA_COURIER');
-                        setStep('pickup');
-                      }}
-                    >
-                      Ship via Xelgo
+                  <div className="space-y-2">
+                    {xelgoRates.length > 0 ? xelgoRates.map((rate, i) => {
+                      const parts = rate.service.split(/\s+/);
+                      const cName = parts.slice(0, -1).join(' ') || parts[0];
+                      const serviceType = parts.length > 1 ? parts[parts.length - 1] : '';
+                      return (
+                        <div
+                          key={`xelgo-${i}`}
+                          className="group flex items-center justify-between rounded-xl border border-blue-100 bg-gradient-to-r from-blue-50/80 to-white p-3.5 hover:border-blue-300 hover:shadow-sm transition-all cursor-pointer"
+                          onClick={() => handleSelectRateAndContinue(rate)}
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="shrink-0 h-9 w-9 rounded-lg bg-blue-100 flex items-center justify-center">
+                              <Package size={16} className="text-blue-600" />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-sm font-semibold text-text-primary truncate">{cName}</span>
+                                {serviceType && <span className="text-[10px] text-blue-500 bg-blue-50 border border-blue-200 rounded px-1.5 py-0.5 font-medium">{serviceType}</span>}
+                              </div>
+                              <div className="flex items-center gap-2 mt-0.5">
+                                {rate.cost != null && <span className="text-xs font-bold text-text-primary">₹{rate.cost}</span>}
+                                {rate.cost == null && <span className="text-xs text-text-muted italic">Price at booking</span>}
+                                {rate.estimatedDelivery && (
+                                  <>
+                                    <span className="text-text-muted">·</span>
+                                    <span className="text-xs text-text-secondary flex items-center gap-1"><Calendar size={10} />{rate.estimatedDelivery}</span>
+                                  </>
+                                )}
+                                {!rate.estimatedDelivery && rate.estimatedDays && (
+                                  <>
+                                    <span className="text-text-muted">·</span>
+                                    <span className="text-xs text-text-secondary">{rate.estimatedDays} day{rate.estimatedDays > 1 ? 's' : ''}</span>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                          <Button size="sm" className="shrink-0 opacity-80 group-hover:opacity-100 transition-opacity">
+                            <ArrowRight size={14} />
+                            Book
+                          </Button>
+                        </div>
+                      );
+                    }) : (
+                      <div
+                        className="group flex items-center justify-between rounded-xl border border-blue-100 bg-gradient-to-r from-blue-50/80 to-white p-3.5 hover:border-blue-300 hover:shadow-sm transition-all cursor-pointer"
+                        onClick={() => { setSelectedCourier('XELNOVA_COURIER'); setStep('pickup'); }}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="h-9 w-9 rounded-lg bg-blue-100 flex items-center justify-center">
+                            <Package size={16} className="text-blue-600" />
+                          </div>
+                          <div>
+                            <span className="text-sm font-semibold text-text-primary">Xelgo Surface</span>
+                            <p className="text-xs text-text-muted mt-0.5">Price calculated at booking based on weight</p>
+                          </div>
+                        </div>
+                        <Button size="sm" className="shrink-0 opacity-80 group-hover:opacity-100 transition-opacity">
+                          <ArrowRight size={14} />
+                          Book
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* ── Seller's Delivery Partners ── */}
+                {(partnerRates.length > 0 || partnerRatesUnavailable.length > 0) && (
+                  <div>
+                    <div className="flex items-center gap-2 mb-2.5">
+                      <div className="h-5 w-5 rounded-md bg-gradient-to-br from-emerald-500 to-emerald-600 flex items-center justify-center">
+                        <Navigation size={11} className="text-white" />
+                      </div>
+                      <h4 className="text-xs font-bold text-emerald-700 uppercase tracking-wider">Your Courier Accounts</h4>
+                      <span className="text-[10px] text-emerald-400 font-normal">Book directly with your connected couriers</span>
+                    </div>
+                    <div className="space-y-2">
+                      {partnerRates.map((rate, i) => (
+                        <div
+                          key={`partner-${i}`}
+                          className="group flex items-center justify-between rounded-xl border border-emerald-100 bg-gradient-to-r from-emerald-50/60 to-white p-3.5 hover:border-emerald-300 hover:shadow-sm transition-all cursor-pointer"
+                          onClick={() => handleSelectRateAndContinue(rate)}
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="shrink-0 h-9 w-9 rounded-lg bg-emerald-100 flex items-center justify-center">
+                              <Truck size={16} className="text-emerald-600" />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-sm font-semibold text-text-primary truncate">{getProviderName(rate.providerKey)}</span>
+                                {rate.service && rate.service !== rate.providerKey && (
+                                  <span className="text-[10px] text-emerald-600 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5 font-medium">{rate.service}</span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2 mt-0.5">
+                                {rate.cost != null && <span className="text-xs font-bold text-text-primary">₹{rate.cost}</span>}
+                                {rate.cost == null && <span className="text-xs text-text-muted italic">Price at booking</span>}
+                                {rate.estimatedDelivery && (
+                                  <>
+                                    <span className="text-text-muted">·</span>
+                                    <span className="text-xs text-text-secondary flex items-center gap-1"><Calendar size={10} />{rate.estimatedDelivery}</span>
+                                  </>
+                                )}
+                                {!rate.estimatedDelivery && rate.estimatedDays && (
+                                  <>
+                                    <span className="text-text-muted">·</span>
+                                    <span className="text-xs text-text-secondary">{rate.estimatedDays} day{rate.estimatedDays > 1 ? 's' : ''}</span>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                          <Button size="sm" variant="outline" className="shrink-0 opacity-80 group-hover:opacity-100 transition-opacity border-emerald-200 text-emerald-700 hover:bg-emerald-50">
+                            <ArrowRight size={14} />
+                            Book
+                          </Button>
+                        </div>
+                      ))}
+                      {partnerRatesUnavailable.map((rate, i) => (
+                        <div
+                          key={`partner-na-${i}`}
+                          className="flex items-center justify-between rounded-xl border border-gray-200 border-dashed bg-gray-50/50 p-3.5 opacity-70"
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="shrink-0 h-9 w-9 rounded-lg bg-gray-100 flex items-center justify-center">
+                              <Truck size={16} className="text-gray-400" />
+                            </div>
+                            <div className="min-w-0">
+                              <span className="text-sm font-medium text-text-secondary truncate">{getProviderName(rate.providerKey)}</span>
+                              <p className="text-xs text-text-muted mt-0.5">Not serviceable for this pincode</p>
+                            </div>
+                          </div>
+                          <span className="text-[10px] text-text-muted bg-gray-100 px-2 py-1 rounded-md font-medium">Unavailable</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Self Ship ── */}
+                <div>
+                  <div className="flex items-center gap-2 mb-2.5">
+                    <div className="h-5 w-5 rounded-md bg-gradient-to-br from-gray-400 to-gray-500 flex items-center justify-center">
+                      <PackageCheck size={11} className="text-white" />
+                    </div>
+                    <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider">Self Ship</h4>
+                    <span className="text-[10px] text-gray-400 font-normal">You ship it yourself</span>
+                  </div>
+                  <div
+                    className="group flex items-center justify-between rounded-xl border border-gray-200 bg-gradient-to-r from-gray-50/60 to-white p-3.5 hover:border-gray-300 hover:shadow-sm transition-all cursor-pointer"
+                    onClick={handleBookSelfShip}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="h-9 w-9 rounded-lg bg-gray-100 flex items-center justify-center">
+                        <PackageCheck size={16} className="text-gray-500" />
+                      </div>
+                      <div>
+                        <span className="text-sm font-semibold text-text-primary">Ship with your own courier</span>
+                        <p className="text-xs text-text-muted mt-0.5">You arrange pickup &amp; delivery yourself</p>
+                      </div>
+                    </div>
+                    <Button size="sm" variant="outline" className="shrink-0 opacity-80 group-hover:opacity-100 transition-opacity" loading={saving}>
+                      <ArrowRight size={14} />
+                      Book
                     </Button>
                   </div>
-                )}
-                <div className="rounded-xl bg-blue-50 border border-blue-200 p-3">
-                  <p className="text-xs text-blue-700">
-                    Xelgo handles pickup, delivery, AWB &amp; tracking automatically. Charges include shipping + platform surcharge as a single amount.
-                  </p>
                 </div>
               </div>
             )}
 
-            {/* Delivery Partners */}
-            {activeTab === 'partners' && (
-              <div className="space-y-4">
-                {ratesLoading ? (
-                  <div className="flex justify-center py-8"><Loader2 size={20} className="animate-spin text-primary-500" /></div>
-                ) : partnerRates.length > 0 ? (
-                  <div className="rounded-xl border border-border overflow-hidden">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="bg-gray-50 border-b border-border">
-                          <th className="text-left px-4 py-3 text-xs font-semibold text-text-muted uppercase tracking-wider">Provider</th>
-                          <th className="text-left px-4 py-3 text-xs font-semibold text-text-muted uppercase tracking-wider">Service</th>
-                          <th className="text-left px-4 py-3 text-xs font-semibold text-text-muted uppercase tracking-wider">Cost</th>
-                          <th className="text-left px-4 py-3 text-xs font-semibold text-text-muted uppercase tracking-wider">Est. Delivery</th>
-                          <th className="px-4 py-3"></th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {partnerRates.map((rate, i) => (
-                          <tr key={i} className="border-b border-border last:border-b-0 hover:bg-gray-50/50 transition-colors">
-                            <td className="px-4 py-3 font-medium text-text-primary">{getProviderName(rate.providerKey)}</td>
-                            <td className="px-4 py-3 text-text-secondary">{rate.service}</td>
-                            <td className="px-4 py-3 font-semibold text-text-primary">
-                              {rate.cost != null ? `₹${rate.cost}` : '—'}
-                            </td>
-                            <td className="px-4 py-3 text-text-secondary">
-                              {rate.estimatedDelivery || (rate.estimatedDays ? `${rate.estimatedDays} days` : '—')}
-                            </td>
-                            <td className="px-4 py-3 text-right">
-                              <Button size="sm" onClick={() => handleSelectRateAndContinue(rate)}>
-                                Book Shipment
-                              </Button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+            {!ratesLoading && xelgoRates.length === 0 && partnerRates.length === 0 && configuredProviders.length === 0 && (
+              <div className="rounded-xl bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 p-4">
+                <div className="flex items-start gap-3">
+                  <div className="rounded-lg bg-blue-100 p-2 shrink-0">
+                    <Navigation size={14} className="text-blue-600" />
                   </div>
-                ) : (
-                  <div className="rounded-xl border border-border p-6 text-center">
-                    <Package size={28} className="mx-auto text-gray-400 mb-2" />
-                    <p className="text-sm text-text-muted mb-1">No delivery partners connected.</p>
-                    <p className="text-xs text-text-muted">
-                      Connect Delhivery, ShipRocket, XpressBees, or Ekart in{' '}
-                      <a href="/shipping" className="text-primary-600 underline font-medium">Shipping Settings</a>
+                  <div>
+                    <p className="text-xs font-semibold text-blue-800">Connect your courier accounts for better rates</p>
+                    <p className="text-[11px] text-blue-600 mt-1 leading-relaxed">
+                      Link Delhivery, ShipRocket, XpressBees, or Ekart in{' '}
+                      <a href="/shipping" className="text-primary-600 underline font-semibold hover:text-primary-700">Shipping Settings</a>{' '}
+                      to book shipments directly at your negotiated rates.
                     </p>
                   </div>
-                )}
+                </div>
+              </div>
+            )}
+            {!ratesLoading && xelgoRates.some(r => !r.cost) && (
+              <div className="rounded-xl bg-blue-50 border border-blue-200 p-3">
+                <p className="text-xs text-blue-700">
+                  Some Xelgo rates show &ldquo;price at booking&rdquo;. The exact shipping charge will be calculated based on package weight and dimensions.
+                </p>
               </div>
             )}
           </motion.div>
@@ -1923,7 +2008,7 @@ function ShipOrderModal({
                 <div className="flex items-center gap-2">
                   <CheckCircle size={14} className="text-emerald-600" />
                   <p className="text-xs text-emerald-700 font-medium">
-                    Shipping via {selectedRate.providerKey === 'XELNOVA_COURIER' ? 'Xelgo' : selectedRate.service}
+                    Shipping via {selectedRate.providerKey === 'XELNOVA_COURIER' ? 'Xelgo' : getProviderName(selectedRate.providerKey)}
                     {selectedRate.cost != null && ` · ₹${selectedRate.cost}`}
                     {selectedRate.estimatedDays && ` · ${selectedRate.estimatedDays} day${selectedRate.estimatedDays > 1 ? 's' : ''}`}
                   </p>
@@ -2121,16 +2206,22 @@ function ShipOrderModal({
         )}
 
         {step === 'result' && result && (
-          <motion.div key="result" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="space-y-4 text-center">
-            <div className="flex justify-center">
+          <motion.div key="result" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="space-y-4">
+            <div className="flex flex-col items-center text-center">
               <div className="rounded-full bg-emerald-100 p-3">
                 <CheckCircle size={32} className="text-emerald-600" />
               </div>
+              <h3 className="text-lg font-bold text-text-primary mt-3">Shipment Created!</h3>
+              {result.courierProvider && (
+                <p className="text-sm text-text-secondary mt-1">
+                  Shipped via <strong>{result.courierProvider}</strong>
+                </p>
+              )}
             </div>
-            <h3 className="text-lg font-bold text-text-primary">Shipment Created!</h3>
+
             {result.awbNumber && (
-              <div className="rounded-xl bg-gray-50 border border-border p-4">
-                <p className="text-xs text-text-muted mb-1">AWB Number</p>
+              <div className="rounded-xl bg-gray-50 border border-border p-4 text-center">
+                <p className="text-xs text-text-muted mb-1">AWB / Tracking Number</p>
                 <div className="flex items-center justify-center gap-2">
                   <p className="text-lg font-mono font-bold text-text-primary">{result.awbNumber}</p>
                   <button onClick={() => { navigator.clipboard.writeText(result.awbNumber); toast.success('AWB copied'); }}
@@ -2141,11 +2232,76 @@ function ShipOrderModal({
                 </div>
               </div>
             )}
-            {result.courierProvider && (
-              <p className="text-sm text-text-secondary">
-                Shipped via <strong>{result.courierProvider}</strong>
-              </p>
-            )}
+
+            <div className="rounded-xl border border-border overflow-hidden">
+              <div className="bg-gray-50 px-4 py-2 border-b border-border">
+                <p className="text-xs font-semibold text-text-primary">Shipment Details</p>
+              </div>
+              <div className="divide-y divide-border text-sm">
+                {result.courierOrderId && (
+                  <div className="flex items-center justify-between px-4 py-2.5">
+                    <span className="text-xs text-text-muted">Courier Reference</span>
+                    <span className="text-xs font-medium text-text-primary font-mono">{result.courierOrderId}</span>
+                  </div>
+                )}
+                <div className="flex items-center justify-between px-4 py-2.5">
+                  <span className="text-xs text-text-muted">Shipping Mode</span>
+                  <span className="text-xs font-medium text-text-primary">
+                    {result.shippingMode === 'SELF_SHIP' ? 'Self Ship' : result.shippingMode === 'XELNOVA_COURIER' ? 'Xelgo (Platform)' : result.courierProvider || result.shippingMode}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between px-4 py-2.5">
+                  <span className="text-xs text-text-muted">Status</span>
+                  <Badge variant={result.shipmentStatus === 'PICKUP_SCHEDULED' ? 'success' : 'info'} className="text-[10px]">
+                    {(result.shipmentStatus || 'BOOKED').replace(/_/g, ' ')}
+                  </Badge>
+                </div>
+                {result.courierCharges != null && result.courierCharges > 0 && (
+                  <div className="flex items-center justify-between px-4 py-2.5">
+                    <span className="text-xs text-text-muted">Shipping Charges</span>
+                    <span className="text-xs font-semibold text-text-primary">₹{result.courierCharges}</span>
+                  </div>
+                )}
+                {result.weight && (
+                  <div className="flex items-center justify-between px-4 py-2.5">
+                    <span className="text-xs text-text-muted">Package Weight</span>
+                    <span className="text-xs font-medium text-text-primary">{result.weight} kg</span>
+                  </div>
+                )}
+                {result.dimensions && (
+                  <div className="flex items-center justify-between px-4 py-2.5">
+                    <span className="text-xs text-text-muted">Dimensions (L×B×H)</span>
+                    <span className="text-xs font-medium text-text-primary">{result.dimensions} cm</span>
+                  </div>
+                )}
+                {result.pickupDate && (
+                  <div className="flex items-center justify-between px-4 py-2.5">
+                    <span className="text-xs text-text-muted">Expected Pickup</span>
+                    <span className="text-xs font-medium text-text-primary">
+                      {new Date(result.pickupDate).toLocaleString('en-IN', {
+                        timeZone: 'Asia/Kolkata', weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true,
+                      })}
+                    </span>
+                  </div>
+                )}
+                {result.labelUrl && (
+                  <div className="flex items-center justify-between px-4 py-2.5">
+                    <span className="text-xs text-text-muted">Shipping Label</span>
+                    <a href={result.labelUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-primary-600 font-medium hover:underline inline-flex items-center gap-1">
+                      <ExternalLink size={10} /> View Label
+                    </a>
+                  </div>
+                )}
+                <div className="flex items-center justify-between px-4 py-2.5">
+                  <span className="text-xs text-text-muted">Booked At</span>
+                  <span className="text-xs font-medium text-text-primary">
+                    {new Date(result.createdAt).toLocaleString('en-IN', {
+                      timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true,
+                    })}
+                  </span>
+                </div>
+              </div>
+            </div>
 
             {result.pickup && (
               <div
@@ -2174,28 +2330,29 @@ function ShipOrderModal({
             )}
 
             {result.trackingUrl && (
-              <a href={result.trackingUrl} target="_blank" rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-sm text-primary-600 hover:underline"
-              >
-                <ExternalLink size={13} /> Track Shipment
-              </a>
+              <div className="text-center">
+                <a href={result.trackingUrl} target="_blank" rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-sm text-primary-600 hover:underline font-medium"
+                >
+                  <ExternalLink size={13} /> Track Shipment
+                </a>
+              </div>
             )}
 
-            {/* Download Shipping Label & Invoice buttons */}
             <div className="flex gap-3 pt-2">
               <button
                 onClick={handleDownloadLabel}
                 className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-purple-700 border border-purple-200 rounded-xl bg-purple-50 hover:bg-purple-100 transition-colors"
               >
                 <Download size={14} />
-                Download Shipping Label
+                Shipping Label
               </button>
               <button
                 onClick={handleDownloadInvoice}
                 className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-blue-700 border border-blue-200 rounded-xl bg-blue-50 hover:bg-blue-100 transition-colors"
               >
                 <Download size={14} />
-                Download Invoice
+                Invoice
               </button>
             </div>
 

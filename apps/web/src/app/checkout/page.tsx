@@ -73,7 +73,7 @@ function isPlaceholderEmail(email: string | null | undefined): boolean {
 export default function CheckoutPage() {
   const router = useRouter();
   const pathname = usePathname();
-  const { user, isAuthenticated, loading: authLoading } = useAuth();
+  const { user, isAuthenticated, loading: authLoading, updateUser } = useAuth();
   const [mounted, setMounted] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
   const [addresses, setAddresses] = useState<SavedAddress[]>([]);
@@ -694,13 +694,17 @@ export default function CheckoutPage() {
     };
 
     try {
-      // Persist contact info to user profile so it's pre-filled on future checkouts
       if (showContactBlock) {
         const profilePatch: { name?: string; email?: string } = {};
         if (needsName && contactName.trim()) profilePatch.name = contactName.trim();
         if (needsEmail && contactEmail.trim()) profilePatch.email = contactEmail.trim();
         if (Object.keys(profilePatch).length > 0) {
-          await usersApi.updateProfile(profilePatch).catch(() => {});
+          try {
+            const updatedUser = await usersApi.updateProfile(profilePatch);
+            updateUser(updatedUser);
+          } catch {
+            updateUser(profilePatch);
+          }
         }
       }
 

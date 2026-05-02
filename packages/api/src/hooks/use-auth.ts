@@ -12,7 +12,7 @@ import {
 import type { AuthUser } from '../types';
 import * as authApi from '../auth';
 import { setAccessToken } from '../client';
-import { configureApiAuthStorage } from '../auth-storage';
+import { configureApiAuthStorage, AUTH_STORAGE_KEYS } from '../auth-storage';
 
 interface AuthContextType {
   user: AuthUser | null;
@@ -20,6 +20,7 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<void>;
   register: (name: string, email: string, password: string, phone?: string) => Promise<void>;
   logout: () => Promise<void>;
+  updateUser: (patch: Partial<AuthUser>) => void;
   isAuthenticated: boolean;
 }
 
@@ -126,6 +127,19 @@ export function AuthProvider({
     setUser(null);
   }, []);
 
+  const updateUser = useCallback((patch: Partial<AuthUser>) => {
+    setUser((prev) => {
+      if (!prev) return prev;
+      const updated = { ...prev, ...patch };
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem(AUTH_STORAGE_KEYS.user(), JSON.stringify(updated));
+        } catch {}
+      }
+      return updated;
+    });
+  }, []);
+
   return createElement(
     AuthContext.Provider,
     {
@@ -135,6 +149,7 @@ export function AuthProvider({
         login,
         register,
         logout: logoutFn,
+        updateUser,
         isAuthenticated: !!user,
       },
     },

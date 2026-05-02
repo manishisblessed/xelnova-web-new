@@ -49,6 +49,7 @@ export function DashboardAuthProvider({ children }: { children: ReactNode }) {
       await fetch('/api/session', { method: 'DELETE', credentials: 'include' });
     } finally {
       setUser(null);
+      try { sessionStorage.removeItem('xelnova-seller-gate-ok'); } catch {}
       window.location.href = '/login';
     }
   }, [setUser]);
