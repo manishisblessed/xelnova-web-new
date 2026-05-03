@@ -985,11 +985,46 @@ export class SellerDashboardService {
     const returnPolicy = await this.adminService.getMarketplaceReturnPolicy();
     const results: { row: number; status: 'ok' | 'error'; message?: string; productId?: string; sku?: string }[] = [];
 
+    /**
+     * Resolve the seller-supplied category column to a real category id.
+     * Sellers tend to type the human name they saw in the dropdown rather
+     * than the cuid — accept any of: id, slug, exact name (case-insensitive).
+     * Categories are loaded once per upload and cached in-memory by all
+     * three keys for O(1) lookup per row.
+     */
+    const allCategories = await this.prisma.category.findMany({
+      select: { id: true, slug: true, name: true },
+    });
+    const catById = new Map(allCategories.map((c) => [c.id, c]));
+    const catBySlug = new Map(allCategories.map((c) => [c.slug.toLowerCase(), c]));
+    const catByName = new Map(allCategories.map((c) => [c.name.trim().toLowerCase(), c]));
+    const resolveCategoryId = (raw: string): string | null => {
+      const v = raw.trim();
+      if (!v) return null;
+      if (catById.has(v)) return v;
+      const lower = v.toLowerCase();
+      const bySlug = catBySlug.get(lower);
+      if (bySlug) return bySlug.id;
+      const byName = catByName.get(lower);
+      if (byName) return byName.id;
+      return null;
+    };
+
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
       try {
         if (!r.name || !r.price || !r.categoryId) {
           results.push({ row: i + 1, status: 'error', message: 'name, price, categoryId are required' });
+          continue;
+        }
+
+        const categoryId = resolveCategoryId(r.categoryId);
+        if (!categoryId) {
+          results.push({
+            row: i + 1,
+            status: 'error',
+            message: `Unknown category "${r.categoryId}". Use the exact category name, slug, or ID from the categories list.`,
+          });
           continue;
         }
 
@@ -1017,7 +1052,7 @@ export class SellerDashboardService {
         const slug = slugCount > 0 ? `${baseSlug}-${slugCount + 1}` : baseSlug;
 
         // Always auto-generate SKU for bulk uploads
-        const sku = await this.generateSku(seller.id, r.categoryId);
+        const sku = await this.generateSku(seller.id, categoryId);
 
         const product = await this.prisma.product.create({
           data: {
@@ -1027,7 +1062,7 @@ export class SellerDashboardService {
             description: r.description || null,
             price,
             compareAtPrice,
-            categoryId: r.categoryId,
+            categoryId,
             brand: r.brand || null,
             sellerId: seller.id,
             stock: r.stock ? parseInt(r.stock) : 0,

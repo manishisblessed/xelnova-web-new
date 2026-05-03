@@ -7,6 +7,8 @@ import {
   TrackingResult,
   CancelResult,
   ServiceabilityResult,
+  RegisterWarehouseOptions,
+  RegisterWarehouseResult,
 } from './courier-provider.interface';
 
 interface XBTokenCache {
@@ -300,5 +302,45 @@ export class XpressBeesProvider implements CourierProvider {
     if (s.includes('rto')) return 'RTO_INITIATED';
     if (s.includes('cancel')) return 'CANCELLED';
     return 'IN_TRANSIT';
+  }
+
+  /**
+   * XpressBees does not have a dedicated warehouse registration API.
+   * The pickup warehouse_name + address are passed inline with each
+   * shipment. This method validates credentials and stores the warehouse
+   * name so the platform can track registration status consistently
+   * across all couriers.
+   */
+  async registerWarehouse(
+    config: SellerCourierConfig,
+    options: RegisterWarehouseOptions,
+  ): Promise<RegisterWarehouseResult> {
+    if (!options.name || !options.address || !options.city || !options.state || !options.pincode || !options.phone) {
+      return {
+        success: false,
+        message: 'Missing required fields (name, address, city, state, pincode, phone).',
+      };
+    }
+
+    try {
+      await this.authHeaders(config);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.error(`XpressBees registerWarehouse auth check failed: ${msg}`);
+      return {
+        success: false,
+        message: `XpressBees authentication failed — cannot register warehouse: ${msg}`,
+      };
+    }
+
+    this.logger.log(
+      `XpressBees warehouse "${options.name}" validated (no external API — name stored for shipment payloads).`,
+    );
+
+    return {
+      success: true,
+      registeredName: options.name,
+      message: `Warehouse "${options.name}" registered with XpressBees (address will be sent with each shipment).`,
+    };
   }
 }

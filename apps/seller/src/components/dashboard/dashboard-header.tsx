@@ -10,14 +10,14 @@ export function DashboardHeader({ title, subtitle }: { title: string; subtitle?:
   const initial = displayName.charAt(0).toUpperCase();
 
   return (
-    <header className="border-b border-border bg-surface px-6 py-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-semibold text-text-primary font-display">{title}</h1>
-          {subtitle ? <p className="text-sm text-text-muted mt-0.5">{subtitle}</p> : null}
+    <header className="border-b border-border bg-surface px-4 sm:px-6 py-3 sm:py-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <h1 className="text-base sm:text-lg font-semibold text-text-primary font-display truncate">{title}</h1>
+          {subtitle ? <p className="text-xs sm:text-sm text-text-muted mt-0.5 line-clamp-2">{subtitle}</p> : null}
         </div>
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+          <div className="hidden sm:flex items-center gap-2">
             <span className="text-sm font-medium text-text-primary">{displayName}</span>
             {isApproved && (
               <CheckCircle className="w-4 h-4 text-green-500" aria-label="Verified seller" />

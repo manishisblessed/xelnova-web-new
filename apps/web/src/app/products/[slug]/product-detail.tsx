@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { cn } from "@xelnova/utils";
 import { formatCurrency, formatDate, priceInclusiveOfGst } from "@xelnova/utils";
-import { useProductBySlug } from "@/lib/api";
+import { useProductBySlug, useMarketplacePolicy } from "@/lib/api";
 import { reviewsApi, setAccessToken } from "@xelnova/api";
 import { useCartStore } from "@/lib/store/cart-store";
 import { useWishlistStore } from "@/lib/store/wishlist-store";
@@ -28,6 +28,7 @@ export default function ProductDetail() {
   const slug = params.slug as string;
   const { data, loading } = useProductBySlug(slug);
   const product = data?.product ?? null;
+  const { data: marketplacePolicy } = useMarketplacePolicy();
 
   const [selectedImage, setSelectedImage] = useState(0);
   const [activeTab, setActiveTab] = useState<TabId>("description");
@@ -49,11 +50,32 @@ export default function ProductDetail() {
       return;
     }
     const next: Record<string, string> = {};
+    let firstImages: string[] | null = null;
+    let firstVideo: string | null = null;
     for (const v of product.variants) {
       const first = v.options?.[0];
-      if (first) next[v.type] = first.value;
+      if (first) {
+        next[v.type] = first.value;
+      }
+      // Search all options for images/video (first option may not have them)
+      if (!firstImages || !firstVideo) {
+        for (const opt of v.options ?? []) {
+          if (!firstImages && opt.images && opt.images.length > 0) {
+            firstImages = opt.images;
+          }
+          if (!firstVideo && (opt as any).video) {
+            firstVideo = (opt as any).video;
+          }
+          if (firstImages && firstVideo) break;
+        }
+      }
     }
     setSelectedVariants(next);
+    if (firstImages && (!product.images || product.images.length === 0)) {
+      setVariantGallery(firstImages);
+      setSelectedImage(0);
+    }
+    if (firstVideo) setVariantVideo(firstVideo);
   // eslint-disable-next-line react-hooks/exhaustive-deps -- re-run only when the product itself changes, not on every variant reference shift
   }, [product?.id]);
 
@@ -294,9 +316,48 @@ export default function ProductDetail() {
     { id: "reviews", label: `Reviews (${product.reviewCount.toLocaleString("en-IN")})` },
   ];
 
-  const activeGallery = variantGallery && variantGallery.length > 0 ? variantGallery : product.images;
+  const allVariantImages = (() => {
+    if (!product?.variants?.length) return [];
+    const imgs: string[] = [];
+    for (const v of product.variants) {
+      for (const opt of v.options ?? []) {
+        if (Array.isArray(opt.images)) {
+          for (const img of opt.images) {
+            if (img && !imgs.includes(img)) imgs.push(img);
+          }
+        }
+      }
+    }
+    return imgs;
+  })();
+  const activeGallery = variantGallery && variantGallery.length > 0
+    ? variantGallery
+    : product.images.length > 0
+      ? product.images
+      : allVariantImages;
   const hasImages = activeGallery.length > 0;
-  const deliveryDate = new Date(Date.now() + 3 * 86400000).toLocaleDateString("en-IN", { weekday: "long", month: "short", day: "numeric" });
+
+  /**
+   * Delivery promise = today + admin-configured `defaultDeliveryDays` (Settings →
+   * Shipping). Falls back to 5 business days when the policy hasn't loaded yet so
+   * the badge never renders empty. The previous hard-coded 3 days has been
+   * replaced because the admin team needed control over the lead-time copy.
+   */
+  const deliveryDays = Math.max(1, Math.min(60, marketplacePolicy?.defaultDeliveryDays ?? 5));
+  const deliveryDate = new Date(Date.now() + deliveryDays * 86400000).toLocaleDateString("en-IN", {
+    weekday: "long",
+    month: "short",
+    day: "numeric",
+  });
+
+  // Marketplace-wide return policy gates the per-PDP return line. Sellers
+  // cannot override this — the admin decides whether returns are advertised
+  // at all (see Admin → Settings → Return & cancellation).
+  const marketplaceReturnsAllowed = marketplacePolicy?.returnPolicy?.isReturnable !== false;
+  const productReturnsAllowed = product.isReturnable !== false;
+  const showReturnPolicy = marketplaceReturnsAllowed && productReturnsAllowed;
+  const effectiveReturnWindow =
+    product.returnWindow ?? marketplacePolicy?.returnPolicy?.returnWindow ?? 7;
 
   // Media gallery: images first, then video (if exists)
   // Use variant video if available, otherwise fall back to product video
@@ -491,12 +552,12 @@ export default function ProductDetail() {
 
               {/* Amazon-style service badges */}
               <div className="flex flex-wrap gap-4 text-xs text-center">
-                {product.isReplaceable && (
+                {product.isReplaceable && marketplacePolicy?.returnPolicy?.isReplaceable !== false && (
                   <div className="flex flex-col items-center gap-1.5">
                     <div className="w-10 h-10 rounded-full bg-primary-50 border border-primary-100 flex items-center justify-center">
                       <RefreshCw size={18} className="text-primary-600" />
                     </div>
-                    <span className="text-text-secondary font-medium">{product.returnWindow || 7} Days<br/>Replacement</span>
+                    <span className="text-text-secondary font-medium">{effectiveReturnWindow} Days<br/>Replacement</span>
                   </div>
                 )}
                 <div className="flex flex-col items-center gap-1.5">
@@ -524,12 +585,21 @@ export default function ProductDetail() {
                     <span className="text-text-secondary">by {deliveryDate}</span>
                   </span>
                 </div>
-                <div className="flex items-center gap-3 text-sm">
-                  <div className="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center shrink-0">
-                    <RotateCcw size={16} className="text-primary-600" />
+                {showReturnPolicy ? (
+                  <div className="flex items-center gap-3 text-sm">
+                    <div className="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center shrink-0">
+                      <RotateCcw size={16} className="text-primary-600" />
+                    </div>
+                    <span className="text-text-secondary">{effectiveReturnWindow} days easy return policy</span>
                   </div>
-                  <span className="text-text-secondary">{product.returnWindow || 7} days easy return policy</span>
-                </div>
+                ) : (
+                  <div className="flex items-center gap-3 text-sm">
+                    <div className="w-8 h-8 rounded-lg bg-gray-50 flex items-center justify-center shrink-0">
+                      <RotateCcw size={16} className="text-text-muted" />
+                    </div>
+                    <span className="text-text-secondary">Non-returnable</span>
+                  </div>
+                )}
                 {product.warrantyInfo && (
                   <div className="flex items-center gap-3 text-sm">
                     <div className="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center shrink-0">

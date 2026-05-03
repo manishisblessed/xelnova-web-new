@@ -161,8 +161,8 @@ export default function HomePage() {
         </section>
       )}
 
-      {/* ─── 3. SOCIAL PROOF STATS ─── */}
-      <section className="py-5">
+      {/* ─── 3. SOCIAL PROOF STATS (hidden for now — uncomment to restore) ─── */}
+      {/* <section className="py-5">
         <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
           <div className="stats-ribbon p-5 md:p-7">
             <div className="pointer-events-none absolute inset-0 z-0 opacity-[0.12]">
@@ -185,7 +185,7 @@ export default function HomePage() {
             </div>
           </div>
         </div>
-      </section>
+      </section> */}
 
       {/* ─── 4. CATEGORIES ─── */}
       <section className="py-5">

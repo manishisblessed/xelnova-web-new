@@ -3,6 +3,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { productsApi, categoriesApi, searchApi } from '@xelnova/api';
 import type { Product as ApiProduct, Category as ApiCategory } from '@xelnova/api';
+
+type MarketplacePolicy = Awaited<ReturnType<typeof productsApi.getMarketplacePolicy>>;
 import type { Product, ProductReview } from './data/products';
 import type { Category } from './data/categories';
 import { FALLBACK_CATEGORIES } from './data/fallback-categories';
@@ -64,7 +66,7 @@ export function mapProduct(p: ApiProduct): Product {
     comparePrice,
     gstRate,
     discount,
-    images: p.images?.length ? p.images : [],
+    images: p.images?.length ? p.images.filter((img) => typeof img === 'string' && img.trim() !== '') : [],
     category: (p.category as any)?.slug || p.categoryId || '',
     brand: p.brand || '',
     rating: p.rating,
@@ -97,6 +99,8 @@ export function mapProduct(p: ApiProduct): Product {
     warrantyInfo: p.warrantyInfo ?? undefined,
     deliveredBy: p.deliveredBy ?? 'Xelnova',
     isReplaceable: p.isReplaceable ?? false,
+    isReturnable: p.isReturnable !== false,
+    isCancellable: p.isCancellable !== false,
     returnWindow: p.returnWindow ?? 7,
   };
 }
@@ -185,6 +189,21 @@ export function useFlashDeals() {
   return useFetch(async () => {
     const products = await deduplicatedFetch('flashDeals', () => productsApi.getFlashDeals());
     return products.map(mapProduct);
+  }, []);
+}
+
+/**
+ * Marketplace policy hook — lead time + return policy used by the PDP / cart
+ * to render the correct delivery date and return-policy line. Cached for the
+ * session because the values rarely change and a stale fallback is harmless.
+ */
+let _cachedPolicy: MarketplacePolicy | null = null;
+export function useMarketplacePolicy() {
+  return useFetch(async () => {
+    if (_cachedPolicy) return _cachedPolicy;
+    const policy = await deduplicatedFetch('marketplacePolicy', () => productsApi.getMarketplacePolicy());
+    _cachedPolicy = policy;
+    return policy;
   }, []);
 }
 

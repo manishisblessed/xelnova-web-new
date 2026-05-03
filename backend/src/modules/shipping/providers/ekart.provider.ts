@@ -7,6 +7,8 @@ import {
   TrackingResult,
   CancelResult,
   ServiceabilityResult,
+  RegisterWarehouseOptions,
+  RegisterWarehouseResult,
 } from './courier-provider.interface';
 
 interface EkartTokenCache {
@@ -326,5 +328,44 @@ export class EkartProvider implements CourierProvider {
     if (s === 'lost' || s === 'damaged') return 'CANCELLED';
     if (s === 'undelivered' || s === 'not serviceable') return 'IN_TRANSIT';
     return 'IN_TRANSIT';
+  }
+
+  /**
+   * Ekart does not expose a public warehouse/pickup-location registration API.
+   * Pickup address details are sent inline with each shipment. This method
+   * validates that auth credentials work (obtains an OAuth token) and stores
+   * the warehouse name for consistent multi-courier status tracking.
+   */
+  async registerWarehouse(
+    config: SellerCourierConfig,
+    options: RegisterWarehouseOptions,
+  ): Promise<RegisterWarehouseResult> {
+    if (!options.name || !options.address || !options.city || !options.state || !options.pincode || !options.phone) {
+      return {
+        success: false,
+        message: 'Missing required fields (name, address, city, state, pincode, phone).',
+      };
+    }
+
+    try {
+      await this.getAccessToken(config);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.error(`Ekart registerWarehouse auth check failed: ${msg}`);
+      return {
+        success: false,
+        message: `Ekart authentication failed — cannot register warehouse: ${msg}`,
+      };
+    }
+
+    this.logger.log(
+      `Ekart warehouse "${options.name}" validated (no external API — address sent per-shipment).`,
+    );
+
+    return {
+      success: true,
+      registeredName: options.name,
+      message: `Warehouse "${options.name}" registered with Ekart (address will be sent with each shipment).`,
+    };
   }
 }

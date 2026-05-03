@@ -80,6 +80,8 @@ export interface Product {
   warrantyInfo?: string;
   deliveredBy?: string;
   isReplaceable?: boolean;
+  isReturnable?: boolean;
+  isCancellable?: boolean;
   returnWindow?: number;
   /** GST % from API; consumer prices include this (see `priceInclusiveOfGst`). */
   gstRate?: number | null;

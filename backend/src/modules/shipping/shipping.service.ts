@@ -1110,6 +1110,307 @@ export class ShippingService {
     return this.serialisePickupLocation(fresh!);
   }
 
+  // ─── Multi-Courier Registration ───
+
+  /**
+   * Register a pickup location with ALL available couriers.
+   * Determines which couriers are configured (platform Xelgo + seller's own),
+   * loops through each and calls registerWarehouse, saving results per-courier.
+   */
+  async registerPickupLocationAllCouriers(
+    userId: string,
+    locationId: string,
+  ) {
+    const seller = await this.getSellerProfile(userId);
+    const location = await this.prisma.sellerPickupLocation.findFirst({
+      where: { id: locationId, sellerId: seller.id },
+      include: { seller: { select: { id: true, sellerCode: true, storeName: true } } },
+    });
+    if (!location) {
+      throw new NotFoundException('Pickup location not found');
+    }
+
+    const couriersToRegister = await this.getAvailableCouriersForSeller(seller.id);
+    const results: Array<{ provider: ShippingMode; success: boolean; message: string }> = [];
+
+    for (const { mode, config, displayName } of couriersToRegister) {
+      const result = await this.registerLocationWithCourier(location, mode, config);
+      results.push({ provider: mode, success: result.success, message: result.message });
+    }
+
+    return {
+      locationId,
+      results,
+      registrations: await this.getPickupLocationRegistrations(locationId),
+    };
+  }
+
+  /**
+   * Register a pickup location with a SPECIFIC courier.
+   */
+  async registerPickupLocationWithCourier(
+    userId: string,
+    locationId: string,
+    provider: ShippingMode,
+  ) {
+    const seller = await this.getSellerProfile(userId);
+    const location = await this.prisma.sellerPickupLocation.findFirst({
+      where: { id: locationId, sellerId: seller.id },
+      include: { seller: { select: { id: true, sellerCode: true, storeName: true } } },
+    });
+    if (!location) {
+      throw new NotFoundException('Pickup location not found');
+    }
+
+    const config = await this.resolveConfigForProvider(seller.id, provider);
+    if (!config) {
+      throw new BadRequestException(`No credentials configured for ${provider}. Add the courier in Shipping Settings first.`);
+    }
+
+    const result = await this.registerLocationWithCourier(location, provider, config);
+    if (!result.success) {
+      throw new BadRequestException(result.message);
+    }
+
+    return {
+      provider,
+      ...result,
+      registrations: await this.getPickupLocationRegistrations(locationId),
+    };
+  }
+
+  /**
+   * Unregister a pickup location from a specific courier (soft-deactivate).
+   */
+  async unregisterPickupLocationFromCourier(
+    userId: string,
+    locationId: string,
+    provider: ShippingMode,
+  ) {
+    const seller = await this.getSellerProfile(userId);
+    const location = await this.prisma.sellerPickupLocation.findFirst({
+      where: { id: locationId, sellerId: seller.id },
+      select: { id: true },
+    });
+    if (!location) {
+      throw new NotFoundException('Pickup location not found');
+    }
+
+    const existing = await this.prisma.sellerPickupLocationRegistration.findUnique({
+      where: { pickupLocationId_provider: { pickupLocationId: locationId, provider } },
+    });
+    if (!existing) {
+      throw new NotFoundException(`No registration found for ${provider}`);
+    }
+
+    await this.prisma.sellerPickupLocationRegistration.update({
+      where: { id: existing.id },
+      data: { isActive: false },
+    });
+
+    return {
+      provider,
+      message: `Unregistered from ${provider}`,
+      registrations: await this.getPickupLocationRegistrations(locationId),
+    };
+  }
+
+  /**
+   * Get all per-courier registration statuses for a pickup location.
+   */
+  async getPickupLocationRegistrations(locationId: string) {
+    const rows = await this.prisma.sellerPickupLocationRegistration.findMany({
+      where: { pickupLocationId: locationId },
+      orderBy: { provider: 'asc' },
+    });
+    return rows.map((r) => ({
+      id: r.id,
+      provider: r.provider,
+      warehouseName: r.warehouseName,
+      registered: Boolean(r.registeredAt && !r.registrationError),
+      registeredAt: r.registeredAt,
+      lastError: r.registrationError,
+      isActive: r.isActive,
+    }));
+  }
+
+  /**
+   * Fetch registrations for a location with ownership check.
+   */
+  async getPickupLocationRegistrationsForUser(userId: string, locationId: string) {
+    const seller = await this.getSellerProfile(userId);
+    const location = await this.prisma.sellerPickupLocation.findFirst({
+      where: { id: locationId, sellerId: seller.id },
+      select: { id: true },
+    });
+    if (!location) {
+      throw new NotFoundException('Pickup location not found');
+    }
+    return this.getPickupLocationRegistrations(locationId);
+  }
+
+  /**
+   * Determine which couriers are available for a seller (platform Xelgo + own configs).
+   */
+  private async getAvailableCouriersForSeller(sellerId: string): Promise<
+    Array<{ mode: ShippingMode; config: SellerCourierConfig; displayName: string }>
+  > {
+    const couriers: Array<{ mode: ShippingMode; config: SellerCourierConfig; displayName: string }> = [];
+
+    // Platform Xelgo backend (primary)
+    const resolved = await this.resolveXelgoBackend();
+    if (resolved.mode !== 'unconfigured') {
+      couriers.push({ mode: resolved.mode, config: resolved.config, displayName: resolved.displayName });
+    }
+
+    // Seller's own courier configs (additional couriers beyond Xelgo)
+    const sellerConfigs = await this.prisma.sellerCourierConfig.findMany({
+      where: { sellerId, isActive: true },
+    });
+    for (const cfg of sellerConfigs) {
+      const alreadyAdded = couriers.some((c) => c.mode === cfg.provider);
+      if (alreadyAdded) continue;
+      const decrypted = {
+        ...cfg,
+        apiKey: this.decrypt(cfg.apiKey),
+        apiSecret: cfg.apiSecret ? this.decrypt(cfg.apiSecret) : null,
+      };
+      const provider = this.providers.get(cfg.provider);
+      if (provider) {
+        couriers.push({ mode: cfg.provider, config: decrypted as SellerCourierConfig, displayName: provider.providerName });
+      }
+    }
+
+    return couriers;
+  }
+
+  /**
+   * Resolve credentials for a specific courier (platform or seller's own).
+   */
+  private async resolveConfigForProvider(
+    sellerId: string,
+    provider: ShippingMode,
+  ): Promise<SellerCourierConfig | null> {
+    // Check platform Xelgo backend first
+    const resolved = await this.resolveXelgoBackend();
+    if (resolved.mode !== 'unconfigured' && resolved.mode === provider) {
+      return resolved.config;
+    }
+
+    // Check seller's own config
+    const cfg = await this.prisma.sellerCourierConfig.findUnique({
+      where: { sellerId_provider: { sellerId, provider } },
+    });
+    if (!cfg || !cfg.isActive) return null;
+    return {
+      ...cfg,
+      apiKey: this.decrypt(cfg.apiKey),
+      apiSecret: cfg.apiSecret ? this.decrypt(cfg.apiSecret) : null,
+    } as SellerCourierConfig;
+  }
+
+  /**
+   * Core: register a single location with a single courier and persist the result.
+   */
+  private async registerLocationWithCourier(
+    location: {
+      id: string;
+      contactPerson: string | null;
+      phone: string;
+      email: string | null;
+      addressLine: string;
+      city: string;
+      state: string;
+      country: string;
+      pincode: string;
+      seller: { id: string; sellerCode?: string | null; storeName?: string | null };
+    },
+    mode: ShippingMode,
+    config: SellerCourierConfig,
+  ) {
+    const provider = this.providers.get(mode);
+    if (!provider?.registerWarehouse) {
+      const row = await this.prisma.sellerPickupLocationRegistration.upsert({
+        where: { pickupLocationId_provider: { pickupLocationId: location.id, provider: mode } },
+        create: {
+          pickupLocationId: location.id,
+          provider: mode,
+          warehouseName: config.warehouseId || null,
+          registeredAt: new Date(),
+          registrationError: null,
+          isActive: true,
+          snapshotHash: null,
+        },
+        update: {
+          warehouseName: config.warehouseId || null,
+          registeredAt: new Date(),
+          registrationError: null,
+          isActive: true,
+        },
+      });
+      return {
+        success: true,
+        warehouseName: row.warehouseName,
+        message: `${mode} does not support per-seller warehouse API — using platform warehouse.`,
+      };
+    }
+
+    const phone = (location.phone || '').replace(/(?!^\+)\D/g, '');
+    const warehouseName = this.buildLocationWarehouseName(
+      location.seller,
+      { id: location.id, isDefault: false, xelgoWarehouseName: null },
+    );
+
+    const opts: RegisterWarehouseOptions = {
+      name: warehouseName,
+      registeredName: location.contactPerson?.trim() || location.seller.storeName?.trim() || warehouseName,
+      contactPerson: location.contactPerson?.trim() || location.seller.storeName?.trim() || warehouseName,
+      email: location.email?.trim() || '',
+      phone,
+      address: location.addressLine.trim(),
+      city: location.city.trim(),
+      state: location.state.trim(),
+      country: location.country || 'India',
+      pincode: location.pincode.trim(),
+    };
+
+    const result = await provider.registerWarehouse(config, opts);
+    const finalName = result.registeredName || warehouseName;
+    const snapshotHash = this.buildLocationSnapshotHash({
+      addressLine: location.addressLine,
+      city: location.city,
+      state: location.state,
+      pincode: location.pincode,
+      phone,
+    });
+
+    await this.prisma.sellerPickupLocationRegistration.upsert({
+      where: { pickupLocationId_provider: { pickupLocationId: location.id, provider: mode } },
+      create: {
+        pickupLocationId: location.id,
+        provider: mode,
+        warehouseName: result.success ? finalName : null,
+        registeredAt: result.success ? new Date() : null,
+        registrationError: result.success ? null : result.message,
+        snapshotHash: result.success ? snapshotHash : null,
+        isActive: true,
+      },
+      update: {
+        warehouseName: result.success ? finalName : undefined,
+        registeredAt: result.success ? new Date() : undefined,
+        registrationError: result.success ? null : result.message,
+        snapshotHash: result.success ? snapshotHash : undefined,
+        isActive: true,
+      },
+    });
+
+    return {
+      success: result.success,
+      warehouseName: result.success ? finalName : null,
+      message: result.message,
+    };
+  }
+
   /**
    * Resolve which pickup location a shipment booking should use:
    *   • If `requestedLocationId` is provided, validate it belongs to the

@@ -505,6 +505,57 @@ interface VariantGroup {
   options?: VariantOption[];
 }
 
+/**
+ * Pick the best image URL to represent the product visually.
+ *
+ * Some sellers attach all photos to variants instead of the top-level
+ * `images` array (e.g. a colour-only listing where every option has its
+ * own gallery). When we look up a thumbnail we therefore fall back to
+ * the first variant option image so the row/preview never renders a
+ * blank tile while the listing has photos available.
+ */
+function pickProductThumbnail(p: { images?: string[] | null; variants?: unknown }): string | null {
+  if (Array.isArray(p.images) && p.images.length > 0 && typeof p.images[0] === 'string') {
+    return p.images[0] as string;
+  }
+  const variants = (p.variants ?? []) as VariantGroup[];
+  if (!Array.isArray(variants)) return null;
+  for (const group of variants) {
+    for (const opt of group?.options ?? []) {
+      const url = opt?.images?.[0];
+      if (typeof url === 'string' && url) return url;
+    }
+  }
+  return null;
+}
+
+/**
+ * Combined gallery for the admin preview modal — top-level product
+ * images first, followed by every variant option image (deduped). This
+ * means admins can still review the photos of a listing whose images
+ * live solely on the variants.
+ */
+function collectProductGallery(p: { images?: string[] | null; variants?: unknown }): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const add = (url: unknown) => {
+    if (typeof url !== 'string' || !url) return;
+    if (seen.has(url)) return;
+    seen.add(url);
+    out.push(url);
+  };
+  for (const u of p.images ?? []) add(u);
+  const variants = (p.variants ?? []) as VariantGroup[];
+  if (Array.isArray(variants)) {
+    for (const group of variants) {
+      for (const opt of group?.options ?? []) {
+        for (const u of opt?.images ?? []) add(u);
+      }
+    }
+  }
+  return out;
+}
+
 function PendingChangesDisplay({
   changes,
   currentProduct,
@@ -988,25 +1039,28 @@ export default function ProductsPage() {
       key: 'name',
       header: 'Product',
       className: 'min-w-[280px] max-w-[320px]',
-      render: (r) => (
-        <div className="flex items-center gap-3">
-          <div className="h-11 w-11 rounded-lg bg-surface-muted overflow-hidden shrink-0 border border-border">
-            {r.images?.[0] ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={r.images[0]} alt="" className="h-full w-full object-cover" />
-            ) : (
-              <div className="h-full w-full flex items-center justify-center text-text-muted">
-                <Clock size={16} />
-              </div>
-            )}
+      render: (r) => {
+        const thumb = pickProductThumbnail(r);
+        return (
+          <div className="flex items-center gap-3">
+            <div className="h-11 w-11 rounded-lg bg-surface-muted overflow-hidden shrink-0 border border-border">
+              {thumb ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={thumb} alt="" className="h-full w-full object-cover" />
+              ) : (
+                <div className="h-full w-full flex items-center justify-center text-text-muted">
+                  <Clock size={16} />
+                </div>
+              )}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="font-medium text-text-primary line-clamp-2 leading-tight" title={r.name}>
+                {r.name}
+              </p>
+            </div>
           </div>
-          <div className="min-w-0 flex-1">
-            <p className="font-medium text-text-primary line-clamp-2 leading-tight" title={r.name}>
-              {r.name}
-            </p>
-          </div>
-        </div>
-      ),
+        );
+      },
     },
     {
       key: 'category',
@@ -1408,39 +1462,61 @@ export default function ProductsPage() {
               </div>
             )}
 
-            {viewing.images && viewing.images.length > 0 ? (
-              <div className="space-y-2">
-                <p className="text-xs font-semibold text-text-primary">Images ({viewing.images.length})</p>
-                <div className="rounded-xl border border-border bg-surface-muted/20 overflow-hidden">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={viewing.images[viewImageIdx]}
-                    alt=""
-                    className="w-full max-h-[min(360px,50vh)] object-contain bg-black/5"
-                  />
+            {(() => {
+              const gallery = collectProductGallery(viewing);
+              const hasTopLevel = (viewing.images?.length ?? 0) > 0;
+              const variantOnly = !hasTopLevel && gallery.length > 0;
+              if (gallery.length === 0) {
+                return (
+                  <p className="text-sm text-warning-600 bg-warning-50 border border-warning-200 rounded-lg px-3 py-2">
+                    No images uploaded for this product.
+                  </p>
+                );
+              }
+              const safeIdx = Math.min(viewImageIdx, gallery.length - 1);
+              return (
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-xs font-semibold text-text-primary">
+                      Images ({gallery.length})
+                    </p>
+                    {variantOnly && (
+                      <Badge variant="default">From variants</Badge>
+                    )}
+                  </div>
+                  {variantOnly && (
+                    <p className="text-[11px] text-text-muted -mt-1">
+                      This listing has no top-level photos — the gallery below is pulled from the variant
+                      options so you can still review the visuals.
+                    </p>
+                  )}
+                  <div className="rounded-xl border border-border bg-surface-muted/20 overflow-hidden">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={gallery[safeIdx]}
+                      alt=""
+                      className="w-full max-h-[min(360px,50vh)] object-contain bg-black/5"
+                    />
+                  </div>
+                  <div className="flex gap-2 flex-wrap">
+                    {gallery.map((url, i) => (
+                      <button
+                        key={`${url}-${i}`}
+                        type="button"
+                        onClick={() => setViewImageIdx(i)}
+                        className={`h-16 w-16 rounded-lg border-2 overflow-hidden shrink-0 transition-colors ${
+                          i === safeIdx ? 'border-primary-500 ring-2 ring-primary-200' : 'border-border hover:border-primary-300'
+                        }`}
+                        title={`Image ${i + 1}`}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={url} alt="" className="h-full w-full object-cover" />
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <div className="flex gap-2 flex-wrap">
-                  {viewing.images.map((url, i) => (
-                    <button
-                      key={`${url}-${i}`}
-                      type="button"
-                      onClick={() => setViewImageIdx(i)}
-                      className={`h-16 w-16 rounded-lg border-2 overflow-hidden shrink-0 transition-colors ${
-                        i === viewImageIdx ? 'border-primary-500 ring-2 ring-primary-200' : 'border-border hover:border-primary-300'
-                      }`}
-                      title={`Image ${i + 1}`}
-                    >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={url} alt="" className="h-full w-full object-cover" />
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <p className="text-sm text-warning-600 bg-warning-50 border border-warning-200 rounded-lg px-3 py-2">
-                No images uploaded for this product.
-              </p>
-            )}
+              );
+            })()}
 
             {/* Image-only rejection: ask the seller to redo just the photos
                 without changing listing status. Only relevant during review/pending status. */}

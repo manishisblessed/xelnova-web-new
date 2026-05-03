@@ -14,7 +14,7 @@ interface DimensionSlab { upToCm3: number; rate: number }
 interface Settings {
   general: { siteName: string; tagline: string; currency: string; timezone: string; language: string };
   tax: { gstEnabled: boolean; gstRate: number; hsnDefault: string };
-  shipping: { freeShippingMin: number; defaultRate: number; expressRate: number; codEnabled: boolean; codFee: number };
+  shipping: { freeShippingMin: number; defaultRate: number; expressRate: number; codEnabled: boolean; codFee: number; defaultDeliveryDays: number };
   payment: { razorpayEnabled: boolean; codEnabled: boolean; upiEnabled: boolean; cardEnabled: boolean; netBankingEnabled: boolean };
   notifications: { orderConfirmation: boolean; shipmentUpdate: boolean; promotionalEmails: boolean; smsAlerts: boolean; adminNewOrder: boolean };
   shippingLabel: { companyName: string; companyLogo: string; companyAddress: string; companyPhone: string; companyGstin: string; tagline: string; footerText: string; showSellerSignature: boolean; showBarcode: boolean };
@@ -197,6 +197,18 @@ export default function SettingsPage() {
             <FormField label="Express Rate (₹)"><FormInput type="number" value={data.shipping.expressRate} onChange={e => setData(d => d ? { ...d, shipping: { ...d.shipping, expressRate: +e.target.value } } : null)} /></FormField>
             <FormToggle label="Enable COD" checked={data.shipping.codEnabled} onChange={v => setData(d => d ? { ...d, shipping: { ...d.shipping, codEnabled: v } } : null)} />
             <FormField label="COD Fee (₹)"><FormInput type="number" value={data.shipping.codFee} onChange={e => setData(d => d ? { ...d, shipping: { ...d.shipping, codFee: +e.target.value } } : null)} /></FormField>
+            <FormField label="Default delivery days (shown on product pages)">
+              <FormInput
+                type="number"
+                min={1}
+                max={30}
+                value={data.shipping.defaultDeliveryDays ?? 5}
+                onChange={e => setData(d => d ? { ...d, shipping: { ...d.shipping, defaultDeliveryDays: +e.target.value } } : null)}
+              />
+              <p className="text-[10px] text-text-muted mt-1">
+                Used to compute the &ldquo;FREE Delivery by &lt;date&gt;&rdquo; line on the product detail page when the seller hasn&rsquo;t set a per-product lead time.
+              </p>
+            </FormField>
           </div>
         </SettingsSection>
 

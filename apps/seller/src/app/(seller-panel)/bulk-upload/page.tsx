@@ -1,10 +1,20 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Upload, Download, FileSpreadsheet, CheckCircle, XCircle, AlertTriangle, Info } from 'lucide-react';
+import { Upload, Download, FileSpreadsheet, CheckCircle, XCircle, AlertTriangle, Info, Image as ImageIcon, Copy, Check } from 'lucide-react';
 import { DashboardHeader } from '@/components/dashboard/dashboard-header';
 import { apiBulkUploadProducts } from '@/lib/api';
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL?.trim().replace(/\/$/, '') || '/api/v1';
+
+type CategoryNode = {
+  id: string;
+  slug: string;
+  name: string;
+  parentId?: string | null;
+  children?: CategoryNode[];
+};
 
 const TEMPLATE_HEADERS = [
   'name', 'price', 'categoryId', 'shortDescription', 'description',
@@ -18,13 +28,13 @@ const TEMPLATE_HEADERS = [
 const FIELD_DESCRIPTIONS: Record<string, string> = {
   name: 'Product name (required)',
   price: 'Selling price in INR, inclusive of GST (required)',
-  categoryId: 'Category ID (required)',
+  categoryId: 'Category — exact category name, slug, or ID (required)',
   shortDescription: 'Brief product summary',
   description: 'Full product description',
   compareAtPrice: 'MRP / compare-at price in INR, inclusive of GST',
-  brand: 'Brand name',
+  brand: 'Brand name (must already exist & be approved)',
   stock: 'Available stock quantity',
-  images: 'Image URLs separated by |',
+  images: 'Public image URLs separated by | — upload to a host first (e.g. Cloudinary)',
   highlights: 'Key features separated by |',
   tags: 'Search tags separated by |',
   metaTitle: 'SEO title',
@@ -71,13 +81,56 @@ type UploadResult = {
   results: { row: number; status: 'ok' | 'error'; message?: string; productId?: string; sku?: string }[];
 };
 
+function flattenCategories(nodes: CategoryNode[], prefix = ''): { id: string; slug: string; label: string; name: string }[] {
+  const out: { id: string; slug: string; label: string; name: string }[] = [];
+  for (const n of nodes) {
+    const label = prefix ? `${prefix} › ${n.name}` : n.name;
+    out.push({ id: n.id, slug: n.slug, name: n.name, label });
+    if (n.children?.length) out.push(...flattenCategories(n.children, label));
+  }
+  return out;
+}
+
 export default function BulkUploadPage() {
   const [rows, setRows] = useState<Record<string, string>[]>([]);
   const [uploading, setUploading] = useState(false);
   const [result, setResult] = useState<UploadResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showFields, setShowFields] = useState(false);
+  const [showCategories, setShowCategories] = useState(false);
+  const [categories, setCategories] = useState<{ id: string; slug: string; label: string; name: string }[]>([]);
+  const [categorySearch, setCategorySearch] = useState('');
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    fetch(`${API_URL}/categories`)
+      .then((r) => r.json())
+      .then((res) => {
+        const tree: CategoryNode[] = res.data ?? res ?? [];
+        setCategories(flattenCategories(tree));
+      })
+      .catch(() => {
+        // soft-fail — sellers can still upload using IDs/names they already know
+      });
+  }, []);
+
+  const copyToClipboard = async (text: string, key: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedKey(key);
+      setTimeout(() => setCopiedKey((k) => (k === key ? null : k)), 1500);
+    } catch {
+      // ignore — older browsers without clipboard permission
+    }
+  };
+
+  const filteredCategories = categorySearch.trim()
+    ? categories.filter((c) =>
+        c.label.toLowerCase().includes(categorySearch.trim().toLowerCase()) ||
+        c.slug.includes(categorySearch.trim().toLowerCase()),
+      )
+    : categories;
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -113,11 +166,13 @@ export default function BulkUploadPage() {
   };
 
   const downloadTemplate = () => {
+    const sampleCategoryName = categories[0]?.name || 'Electronics';
     const csv = TEMPLATE_HEADERS.join(',') + '\n' +
       [
-        'Example Product', '199.99', 'CATEGORY_ID_HERE', 'Short desc', 'Full description',
+        'Example Product', '199.99', sampleCategoryName, 'Short desc', '"Full, detailed description"',
         '299.99', 'BrandName', '100',
-        'https://img1.jpg|https://img2.jpg', 'Feature 1|Feature 2', 'tag1|tag2',
+        'https://res.cloudinary.com/xelnova/image/upload/sample1.jpg|https://res.cloudinary.com/xelnova/image/upload/sample2.jpg',
+        'Feature 1|Feature 2', 'tag1|tag2',
         'SEO Title', 'SEO Description', '1234', '18', '5',
         '0.5', '30x20x15',
         'Detailed product description here', '1 Year Manufacturer Warranty', '', '',
@@ -143,11 +198,87 @@ export default function BulkUploadPage() {
             <Download size={16} />
             Download Template
           </button>
+          <button onClick={() => setShowCategories((s) => !s)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-gray-200 text-sm font-medium hover:bg-gray-50 transition-colors">
+            <Info size={16} />
+            {showCategories ? 'Hide' : 'Show'} Category List
+          </button>
           <button onClick={() => setShowFields(!showFields)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-gray-200 text-sm font-medium hover:bg-gray-50 transition-colors">
             <Info size={16} />
             {showFields ? 'Hide' : 'Show'} Field Guide
           </button>
         </div>
+
+        <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 mb-6 flex gap-3">
+          <ImageIcon size={18} className="text-blue-600 shrink-0 mt-0.5" />
+          <div className="text-xs text-blue-900 leading-relaxed">
+            <p className="font-semibold mb-1">How to add product images via CSV</p>
+            <p>
+              CSV files cannot contain image data — only links. Upload your photos to a public host first
+              (e.g. Cloudinary, S3, Imgur, Google Drive with public-share link), then paste the resulting
+              URLs into the <code className="bg-blue-100 px-1 rounded">images</code> column separated by{' '}
+              <code className="bg-blue-100 px-1 rounded">|</code>. Example:
+            </p>
+            <code className="mt-1 block whitespace-pre-wrap text-[11px] bg-blue-100/60 border border-blue-200 rounded px-2 py-1 text-blue-800 break-all">
+              https://res.cloudinary.com/.../front.jpg|https://res.cloudinary.com/.../back.jpg
+            </code>
+            <p className="mt-1.5 text-blue-800">
+              The first URL becomes the listing thumbnail. Each URL must be publicly accessible (test it in
+              an incognito window).
+            </p>
+          </div>
+        </div>
+
+        {showCategories && (
+          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="bg-white rounded-2xl border border-gray-200 p-5 mb-6 overflow-hidden">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-800">Available categories</h3>
+                <p className="text-xs text-gray-500">Use the <strong>Name</strong> or <strong>Slug</strong> in your CSV — both work in the <code>categoryId</code> column.</p>
+              </div>
+              <input
+                type="text"
+                value={categorySearch}
+                onChange={(e) => setCategorySearch(e.target.value)}
+                placeholder="Search categories…"
+                className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs focus:outline-none focus:ring-2 focus:ring-violet-200 min-w-[180px]"
+              />
+            </div>
+            {filteredCategories.length === 0 ? (
+              <p className="text-xs text-gray-500 italic">
+                {categories.length === 0 ? 'Loading categories…' : 'No matches.'}
+              </p>
+            ) : (
+              <div className="max-h-72 overflow-auto border rounded-lg">
+                <table className="w-full text-xs">
+                  <thead className="bg-gray-50 sticky top-0">
+                    <tr className="text-left">
+                      <th className="px-3 py-2 font-medium text-gray-600">Name (use this in CSV)</th>
+                      <th className="px-3 py-2 font-medium text-gray-600">Slug</th>
+                      <th className="px-3 py-2 font-medium text-gray-600 w-16">Copy</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredCategories.map((c) => (
+                      <tr key={c.id} className="border-t hover:bg-gray-50">
+                        <td className="px-3 py-1.5 text-gray-800">{c.label}</td>
+                        <td className="px-3 py-1.5 font-mono text-violet-600">{c.slug}</td>
+                        <td className="px-3 py-1.5">
+                          <button
+                            onClick={() => copyToClipboard(c.name, c.id)}
+                            className="inline-flex items-center gap-1 text-violet-600 hover:bg-violet-50 px-1.5 py-0.5 rounded transition-colors"
+                            title="Copy name"
+                          >
+                            {copiedKey === c.id ? <Check size={12} /> : <Copy size={12} />}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </motion.div>
+        )}
 
         {showFields && (
           <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="bg-white rounded-2xl border border-gray-200 p-5 mb-6 overflow-hidden">
@@ -161,7 +292,7 @@ export default function BulkUploadPage() {
               ))}
             </div>
             <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
-              <strong>Notes:</strong> Only <code>name</code>, <code>price</code>, and <code>categoryId</code> are required. <strong>price</strong> and <strong>compareAtPrice</strong> are the amounts customers see — they are stored exactly as entered (no conversion). <code>gstRate</code> is recorded per product for invoice/tax reporting only and does not change the displayed price. SKU is auto-generated for every product. Use pipe (<code>|</code>) for multi-value fields. JSON fields use <code>{`{"key":"value"}`}</code> format. Return/cancellation policy is not per-row — it is configured by admin for the whole marketplace.
+              <strong>Notes:</strong> Only <code>name</code>, <code>price</code>, and <code>categoryId</code> are required. The <code>categoryId</code> column accepts the category <strong>name</strong>, <strong>slug</strong>, or internal ID — use the <em>Show Category List</em> button above to copy one. <strong>price</strong> and <strong>compareAtPrice</strong> are the amounts customers see — they are stored exactly as entered (no conversion). <code>gstRate</code> is recorded per product for invoice/tax reporting only and does not change the displayed price. SKU is auto-generated for every product. Use pipe (<code>|</code>) for multi-value fields. JSON fields use <code>{`{"key":"value"}`}</code> format. Return/cancellation policy is not per-row — it is configured by admin for the whole marketplace.
             </div>
           </motion.div>
         )}

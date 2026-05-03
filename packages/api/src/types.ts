@@ -108,6 +108,8 @@ export interface Product {
   warrantyInfo?: string | null;
   deliveredBy?: string | null;
   isReplaceable?: boolean;
+  isReturnable?: boolean;
+  isCancellable?: boolean;
   returnWindow?: number;
 }
 

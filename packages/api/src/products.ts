@@ -86,3 +86,20 @@ export async function getTopReviews(): Promise<TopReview[]> {
   const { data } = await api.get<ApiResponse<TopReview[]>>('/products/reviews/top');
   return data.data;
 }
+
+export interface MarketplacePolicy {
+  defaultDeliveryDays: number;
+  freeShippingMin: number;
+  returnPolicy: {
+    isCancellable: boolean;
+    isReturnable: boolean;
+    isReplaceable: boolean;
+    returnWindow: number;
+    cancellationWindow: number;
+  };
+}
+
+export async function getMarketplacePolicy(): Promise<MarketplacePolicy> {
+  const { data } = await api.get<ApiResponse<MarketplacePolicy>>('/products/marketplace-policy');
+  return data.data;
+}

@@ -5,7 +5,7 @@ import { AdminListPage } from '@/components/dashboard/admin-list-page';
 import { ActionModal } from '@/components/dashboard/action-modal';
 import { ConfirmDialog } from '@/components/dashboard/confirm-dialog';
 import { FormField, FormInput, FormSelect, FormTextarea } from '@/components/dashboard/form-field';
-import { Pencil, Trash2 } from 'lucide-react';
+import { Pencil, Trash2, FolderTree } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Column } from '@/components/dashboard/data-table';
 import { apiCreate, apiUpdate, apiDelete, apiGet } from '@/lib/api';
@@ -19,7 +19,7 @@ export interface Category {
   image: string | null;
   parentId: string | null;
   children?: Category[];
-  _count: { products: number };
+  _count?: { products: number };
 }
 
 type CategoryRow = Category & { parentDisplay: string };
@@ -140,7 +140,7 @@ export default function CategoriesPage() {
           name,
           ...(description ? { description } : { description: '' }),
           ...(image ? { image } : { image: '' }),
-          ...(form.parentId ? { parentId: form.parentId } : {}),
+          parentId: form.parentId || '',
         });
         toast.success('Category updated');
       } else {
@@ -207,7 +207,7 @@ export default function CategoriesPage() {
     {
       key: '_count',
       header: 'Products',
-      render: (r) => <span>{r._count?.products ?? 0}</span>,
+      render: (r) => <span className="font-medium">{r._count?.products ?? 0}</span>,
     },
   ];
 
@@ -252,55 +252,54 @@ export default function CategoriesPage() {
         onSubmit={handleSave}
         loading={saving}
       >
-        {!editing && (
-          <div className="mb-4 rounded-lg bg-primary-50 border border-primary-200 p-3">
-            <h4 className="text-sm font-semibold text-primary-900 mb-1">
-              Creating Hierarchical Categories
-            </h4>
-            <p className="text-xs text-primary-700 leading-relaxed">
-              <strong>Root Category:</strong> Leave parent empty (e.g., &quot;Electronics&quot;)<br />
-              <strong>Subcategory:</strong> Select a parent (e.g., &quot;Mobile Phones&quot; under &quot;Electronics&quot;)<br />
-              <strong>Sub-subcategory:</strong> Select a subcategory as parent (e.g., &quot;Accessories&quot; under &quot;Mobile Phones&quot;)<br />
-              <span className="text-primary-600 mt-1 inline-block">Example: Electronics › Mobile Phones › Accessories</span>
-            </p>
-          </div>
-        )}
-        <FormField label="Name">
-          <FormInput
-            value={form.name}
-            onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-          />
-        </FormField>
-        {editing && (
-          <FormField label="Slug">
-            <FormInput value={editing.slug} readOnly className="bg-surface-muted" />
+        <div className="space-y-4">
+          <FormField label="Parent (optional)">
+            <CategorySelector
+              categories={parentOptions}
+              value={form.parentId}
+              onChange={(id) => setForm((f) => ({ ...f, parentId: id }))}
+              placeholder="None — this will be a root category"
+              allowParentSelection
+            />
           </FormField>
-        )}
-        <FormField label="Description">
-          <FormTextarea
-            value={form.description}
-            onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-          />
-        </FormField>
-        <FormField label="Image URL">
-          <FormInput
-            value={form.image}
-            onChange={(e) => setForm((f) => ({ ...f, image: e.target.value }))}
-            placeholder="https://..."
-          />
-        </FormField>
-        <FormField label="Parent Category">
-          <CategorySelector
-            categories={parentOptions}
-            value={form.parentId}
-            onChange={(id) => setForm((f) => ({ ...f, parentId: id }))}
-            placeholder="None (root category)"
-            allowParentSelection
-          />
-          <p className="mt-1.5 text-xs text-text-muted">
-            Leave empty to create a root category, or select a parent to create a subcategory.
-          </p>
-        </FormField>
+
+          {form.parentId && (
+            <div className="rounded-lg bg-primary-50 border border-primary-100 px-3 py-2 flex items-center gap-2">
+              <FolderTree size={14} className="text-primary-600 shrink-0" />
+              <p className="text-xs text-primary-700">
+                This will be created as a <strong>subcategory</strong> under the selected parent.
+              </p>
+            </div>
+          )}
+
+          <FormField label="Name *">
+            <FormInput
+              value={form.name}
+              onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+              placeholder={form.parentId ? 'e.g., Mobile Phones, Accessories' : 'e.g., Electronics, Fashion, Books'}
+            />
+            {form.name.trim() && (
+              <p className="mt-1 text-xs text-text-muted">
+                URL: <span className="font-mono text-primary-600">/category/{form.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')}</span>
+              </p>
+            )}
+          </FormField>
+
+          {editing && (
+            <FormField label="Slug">
+              <FormInput value={editing.slug} readOnly className="bg-surface-muted font-mono text-xs" />
+            </FormField>
+          )}
+
+          <FormField label="Description (optional)">
+            <FormTextarea
+              value={form.description}
+              onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+              placeholder="What products will customers find in this category?"
+              rows={2}
+            />
+          </FormField>
+        </div>
       </ActionModal>
       <ConfirmDialog
         open={deleteOpen}

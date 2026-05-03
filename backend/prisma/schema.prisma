@@ -1153,7 +1153,8 @@ model SellerPickupLocation {
   /// re-register transparently so Delhivery always has fresh details.
   xelgoWarehouseSnapshotHash      String?
 
-  shipments Shipment[]
+  shipments     Shipment[]
+  registrations SellerPickupLocationRegistration[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1161,6 +1162,27 @@ model SellerPickupLocation {
   @@index([sellerId])
   @@index([sellerId, isDefault])
   @@map("seller_pickup_locations")
+}
+
+// ─── Per-Courier Pickup Registration ───
+
+model SellerPickupLocationRegistration {
+  id               String               @id @default(cuid())
+  pickupLocationId String
+  pickupLocation   SellerPickupLocation @relation(fields: [pickupLocationId], references: [id], onDelete: Cascade)
+  provider         ShippingMode
+  warehouseName    String?
+  registeredAt     DateTime?
+  registrationError String?
+  snapshotHash     String?
+  isActive         Boolean              @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([pickupLocationId, provider])
+  @@index([pickupLocationId])
+  @@map("seller_pickup_location_registrations")
 }
 
 // ─── Seller Courier Config ───

@@ -312,6 +312,56 @@ export class ShippingController {
     );
   }
 
+  @Post('pickup-locations/:id/register-all')
+  @ApiOperation({ summary: 'Register a pickup location with ALL available couriers.' })
+  async registerPickupLocationAllCouriers(
+    @CurrentUser('id') userId: string,
+    @Param('id') id: string,
+  ) {
+    return successResponse(
+      await this.service.registerPickupLocationAllCouriers(userId, id),
+      'Pickup location registered with all available couriers',
+    );
+  }
+
+  @Post('pickup-locations/:id/register/:provider')
+  @ApiOperation({ summary: 'Register a pickup location with a specific courier.' })
+  async registerPickupLocationWithCourier(
+    @CurrentUser('id') userId: string,
+    @Param('id') id: string,
+    @Param('provider') provider: ShippingMode,
+  ) {
+    return successResponse(
+      await this.service.registerPickupLocationWithCourier(userId, id, provider),
+      `Pickup location registered with ${provider}`,
+    );
+  }
+
+  @Delete('pickup-locations/:id/register/:provider')
+  @ApiOperation({ summary: 'Unregister a pickup location from a specific courier.' })
+  async unregisterPickupLocationFromCourier(
+    @CurrentUser('id') userId: string,
+    @Param('id') id: string,
+    @Param('provider') provider: ShippingMode,
+  ) {
+    return successResponse(
+      await this.service.unregisterPickupLocationFromCourier(userId, id, provider),
+      `Pickup location unregistered from ${provider}`,
+    );
+  }
+
+  @Get('pickup-locations/:id/registrations')
+  @ApiOperation({ summary: 'Get per-courier registration statuses for a pickup location.' })
+  async getPickupLocationRegistrations(
+    @CurrentUser('id') userId: string,
+    @Param('id') id: string,
+  ) {
+    return successResponse(
+      await this.service.getPickupLocationRegistrationsForUser(userId, id),
+      'Pickup location registrations fetched',
+    );
+  }
+
   @Post('orders/:id/shipment/schedule-pickup')
   @ApiOperation({ summary: 'Schedule a carrier pickup for the shipment' })
   async schedulePickup(

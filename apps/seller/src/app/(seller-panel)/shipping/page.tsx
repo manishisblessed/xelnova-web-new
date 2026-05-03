@@ -21,9 +21,14 @@ import {
   apiDeletePickupLocation,
   apiSetDefaultPickupLocation,
   apiRegisterPickupLocation,
+  apiGetPickupLocationRegistrations,
+  apiRegisterPickupLocationAllCouriers,
+  apiRegisterPickupLocationWithCourier,
+  apiUnregisterPickupLocationFromCourier,
   type ShippingRates,
   type SellerPickupLocation,
   type CreatePickupLocationPayload,
+  type PickupLocationRegistration,
 } from '@/lib/api';
 
 interface CourierConfig {
@@ -235,18 +240,44 @@ export default function ShippingSettingsPage() {
     null,
   );
   const [locationActionId, setLocationActionId] = useState<string | null>(null);
+  const [courierRegs, setCourierRegs] = useState<Record<string, PickupLocationRegistration[]>>({});
+  const [courierRegLoading, setCourierRegLoading] = useState<string | null>(null);
+
+  const loadCourierRegistrations = useCallback(async (locationId: string) => {
+    try {
+      const data = await apiGetPickupLocationRegistrations(locationId);
+      setCourierRegs((prev) => ({ ...prev, [locationId]: Array.isArray(data) ? data : [] }));
+    } catch {
+      // silently fail — registrations are supplementary info
+    }
+  }, []);
+
+  const loadAllCourierRegistrations = useCallback(async (locs: SellerPickupLocation[]) => {
+    const results: Record<string, PickupLocationRegistration[]> = {};
+    await Promise.allSettled(
+      locs.map(async (loc) => {
+        try {
+          const data = await apiGetPickupLocationRegistrations(loc.id);
+          results[loc.id] = Array.isArray(data) ? data : [];
+        } catch { /* ignore */ }
+      }),
+    );
+    setCourierRegs((prev) => ({ ...prev, ...results }));
+  }, []);
 
   const loadLocations = useCallback(async () => {
     setLocationsLoading(true);
     try {
       const data = await apiListPickupLocations();
-      setLocations(Array.isArray(data) ? data : []);
+      const locs = Array.isArray(data) ? data : [];
+      setLocations(locs);
+      loadAllCourierRegistrations(locs);
     } catch (err) {
       console.warn('Failed to load pickup locations', err);
     } finally {
       setLocationsLoading(false);
     }
-  }, []);
+  }, [loadAllCourierRegistrations]);
 
   const handleSetDefaultLocation = async (location: SellerPickupLocation) => {
     if (location.isDefault) return;
@@ -265,17 +296,50 @@ export default function ShippingSettingsPage() {
   const handleReregisterLocation = async (location: SellerPickupLocation) => {
     setLocationActionId(location.id);
     try {
-      const updated = await apiRegisterPickupLocation(location.id);
-      toast.success(
-        updated.lastError
-          ? `Carrier rejected: ${updated.lastError}`
-          : `Pickup location "${updated.label}" registered.`,
-      );
+      const result = await apiRegisterPickupLocationAllCouriers(location.id);
+      const failed = result.results.filter((r) => !r.success);
+      if (failed.length === 0) {
+        toast.success(`"${location.label}" registered with all couriers.`);
+      } else if (failed.length < result.results.length) {
+        toast.success(
+          `"${location.label}" registered with ${result.results.length - failed.length} courier(s). ${failed.length} failed.`,
+        );
+      } else {
+        toast.error(`Registration failed for all couriers.`);
+      }
+      setCourierRegs((prev) => ({ ...prev, [location.id]: result.registrations }));
       await loadLocations();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to register location');
     } finally {
       setLocationActionId(null);
+    }
+  };
+
+  const handleToggleCourierRegistration = async (
+    locationId: string,
+    provider: string,
+    currentlyActive: boolean,
+  ) => {
+    setCourierRegLoading(`${locationId}-${provider}`);
+    try {
+      if (currentlyActive) {
+        const result = await apiUnregisterPickupLocationFromCourier(locationId, provider);
+        toast.success(result.message);
+        setCourierRegs((prev) => ({ ...prev, [locationId]: result.registrations }));
+      } else {
+        const result = await apiRegisterPickupLocationWithCourier(locationId, provider);
+        if (result.success) {
+          toast.success(`Registered with ${provider}`);
+        } else {
+          toast.error(result.message);
+        }
+        setCourierRegs((prev) => ({ ...prev, [locationId]: result.registrations }));
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : `Failed to update ${provider}`);
+    } finally {
+      setCourierRegLoading(null);
     }
   };
 
@@ -463,6 +527,9 @@ export default function ShippingSettingsPage() {
             <div className="space-y-3">
               {locations.map((loc) => {
                 const busy = locationActionId === loc.id;
+                const regs = courierRegs[loc.id] || [];
+                const activeRegs = regs.filter((r) => r.registered && r.isActive);
+                const failedRegs = regs.filter((r) => !r.registered && r.lastError);
                 return (
                   <div
                     key={loc.id}
@@ -481,54 +548,85 @@ export default function ShippingSettingsPage() {
                               <Star size={9} className="mr-0.5 fill-current" /> Default
                             </Badge>
                           )}
-                          {loc.registered && !loc.addressDriftedSinceRegistration && (
-                            <Badge variant="success" className="text-[10px] px-1.5 py-0">
-                              <CheckCircle2 size={9} className="mr-0.5" /> Registered
-                            </Badge>
-                          )}
-                          {loc.registered && loc.addressDriftedSinceRegistration && (
-                            <Badge variant="warning" className="text-[10px] px-1.5 py-0">
-                              Address changed
-                            </Badge>
-                          )}
-                          {!loc.registered && loc.lastError && (
-                            <Badge variant="warning" className="text-[10px] px-1.5 py-0">
-                              Not registered
-                            </Badge>
-                          )}
                         </div>
                         <p className="text-xs text-text-muted mt-1 leading-relaxed">
                           {loc.addressLine}, {loc.city}, {loc.state} – {loc.pincode}
                           {loc.phone && <span className="ml-1">· 📞 {loc.phone}</span>}
                         </p>
-                        {loc.warehouseName && (
-                          <p className="text-[11px] text-text-muted mt-1">
-                            Warehouse name: <span className="font-mono">{loc.warehouseName}</span>
-                            {loc.registeredAt && (
-                              <span className="ml-1">
-                                · Registered{' '}
-                                {new Date(loc.registeredAt).toLocaleDateString('en-IN', {
-                                  day: 'numeric',
-                                  month: 'short',
-                                  year: 'numeric',
-                                })}
-                              </span>
-                            )}
+
+                        {/* Per-courier registration status */}
+                        {regs.length > 0 && (
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {regs.map((reg) => {
+                              const isToggling = courierRegLoading === `${loc.id}-${reg.provider}`;
+                              return (
+                                <button
+                                  key={reg.provider}
+                                  onClick={() =>
+                                    handleToggleCourierRegistration(
+                                      loc.id,
+                                      reg.provider,
+                                      reg.isActive && reg.registered,
+                                    )
+                                  }
+                                  disabled={isToggling || busy}
+                                  className="group flex items-center gap-1 disabled:opacity-60"
+                                  title={
+                                    reg.isActive && reg.registered
+                                      ? `${reg.provider}: Registered — click to unregister`
+                                      : reg.lastError
+                                        ? `${reg.provider}: Failed — ${reg.lastError} — click to retry`
+                                        : `${reg.provider}: Inactive — click to register`
+                                  }
+                                >
+                                  {isToggling ? (
+                                    <Badge variant="default" className="text-[10px] px-1.5 py-0">
+                                      <Loader2 size={9} className="mr-0.5 animate-spin" />
+                                      {reg.provider.replace('_', ' ')}
+                                    </Badge>
+                                  ) : reg.isActive && reg.registered ? (
+                                    <Badge variant="success" className="text-[10px] px-1.5 py-0 group-hover:opacity-80">
+                                      <CheckCircle2 size={9} className="mr-0.5" />
+                                      {reg.provider.replace('_', ' ')}
+                                    </Badge>
+                                  ) : reg.lastError ? (
+                                    <Badge variant="warning" className="text-[10px] px-1.5 py-0 group-hover:opacity-80">
+                                      <AlertCircle size={9} className="mr-0.5" />
+                                      {reg.provider.replace('_', ' ')}
+                                    </Badge>
+                                  ) : (
+                                    <Badge variant="default" className="text-[10px] px-1.5 py-0 group-hover:opacity-80">
+                                      {reg.provider.replace('_', ' ')}
+                                    </Badge>
+                                  )}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        {regs.length === 0 && !loc.registered && (
+                          <p className="text-[11px] text-text-muted mt-1.5 italic">
+                            Not registered with any courier yet
                           </p>
                         )}
+
                         {loc.addressDriftedSinceRegistration && (
                           <div className="flex items-start gap-2 mt-2 rounded-lg bg-amber-50 border border-amber-200 p-2 text-[11px] text-amber-800">
                             <AlertCircle size={12} className="shrink-0 mt-0.5" />
                             <span>
-                              The address changed after registration — click <strong>Re-register</strong>{' '}
-                              so the courier picks from the new address.
+                              The address changed after registration — click <strong>Re-register all</strong>{' '}
+                              so couriers pick from the new address.
                             </span>
                           </div>
                         )}
-                        {loc.lastError && !loc.registered && (
+                        {failedRegs.length > 0 && (
                           <div className="flex items-start gap-2 mt-2 rounded-lg bg-red-50 border border-red-200 p-2 text-[11px] text-red-800">
                             <AlertCircle size={12} className="shrink-0 mt-0.5" />
-                            <span>Carrier rejected: {loc.lastError}</span>
+                            <span>
+                              {failedRegs.map((r) => r.provider.replace('_', ' ')).join(', ')} failed to register.
+                              Click the badge to retry.
+                            </span>
                           </div>
                         )}
                       </div>
@@ -564,12 +662,12 @@ export default function ShippingSettingsPage() {
                       )}
                       <Button
                         size="sm"
-                        variant={loc.addressDriftedSinceRegistration || !loc.registered ? 'primary' : 'outline'}
+                        variant={loc.addressDriftedSinceRegistration || activeRegs.length === 0 ? 'primary' : 'outline'}
                         onClick={() => handleReregisterLocation(loc)}
                         loading={busy}
                       >
                         <Truck size={12} />
-                        {loc.registered ? 'Re-register' : 'Register with carrier'}
+                        {activeRegs.length > 0 ? 'Re-register all' : 'Register with all couriers'}
                       </Button>
                     </div>
                   </div>
@@ -1199,6 +1297,8 @@ function PickupLocationFormModal({
     >
       <div className="space-y-4">
         <Input
+          stackedLabel
+          required
           label="Label"
           placeholder="e.g. Main warehouse, Festival overflow"
           value={form.label}
@@ -1206,12 +1306,15 @@ function PickupLocationFormModal({
         />
         <div className="grid gap-3 sm:grid-cols-2">
           <Input
+            stackedLabel
             label="Contact person"
             placeholder="Name of the person at this address"
             value={form.contactPerson || ''}
             onChange={(e) => setForm((f) => ({ ...f, contactPerson: e.target.value }))}
           />
           <Input
+            stackedLabel
+            required
             label="Pickup phone"
             placeholder="10-digit mobile"
             value={form.phone}
@@ -1219,12 +1322,15 @@ function PickupLocationFormModal({
           />
         </div>
         <Input
+          stackedLabel
           label="Email (optional)"
           placeholder="Pickup point email"
           value={form.email || ''}
           onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
         />
         <Input
+          stackedLabel
+          required
           label="Address line"
           placeholder="Building / street / area"
           value={form.addressLine}
@@ -1232,18 +1338,24 @@ function PickupLocationFormModal({
         />
         <div className="grid gap-3 sm:grid-cols-3">
           <Input
+            stackedLabel
+            required
             label="City"
             placeholder="e.g. Mumbai"
             value={form.city}
             onChange={(e) => setForm((f) => ({ ...f, city: e.target.value }))}
           />
           <Input
+            stackedLabel
+            required
             label="State"
             placeholder="e.g. Maharashtra"
             value={form.state}
             onChange={(e) => setForm((f) => ({ ...f, state: e.target.value }))}
           />
           <Input
+            stackedLabel
+            required
             label="Pincode"
             placeholder="6-digit"
             value={form.pincode}

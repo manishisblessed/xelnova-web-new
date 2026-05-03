@@ -1040,30 +1040,155 @@ export class AdminService {
 
   // ─── Categories ───
 
+  /**
+   * Returns the full category tree (root → children → grandchildren) in
+   * one round-trip so the admin UI can both display and pick parents at
+   * any depth. We materialise the relations bottom-up so a single
+   * `findMany` is enough.
+   */
   async getCategories() {
-    return this.prisma.category.findMany({
-      include: { children: true, _count: { select: { products: true } } },
-      where: { parentId: null },
+    const all = await this.prisma.category.findMany({
+      include: { _count: { select: { products: true } } },
       orderBy: { name: 'asc' },
     });
+
+    type Node = (typeof all)[number] & { children: Node[] };
+    const byId = new Map<string, Node>();
+    for (const c of all) byId.set(c.id, { ...(c as any), children: [] });
+
+    const roots: Node[] = [];
+    for (const c of all) {
+      const node = byId.get(c.id)!;
+      if (c.parentId && byId.has(c.parentId)) {
+        byId.get(c.parentId)!.children.push(node);
+      } else {
+        roots.push(node);
+      }
+    }
+    return roots;
   }
 
   async createCategory(dto: CreateCategoryDto) {
-    const slug = this.slugify(dto.name);
+    const name = dto.name?.trim();
+    if (!name) {
+      throw new BadRequestException('Category name is required');
+    }
+    const slug = this.slugify(name);
+
+    // Slug must be unique — bail with a friendly error before Prisma
+    // throws a P2002 the UI can't read.
+    const existing = await this.prisma.category.findUnique({ where: { slug } });
+    if (existing) {
+      throw new BadRequestException(`A category named "${name}" already exists`);
+    }
+
+    if (dto.parentId) {
+      const parent = await this.prisma.category.findUnique({ where: { id: dto.parentId } });
+      if (!parent) throw new BadRequestException('Selected parent category no longer exists');
+    }
+
     return this.prisma.category.create({
-      data: { name: dto.name, slug, description: dto.description, image: dto.image, parentId: dto.parentId },
+      data: {
+        name,
+        slug,
+        description: dto.description?.trim() || null,
+        image: dto.image?.trim() || null,
+        parentId: dto.parentId || null,
+      },
     });
   }
 
   async updateCategory(id: string, dto: UpdateCategoryDto) {
-    const data: any = { ...dto };
-    if (dto.name) data.slug = this.slugify(dto.name);
+    const data: any = {};
+    if (dto.name !== undefined) {
+      const name = dto.name.trim();
+      if (!name) throw new BadRequestException('Category name cannot be empty');
+      data.name = name;
+      data.slug = this.slugify(name);
+    }
+    if (dto.description !== undefined) data.description = dto.description?.trim() || null;
+    if (dto.image !== undefined) data.image = dto.image?.trim() || null;
+    if (dto.parentId !== undefined) {
+      // Empty string in the payload means "make this a root category".
+      data.parentId = dto.parentId ? dto.parentId : null;
+
+      // Block self-parenting and cycles (parent cannot be a descendant).
+      if (data.parentId === id) {
+        throw new BadRequestException('A category cannot be its own parent');
+      }
+      if (data.parentId) {
+        const descendantIds = await this.collectCategoryDescendants(id);
+        if (descendantIds.has(data.parentId)) {
+          throw new BadRequestException(
+            'You cannot move a category beneath one of its own descendants',
+          );
+        }
+      }
+    }
+
+    if (data.slug) {
+      const clash = await this.prisma.category.findFirst({
+        where: { slug: data.slug, NOT: { id } },
+        select: { id: true },
+      });
+      if (clash) {
+        throw new BadRequestException('Another category already uses that name');
+      }
+    }
+
     return this.prisma.category.update({ where: { id }, data });
   }
 
   async deleteCategory(id: string) {
+    const cat = await this.prisma.category.findUnique({
+      where: { id },
+      include: {
+        _count: { select: { products: true, children: true } },
+      },
+    });
+    if (!cat) throw new NotFoundException('Category not found');
+
+    // Categories with children or products would cascade-fail at the DB level
+    // — give the admin a clear message instead of a Prisma 500.
+    if (cat._count.children > 0) {
+      throw new BadRequestException(
+        'Move or delete this category\u2019s subcategories before deleting it',
+      );
+    }
+    if (cat._count.products > 0) {
+      throw new BadRequestException(
+        'Reassign or delete this category\u2019s products before deleting it',
+      );
+    }
+
     await this.prisma.category.delete({ where: { id } });
     return { deleted: true };
+  }
+
+  /** Collects all descendant category ids of a given root (used to block cycles). */
+  private async collectCategoryDescendants(rootId: string): Promise<Set<string>> {
+    const all = await this.prisma.category.findMany({
+      select: { id: true, parentId: true },
+    });
+    const childrenByParent = new Map<string, string[]>();
+    for (const c of all) {
+      if (!c.parentId) continue;
+      const list = childrenByParent.get(c.parentId) ?? [];
+      list.push(c.id);
+      childrenByParent.set(c.parentId, list);
+    }
+    const out = new Set<string>();
+    const stack = [rootId];
+    while (stack.length) {
+      const cur = stack.pop()!;
+      for (const ch of childrenByParent.get(cur) ?? []) {
+        if (!out.has(ch)) {
+          out.add(ch);
+          stack.push(ch);
+        }
+      }
+    }
+    return out;
   }
 
   // ─── Brands ───
@@ -1665,7 +1790,7 @@ export class AdminService {
   private readonly defaultSiteSettings = {
     general: { siteName: 'Xelnova', tagline: 'Your marketplace', currency: 'INR', timezone: 'Asia/Kolkata', language: 'en' },
     tax: { gstEnabled: true, gstRate: 18, hsnDefault: '' },
-    shipping: { freeShippingMin: 499, defaultRate: 49, expressRate: 99, codEnabled: true, codFee: 0 },
+    shipping: { freeShippingMin: 499, defaultRate: 49, expressRate: 99, codEnabled: true, codFee: 0, defaultDeliveryDays: 5 },
     payment: { razorpayEnabled: true, codEnabled: true, upiEnabled: true, cardEnabled: true, netBankingEnabled: true },
     notifications: { orderConfirmation: true, shipmentUpdate: true, promotionalEmails: false, smsAlerts: false, adminNewOrder: true },
     shippingLabel: {

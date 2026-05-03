@@ -175,11 +175,13 @@ export function CategorySelector({
 
   return (
     <div className="relative">
-      {/* Trigger Button */}
-      <button
-        type="button"
+      {/* Trigger */}
+      <div
+        role="button"
+        tabIndex={0}
         onClick={() => setIsOpen(!isOpen)}
-        className="w-full rounded-xl border border-border bg-surface-raised px-3 py-2.5 text-sm text-left flex items-center justify-between outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30"
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setIsOpen(!isOpen); } }}
+        className="w-full rounded-xl border border-border bg-surface-raised px-3 py-2.5 text-sm text-left flex items-center justify-between outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30 cursor-pointer"
       >
         <span className={value ? 'text-text-primary' : 'text-text-muted'}>
           {displayText}
@@ -202,7 +204,7 @@ export function CategorySelector({
             className={`text-text-muted transition-transform ${isOpen ? 'rotate-90' : ''}`}
           />
         </div>
-      </button>
+      </div>
 
       {/* Dropdown */}
       {isOpen && (
@@ -293,11 +295,13 @@ export function CategorySelector({
                 // Hierarchical Navigation
                 <div className="py-1">
                   {currentCategories.map((cat) => (
-                    <button
+                    <div
                       key={cat.id}
-                      type="button"
+                      role="button"
+                      tabIndex={0}
                       onClick={() => handleSelectCategory(cat)}
-                      className="w-full px-3 py-2.5 text-left hover:bg-surface/80 transition-colors flex items-center justify-between group"
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleSelectCategory(cat); }}
+                      className="w-full px-3 py-2.5 text-left hover:bg-surface/80 transition-colors flex items-center justify-between group cursor-pointer"
                     >
                       <span className="text-sm text-text-primary font-medium">
                         {cat.name}
@@ -319,7 +323,7 @@ export function CategorySelector({
                           className="text-text-muted group-hover:text-text-secondary"
                         />
                       ) : null}
-                    </button>
+                    </div>
                   ))}
                   {currentCategories.length === 0 && (
                     <div className="px-3 py-8 text-center text-sm text-text-muted">

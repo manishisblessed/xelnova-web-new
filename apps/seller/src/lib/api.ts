@@ -442,6 +442,60 @@ export async function apiRegisterPickupLocation(id: string) {
   return handleResponse<SellerPickupLocation>(res);
 }
 
+export type PickupLocationRegistration = {
+  id: string;
+  provider: string;
+  warehouseName: string | null;
+  registered: boolean;
+  registeredAt: string | null;
+  lastError: string | null;
+  isActive: boolean;
+};
+
+export async function apiGetPickupLocationRegistrations(id: string) {
+  const res = await fetchWithRefresh(`${API_URL}/seller/pickup-locations/${id}/registrations`, {
+    headers: authHeaders(),
+  });
+  return handleResponse<PickupLocationRegistration[]>(res);
+}
+
+export async function apiRegisterPickupLocationAllCouriers(id: string) {
+  const res = await fetchWithRefresh(`${API_URL}/seller/pickup-locations/${id}/register-all`, {
+    method: 'POST',
+    headers: authHeaders(),
+  });
+  return handleResponse<{
+    locationId: string;
+    results: Array<{ provider: string; success: boolean; message: string }>;
+    registrations: PickupLocationRegistration[];
+  }>(res);
+}
+
+export async function apiRegisterPickupLocationWithCourier(id: string, provider: string) {
+  const res = await fetchWithRefresh(`${API_URL}/seller/pickup-locations/${id}/register/${provider}`, {
+    method: 'POST',
+    headers: authHeaders(),
+  });
+  return handleResponse<{
+    provider: string;
+    success: boolean;
+    message: string;
+    registrations: PickupLocationRegistration[];
+  }>(res);
+}
+
+export async function apiUnregisterPickupLocationFromCourier(id: string, provider: string) {
+  const res = await fetchWithRefresh(`${API_URL}/seller/pickup-locations/${id}/register/${provider}`, {
+    method: 'DELETE',
+    headers: authHeaders(),
+  });
+  return handleResponse<{
+    provider: string;
+    message: string;
+    registrations: PickupLocationRegistration[];
+  }>(res);
+}
+
 export async function apiCheckServiceability(orderId: string) {
   const res = await fetchWithRefresh(`${API_URL}/seller/orders/${orderId}/serviceability`, {
     headers: authHeaders(),

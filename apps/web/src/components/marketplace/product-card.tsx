@@ -90,6 +90,7 @@ export const ProductCard = memo(function ProductCard({ product, index = 0 }: Pro
   const compareIncl = priceInclusiveOfGst(product.comparePrice, product.gstRate);
   const variantSummary = summarizeVariants(product.variants);
   const variantImages = getVariantImages(product.variants);
+  const displayImage = product.images[0] || variantImages[0] || '';
 
   const handleAddToCart = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -101,7 +102,7 @@ export const ProductCard = memo(function ProductCard({ product, index = 0 }: Pro
       slug: product.slug,
       price: product.price,
       comparePrice: product.comparePrice,
-      image: product.images[0] || '',
+      image: displayImage,
       seller: product.seller.name,
       gstRate: product.gstRate ?? null,
     });
@@ -125,9 +126,9 @@ export const ProductCard = memo(function ProductCard({ product, index = 0 }: Pro
           {/* Image */}
           <div className="relative aspect-[4/5] overflow-hidden bg-gradient-to-br from-surface-raised via-white to-primary-50/30">
             {!imgLoaded && !imgError && <div className="absolute inset-0 animate-shimmer" />}
-            {!imgError && product.images[0] ? (
+            {!imgError && displayImage ? (
               <Image
-                src={product.images[0]}
+                src={displayImage}
                 alt={product.name}
                 fill
                 sizes="(max-width: 640px) 50vw, (max-width: 1024px) 25vw, 16vw"
@@ -170,7 +171,7 @@ export const ProductCard = memo(function ProductCard({ product, index = 0 }: Pro
                   {variantImages.slice(0, 3).map((img, idx) => (
                     <div
                       key={idx}
-                      className="w-5 h-5 rounded-full border-2 border-white overflow-hidden shadow-sm"
+                      className="relative w-5 h-5 rounded-full border-2 border-white overflow-hidden shadow-sm"
                     >
                       <Image src={img} alt="" fill sizes="20px" className="object-cover" />
                     </div>
@@ -205,7 +206,10 @@ export const ProductCard = memo(function ProductCard({ product, index = 0 }: Pro
 
             {/* Quick actions on hover */}
             {product.inStock && (
-              <div className="absolute bottom-3 left-3 right-3 flex gap-2 opacity-0 group-hover:opacity-100 translate-y-4 group-hover:translate-y-0 transition-all duration-400 ease-[cubic-bezier(0.16,1,0.3,1)]">
+              <div className={cn(
+                "absolute left-3 right-3 flex gap-2 opacity-0 group-hover:opacity-100 translate-y-4 group-hover:translate-y-0 transition-all duration-400 ease-[cubic-bezier(0.16,1,0.3,1)]",
+                variantSummary && variantSummary.count >= 2 ? "bottom-12" : "bottom-3"
+              )}>
                 <button
                   onClick={handleAddToCart}
                   className="btn-premium flex-1 rounded-xl py-2.5 text-xs font-bold text-white active:scale-[0.97]"

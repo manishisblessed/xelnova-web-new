@@ -100,6 +100,17 @@ export class ProductsController {
     );
   }
 
+  @Get('marketplace-policy')
+  @ApiOperation({
+    summary: 'Public marketplace defaults (return policy + default delivery days) used by the storefront',
+  })
+  async getMarketplacePolicy() {
+    return successResponse(
+      await this.productsService.getMarketplacePolicy(),
+      'Marketplace policy fetched',
+    );
+  }
+
   @Get(':slug')
   @ApiOperation({ summary: 'Get product detail by slug' })
   async findBySlug(@Param('slug') slug: string) {

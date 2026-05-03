@@ -214,4 +214,40 @@ export class ProductsService {
     const payload = row?.payload && typeof row.payload === 'object' ? (row.payload as Record<string, unknown>) : {};
     return { ...this.defaultShippingRates, ...(payload.shippingRates as Record<string, unknown>) };
   }
+
+  /**
+   * Public-facing marketplace policy used by the storefront PDP / cart to
+   * surface the right delivery & return copy. We deliberately scope this to
+   * the strictly customer-readable fields so site settings (payment keys,
+   * courier creds, etc.) never leak through `/products/marketplace-policy`.
+   */
+  async getMarketplacePolicy() {
+    const row = await this.prisma.siteSettings.findUnique({ where: { id: 1 } });
+    const payload =
+      row?.payload && typeof row.payload === 'object' ? (row.payload as Record<string, unknown>) : {};
+
+    const shipping =
+      payload.shipping && typeof payload.shipping === 'object'
+        ? (payload.shipping as Record<string, unknown>)
+        : {};
+    const returnPolicy =
+      payload.returnPolicy && typeof payload.returnPolicy === 'object'
+        ? (payload.returnPolicy as Record<string, unknown>)
+        : {};
+
+    const num = (v: unknown, fallback: number) =>
+      typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : fallback;
+
+    return {
+      defaultDeliveryDays: num(shipping.defaultDeliveryDays, 5),
+      freeShippingMin: num(shipping.freeShippingMin, 499),
+      returnPolicy: {
+        isCancellable: returnPolicy.isCancellable !== false,
+        isReturnable: returnPolicy.isReturnable !== false,
+        isReplaceable: !!returnPolicy.isReplaceable,
+        returnWindow: num(returnPolicy.returnWindow, 7),
+        cancellationWindow: num(returnPolicy.cancellationWindow, 0),
+      },
+    };
+  }
 }
