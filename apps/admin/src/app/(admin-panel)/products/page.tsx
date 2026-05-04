@@ -733,9 +733,37 @@ function PendingChangesDisplay({
     );
   };
 
+  /**
+   * Skip entries where the seller "submitted" a value that is byte-for-byte
+   * identical to what the catalog already has — those are noise (the seller
+   * just opened the edit modal and re-saved without touching that field).
+   * Showing them as "Changed" makes it impossible for the admin to see what
+   * actually moved, which was the whole point of this review screen.
+   */
+  const realChanges = Object.entries(changes).filter(([key, newValue]) => {
+    const oldValue = currentProduct[key];
+
+    if (key === 'variants' && Array.isArray(newValue)) {
+      return hasVariantDiff(
+        (oldValue as VariantGroup[] | null) ?? null,
+        newValue as VariantGroup[],
+      );
+    }
+
+    return !valuesEqual(oldValue, newValue);
+  });
+
+  if (realChanges.length === 0) {
+    return (
+      <p className="text-xs text-gray-500 italic">
+        The seller resubmitted the listing but no field values actually changed.
+      </p>
+    );
+  }
+
   return (
     <div className="space-y-4">
-      {Object.entries(changes).map(([key, newValue]) => {
+      {realChanges.map(([key, newValue]) => {
         const oldValue = currentProduct[key];
         const label = FIELD_LABELS[key] || key.replace(/([A-Z])/g, ' $1').trim();
 
@@ -762,6 +790,68 @@ function PendingChangesDisplay({
       })}
     </div>
   );
+}
+
+/**
+ * Deep-equality check tuned for the kinds of values stored on a Product
+ * (primitives, plain JSON arrays/objects). We normalize null/undefined and
+ * the empty string so "missing" values compare equal regardless of which
+ * shape the seller draft used.
+ */
+function valuesEqual(a: unknown, b: unknown): boolean {
+  const norm = (v: unknown) => (v === undefined || v === '' ? null : v);
+  const na = norm(a);
+  const nb = norm(b);
+  if (na === nb) return true;
+  if (na === null || nb === null) return false;
+  try {
+    return JSON.stringify(na) === JSON.stringify(nb);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Returns true only when at least one variant option (or the group structure
+ * itself) actually differs between the current product and the proposed
+ * change. Mirrors the comparison that `renderVariantChanges` does so the
+ * "Variants" block stays out of the list when nothing meaningful changed.
+ */
+function hasVariantDiff(
+  oldVariants: VariantGroup[] | null,
+  newVariants: VariantGroup[],
+): boolean {
+  if (!Array.isArray(oldVariants) || !Array.isArray(newVariants)) {
+    return !valuesEqual(oldVariants, newVariants);
+  }
+  if (oldVariants.length !== newVariants.length) return true;
+
+  const oldMap = new Map<string, VariantOption>();
+  oldVariants.forEach((group) => {
+    (group.options ?? []).forEach((opt) => {
+      const key = opt.sku || opt.label || opt.value || '';
+      if (key) oldMap.set(key, opt);
+    });
+  });
+
+  for (const group of newVariants) {
+    for (const opt of group.options ?? []) {
+      const key = opt.sku || opt.label || opt.value || '';
+      const oldOpt = oldMap.get(key);
+      if (!oldOpt) return true;
+      if (
+        oldOpt.price !== opt.price ||
+        oldOpt.stock !== opt.stock ||
+        oldOpt.compareAtPrice !== opt.compareAtPrice ||
+        oldOpt.available !== opt.available ||
+        oldOpt.label !== opt.label ||
+        oldOpt.value !== opt.value
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 export default function ProductsPage() {
@@ -1277,7 +1367,11 @@ export default function ProductsPage() {
           setViewOpen(false);
           setViewing(null);
         }}
-        title={viewing?.name ?? 'Product preview'}
+        title={
+          viewing?.hasPendingChanges
+            ? `${viewing?.name ?? 'Product preview'} — Changes pending approval`
+            : viewing?.name ?? 'Product preview'
+        }
         extraWide
       >
         {viewLoading && (
@@ -1402,11 +1496,15 @@ export default function ProductsPage() {
                   <div>
                     <p className="text-sm font-semibold text-warning-900 flex items-center gap-2">
                       <AlertTriangle size={18} className="text-warning-600" />
-                      Pending Changes Awaiting Approval
+                      Changes pending your approval
+                      <span className="bg-warning-600 text-white px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide">
+                        Action required
+                      </span>
                     </p>
                     <p className="text-xs text-warning-700 mt-1">
                       Seller submitted changes{' '}
-                      {viewing.pendingChangesSubmittedAt && new Date(viewing.pendingChangesSubmittedAt).toLocaleString()}
+                      {viewing.pendingChangesSubmittedAt && new Date(viewing.pendingChangesSubmittedAt).toLocaleString()}.
+                      Only the fields the seller actually modified are shown below — review each one before approving.
                     </p>
                   </div>
                 </div>

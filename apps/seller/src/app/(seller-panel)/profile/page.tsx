@@ -110,7 +110,7 @@ function ProfileSellerIdentity({
   const publicId = getPublicSellerIdNumber(sellerCodeSequence, sellerCode ?? null);
   const idFallback = (sellerCode || slug || '').trim();
   const idDisplay = publicId != null
-    ? publicId.toLocaleString('en-IN')
+    ? String(publicId)
     : (idFallback || '—');
   const idCopy = publicId != null ? String(publicId) : idFallback;
   const idDisabled = !idCopy;

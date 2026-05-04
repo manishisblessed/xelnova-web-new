@@ -16,6 +16,7 @@ import {
   apiGetProduct,
   apiGetProductAttributePresets,
   apiGetProducts,
+  apiGetSellerBrands,
   apiUpdateProduct,
   apiUploadImage,
   apiUploadImages,
@@ -26,6 +27,7 @@ import {
 import { useSellerProfile } from '@/lib/seller-profile-context';
 import { VerificationBanner } from '@/components/dashboard/verification-banner';
 import { publicApiBase } from '@/lib/public-api-base';
+import { resolveStorefrontPreviewUrl } from '@/lib/storefront-url';
 import { ProductVariantsExpansion } from '@/components/product-variants-expansion';
 import { CategorySelector } from '@/components/category-selector';
 import {
@@ -166,6 +168,28 @@ interface SellerProduct {
   brand?: string | null;
   createdAt: string;
   rejectionReason?: string | null;
+}
+
+/**
+ * Minimal brand shape the Add/Edit product form needs — enough to render the
+ * picker and reuse the authorization certificate already on file. Mirrors the
+ * payload from `GET /seller/brands`.
+ */
+interface SellerBrandSummary {
+  id: string;
+  name: string;
+  slug: string;
+  approved: boolean;
+  authorizationCertificate?: string | null;
+}
+
+/**
+ * Mirrors the backend's brand slug algorithm (see seller-dashboard.service.ts)
+ * so we can match the brand currently on a product against the seller's
+ * registered brands when opening the edit form.
+ */
+function slugifyBrandName(text: string): string {
+  return text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
 }
 
 const PRODUCT_DRAFT_KEY = 'xelnova:seller:product-draft:v1';
@@ -504,6 +528,30 @@ function InlineProductExpansion({
   const stockChanged = String(product.stock) !== inlineStock;
   const hasChanges = priceChanged || stockChanged;
 
+  const publicProductUrl = product.slug ? resolveStorefrontPreviewUrl(`/products/${product.slug}`) : null;
+  const canPreview = !!publicProductUrl && product.status === 'ACTIVE';
+  const handleShare = async () => {
+    if (!publicProductUrl) return;
+    try {
+      if (typeof navigator !== 'undefined' && 'share' in navigator) {
+        await (navigator as Navigator & { share: (data: { title?: string; text?: string; url?: string }) => Promise<void> }).share({
+          title: product.name,
+          text: `Check out ${product.name} on Xelnova`,
+          url: publicProductUrl,
+        });
+        return;
+      }
+    } catch {
+      // user cancelled or share failed — fall back to copy
+    }
+    try {
+      await navigator.clipboard.writeText(publicProductUrl);
+      toast.success('Product link copied to clipboard');
+    } catch {
+      toast.error('Could not copy link');
+    }
+  };
+
   return (
     <div className="border-t border-gray-200 bg-white" onClick={(e) => e.stopPropagation()}>
       {/* Action bar */}
@@ -520,6 +568,31 @@ function InlineProductExpansion({
           )}
         </div>
         <div className="flex items-center gap-1.5">
+          {publicProductUrl && (
+            <a
+              href={publicProductUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={canPreview ? 'Open this product page in a new tab' : 'This listing is not live yet — preview only'}
+              className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium shadow-sm transition-colors ${
+                canPreview
+                  ? 'border-primary-300 bg-white text-primary-600 hover:bg-primary-50'
+                  : 'border-gray-300 bg-white text-gray-500 hover:bg-gray-50'
+              }`}
+            >
+              <ExternalLink size={12} /> View on store
+            </a>
+          )}
+          {canPreview && (
+            <button
+              type="button"
+              onClick={handleShare}
+              title="Share product link"
+              className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 shadow-sm transition-colors"
+            >
+              <Upload size={12} /> Share
+            </button>
+          )}
           <button type="button" onClick={onEdit} className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 shadow-sm transition-colors">
             <Pencil size={12} /> Edit
           </button>
@@ -680,18 +753,55 @@ function VariantDetailRow({
   optionIndex: number;
   onVariantUpdate: (groupIndex: number, optionIndex: number, updates: { price?: number; stock?: number; available?: boolean }) => Promise<void>;
 }) {
-  const originalPrice = variant.price ?? fallbackPrice;
-  const originalStock = variant.stock ?? fallbackStock;
-  const originalActive = variant.active;
+  const initialPrice = variant.price ?? fallbackPrice;
+  const initialStock = variant.stock ?? fallbackStock;
+  const initialActive = variant.active;
 
-  const [price, setPrice] = useState(String(originalPrice));
-  const [stock, setStock] = useState(String(originalStock));
-  const [active, setActive] = useState(originalActive);
+  /**
+   * Track the last successfully-saved snapshot separately from the prop so
+   * the "Save changes" button reliably resets after a save even when the
+   * parent product object hasn't been refetched yet. Previously we compared
+   * against `variant.price` (a stale prop) and the button stayed active
+   * after a successful save, which made sellers click it a second time.
+   */
+  const [savedPrice, setSavedPrice] = useState(String(initialPrice));
+  const [savedStock, setSavedStock] = useState(String(initialStock));
+  const [savedActive, setSavedActive] = useState(initialActive);
+
+  const [price, setPrice] = useState(String(initialPrice));
+  const [stock, setStock] = useState(String(initialStock));
+  const [active, setActive] = useState(initialActive);
   const [saving, setSaving] = useState(false);
 
-  const priceChanged = String(originalPrice) !== price;
-  const stockChanged = String(originalStock) !== stock;
-  const activeChanged = originalActive !== active;
+  // If the parent finally hands us a fresh prop (e.g. after a full refetch),
+  // adopt it as the new baseline.
+  useEffect(() => {
+    const next = String(variant.price ?? fallbackPrice);
+    if (next !== savedPrice) {
+      setSavedPrice(next);
+      setPrice(next);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [variant.price, fallbackPrice]);
+  useEffect(() => {
+    const next = String(variant.stock ?? fallbackStock);
+    if (next !== savedStock) {
+      setSavedStock(next);
+      setStock(next);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [variant.stock, fallbackStock]);
+  useEffect(() => {
+    if (variant.active !== savedActive) {
+      setSavedActive(variant.active);
+      setActive(variant.active);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [variant.active]);
+
+  const priceChanged = savedPrice !== price;
+  const stockChanged = savedStock !== stock;
+  const activeChanged = savedActive !== active;
   const hasChanges = priceChanged || stockChanged || activeChanged;
 
   const handleSave = async () => {
@@ -708,7 +818,18 @@ function VariantDetailRow({
         stock: stockN,
         available: active,
       });
-      toast.success('Variant updated');
+      // Adopt the just-saved values as the new baseline so the Save button
+      // returns to the disabled state and the seller gets clear feedback
+      // that the change persisted (no need to click twice).
+      setSavedPrice(String(priceN));
+      setSavedStock(String(stockN));
+      setSavedActive(active);
+      const willNeedReview = priceChanged; // only price triggers re-approval
+      toast.success(
+        willNeedReview
+          ? 'Variant updated — price change submitted for admin approval'
+          : 'Variant updated',
+      );
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Update failed');
     } finally {
@@ -1854,6 +1975,12 @@ export default function SellerInventoryPage() {
   const [brandListingHint, setBrandListingHint] = useState<BrandListingHint | null>(null);
   const [brandHintLoading, setBrandHintLoading] = useState(false);
   const brandHintDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Brands the seller has already registered — used to offer a picker so they
+  // don't have to retype the brand name / re-upload the authorization
+  // certificate on every new listing.
+  const [sellerBrands, setSellerBrands] = useState<SellerBrandSummary[]>([]);
+  /** '' = seller wants to add a new brand; otherwise the picked brand's id. */
+  const [selectedSellerBrandId, setSelectedSellerBrandId] = useState<string>('');
   const [formLowStock, setFormLowStock] = useState('5');
   const [formWeight, setFormWeight] = useState('');
   // Dimensions are persisted as a single "L x W x H" string for backwards
@@ -1910,6 +2037,48 @@ export default function SellerInventoryPage() {
       if (brandHintDebounceRef.current) clearTimeout(brandHintDebounceRef.current);
     };
   }, [formBrand, createOpen, editProduct]);
+
+  // Load the seller's registered brands whenever the Add/Edit modal opens so
+  // they can pick an existing brand (and reuse its certificate) instead of
+  // retyping the name and re-uploading the same document every time.
+  useEffect(() => {
+    if (!createOpen && !editProduct) return;
+    let cancelled = false;
+    apiGetSellerBrands()
+      .then((data) => {
+        if (cancelled) return;
+        if (Array.isArray(data)) {
+          setSellerBrands(data as SellerBrandSummary[]);
+        }
+      })
+      .catch(() => {
+        // Non-fatal — the picker simply won't render and the seller can type
+        // the brand by hand as before.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [createOpen, editProduct]);
+
+  // When we land in the form with a brand already filled in (editing an
+  // existing product, or restoring an autosaved draft), try to match it to
+  // one of the seller's registered brands so the picker pre-selects it and
+  // the certificate section switches to the read-only "on file" view.
+  useEffect(() => {
+    if (!createOpen && !editProduct) return;
+    if (selectedSellerBrandId) return;
+    if (sellerBrands.length === 0) return;
+    const name = formBrand.trim();
+    if (!name) return;
+    const slug = slugifyBrandName(name);
+    const match = sellerBrands.find((b) => b.slug === slug);
+    if (match) {
+      setSelectedSellerBrandId(match.id);
+      if (match.authorizationCertificate && !formBrandCertificate.trim()) {
+        setFormBrandCertificate(match.authorizationCertificate);
+      }
+    }
+  }, [sellerBrands, formBrand, createOpen, editProduct, selectedSellerBrandId, formBrandCertificate]);
 
   // ─── Autosave (Add Product draft) ───
   // We persist the entire create-form state to localStorage so the seller
@@ -2127,6 +2296,7 @@ export default function SellerInventoryPage() {
     setBrandCertLinkDraft('');
     setFormBrandAuthExtraUrls(['']);
     setBrandListingHint(null);
+    setSelectedSellerBrandId('');
     setFormLowStock('5');
     setFormWeight('');
     setFormDimensions('');
@@ -2152,6 +2322,7 @@ export default function SellerInventoryPage() {
     setEditProduct(p);
     setShowBrandCertUrlField(false);
     setBrandCertLinkDraft('');
+    setSelectedSellerBrandId('');
     setFormName(p.name);
     setFormBrand('');
     setFormPrice('');
@@ -2785,6 +2956,8 @@ export default function SellerInventoryPage() {
       render: (row) => {
         const variantGroups = Array.isArray(row.variants) ? row.variants as Array<{ options?: unknown[] }> : [];
         const variantCount = variantGroups.reduce((sum, g) => sum + (g.options?.length ?? 0), 0);
+        const publicUrl = row.slug ? resolveStorefrontPreviewUrl(`/products/${row.slug}`) : null;
+        const canPreview = !!publicUrl && row.status === 'ACTIVE';
         return (
           <div className="flex items-center gap-3 min-w-0 w-full py-0.5">
             <div className="h-11 w-11 rounded-xl bg-gradient-to-br from-gray-100 to-gray-50 overflow-hidden shrink-0 border border-gray-200/60 shadow-sm">
@@ -2798,9 +2971,40 @@ export default function SellerInventoryPage() {
               )}
             </div>
             <div className="min-w-0 flex-1">
-              <p className="font-semibold text-[13px] line-clamp-2 leading-snug text-text-primary" title={row.name}>
-                {row.name}
-              </p>
+              <div className="flex items-center gap-1.5 min-w-0">
+                {canPreview ? (
+                  <a
+                    href={publicUrl ?? '#'}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => e.stopPropagation()}
+                    title="Open product page in a new tab"
+                    className="font-semibold text-[13px] line-clamp-2 leading-snug text-text-primary hover:text-primary-600 hover:underline transition-colors min-w-0"
+                  >
+                    {row.name}
+                  </a>
+                ) : (
+                  <p
+                    className="font-semibold text-[13px] line-clamp-2 leading-snug text-text-primary min-w-0"
+                    title={row.status !== 'ACTIVE' ? 'This listing is not live yet — preview unavailable' : row.name}
+                  >
+                    {row.name}
+                  </p>
+                )}
+                {canPreview && (
+                  <a
+                    href={publicUrl ?? '#'}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => e.stopPropagation()}
+                    title="Open product page in a new tab"
+                    aria-label="Open product page in a new tab"
+                    className="inline-flex items-center justify-center h-5 w-5 rounded text-text-muted hover:text-primary-600 hover:bg-primary-50 transition-colors shrink-0"
+                  >
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
+                )}
+              </div>
               <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                 {row.brand && (
                   <span className="text-[11px] text-text-muted">{row.brand}</span>
@@ -2939,6 +3143,31 @@ export default function SellerInventoryPage() {
 
   const attributePresets = fetchedAttrPresets ?? BUNDLED_PRODUCT_ATTRIBUTE_PRESETS;
 
+  const selectedSellerBrand = selectedSellerBrandId
+    ? sellerBrands.find((b) => b.id === selectedSellerBrandId) ?? null
+    : null;
+
+  /**
+   * Picker change — when the seller picks a brand they've already registered
+   * we can auto-fill the name and reuse the certificate on file, saving them
+   * from uploading the same document on every new product.
+   */
+  const handleSellerBrandPick = (id: string) => {
+    setSelectedSellerBrandId(id);
+    if (!id) {
+      // "Add a new brand" — keep whatever the seller has typed so far so we
+      // don't wipe their in-progress work. They can edit/replace freely.
+      return;
+    }
+    const brand = sellerBrands.find((b) => b.id === id);
+    if (!brand) return;
+    setFormBrand(brand.name);
+    setFormBrandCertificate((brand.authorizationCertificate ?? '').trim());
+    setShowBrandCertUrlField(false);
+    setBrandCertLinkDraft('');
+    setBrandCertImageError(false);
+  };
+
   const formFields = (
     <div className="space-y-5 relative">
       {editProduct && editLoading && (
@@ -2956,22 +3185,73 @@ export default function SellerInventoryPage() {
         onChange={(e) => setFormName(e.target.value)}
       />
       <div className="space-y-2">
-        <Input
-          stackedLabel
-          label="Brand name"
-          required
-          value={formBrand}
-          onChange={(e) => setFormBrand(e.target.value)}
-        />
-        {brandHintLoading && formBrand.trim() ? (
+        {sellerBrands.length > 0 ? (
+          <div>
+            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-text-secondary">
+              Choose brand
+            </label>
+            <select
+              value={selectedSellerBrandId}
+              onChange={(e) => handleSellerBrandPick(e.target.value)}
+              className="w-full rounded-xl border border-border bg-surface px-4 py-2.5 text-sm text-text-primary outline-none transition-all duration-200 focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30"
+            >
+              <option value="">+ Add a new brand…</option>
+              {sellerBrands.map((b) => {
+                const statusLabel = b.approved ? 'approved' : 'pending';
+                const certLabel = b.authorizationCertificate ? ' • certificate on file' : '';
+                return (
+                  <option key={b.id} value={b.id}>
+                    {b.name} ({statusLabel}){certLabel}
+                  </option>
+                );
+              })}
+            </select>
+            <p className="mt-1 text-[11px] text-text-muted">
+              Pick one of your registered brands to auto-fill the brand name and reuse the authorization certificate on file — no need to upload it again.
+            </p>
+          </div>
+        ) : null}
+        {selectedSellerBrand ? (
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 px-3 py-2.5 text-sm text-emerald-900">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="font-medium">
+                  Listing under your brand: <span className="font-semibold">{selectedSellerBrand.name}</span>
+                </p>
+                <p className="mt-0.5 text-xs text-emerald-800/80">
+                  {selectedSellerBrand.approved
+                    ? 'This brand is approved on Xelnova.'
+                    : 'This brand is pending admin review.'}
+                  {selectedSellerBrand.authorizationCertificate ? ' Certificate on file will be reused.' : ''}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleSellerBrandPick('')}
+                className="shrink-0 text-xs font-medium text-emerald-900 underline-offset-2 hover:underline"
+              >
+                Change
+              </button>
+            </div>
+          </div>
+        ) : (
+          <Input
+            stackedLabel
+            label="Brand name"
+            required
+            value={formBrand}
+            onChange={(e) => setFormBrand(e.target.value)}
+          />
+        )}
+        {!selectedSellerBrand && brandHintLoading && formBrand.trim() ? (
           <p className="text-xs text-text-muted">Checking brand listing rules…</p>
         ) : null}
-        {brandListingHint?.mode === 'dealer_authorization_required' ? (
+        {!selectedSellerBrand && brandListingHint?.mode === 'dealer_authorization_required' ? (
           <div className="rounded-lg border border-amber-200 bg-amber-50/80 px-3 py-2 text-xs text-amber-950">
             {brandListingHint.message}
           </div>
         ) : null}
-        {brandListingHint?.mode === 'new_brand' && formBrand.trim() ? (
+        {!selectedSellerBrand && brandListingHint?.mode === 'new_brand' && formBrand.trim() ? (
           <p className="text-xs text-text-muted">
             This brand will be registered for your store and reviewed with the product.
           </p>
@@ -3009,7 +3289,45 @@ export default function SellerInventoryPage() {
             e.target.value = '';
           }}
         />
-        {formBrandCertificate.trim() ? (
+        {selectedSellerBrand && (selectedSellerBrand.authorizationCertificate ?? '').trim() ? (
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-stretch gap-3">
+              <div className="relative h-40 min-w-[200px] max-w-sm flex-1 overflow-hidden rounded-xl border border-border bg-white">
+                {!brandCertImageError ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={(selectedSellerBrand.authorizationCertificate ?? '').trim()}
+                    alt="Brand authorization certificate"
+                    className="h-full w-full object-contain p-1"
+                    onError={() => setBrandCertImageError(true)}
+                  />
+                ) : (
+                  <div className="flex h-full min-h-[120px] flex-col items-center justify-center gap-2 p-3 text-center">
+                    <ImageIcon className="h-8 w-8 text-text-muted/60" />
+                    <p className="text-[11px] text-text-muted">Image preview is not available for this file.</p>
+                    <a
+                      href={(selectedSellerBrand.authorizationCertificate ?? '').trim()}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-xs font-medium text-primary-600 hover:text-primary-700"
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" />
+                      Open certificate
+                    </a>
+                  </div>
+                )}
+              </div>
+              <div className="flex flex-col justify-center gap-1.5">
+                <p className="text-xs font-medium text-emerald-700">
+                  Reusing certificate on file for <span className="font-semibold">{selectedSellerBrand.name}</span>.
+                </p>
+                <p className="text-[11px] text-text-muted">
+                  Manage this brand&apos;s certificate from the <span className="font-medium">Brands</span> page.
+                </p>
+              </div>
+            </div>
+          </div>
+        ) : formBrandCertificate.trim() ? (
           <div className="space-y-3">
             <div className="flex flex-wrap items-stretch gap-3">
               <div className="relative h-40 min-w-[200px] max-w-sm flex-1 overflow-hidden rounded-xl border border-border bg-white">
@@ -4052,8 +4370,9 @@ export default function SellerInventoryPage() {
             <p className="font-semibold mb-0.5">Editing a published listing</p>
             <p>
               Saving changes to the catalog details (name, description, price, images, variants, etc.)
-              will return this product to <strong>Pending review</strong> and remove it from the marketplace
-              until an admin re-approves it. Stock-only updates do not require re-approval.
+              will mark this product as <strong>Pending review</strong> until an admin re-approves the
+              changes. Your existing listing stays live on the marketplace in the meantime, and the
+              new details only go live after approval. Stock-only updates do not require re-approval.
             </p>
           </div>
         )}

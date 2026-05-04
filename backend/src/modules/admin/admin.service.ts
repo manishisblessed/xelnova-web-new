@@ -415,6 +415,7 @@ export class AdminService {
         name: true,
         hasPendingChanges: true,
         pendingChangesData: true,
+        additionalDetails: true,
         seller: { select: { userId: true } },
       },
     });
@@ -427,13 +428,88 @@ export class AdminService {
       throw new BadRequestException('No pending changes to approve');
     }
 
-    const changes = product.pendingChangesData as Record<string, unknown>;
+    const rawChanges = { ...(product.pendingChangesData as Record<string, unknown>) };
+
+    /**
+     * Map "virtual" fields the seller can submit (which the Prisma Product
+     * model does not have a column for) onto the columns that actually back
+     * them. Without this Prisma throws an "Unknown argument" / 500 error
+     * when applying the pending changes, leaving the listing stuck in the
+     * approval queue forever.
+     *
+     * Currently the only such field is `brandAuthorizationCertificate`,
+     * which lives inside the `additionalDetails` JSON blob keyed as
+     * "Brand Authorization Certificate".
+     */
+    const whitelisted = new Set<string>([
+      'name',
+      'shortDescription',
+      'description',
+      'productDescription',
+      'price',
+      'compareAtPrice',
+      'images',
+      'video',
+      'videoPublicId',
+      'variants',
+      'categoryId',
+      'brand',
+      'highlights',
+      'tags',
+      'featuresAndSpecs',
+      'materialsAndCare',
+      'itemDetails',
+      'additionalDetails',
+      'safetyInfo',
+      'regulatoryInfo',
+      'warrantyInfo',
+      'weight',
+      'dimensions',
+      'hsnCode',
+      'gstRate',
+      'metaTitle',
+      'metaDescription',
+      'sku',
+      'brandAuthAdditionalDocumentUrls',
+    ]);
+
+    const data: Record<string, unknown> = {};
+
+    if (Object.prototype.hasOwnProperty.call(rawChanges, 'brandAuthorizationCertificate')) {
+      const certUrl = String(rawChanges.brandAuthorizationCertificate ?? '').trim();
+      delete rawChanges.brandAuthorizationCertificate;
+      if (certUrl) {
+        const baseAdditional =
+          rawChanges.additionalDetails &&
+          typeof rawChanges.additionalDetails === 'object' &&
+          !Array.isArray(rawChanges.additionalDetails)
+            ? { ...(rawChanges.additionalDetails as Record<string, unknown>) }
+            : product.additionalDetails &&
+                typeof product.additionalDetails === 'object' &&
+                !Array.isArray(product.additionalDetails)
+              ? { ...(product.additionalDetails as Record<string, unknown>) }
+              : {};
+        baseAdditional['Brand Authorization Certificate'] = certUrl;
+        data.additionalDetails = baseAdditional;
+        delete rawChanges.additionalDetails;
+      }
+    }
+
+    for (const [key, value] of Object.entries(rawChanges)) {
+      if (whitelisted.has(key)) {
+        data[key] = value;
+      } else {
+        this.logger.warn(
+          `approvePendingChanges: dropping non-Product field "${key}" from pending changes for product ${id}`,
+        );
+      }
+    }
 
     // Apply the pending changes
     await this.prisma.product.update({
       where: { id },
       data: {
-        ...changes,
+        ...data,
         hasPendingChanges: false,
         pendingChangesData: Prisma.DbNull,
         pendingChangesSubmittedAt: null,
@@ -450,7 +526,7 @@ export class AdminService {
 
     await this.logActivity('admin', 'product_changes_approved', `Approved pending changes for product ${product.name}`, undefined, {
       productId: id,
-      changes: Object.keys(changes),
+      changes: Object.keys(data),
     });
 
     return { approved: true, message: 'Pending changes have been approved and applied' };
@@ -1429,24 +1505,84 @@ export class AdminService {
   }
 
   async createRole(dto: CreateRoleDto) {
-    const data: any = { 
-      name: dto.name,
-      description: dto.description || null,
+    const trimmedName = (dto.name ?? '').trim();
+    if (!trimmedName) {
+      throw new BadRequestException('Role name is required');
+    }
+
+    // Pre-check so the user gets a clear, friendly message instead of a raw
+    // Prisma "Unique constraint failed on the fields: (`name`)" toast.
+    const existing = await this.prisma.adminRole.findFirst({
+      where: { name: { equals: trimmedName, mode: 'insensitive' } },
+      select: { id: true, name: true, isSystem: true },
+    });
+    if (existing) {
+      throw new ConflictException(
+        `A role named "${existing.name}" already exists. Pick a different name or edit the existing role.`,
+      );
+    }
+
+    const data: any = {
+      name: trimmedName,
+      description: dto.description?.trim() || null,
       level: dto.level || 'VIEWER',
       permissions: dto.permissions || '',
       permissionsData: dto.permissionsData || {},
     };
-    return this.prisma.adminRole.create({ data });
+    try {
+      return await this.prisma.adminRole.create({ data });
+    } catch (err) {
+      // Belt-and-suspenders: race condition between the pre-check and create.
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002'
+      ) {
+        throw new ConflictException(
+          `A role named "${trimmedName}" already exists. Pick a different name or edit the existing role.`,
+        );
+      }
+      throw err;
+    }
   }
 
   async updateRole(id: string, dto: UpdateRoleDto) {
     const data: any = {};
-    if (dto.name !== undefined) data.name = dto.name;
-    if (dto.description !== undefined) data.description = dto.description;
+    if (dto.name !== undefined) {
+      const trimmedName = dto.name.trim();
+      if (!trimmedName) {
+        throw new BadRequestException('Role name cannot be empty');
+      }
+      const conflict = await this.prisma.adminRole.findFirst({
+        where: {
+          name: { equals: trimmedName, mode: 'insensitive' },
+          NOT: { id },
+        },
+        select: { id: true, name: true },
+      });
+      if (conflict) {
+        throw new ConflictException(
+          `A role named "${conflict.name}" already exists. Pick a different name.`,
+        );
+      }
+      data.name = trimmedName;
+    }
+    if (dto.description !== undefined) data.description = dto.description?.trim() || null;
     if (dto.level !== undefined) data.level = dto.level;
     if (dto.permissions !== undefined) data.permissions = dto.permissions;
     if (dto.permissionsData !== undefined) data.permissionsData = dto.permissionsData;
-    return this.prisma.adminRole.update({ where: { id }, data });
+    try {
+      return await this.prisma.adminRole.update({ where: { id }, data });
+    } catch (err) {
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002'
+      ) {
+        throw new ConflictException(
+          'A role with that name already exists. Pick a different name.',
+        );
+      }
+      throw err;
+    }
   }
 
   async deleteRole(id: string) {

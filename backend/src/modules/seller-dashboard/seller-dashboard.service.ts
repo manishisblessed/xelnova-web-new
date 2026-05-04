@@ -364,8 +364,12 @@ export class SellerDashboardService {
     }
 
     /**
-     * Check if variant changes are inventory-only (stock, price, available).
-     * These should be allowed without re-approval.
+     * Check if variant changes are inventory-only (stock + availability flag).
+     *
+     * Price/MRP changes on a variant DO require admin re-approval — sellers
+     * must not be able to silently change the price the buyer sees on a
+     * live listing without the admin signing off (mirrors the policy for
+     * the parent product price).
      */
     const isVariantInventoryOnlyChange = (oldVariants: unknown, newVariants: unknown): boolean => {
       if (!Array.isArray(oldVariants) || !Array.isArray(newVariants)) return false;
@@ -387,18 +391,24 @@ export class SellerDashboardService {
           const oldOpt = oldOpts[oi];
           const newOpt = newOpts[oi];
 
-          // Only allow changes to: stock, price, compareAtPrice, available
-          const inventoryFields = ['stock', 'price', 'compareAtPrice', 'available'];
-          const structuralFields = ['label', 'value', 'sku', 'images', 'video', 'videoPublicId'];
+          // Anything outside this list (price, compareAtPrice, label, value,
+          // sku, images, video, etc.) must go through admin re-approval.
+          const inventoryOnlyFields = new Set(['stock', 'available']);
 
-          for (const field of structuralFields) {
+          const allKeys = new Set([
+            ...Object.keys(oldOpt ?? {}),
+            ...Object.keys(newOpt ?? {}),
+          ]);
+
+          for (const field of allKeys) {
+            if (inventoryOnlyFields.has(field)) continue;
             if (JSON.stringify(oldOpt[field]) !== JSON.stringify(newOpt[field])) {
-              return false; // Structural change detected
+              return false; // Non-inventory change detected → needs re-approval
             }
           }
         }
       }
-      return true; // Only inventory changes
+      return true; // Only stock / availability changes
     };
 
     // Check if this is a variant-only update with just inventory changes
