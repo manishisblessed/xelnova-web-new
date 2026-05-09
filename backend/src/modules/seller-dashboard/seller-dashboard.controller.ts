@@ -191,6 +191,12 @@ export class SellerDashboardController {
     return successResponse(await this.service.getSellerBrands(userId), 'Brands fetched');
   }
 
+  @Get('brands/available')
+  @ApiOperation({ summary: 'Get all brands available for this seller (own brands + approved brands + default brands)' })
+  async getAvailableBrands(@CurrentUser('id') userId: string) {
+    return successResponse(await this.service.getAvailableBrandsForSeller(userId), 'Available brands fetched');
+  }
+
   @Get('brands/listing-hint')
   @ApiOperation({
     summary: 'Whether a brand name will need dealer certificate + additional documents (registered by another seller)',

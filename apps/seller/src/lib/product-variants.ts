@@ -138,12 +138,12 @@ function optInt(s: string): number | undefined {
   return n !== undefined ? Math.floor(n) : undefined;
 }
 
-export function newFormValue(): FormVariantValue {
+export function newFormValue(defaultImages?: string[]): FormVariantValue {
   return {
     id: `fv-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     label: '',
     hex: '',
-    images: [],
+    images: defaultImages ?? [],
     video: '',
     videoPublicId: '',
     price: '',
@@ -153,13 +153,13 @@ export function newFormValue(): FormVariantValue {
   };
 }
 
-export function newFormRow(): FormVariantRow {
+export function newFormRow(defaultImages?: string[]): FormVariantRow {
   return {
     id: `vr-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     label: 'Colour',
     defaultLabel: '',
     kind: 'color',
-    values: [newFormValue()],
+    values: [newFormValue(defaultImages)],
     sizeChartEnabled: false,
     sizeChartColumns: [],
     sizeChartData: {},

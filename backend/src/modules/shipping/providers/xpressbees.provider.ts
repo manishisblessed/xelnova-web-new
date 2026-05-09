@@ -102,6 +102,9 @@ export class XpressBeesProvider implements CourierProvider {
     const isCod = details.isCod ?? false;
     const dims = details.dimensions?.split('x') || [];
 
+    const consigneePhone = (details.deliveryAddress.phone || '').replace(/\D/g, '').slice(-10);
+    const sellerPhone = (details.sellerAddress.phone || '').replace(/\D/g, '').slice(-10);
+
     const payload = {
       order_number: details.orderNumber,
       shipping_charges: 0,
@@ -114,7 +117,7 @@ export class XpressBeesProvider implements CourierProvider {
       package_breadth: dims[1] || '10',
       package_height: dims[2] || '10',
       request_auto_pickup: 'yes',
-      ...(isCod && { collectable_amount: details.totalAmount || 0 }),
+      collectable_amount: isCod ? (details.totalAmount || 0) : 0,
       consignee: {
         name: details.deliveryAddress.fullName,
         address: details.deliveryAddress.addressLine1,
@@ -122,7 +125,7 @@ export class XpressBeesProvider implements CourierProvider {
         city: details.deliveryAddress.city,
         state: details.deliveryAddress.state,
         pincode: details.deliveryAddress.pincode,
-        phone: details.deliveryAddress.phone,
+        phone: consigneePhone,
       },
       pickup: {
         warehouse_name: config.warehouseId || 'default',
@@ -131,7 +134,7 @@ export class XpressBeesProvider implements CourierProvider {
         city: details.sellerAddress.city,
         state: details.sellerAddress.state,
         pincode: details.sellerAddress.pincode,
-        phone: details.sellerAddress.phone,
+        phone: sellerPhone,
       },
       order_items: details.items.map((item) => ({
         name: item.name,

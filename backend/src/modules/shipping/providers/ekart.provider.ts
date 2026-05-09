@@ -409,11 +409,69 @@ export class EkartProvider implements CourierProvider {
   }
 
   /**
+   * Extract the location name/code from an Ekart location object.
+   * Different API versions return the identifier under different keys.
+   */
+  private extractLocationName(loc: any): string {
+    return (
+      loc.location_code ||
+      loc.locationCode ||
+      loc.name ||
+      loc.location_name ||
+      loc.pickup_location ||
+      loc.alias ||
+      ''
+    );
+  }
+
+  /**
+   * Fetch all existing pickup locations from the Ekart account.
+   * Tries multiple endpoints since the API has evolved across versions.
+   */
+  private async fetchExistingLocations(headers: Record<string, string>): Promise<any[]> {
+    const locationEndpoints = [
+      '/api/v1/pickup-addresses',
+      '/api/v1/locations',
+      '/api/v1/location',
+      '/api/v1/pickup/list',
+      '/integrations/v2/pickup-locations',
+    ];
+
+    for (const endpoint of locationEndpoints) {
+      try {
+        const listRes = await fetch(`${this.BASE}${endpoint}`, { headers });
+
+        if (listRes.ok) {
+          const listData = await listRes.json();
+          const locations = Array.isArray(listData?.data)
+            ? listData.data
+            : Array.isArray(listData?.locations)
+              ? listData.locations
+              : Array.isArray(listData?.pickup_addresses)
+                ? listData.pickup_addresses
+                : Array.isArray(listData)
+                  ? listData
+                  : [];
+
+          if (locations.length > 0) {
+            this.logger.log(`Ekart: Found ${locations.length} pickup location(s) via ${endpoint}.`);
+            return locations;
+          }
+        }
+      } catch (err) {
+        this.logger.debug(`Ekart: Endpoint ${endpoint} failed: ${err}`);
+      }
+    }
+    return [];
+  }
+
+  /**
    * Ekart requires pickup locations to be pre-registered in their system.
-   * This method attempts to:
-   * 1. Fetch existing pickup locations from the Ekart account
-   * 2. If a matching location exists, return its name
-   * 3. If not, attempt to create a new location via the API
+   * This method:
+   * 1. Fetches existing pickup locations from the Ekart account
+   * 2. Finds the best match by pincode → address → first available
+   * 3. Returns the Ekart-side location code (not our internal name)
+   * 4. If no locations exist, attempts to create one
    */
   async registerWarehouse(
     config: SellerCourierConfig,
@@ -438,62 +496,38 @@ export class EkartProvider implements CourierProvider {
       };
     }
 
-    // Try multiple Ekart API endpoints to fetch existing pickup locations
-    const locationEndpoints = [
-      '/api/v1/pickup-addresses',
-      '/api/v1/locations',
-      '/api/v1/location',
-      '/api/v1/pickup/list',
-      '/integrations/v2/pickup-locations',
-    ];
-
-    let existingLocations: any[] = [];
-    
-    for (const endpoint of locationEndpoints) {
-      try {
-        const listRes = await fetch(`${this.BASE}${endpoint}`, { headers });
-        
-        if (listRes.ok) {
-          const listData = await listRes.json();
-          const locations = Array.isArray(listData?.data) 
-            ? listData.data 
-            : Array.isArray(listData?.locations) 
-              ? listData.locations 
-              : Array.isArray(listData?.pickup_addresses)
-                ? listData.pickup_addresses
-                : Array.isArray(listData) 
-                  ? listData 
-                  : [];
-
-          if (locations.length > 0) {
-            existingLocations = locations;
-            this.logger.log(`Ekart: Found ${locations.length} pickup location(s) via ${endpoint}.`);
-            break;
-          }
-        }
-      } catch (err) {
-        this.logger.debug(`Ekart: Endpoint ${endpoint} failed: ${err}`);
-      }
-    }
+    const existingLocations = await this.fetchExistingLocations(headers);
 
     if (existingLocations.length > 0) {
-      // Check if there's a matching location by pincode or name
       const matchByPincode = existingLocations.find(
-        (loc: any) => String(loc.pincode || loc.pin || loc.postal_code) === options.pincode
-      );
-      const matchByName = existingLocations.find(
-        (loc: any) => {
-          const locName = (loc.name || loc.location_name || loc.pickup_location || '').toLowerCase();
-          const optName = options.name.toLowerCase();
-          return locName.includes(optName) || optName.includes(locName);
-        }
+        (loc: any) => String(loc.pincode || loc.pin || loc.postal_code) === options.pincode,
       );
 
-      const bestMatch = matchByPincode || matchByName || existingLocations[0];
-      const locationName = bestMatch.name || bestMatch.location_name || bestMatch.pickup_location || bestMatch.alias || 'Primary';
+      const optAddr = (options.address || '').toLowerCase().trim();
+      const matchByAddress = !matchByPincode
+        ? existingLocations.find((loc: any) => {
+            const locAddr = (loc.address || loc.full_address || '').toLowerCase().trim();
+            return locAddr && optAddr && (locAddr.includes(optAddr) || optAddr.includes(locAddr));
+          })
+        : null;
+
+      const bestMatch = matchByPincode || matchByAddress || existingLocations[0];
+      const locationName = this.extractLocationName(bestMatch);
+
+      if (!locationName) {
+        this.logger.warn(
+          `Ekart: Found ${existingLocations.length} location(s) but none had a usable name/code. Raw keys: ${Object.keys(bestMatch).join(', ')}`,
+        );
+        return {
+          success: false,
+          message:
+            'Ekart returned pickup locations but none had a recognizable location code. ' +
+            'Please check your Ekart Elite portal → Address menu and ensure at least one pickup location is active.',
+        };
+      }
 
       this.logger.log(
-        `Ekart: Using existing location "${locationName}" (pincode match: ${!!matchByPincode}, name match: ${!!matchByName}).`,
+        `Ekart: Using existing location "${locationName}" (pincode match: ${!!matchByPincode}, address match: ${!!matchByAddress}).`,
       );
 
       return {
@@ -504,7 +538,7 @@ export class EkartProvider implements CourierProvider {
       };
     }
 
-    // Try to create a new pickup location
+    // No existing locations found — try to create one
     const locationPayload = {
       name: options.name,
       address: options.address,
@@ -526,10 +560,16 @@ export class EkartProvider implements CourierProvider {
 
       if (createRes.ok) {
         const createData = await createRes.json();
-        const createdName = createData?.name || createData?.data?.name || options.name;
-        
+        const createdName =
+          createData?.location_code ||
+          createData?.locationCode ||
+          createData?.data?.location_code ||
+          createData?.name ||
+          createData?.data?.name ||
+          options.name;
+
         this.logger.log(`Ekart: Successfully created pickup location "${createdName}".`);
-        
+
         return {
           success: true,
           registeredName: createdName,
@@ -539,33 +579,37 @@ export class EkartProvider implements CourierProvider {
 
       const errText = await createRes.text();
       this.logger.warn(`Ekart location creation failed (${createRes.status}): ${errText.slice(0, 300)}`);
-      
-      // If creation fails, check if it's because the location already exists
+
       if (errText.toLowerCase().includes('already') || errText.toLowerCase().includes('exists')) {
-        return {
-          success: true,
-          registeredName: options.name,
-          alreadyExisted: true,
-          message: `Pickup location "${options.name}" already exists in Ekart.`,
-        };
+        // Location exists but we couldn't list it — re-fetch to get the real name
+        const refetchedLocations = await this.fetchExistingLocations(headers);
+        if (refetchedLocations.length > 0) {
+          const best = refetchedLocations.find(
+            (loc: any) => String(loc.pincode || loc.pin || loc.postal_code) === options.pincode,
+          ) || refetchedLocations[0];
+          const name = this.extractLocationName(best);
+          if (name) {
+            return {
+              success: true,
+              registeredName: name,
+              alreadyExisted: true,
+              message: `Using existing Ekart pickup location "${name}".`,
+            };
+          }
+        }
       }
     } catch (err) {
       this.logger.warn(`Ekart: Location creation threw: ${err}`);
     }
 
-    // Fallback: Use the warehouseId from config if set, otherwise use platform default
-    const fallbackName = config.warehouseId || 'Primary';
-    
-    this.logger.warn(
-      `Ekart: Could not create/find pickup location. ` +
-      `Using fallback name "${fallbackName}". ` +
-      `Make sure this location is registered in your Ekart Elite portal.`,
-    );
-
+    // Hard fail — don't return our internal warehouse ID as a fallback
+    // since Ekart will always reject names it doesn't recognize.
     return {
-      success: true,
-      registeredName: fallbackName,
-      message: `Using Ekart pickup location "${fallbackName}". If shipment fails, please register this location in your Ekart Elite portal → Address menu.`,
+      success: false,
+      message:
+        'Could not find or create a pickup location in Ekart. ' +
+        'Please register a pickup address in your Ekart Elite portal → Address menu in Settings, ' +
+        'then try shipping again.',
     };
   }
 }

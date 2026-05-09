@@ -345,7 +345,13 @@ export class SellerDashboardService {
     if (!hasProductInfo) {
       throw new BadRequestException('Add at least one product information section');
     }
-    if (!dto.brandAuthorizationCertificate?.trim()) {
+    
+    // Check if the brand is a default brand that doesn't require authorization
+    const brandSlug = this.slugify(dto.brand);
+    const brandRecord = await this.prisma.brand.findUnique({ where: { slug: brandSlug } });
+    const isDefaultBrand = brandRecord?.isDefault === true;
+    
+    if (!isDefaultBrand && !dto.brandAuthorizationCertificate?.trim()) {
       throw new BadRequestException('Brand authorization certificate is required');
     }
 
@@ -372,7 +378,9 @@ export class SellerDashboardService {
         : {};
     const additionalDetails = {
       ...additionalDetailsBase,
-      'Brand Authorization Certificate': dto.brandAuthorizationCertificate.trim(),
+      ...(dto.brandAuthorizationCertificate?.trim() && {
+        'Brand Authorization Certificate': dto.brandAuthorizationCertificate.trim(),
+      }),
     } as unknown as Prisma.InputJsonValue;
 
     const sku = dto.sku || await this.generateSku(seller.id, dto.categoryId);
@@ -586,6 +594,8 @@ export class SellerDashboardService {
       'safetyInfo',
       'regulatoryInfo',
       'warrantyInfo',
+      'warrantyDurationValue',
+      'warrantyDurationUnit',
       'weight',
       'dimensions',
       'specifications',
@@ -725,6 +735,29 @@ export class SellerDashboardService {
     if (dto.specifications !== undefined) {
       data.specifications = sanitizeSpecificationsForDb(dto.specifications);
     }
+    
+    // Handle warranty fields
+    if (dto.warrantyDurationValue !== undefined || dto.warrantyDurationUnit !== undefined) {
+      const wVal = dto.warrantyDurationValue;
+      const wUnit = dto.warrantyDurationUnit;
+      
+      if (wVal === null && wUnit === null) {
+        data.warrantyDurationValue = null;
+        data.warrantyDurationUnit = null;
+        data.warrantyInfo = null;
+      } else if (wVal !== undefined && wUnit !== undefined) {
+        const num = Number(wVal);
+        if (Number.isNaN(num) || num < 1 || !Number.isInteger(num)) {
+          throw new BadRequestException('Warranty value must be a positive integer');
+        }
+        data.warrantyDurationValue = num;
+        data.warrantyDurationUnit = wUnit;
+        data.warrantyInfo = this.formatSellerWarranty(num, wUnit);
+      }
+    } else if (dto.warrantyInfo !== undefined) {
+      data.warrantyInfo = dto.warrantyInfo.trim() || null;
+    }
+    
     delete data.isCancellable;
     delete data.isReturnable;
     delete data.isReplaceable;
@@ -1548,7 +1581,8 @@ export class SellerDashboardService {
 
     const ownsIt = existing.proposedBy === sellerId;
     const globallyApproved = existing.approved === true;
-    if (ownsIt || globallyApproved) {
+    const isDefaultBrand = existing.isDefault === true;
+    if (ownsIt || globallyApproved || isDefaultBrand) {
       return 'standard';
     }
 
@@ -1577,7 +1611,7 @@ export class SellerDashboardService {
     if (!existing) {
       return { mode: 'new_brand' as const };
     }
-    if (existing.proposedBy === seller.id || existing.approved === true) {
+    if (existing.proposedBy === seller.id || existing.approved === true || existing.isDefault === true) {
       return { mode: 'direct' as const };
     }
     return {
@@ -1592,6 +1626,26 @@ export class SellerDashboardService {
     return this.prisma.brand.findMany({
       where: { proposedBy: seller.id },
       orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  /** Get all brands available to a seller: their own proposed brands + global approved brands + default brands. */
+  async getAvailableBrandsForSeller(userId: string) {
+    const seller = await this.getSellerProfile(userId);
+    return this.prisma.brand.findMany({
+      where: {
+        OR: [
+          { proposedBy: seller.id }, // Seller's own brands
+          { approved: true }, // Admin-approved global brands
+          { isDefault: true }, // Default brands like Generic
+        ],
+        isActive: true,
+      },
+      orderBy: [
+        { isDefault: 'desc' }, // Default brands first
+        { approved: 'desc' }, // Then approved brands
+        { createdAt: 'desc' },
+      ],
     });
   }
 
@@ -1864,6 +1918,22 @@ export class SellerDashboardService {
       topProducts,
       categoryBreakdown: categoryData,
     };
+  }
+
+  private formatSellerWarranty(value: number, unit: string): string {
+    const label =
+      unit === 'DAYS'
+        ? value === 1
+          ? 'Day'
+          : 'Days'
+        : unit === 'MONTHS'
+          ? value === 1
+            ? 'Month'
+            : 'Months'
+          : value === 1
+            ? 'Year'
+            : 'Years';
+    return `Seller Warranty: ${value} ${label}`;
   }
 
   /**

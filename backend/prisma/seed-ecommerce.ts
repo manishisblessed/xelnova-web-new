@@ -33,6 +33,7 @@ export async function upsertEcommerceDemoData(prisma: PrismaClient) {
   }
 
   const brands = [
+    { slug: "generic", name: "Generic", logo: "", featured: false, isDefault: true },
     { slug: "samsung", name: "Samsung", logo: "", featured: true },
     { slug: "apple", name: "Apple", logo: "", featured: true },
     { slug: "sony", name: "Sony", logo: "", featured: true },
@@ -55,6 +56,7 @@ export async function upsertEcommerceDemoData(prisma: PrismaClient) {
         featured: b.featured,
         isActive: true,
         approved: true,
+        isDefault: b.isDefault || false,
       },
       update: {
         name: b.name,
@@ -62,6 +64,7 @@ export async function upsertEcommerceDemoData(prisma: PrismaClient) {
         featured: b.featured,
         isActive: true,
         approved: true,
+        isDefault: b.isDefault || false,
       },
     });
   }

@@ -906,6 +906,8 @@ model Brand {
   logo     String?
   featured Boolean @default(false)
   isActive Boolean @default(true)
+  /** When true, sellers can use this brand without authorization certificates (e.g., Generic brand). */
+  isDefault Boolean @default(false)
 
   /** SellerProfile.id of the seller who proposed this brand (null for admin-created). */
   proposedBy String?

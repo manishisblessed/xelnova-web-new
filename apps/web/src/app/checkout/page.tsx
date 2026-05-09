@@ -1241,9 +1241,9 @@ export default function CheckoutPage() {
                       type="button"
                       onClick={() => void handleApplyCoupon()}
                       disabled={couponApplying || !couponInput.trim()}
-                      className="inline-flex min-h-[42px] items-center justify-center rounded-xl bg-primary-600 px-4 py-2 text-sm font-semibold text-white hover:bg-primary-700 disabled:opacity-40 sm:shrink-0"
+                      className="inline-flex min-h-[42px] items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-primary-600 to-primary-700 px-5 py-2 text-sm font-bold text-white shadow-md shadow-primary-500/20 hover:shadow-lg hover:shadow-primary-500/30 hover:from-primary-700 hover:to-primary-800 disabled:opacity-50 disabled:shadow-none transition-all sm:shrink-0"
                     >
-                      {couponApplying ? <Loader2 size={16} className="animate-spin" /> : "Apply"}
+                      {couponApplying ? <Loader2 size={16} className="animate-spin" /> : <>✓ Apply</>}
                     </button>
                   )}
                 </div>

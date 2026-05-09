@@ -251,63 +251,7 @@ export function Header() {
 
   return (
     <header className={`sticky top-0 z-50 bg-white transition-all duration-500 ${isScrolled ? 'shadow-elevated' : ''}`}>
-      {/* Top Bar — Blinkit-inspired emerald with sunshine accents */}
-      <div className="bg-gradient-to-r from-primary-700 via-primary-600 to-primary-700 text-[11px] relative overflow-hidden">
-        <div className="pointer-events-none absolute inset-0 opacity-25 bg-[radial-gradient(ellipse_60%_120%_at_85%_50%,rgba(247,197,43,0.35),transparent_60%),radial-gradient(ellipse_40%_120%_at_15%_50%,rgba(255,255,255,0.18),transparent_60%)]" />
-        <div className="relative mx-auto max-w-[1440px] flex items-center justify-between px-4 py-1.5 sm:px-6">
-          <div className="flex items-center gap-3 text-white/95">
-            <div className="flex items-center gap-1.5 text-white/95">
-              <MapPin size={10} className="shrink-0 opacity-90" aria-hidden />
-              {location ? (
-                <span className="inline max-w-[min(100%,14rem)] truncate sm:max-w-none">
-                  Deliver to <strong className="text-white">{location.city} {location.pincode}</strong>
-                </span>
-              ) : (
-                <span className="inline opacity-75">
-                  Detecting location…</span>
-              )}
-            </div>
-            <span className="text-white/45 hidden sm:inline">|</span>
-            <a
-              href="tel:+919259131155"
-              className="hidden sm:flex items-center gap-1 hover:text-white transition-colors"
-            >
-              <Phone size={10} />
-              +91 9259131155
-            </a>
-            <span className="text-white/45 hidden md:inline">|</span>
-            <a
-              href="https://wa.me/919259131155"
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label="Chat with us on WhatsApp"
-              className="hidden md:flex items-center gap-1 hover:text-white transition-colors"
-            >
-              <WhatsAppIcon size={12} className="text-green-300" />
-              WhatsApp
-            </a>
-          </div>
-          <div className="flex items-center gap-3 text-white/90">
-            <Link href="/download" className="hidden md:flex items-center gap-1 hover:text-white transition-colors">
-              <Download size={10} />
-              Get App
-            </Link>
-            <span className="hidden md:inline text-white/45">|</span>
-            <a
-              href="https://seller.xelnova.in"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="hover:text-white transition-colors"
-            >
-              Sell on Xelnova
-            </a>
-            <span className="text-white/45">|</span>
-            <Link href="/track-order" className="hover:text-white transition-colors">Track Order</Link>
-            <span className="text-white/45 hidden sm:inline">|</span>
-            <Link href="/faq" className="hidden sm:inline hover:text-white transition-colors">Help</Link>
-          </div>
-        </div>
-      </div>
+      {/* Top Bar — Hidden */}
 
       {/* Main Header */}
       <div className={`transition-all duration-500 border-b border-border/50 ${isScrolled ? 'glass' : 'bg-white'}`}>
@@ -564,45 +508,7 @@ export function Header() {
         </div>
       </div>
 
-      {/* Category Navigation + Sale Badge */}
-      <div className={`border-b border-border/40 transition-all duration-500 ${isScrolled ? 'glass' : 'bg-white'}`}>
-        <div className="mx-auto max-w-[1440px] flex items-center px-4 lg:px-6">
-          <div className="relative flex-1 min-w-0">
-            <div className="absolute left-0 top-0 bottom-0 w-8 bg-gradient-to-r from-white to-transparent z-10 pointer-events-none opacity-0 transition-opacity" id="cat-fade-left" />
-            <div className="flex items-center gap-0.5 overflow-x-auto scrollbar-hide scroll-smooth" id="category-scroll">
-              {(categories || []).map((cat) => (
-                <Link
-                  key={cat.slug}
-                  href={`/products?category=${cat.slug}`}
-                  className="flex-shrink-0 flex items-center gap-1.5 px-3.5 py-2.5 text-sm text-text-secondary hover:text-primary-700 hover:bg-primary-50 transition-all rounded-lg font-medium"
-                >
-                  <span className="text-sm">{categoryIcons[cat.slug] || '🛍️'}</span>
-                  {cat.name}
-                </Link>
-              ))}
-            </div>
-            <div className="absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-white to-transparent z-10 pointer-events-none" id="cat-fade-right" />
-          </div>
-          <div className="flex-shrink-0 flex items-center gap-3 pl-3 border-l border-border/30 ml-2">
-            <Link
-              href="/products?deals=sale"
-              className="hidden sm:flex flex-shrink-0 items-center gap-1.5 bg-gradient-to-r from-danger-500 to-accent-500 text-white text-xs font-bold px-3.5 py-1.5 rounded-full animate-pulse-soft"
-            >
-              <Flame size={12} />
-              Mega Sale — Up to 70% Off
-            </Link>
-            <a
-              href="https://seller.xelnova.in"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex-shrink-0 flex items-center gap-1 px-3 py-2.5 text-sm font-semibold text-accent-600 hover:bg-accent-50 transition-colors rounded-lg"
-            >
-              <Sparkles size={14} />
-              Sell on Xelnova
-            </a>
-          </div>
-        </div>
-      </div>
+      {/* Category Navigation + Sale Badge — Hidden */}
 
       {/* Mobile Sidebar */}
       <AnimatePresence>

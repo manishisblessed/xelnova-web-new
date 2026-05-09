@@ -2114,6 +2114,19 @@ export default function ProductsPage() {
                     </div>
                   )}
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    {viewing?.warrantyDurationValue && viewing?.warrantyDurationUnit && (
+                      <div className="sm:col-span-3 rounded-lg border-2 border-info-200 bg-info-50 p-3 mb-2">
+                        <p className="text-xs font-semibold text-info-900 mb-1">
+                          Seller-provided warranty
+                        </p>
+                        <p className="text-sm text-info-800">
+                          {viewing.warrantyDurationValue} {viewing.warrantyDurationUnit.toLowerCase()} — {viewing.warrantyInfo}
+                        </p>
+                        <p className="mt-1.5 text-[11px] text-info-700">
+                          You can modify this above or leave it as-is to approve.
+                        </p>
+                      </div>
+                    )}
                     <div className="sm:col-span-1">
                       <label className="block text-[11px] font-medium uppercase tracking-wide text-text-muted">
                         Warranty (optional)

@@ -677,31 +677,6 @@ export default function ShippingSettingsPage() {
           )}
         </motion.div>
 
-        {/* Built-in option — only Ship By Own here. Xelgo (platform courier) is offered
-            on the per-order ship page when the seller hands a paid order over to us. */}
-        <div className="grid gap-3 sm:grid-cols-2">
-          <motion.div
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="rounded-2xl border border-border bg-white p-4"
-          >
-            <div className="flex items-start gap-3">
-              <div className="rounded-xl bg-gray-100 p-2">
-                <Settings size={18} className="text-gray-500" />
-              </div>
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <h3 className="text-sm font-semibold text-text-primary">Ship By Own</h3>
-                  <Badge variant="info" className="text-[10px] px-1.5 py-0">No Setup</Badge>
-                </div>
-                <p className="text-xs text-text-muted mt-1 leading-relaxed">
-                  Ship with any courier you prefer. We won&apos;t charge any shipping or surcharge for self-shipped orders.
-                </p>
-              </div>
-            </div>
-          </motion.div>
-        </div>
-
         {/* Third-party courier integrations */}
         <div>
           <div className="flex items-center gap-2 mb-1">
@@ -795,6 +770,31 @@ export default function ShippingSettingsPage() {
               );
             })}
           </div>
+        </div>
+
+        {/* Built-in option — only Ship By Own here. Xelgo (platform courier) is offered
+            on the per-order ship page when the seller hands a paid order over to us. */}
+        <div className="grid gap-3 sm:grid-cols-2">
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="rounded-2xl border border-border bg-white p-4"
+          >
+            <div className="flex items-start gap-3">
+              <div className="rounded-xl bg-gray-100 p-2">
+                <Settings size={18} className="text-gray-500" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-semibold text-text-primary">Ship By Own</h3>
+                  <Badge variant="info" className="text-[10px] px-1.5 py-0">No Setup</Badge>
+                </div>
+                <p className="text-xs text-text-muted mt-1 leading-relaxed">
+                  Ship with any courier you prefer. We won&apos;t charge any shipping or surcharge for self-shipped orders.
+                </p>
+              </div>
+            </div>
+          </motion.div>
         </div>
 
         {loading && (

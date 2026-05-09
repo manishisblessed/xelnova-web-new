@@ -2060,6 +2060,8 @@ export default function SellerInventoryPage() {
   const [formSafetyInfo, setFormSafetyInfo] = useState('');
   const [formRegulatoryInfo, setFormRegulatoryInfo] = useState('');
   const [formWarrantyInfo, setFormWarrantyInfo] = useState('');
+  const [formWarrantyDurationValue, setFormWarrantyDurationValue] = useState('');
+  const [formWarrantyDurationUnit, setFormWarrantyDurationUnit] = useState<'DAYS' | 'MONTHS' | 'YEARS' | ''>('');
   const brandCertificateInputRef = useRef<HTMLInputElement>(null);
   const [showBrandCertUrlField, setShowBrandCertUrlField] = useState(false);
   const [brandCertLinkDraft, setBrandCertLinkDraft] = useState('');
@@ -2181,6 +2183,8 @@ export default function SellerInventoryPage() {
       formSafetyInfo,
       formRegulatoryInfo,
       formWarrantyInfo,
+      formWarrantyDurationValue,
+      formWarrantyDurationUnit,
     }),
     [
       formName, formBrand, formPrice, formCompare, formStock, formSku, formCategoryId,
@@ -2191,6 +2195,7 @@ export default function SellerInventoryPage() {
       formFeaturesAndSpecs, formMaterialsAndCare,
       formItemDetails, formAdditionalDetails, formProductDescription,
       formSafetyInfo, formRegulatoryInfo, formWarrantyInfo,
+      formWarrantyDurationValue, formWarrantyDurationUnit,
     ],
   );
 
@@ -2276,6 +2281,8 @@ export default function SellerInventoryPage() {
       setFormSafetyInfo(get('formSafetyInfo', ''));
       setFormRegulatoryInfo(get('formRegulatoryInfo', ''));
       setFormWarrantyInfo(get('formWarrantyInfo', ''));
+      setFormWarrantyDurationValue(get('formWarrantyDurationValue', ''));
+      setFormWarrantyDurationUnit(get<'DAYS' | 'MONTHS' | 'YEARS' | ''>('formWarrantyDurationUnit', ''));
       draftHydratedRef.current = true;
       setDraftRestored(true);
       setDraftSavedAt(parsed?.savedAt ?? null);
@@ -2392,6 +2399,8 @@ export default function SellerInventoryPage() {
     setFormSafetyInfo('');
     setFormRegulatoryInfo('');
     setFormWarrantyInfo('');
+    setFormWarrantyDurationValue('');
+    setFormWarrantyDurationUnit('');
   };
 
   const openCreate = () => {
@@ -2513,6 +2522,8 @@ export default function SellerInventoryPage() {
         setFormSafetyInfo(String(full.safetyInfo ?? ''));
         setFormRegulatoryInfo(String(full.regulatoryInfo ?? ''));
         setFormWarrantyInfo(String(full.warrantyInfo ?? ''));
+        setFormWarrantyDurationValue(full.warrantyDurationValue ? String(full.warrantyDurationValue) : '');
+        setFormWarrantyDurationUnit((full.warrantyDurationUnit as 'DAYS' | 'MONTHS' | 'YEARS' | '') ?? '');
         const extraUrls = full.brandAuthAdditionalDocumentUrls as string[] | undefined;
         if (Array.isArray(extraUrls) && extraUrls.length) {
           setFormBrandAuthExtraUrls(extraUrls.map((u) => String(u)));
@@ -2527,7 +2538,7 @@ export default function SellerInventoryPage() {
   };
 
   const addVariantRow = () => {
-    setFormVariantRows((prev) => [...prev, newFormRow()]);
+    setFormVariantRows((prev) => [...prev, newFormRow(formImages.map((img) => img.url))]);
   };
 
   const updateVariantRow = (id: string, patch: Partial<FormVariantRow>) => {
@@ -2540,7 +2551,11 @@ export default function SellerInventoryPage() {
 
   const addVariantValue = (rowId: string) => {
     setFormVariantRows((prev) =>
-      prev.map((r) => (r.id === rowId ? { ...r, values: [...r.values, newFormValue()] } : r)),
+      prev.map((r) =>
+        r.id === rowId
+          ? { ...r, values: [...r.values, newFormValue(formImages.map((img) => img.url))] }
+          : r,
+      ),
     );
   };
 
@@ -2930,6 +2945,8 @@ export default function SellerInventoryPage() {
         safetyInfo: formSafetyInfo.trim() || undefined,
         regulatoryInfo: formRegulatoryInfo.trim() || undefined,
         warrantyInfo: formWarrantyInfo.trim() || undefined,
+        warrantyDurationValue: formWarrantyDurationValue.trim() ? Number(formWarrantyDurationValue) : undefined,
+        warrantyDurationUnit: formWarrantyDurationUnit || undefined,
       });
       toast.success('Product created and submitted for approval', {
         description: dealerAuthorizationRequired
@@ -3048,6 +3065,8 @@ export default function SellerInventoryPage() {
         safetyInfo: formSafetyInfo.trim() || undefined,
         regulatoryInfo: formRegulatoryInfo.trim() || undefined,
         warrantyInfo: formWarrantyInfo.trim() || undefined,
+        warrantyDurationValue: formWarrantyDurationValue.trim() ? Number(formWarrantyDurationValue) : undefined,
+        warrantyDurationUnit: formWarrantyDurationUnit || undefined,
       });
       const wasActive = editProduct.status === 'ACTIVE';
       if (wasActive) {
@@ -4393,6 +4412,39 @@ export default function SellerInventoryPage() {
             onChange={(e) => setFormWarrantyInfo(e.target.value)}
             hint="For example, 1 Year Manufacturer Warranty."
           />
+        </div>
+
+        {/* Warranty Duration */}
+        <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="sm:col-span-1">
+            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-text-secondary">
+              Warranty duration
+            </label>
+            <input
+              type="number"
+              min={1}
+              placeholder="e.g. 1, 6, 12"
+              value={formWarrantyDurationValue}
+              onChange={(e) => setFormWarrantyDurationValue(e.target.value)}
+              className="w-full rounded-xl border border-border bg-surface-raised px-3 py-2 text-sm text-text-primary outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30"
+            />
+            <p className="mt-1 text-xs text-text-muted">Leave blank to use text-only warranty above.</p>
+          </div>
+          <div className="sm:col-span-2">
+            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-text-secondary">
+              Warranty unit
+            </label>
+            <select
+              value={formWarrantyDurationUnit}
+              onChange={(e) => setFormWarrantyDurationUnit(e.target.value as 'DAYS' | 'MONTHS' | 'YEARS' | '')}
+              className="w-full rounded-xl border border-border bg-surface-raised px-3 py-2 text-sm text-text-primary outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30"
+            >
+              <option value="">— Select unit —</option>
+              <option value="DAYS">Days</option>
+              <option value="MONTHS">Months</option>
+              <option value="YEARS">Years</option>
+            </select>
+          </div>
         </div>
 
         {/* Safety Info */}

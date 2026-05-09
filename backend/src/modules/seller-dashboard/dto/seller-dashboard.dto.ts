@@ -59,6 +59,8 @@ export class CreateProductDto {
   @ApiPropertyOptional({ description: 'Safety and product resources information' }) @IsOptional() @IsString() safetyInfo?: string;
   @ApiPropertyOptional({ description: 'Regulatory information (BIS, certifications)' }) @IsOptional() @IsString() regulatoryInfo?: string;
   @ApiPropertyOptional({ description: 'Warranty information' }) @IsOptional() @IsString() warrantyInfo?: string;
+  @ApiPropertyOptional({ description: 'Warranty duration value (e.g., 1, 6, 12)' }) @IsOptional() @IsNumber() @Type(() => Number) warrantyDurationValue?: number;
+  @ApiPropertyOptional({ description: 'Warranty duration unit (DAYS, MONTHS, or YEARS)' }) @IsOptional() @IsString() warrantyDurationUnit?: string;
 }
 
 export class UpdateProductDto {
@@ -119,6 +121,8 @@ export class UpdateProductDto {
   @ApiPropertyOptional({ description: 'Safety and product resources information' }) @IsOptional() @IsString() safetyInfo?: string;
   @ApiPropertyOptional({ description: 'Regulatory information (BIS, certifications)' }) @IsOptional() @IsString() regulatoryInfo?: string;
   @ApiPropertyOptional({ description: 'Warranty information' }) @IsOptional() @IsString() warrantyInfo?: string;
+  @ApiPropertyOptional({ description: 'Warranty duration value (e.g., 1, 6, 12)' }) @IsOptional() @IsNumber() @Type(() => Number) warrantyDurationValue?: number;
+  @ApiPropertyOptional({ description: 'Warranty duration unit (DAYS, MONTHS, or YEARS)' }) @IsOptional() @IsString() warrantyDurationUnit?: string;
 }
 
 export class SellerProductQueryDto {

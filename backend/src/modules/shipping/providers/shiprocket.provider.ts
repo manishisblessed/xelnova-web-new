@@ -68,6 +68,8 @@ export class ShipRocketProvider implements CourierProvider {
     const headers = await this.authHeaders(config);
 
     // Step 1: Create order
+    const billingPhone = (details.deliveryAddress.phone || '').replace(/\D/g, '').slice(-10);
+
     const orderPayload = {
       order_id: details.orderNumber,
       order_date: new Date().toISOString().split('T')[0],
@@ -82,7 +84,7 @@ export class ShipRocketProvider implements CourierProvider {
       billing_state: details.deliveryAddress.state,
       billing_country: 'India',
       billing_email: '',
-      billing_phone: details.deliveryAddress.phone,
+      billing_phone: billingPhone,
       shipping_is_billing: true,
       order_items: details.items.map((item) => ({
         name: item.name,
@@ -372,9 +374,69 @@ export class ShipRocketProvider implements CourierProvider {
   }
 
   /**
+   * Fetch existing ShipRocket pickup locations and find the best match.
+   * ShipRocket's pickup_location field is the identifier used in order creation.
+   */
+  private async findExistingPickupLocation(
+    headers: Record<string, string>,
+    options: RegisterWarehouseOptions,
+  ): Promise<{ found: boolean; name?: string; id?: number; locations?: any[] }> {
+    try {
+      const listRes = await fetch(`${this.baseUrl}/v1/external/settings/company/pickup`, {
+        headers,
+      });
+
+      if (!listRes.ok) return { found: false };
+
+      const listData = await listRes.json();
+      const locations = listData?.data?.shipping_address || [];
+      if (locations.length === 0) return { found: false, locations: [] };
+
+      // 1. Exact name match
+      const byName = locations.find(
+        (loc: any) =>
+          loc.pickup_location?.toLowerCase() === options.name.toLowerCase() ||
+          loc.pickup_location === options.name,
+      );
+      if (byName) {
+        return { found: true, name: byName.pickup_location, id: byName.id, locations };
+      }
+
+      // 2. Match by pincode (most reliable address-based match)
+      const byPincode = locations.find(
+        (loc: any) => String(loc.pin_code || loc.pincode) === options.pincode,
+      );
+      if (byPincode) {
+        return { found: true, name: byPincode.pickup_location, id: byPincode.id, locations };
+      }
+
+      // 3. Match by city (partial)
+      const optCity = (options.city || '').toLowerCase().trim();
+      const byCity = locations.find(
+        (loc: any) => (loc.city || '').toLowerCase().trim() === optCity,
+      );
+      if (byCity) {
+        return { found: true, name: byCity.pickup_location, id: byCity.id, locations };
+      }
+
+      // 4. Fall back to the first active location
+      const firstActive = locations.find((loc: any) => loc.status === 1 || loc.status === '1') || locations[0];
+      if (firstActive?.pickup_location) {
+        return { found: true, name: firstActive.pickup_location, id: firstActive.id, locations };
+      }
+
+      return { found: false, locations };
+    } catch (err) {
+      this.logger.warn(`Failed to check existing ShipRocket pickup locations: ${err}`);
+      return { found: false };
+    }
+  }
+
+  /**
    * Register a pickup location (warehouse) with ShipRocket.
    * ShipRocket requires pickup locations to be registered via their API
-   * before they can be used for shipments.
+   * before they can be used for shipments. The pickup_location string
+   * must exactly match what ShipRocket has on file.
    */
   async registerWarehouse(
     config: SellerCourierConfig,
@@ -389,40 +451,24 @@ export class ShipRocketProvider implements CourierProvider {
 
     const headers = await this.authHeaders(config);
 
-    // Check if pickup location already exists
-    try {
-      const listRes = await fetch(`${this.baseUrl}/v1/external/settings/company/pickup`, {
-        headers,
-      });
+    // Check existing locations first — match by name, pincode, or city
+    const existing = await this.findExistingPickupLocation(headers, options);
 
-      if (listRes.ok) {
-        const listData = await listRes.json();
-        const locations = listData?.data?.shipping_address || [];
-        
-        // Check if a location with this name already exists
-        const existing = locations.find(
-          (loc: any) => 
-            loc.pickup_location?.toLowerCase() === options.name.toLowerCase() ||
-            loc.pickup_location === options.name
-        );
-
-        if (existing) {
-          this.logger.log(
-            `ShipRocket pickup location "${options.name}" already registered (ID: ${existing.id}).`,
-          );
-          return {
-            success: true,
-            registeredName: existing.pickup_location || options.name,
-            message: `Pickup location "${options.name}" is already registered with ShipRocket.`,
-          };
-        }
-      }
-    } catch (err) {
-      this.logger.warn(`Failed to check existing ShipRocket pickup locations: ${err}`);
+    if (existing.found && existing.name) {
+      this.logger.log(
+        `ShipRocket: Using existing pickup location "${existing.name}" (ID: ${existing.id}).`,
+      );
+      return {
+        success: true,
+        registeredName: existing.name,
+        alreadyExisted: true,
+        message: `Using existing ShipRocket pickup location "${existing.name}".`,
+      };
     }
 
-    // Create new pickup location
-    const nameParts = (options.name || '').split(' ');
+    // No matching location found — create a new one
+    const contactName = options.contactPerson || options.registeredName || options.name;
+    const nameParts = contactName.split(' ');
     const firstName = nameParts[0] || 'Seller';
     const lastName = nameParts.slice(1).join(' ') || 'Pickup';
 
@@ -450,6 +496,20 @@ export class ShipRocketProvider implements CourierProvider {
       if (!res.ok) {
         const errText = await res.text();
         this.logger.error(`ShipRocket addpickup failed: ${res.status} ${errText}`);
+
+        // If it failed because the location already exists, re-fetch to get the actual name
+        if (errText.toLowerCase().includes('already') || errText.toLowerCase().includes('exists')) {
+          const retry = await this.findExistingPickupLocation(headers, options);
+          if (retry.found && retry.name) {
+            return {
+              success: true,
+              registeredName: retry.name,
+              alreadyExisted: true,
+              message: `Using existing ShipRocket pickup location "${retry.name}".`,
+            };
+          }
+        }
+
         return {
           success: false,
           message: `Failed to register pickup location with ShipRocket: ${errText}`,
@@ -459,6 +519,16 @@ export class ShipRocketProvider implements CourierProvider {
       const data = await res.json();
 
       if (data.success === false || data.status === false) {
+        // ShipRocket returned 200 but with success=false — try to find existing
+        const retry = await this.findExistingPickupLocation(headers, options);
+        if (retry.found && retry.name) {
+          return {
+            success: true,
+            registeredName: retry.name,
+            alreadyExisted: true,
+            message: `Using existing ShipRocket pickup location "${retry.name}".`,
+          };
+        }
         return {
           success: false,
           message: data.message || 'ShipRocket rejected the pickup location registration.',
