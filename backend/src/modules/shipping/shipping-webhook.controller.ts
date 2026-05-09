@@ -33,7 +33,7 @@ export class ShippingWebhookController {
     return successResponse(result, 'Webhook processed');
   }
 
-  @Post('sr-updates')
+  @Post('carrier-updates')
   @ApiOperation({ summary: 'ShipRocket status webhook (alias)' })
   async shiprocketWebhookAlias(@Body() payload: any) {
     return this.shiprocketWebhook(payload);
