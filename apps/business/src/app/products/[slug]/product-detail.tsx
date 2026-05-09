@@ -21,6 +21,27 @@ import type { SizeChartRow } from "@/lib/data/products";
 
 type TabId = "description" | "specifications" | "reviews" | "product-info";
 
+/** JSON specs may be null — `Object.keys(null)` crashes the Specifications tab. */
+function normalizeProductSpecifications(specs: unknown): Record<string, string> {
+  if (specs == null || typeof specs !== "object" || Array.isArray(specs)) {
+    return {};
+  }
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(specs as Record<string, unknown>)) {
+    if (v === null || v === undefined) out[k] = "";
+    else if (typeof v === "object") {
+      try {
+        out[k] = JSON.stringify(v);
+      } catch {
+        out[k] = "";
+      }
+    } else {
+      out[k] = String(v);
+    }
+  }
+  return out;
+}
+
 export default function ProductDetail() {
   const params = useParams();
   const router = useRouter();
@@ -104,7 +125,18 @@ export default function ProductDetail() {
     });
   })();
 
-  const variantString = Object.entries(selectedVariants).map(([, v]) => v).join("-");
+  const variantString = (() => {
+    if (product?.variants?.length) {
+      const ordered = product.variants
+        .map((g) => selectedVariants[g.type])
+        .filter((v) => v != null && String(v).length > 0);
+      if (ordered.length > 0) return ordered.join("-");
+    }
+    return Object.entries(selectedVariants)
+      .map(([, v]) => v)
+      .filter((v) => v != null && String(v).length > 0)
+      .join("-");
+  })();
 
   const effectivePrice = (() => {
     if (!product) return 0;
@@ -246,9 +278,34 @@ export default function ProductDetail() {
     { id: "reviews", label: `Reviews (${product.reviewCount.toLocaleString("en-IN")})` },
   ];
 
+  const specificationRows = normalizeProductSpecifications(product.specifications);
+
   const activeGallery = variantGallery && variantGallery.length > 0 ? variantGallery : product.images;
   const hasImages = activeGallery.length > 0;
   const deliveryDate = new Date(Date.now() + 3 * 86400000).toLocaleDateString("en-IN", { weekday: "long", month: "short", day: "numeric" });
+
+  // Align return/replacement/warranty copy with consumer PDP (`apps/web`). Business app does not load site-wide return settings yet — treat marketplace gates as permissive (same as web when settings omit overrides).
+  const marketplaceReturnsAllowed = true;
+  const marketplaceReplacementsAllowed = true;
+  const productReturnsAllowed = product.isReturnable !== false;
+  const returnPreset = (product as { returnPolicyPreset?: string | null }).returnPolicyPreset ?? null;
+  const replacementOnlyPreset = returnPreset === 'REPLACEMENT_ONLY';
+  const showReturnPolicy =
+    marketplaceReturnsAllowed && productReturnsAllowed && !replacementOnlyPreset;
+  const effectiveReturnWindow = product.returnWindow ?? 7;
+
+  const returnPolicyHeadline = (() => {
+    if (!showReturnPolicy) return '';
+    if (returnPreset === 'EASY_RETURN_3_DAYS') return '3 Days Easy Return';
+    if (returnPreset === 'EASY_RETURN_7_DAYS') return '7 Days Easy Return';
+    if (returnPreset === 'RETURN_PLUS_REPLACEMENT')
+      return `${effectiveReturnWindow} Days Easy Return`;
+    return `${effectiveReturnWindow} days easy return policy`;
+  })();
+
+  const showReplacement = !!product.isReplaceable && marketplaceReplacementsAllowed;
+  const effectiveReplacementWindow =
+    product.replacementWindow ?? product.returnWindow ?? effectiveReturnWindow;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -364,6 +421,29 @@ export default function ProductDetail() {
                   <p className="mb-1 text-xs font-bold uppercase tracking-widest text-primary-600">{product.brand}</p>
                 )}
                 <h1 className="text-xl font-bold text-text-primary sm:text-2xl leading-tight">{product.name}</h1>
+                {product.xelnovaProductId ? (
+                  <p className="mt-1.5 text-xs text-text-muted">
+                    Item code:{' '}
+                    <span className="font-mono font-medium text-text-secondary">{product.xelnovaProductId}</span>
+                  </p>
+                ) : null}
+                {(() => {
+                  const L = product.productLengthCm;
+                  const W = product.productWidthCm;
+                  const H = product.productHeightCm;
+                  const Wt = product.productWeightKg;
+                  if (L == null && W == null && H == null && Wt == null) return null;
+                  const parts: string[] = [];
+                  if (L != null && W != null && H != null) {
+                    parts.push(`${L} × ${W} × ${H} cm`);
+                  } else {
+                    if (L != null) parts.push(`L ${L} cm`);
+                    if (W != null) parts.push(`W ${W} cm`);
+                    if (H != null) parts.push(`H ${H} cm`);
+                  }
+                  if (Wt != null) parts.push(`${Wt} kg`);
+                  return <p className="mt-1 text-xs text-text-muted">Size & weight: {parts.join(' · ')}</p>;
+                })()}
               </div>
 
               {/* Ratings */}
@@ -404,12 +484,12 @@ export default function ProductDetail() {
 
               {/* Amazon-style service badges */}
               <div className="flex flex-wrap gap-4 text-xs text-center">
-                {product.isReplaceable && (
+                {showReplacement && (
                   <div className="flex flex-col items-center gap-1.5">
                     <div className="w-10 h-10 rounded-full bg-primary-50 border border-primary-100 flex items-center justify-center">
                       <RefreshCw size={18} className="text-primary-600" />
                     </div>
-                    <span className="text-text-secondary font-medium">{product.returnWindow || 7} Days<br/>Replacement</span>
+                    <span className="text-text-secondary font-medium">{effectiveReplacementWindow} Days<br/>Replacement</span>
                   </div>
                 )}
                 <div className="flex flex-col items-center gap-1.5">
@@ -437,12 +517,47 @@ export default function ProductDetail() {
                     <span className="text-text-secondary">by {deliveryDate}</span>
                   </span>
                 </div>
-                <div className="flex items-center gap-3 text-sm">
-                  <div className="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center shrink-0">
-                    <RotateCcw size={16} className="text-primary-600" />
+                {replacementOnlyPreset ? (
+                  <div className="flex items-center gap-3 text-sm">
+                    <div className="w-8 h-8 rounded-lg bg-gray-50 flex items-center justify-center shrink-0">
+                      <RotateCcw size={16} className="text-text-muted" />
+                    </div>
+                    <span className="text-text-secondary">
+                      Refund returns not offered — replacement within {effectiveReplacementWindow} days if eligible.
+                    </span>
                   </div>
-                  <span className="text-text-secondary">{product.returnWindow || 7} days easy return policy</span>
-                </div>
+                ) : showReturnPolicy ? (
+                  <div className="flex items-center gap-3 text-sm">
+                    <div className="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center shrink-0">
+                      <RotateCcw size={16} className="text-primary-600" />
+                    </div>
+                    <span className="text-text-secondary">{returnPolicyHeadline}</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-3 text-sm">
+                    <div className="w-8 h-8 rounded-lg bg-gray-50 flex items-center justify-center shrink-0">
+                      <RotateCcw size={16} className="text-text-muted" />
+                    </div>
+                    <span className="text-text-secondary">Non-returnable</span>
+                  </div>
+                )}
+                {showReplacement ? (
+                  <div className="flex items-center gap-3 text-sm">
+                    <div className="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center shrink-0">
+                      <RefreshCw size={16} className="text-primary-600" />
+                    </div>
+                    <span className="text-text-secondary">
+                      {effectiveReplacementWindow} days replacement — get a new piece if the item arrives damaged or defective.
+                    </span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-3 text-sm">
+                    <div className="w-8 h-8 rounded-lg bg-gray-50 flex items-center justify-center shrink-0">
+                      <RefreshCw size={16} className="text-text-muted" />
+                    </div>
+                    <span className="text-text-secondary">Not eligible for replacement</span>
+                  </div>
+                )}
                 {product.warrantyInfo && (
                   <div className="flex items-center gap-3 text-sm">
                     <div className="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center shrink-0">
@@ -789,10 +904,10 @@ export default function ProductDetail() {
               )}
               {activeTab === "specifications" && (
                 <motion.div key="specs" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
-                  {Object.keys(product.specifications).length > 0 ? (
+                  {Object.keys(specificationRows).length > 0 ? (
                     <table className="w-full">
                       <tbody>
-                        {Object.entries(product.specifications).map(([key, value], i) => (
+                        {Object.entries(specificationRows).map(([key, value], i) => (
                           <tr key={key} className={i % 2 === 0 ? "bg-gray-50" : "bg-white"}>
                             <td className="px-4 py-3 text-sm font-medium text-text-secondary w-1/3">{key}</td>
                             <td className="px-4 py-3 text-sm text-text-primary">{value}</td>

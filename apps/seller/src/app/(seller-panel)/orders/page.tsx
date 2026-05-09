@@ -15,6 +15,7 @@ import { DashboardHeader } from '@/components/dashboard/dashboard-header';
 import { Badge, Button, Input, Modal } from '@xelnova/ui';
 import {
   apiGetOrders,
+  apiGetSellerOrder,
   apiUpdateOrderStatus,
   apiShipOrder,
   apiGetShipment,
@@ -39,6 +40,11 @@ interface OrderProduct {
   images?: string[];
   weight?: number | null;
   dimensions?: string | null;
+  packageLengthCm?: number | null;
+  packageWidthCm?: number | null;
+  packageHeightCm?: number | null;
+  packageWeightKg?: number | null;
+  xelnovaProductId?: string | null;
 }
 
 interface SellerOrderItem {
@@ -47,6 +53,10 @@ interface SellerOrderItem {
   productImage?: string | null;
   quantity: number;
   price: number;
+  variant?: string | null;
+  variantSku?: string | null;
+  variantImage?: string | null;
+  variantAttributes?: Record<string, string> | null;
 }
 
 interface SellerOrder {
@@ -110,11 +120,11 @@ const SHIPMENT_STATUS_LABELS: Record<string, string> = {
   PENDING: 'Pending',
   BOOKED: 'Booked',
   PICKUP_SCHEDULED: 'Pickup Scheduled',
-  PICKED_UP: 'Picked Up',
+  PICKED_UP: 'Shipped',
   IN_TRANSIT: 'In Transit',
   OUT_FOR_DELIVERY: 'Out for Delivery',
   DELIVERED: 'Delivered',
-  RTO_INITIATED: 'RTO Initiated',
+  RTO_INITIATED: 'RTO',
   RTO_DELIVERED: 'RTO Delivered',
   CANCELLED: 'Cancelled',
 };
@@ -132,6 +142,8 @@ const COURIER_PROVIDERS = [
   { id: 'EKART', name: 'Ekart', desc: 'Flipkart logistics' },
 ];
 
+const SELLER_SHIP_INTENT_KEY = 'xelnova_seller_ship_order_id';
+
 function normalizeOrders(res: unknown): SellerOrder[] {
   if (Array.isArray(res)) return res;
   if (res && typeof res === 'object' && 'items' in res && Array.isArray((res as { items: unknown }).items)) {
@@ -141,7 +153,20 @@ function normalizeOrders(res: unknown): SellerOrder[] {
 }
 
 function itemImg(line: SellerOrderItem): string | undefined {
-  return line.product?.images?.[0] || line.productImage || undefined;
+  return line.variantImage || line.product?.images?.[0] || line.productImage || undefined;
+}
+
+function composePackageDimsString(
+  l?: number | null,
+  w?: number | null,
+  h?: number | null,
+): string {
+  if (l == null && w == null && h == null) return '';
+  const a = Number(l) || 0;
+  const b = Number(w) || 0;
+  const c = Number(h) || 0;
+  if (a <= 0 && b <= 0 && c <= 0) return '';
+  return `${a}x${b}x${c}`;
 }
 
 function itemName(line: SellerOrderItem): string {
@@ -180,6 +205,10 @@ export default function SellerOrdersPage() {
    *  reopen the modal. */
   const handledDeepLinkRef = useRef(false);
 
+  /** Consumed once per `/orders/ship/[id]` → orders redirect so ship modal opens. */
+  const handledShipIntentRef = useRef(false);
+  const [autoOpenShipModal, setAutoOpenShipModal] = useState(false);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -210,6 +239,34 @@ export default function SellerOrdersPage() {
     router.replace(pathname, { scroll: false });
   }, [loading, orders, searchParams, router, pathname]);
 
+  useEffect(() => {
+    if (loading) return;
+    const id =
+      typeof window !== 'undefined' ? sessionStorage.getItem(SELLER_SHIP_INTENT_KEY) : null;
+    if (!id) return;
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        let ord: SellerOrder | undefined = orders.find((o) => o.id === id);
+        if (!ord) ord = (await apiGetSellerOrder(id)) as SellerOrder;
+        if (cancelled) return;
+        sessionStorage.removeItem(SELLER_SHIP_INTENT_KEY);
+        handledShipIntentRef.current = true;
+        setDetail(ord);
+        setAutoOpenShipModal(true);
+      } catch (e: unknown) {
+        if (cancelled) return;
+        sessionStorage.removeItem(SELLER_SHIP_INTENT_KEY);
+        toast.error(e instanceof Error ? e.message : 'Could not open ship flow');
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [loading, orders]);
+
   const handleRefresh = async () => {
     setRefreshing(true);
     await load();
@@ -223,6 +280,9 @@ export default function SellerOrdersPage() {
       toast.success(`Order updated to ${STATUS_CONFIG[newStatus]?.label || newStatus}`);
       setOrders((prev) => prev.map((o) => (o.id === orderId ? { ...o, status: newStatus } : o)));
       if (detail?.id === orderId) setDetail((d) => d ? { ...d, status: newStatus } : d);
+      if (newStatus === 'CONFIRMED') {
+        router.push(`/orders/ship/${orderId}`);
+      }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to update status');
     } finally {
@@ -283,7 +343,11 @@ export default function SellerOrdersPage() {
       <>
         <OrderDetail
           order={detail}
-          onBack={() => setDetail(null)}
+          onBack={() => {
+            handledShipIntentRef.current = false;
+            setAutoOpenShipModal(false);
+            setDetail(null);
+          }}
           onStatusUpdate={handleStatusUpdate}
           onCancel={(orderId) => {
             const order = orders.find(o => o.id === orderId);
@@ -291,6 +355,7 @@ export default function SellerOrdersPage() {
           }}
           onShipped={handleShipped}
           saving={saving}
+          autoOpenShipModal={autoOpenShipModal}
         />
         {cancelModal && (
           <CancelOrderModal
@@ -307,7 +372,7 @@ export default function SellerOrdersPage() {
   return (
     <>
       <DashboardHeader title="Order Management" />
-      <div className="p-6 space-y-5">
+      <div className="p-4 sm:p-6 space-y-5">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {[
             { label: 'Action Required', tab: 'action_required' as TabFilter, count: counts.action_required, icon: AlertTriangle, color: 'text-amber-600', bg: 'bg-amber-50' },
@@ -340,8 +405,8 @@ export default function SellerOrdersPage() {
         </div>
 
         <div className="rounded-2xl border border-border bg-white shadow-sm">
-          <div className="flex items-center justify-between border-b border-border px-4">
-            <div className="flex gap-1 overflow-x-auto">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-b border-border px-4 py-3">
+            <div className="flex gap-1 overflow-x-auto min-w-0 pb-1 sm:pb-0 -mx-1 px-1 sm:mx-0 sm:px-0">
               {TABS.map((tab) => (
                 <button
                   key={tab.id}
@@ -364,21 +429,23 @@ export default function SellerOrdersPage() {
                 </button>
               ))}
             </div>
-            <div className="flex items-center gap-2">
-              <div className="relative">
-                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <div className="relative w-full min-w-0 sm:w-auto">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
                 <input
                   type="text"
                   placeholder="Search orders..."
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  className="pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-gray-50 text-text-primary placeholder:text-text-muted focus:border-primary-400 focus:ring-1 focus:ring-primary-400/30 outline-none w-48"
+                  className="pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-gray-50 text-text-primary placeholder:text-text-muted focus:border-primary-400 focus:ring-1 focus:ring-primary-400/30 outline-none w-full sm:w-48"
                 />
               </div>
               <button
+                type="button"
                 onClick={handleRefresh}
                 disabled={refreshing}
-                className="p-2 rounded-lg border border-border hover:bg-gray-50 text-text-muted hover:text-text-primary transition-colors"
+                className="p-2 rounded-lg border border-border hover:bg-gray-50 text-text-muted hover:text-text-primary transition-colors shrink-0"
+                aria-label="Refresh orders"
               >
                 <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
               </button>
@@ -400,9 +467,16 @@ export default function SellerOrdersPage() {
                 </div>
               ))
             ) : filtered.length === 0 ? (
-              <div className="py-16 text-center">
+              <div className="py-16 text-center px-4">
                 <Package size={40} className="mx-auto text-gray-300 mb-3" />
-                <p className="text-text-muted text-sm">No orders found</p>
+                <p className="text-text-primary text-sm font-medium">No orders match this view</p>
+                <p className="text-text-muted text-xs mt-1 max-w-sm mx-auto">
+                  {search
+                    ? 'Try a different search or clear the filter.'
+                    : activeTab === 'action_required'
+                      ? 'You are all caught up — new orders will appear here.'
+                      : 'Orders will show up here once customers place them.'}
+                </p>
               </div>
             ) : (
               filtered.map((order) => {
@@ -426,7 +500,7 @@ export default function SellerOrdersPage() {
                     <div className="flex items-start gap-4">
                       <div className="relative h-16 w-16 rounded-lg border border-border bg-gray-50 overflow-hidden shrink-0">
                         {order.items?.[0] && itemImg(order.items[0]) ? (
-                          <Image src={itemImg(order.items[0])!} alt="" fill className="object-cover" />
+                          <Image src={itemImg(order.items[0])!} alt="" fill sizes="64px" className="object-cover" />
                         ) : (
                           <div className="h-full w-full flex items-center justify-center">
                             <Package size={20} className="text-gray-300" />
@@ -480,7 +554,10 @@ export default function SellerOrdersPage() {
                         )}
                         {showShipBtn && (
                           <button
-                            onClick={() => setDetail(order)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              router.push(`/orders/ship/${order.id}`);
+                            }}
                             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white rounded-lg bg-purple-600 hover:bg-purple-700 transition-colors"
                           >
                             <Truck size={13} />
@@ -516,6 +593,7 @@ function OrderDetail({
   onCancel,
   onShipped,
   saving,
+  autoOpenShipModal = false,
 }: {
   order: SellerOrder;
   onBack: () => void;
@@ -523,6 +601,7 @@ function OrderDetail({
   onCancel: (orderId: string) => void;
   onShipped: (orderId: string) => void;
   saving: boolean;
+  autoOpenShipModal?: boolean;
 }) {
   const [shipModal, setShipModal] = useState(false);
   const [shipment, setShipment] = useState<ShipmentData | null>(
@@ -562,14 +641,19 @@ function OrderDetail({
   // otherwise we show an "awaiting payment" hint instead.
   const flow = isPaid ? FULFILLMENT_FLOW[order.status] : null;
   const StatusIcon = cfg.icon;
-  const statusSteps = ['PENDING', 'CONFIRMED', 'SHIPPED', 'DELIVERED'];
-  const currentStepIdx = statusSteps.indexOf(order.status);
+  const statusSteps = ['PENDING', 'PROCESSING', 'CONFIRMED', 'SHIPPED', 'DELIVERED'] as const;
+  const currentStepIdx = statusSteps.indexOf(order.status as (typeof statusSteps)[number]);
   const isCancelled = ['CANCELLED', 'RETURNED', 'REFUNDED'].includes(order.status);
   const shipmentCancelled = shipment?.shipmentStatus === 'CANCELLED';
-  const showShipAction = (
-    (['CONFIRMED', 'PROCESSING'].includes(order.status) && isPaid && !shipment) ||
-    (shipmentCancelled && isPaid)
-  );
+  // Align with the order list: ship only once the order is confirmed (not while
+  // still in PROCESSING). Allow re-ship after a cancelled shipment.
+  const showShipAction =
+    isPaid &&
+    !isCancelled &&
+    (
+      (order.status === 'CONFIRMED' && !shipment) ||
+      (shipmentCancelled && !['DELIVERED', 'CANCELLED', 'RETURNED', 'REFUNDED'].includes(order.status))
+    );
 
   const loadShipment = useCallback(async () => {
     setShipmentLoading(true);
@@ -588,6 +672,12 @@ function OrderDetail({
       loadShipment();
     }
   }, [order.id, order.status, loadShipment]);
+
+  useEffect(() => {
+    if (!autoOpenShipModal) return;
+    if (!showShipAction) return;
+    setShipModal(true);
+  }, [autoOpenShipModal, showShipAction]);
 
   const handleLiveTrack = async () => {
     setTrackingLoading(true);
@@ -702,7 +792,7 @@ function OrderDetail({
   return (
     <>
       <DashboardHeader title="Order Details" />
-      <div className="p-6 space-y-5 max-w-5xl">
+      <div className="p-4 sm:p-6 space-y-5 max-w-5xl">
         <button onClick={onBack} className="flex items-center gap-1.5 text-sm text-text-muted hover:text-text-primary transition-colors">
           <ChevronLeft size={16} />
           Back to Orders
@@ -728,12 +818,13 @@ function OrderDetail({
                 )}
               </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2 justify-end">
               {['CONFIRMED', 'SHIPPED', 'DELIVERED'].includes(order.status) && (
                 <>
                   <button
                     onClick={handleDownloadLabel}
-                    disabled={labelDownloading}
+                    disabled={labelDownloading || !shipment || shipmentCancelled}
+                    title={!shipment || shipmentCancelled ? 'Generate a shipment first to download the label' : undefined}
                     className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-purple-700 border border-purple-200 rounded-lg bg-purple-50 hover:bg-purple-100 transition-colors disabled:opacity-50"
                   >
                     {labelDownloading ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
@@ -756,24 +847,24 @@ function OrderDetail({
             </div>
           </div>
 
-          {!isCancelled && (
-            <div className="mt-6 flex items-center gap-0">
+          {!isCancelled && currentStepIdx >= 0 && (
+            <div className="mt-6 flex items-center gap-0 overflow-x-auto pb-1 -mx-1 px-1">
               {statusSteps.map((step, i) => {
                 const done = i <= currentStepIdx;
                 const active = i === currentStepIdx;
                 const StepIcon = STATUS_CONFIG[step]?.icon || Package;
                 return (
-                  <div key={step} className="flex items-center flex-1">
+                  <div key={step} className="flex items-center flex-1 min-w-[3.5rem]">
                     <div className="flex flex-col items-center flex-1">
                       <div className={`flex items-center justify-center h-8 w-8 rounded-full border-2 transition-colors ${done ? 'border-emerald-500 bg-emerald-50' : 'border-gray-200 bg-white'} ${active ? 'ring-2 ring-emerald-200' : ''}`}>
                         {done ? <CheckCircle size={16} className="text-emerald-600" /> : <StepIcon size={14} className="text-gray-400" />}
                       </div>
-                      <span className={`text-[10px] mt-1 font-medium ${done ? 'text-emerald-700' : 'text-text-muted'}`}>
+                      <span className={`text-[10px] mt-1 font-medium text-center max-w-[4.5rem] leading-tight ${done ? 'text-emerald-700' : 'text-text-muted'}`}>
                         {STATUS_CONFIG[step]?.label || step}
                       </span>
                     </div>
                     {i < statusSteps.length - 1 && (
-                      <div className={`h-0.5 flex-1 -mx-1 ${i < currentStepIdx ? 'bg-emerald-400' : 'bg-gray-200'}`} />
+                      <div className={`h-0.5 flex-1 min-w-[2px] -mx-0.5 shrink ${i < currentStepIdx ? 'bg-emerald-400' : 'bg-gray-200'}`} />
                     )}
                   </div>
                 );
@@ -931,6 +1022,27 @@ function OrderDetail({
                       <div className="flex-1 min-w-0">
                         <p className="font-medium text-text-primary text-sm truncate">{itemName(line)}</p>
                         <p className="text-xs text-text-muted mt-0.5">Qty: {line.quantity} × {fmt(line.price)}</p>
+                        {line.product?.xelnovaProductId ? (
+                          <p className="text-[10px] font-mono text-text-muted mt-0.5">{line.product.xelnovaProductId}</p>
+                        ) : null}
+                        {line.variantSku || (line.variantAttributes && Object.keys(line.variantAttributes).length > 0) ? (
+                          <div className="mt-1.5 space-y-0.5 text-[11px] text-text-secondary">
+                            {line.variantAttributes &&
+                              Object.entries(line.variantAttributes).map(([k, v]) => (
+                                <p key={k}>
+                                  <span className="text-text-muted">{k}:</span> {v}
+                                </p>
+                              ))}
+                            {line.variantSku ? (
+                              <p>
+                                <span className="text-text-muted">SKU:</span>{' '}
+                                <code className="font-mono text-[11px] bg-surface-muted px-1 rounded">{line.variantSku}</code>
+                              </p>
+                            ) : null}
+                          </div>
+                        ) : line.variant ? (
+                          <p className="text-[11px] text-text-muted mt-1 capitalize">{line.variant.replace(/-/g, ' / ')}</p>
+                        ) : null}
                       </div>
                       <p className="font-bold text-text-primary text-sm shrink-0">{fmt(line.quantity * line.price)}</p>
                     </div>
@@ -1203,7 +1315,11 @@ function ShipmentInfoPanel({
   // (Xelgo / Delhivery / ShipRocket / etc.) that have an AWB and aren't
   // already past pickup. Self-ship goes out by the seller themselves.
   const pickupAlreadyDone = ['PICKED_UP', 'IN_TRANSIT', 'OUT_FOR_DELIVERY', 'DELIVERED', 'RTO_INITIATED', 'RTO_DELIVERED', 'CANCELLED'].includes(shipment.shipmentStatus);
-  const canSchedulePickup = !isSelfShip && Boolean(shipment.awbNumber) && !pickupAlreadyDone;
+  const canSchedulePickup =
+    shipment.shippingMode === 'XELNOVA_COURIER' &&
+    !isSelfShip &&
+    Boolean(shipment.awbNumber) &&
+    !pickupAlreadyDone;
 
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.07 }}
@@ -1233,6 +1349,18 @@ function ShipmentInfoPanel({
               onClick={onSchedulePickup}
             >
               <Calendar size={12} /> Schedule Pickup
+            </Button>
+          )}
+          {!isSelfShip && shipment.awbNumber && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-amber-200 bg-amber-50 text-amber-900 hover:bg-amber-100"
+              onClick={onDownloadLabel}
+              disabled={labelDownloading}
+            >
+              {labelDownloading ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+              AWB / Label
             </Button>
           )}
           {canRefreshTracking && (
@@ -1424,6 +1552,8 @@ interface ServiceabilityRate {
   estimatedDays: number | null;
   estimatedDelivery: string | null;
   serviceable: boolean;
+  /** Which platform courier row this Xelgo quote maps to — sent as `platformCourier` when booking. */
+  carrierBackend?: string;
 }
 
 function ShipOrderModal({
@@ -1468,6 +1598,7 @@ function ShipOrderModal({
   const [phoneError, setPhoneError] = useState<string | null>(null);
   const [phoneReturnStep, setPhoneReturnStep] =
     useState<'rates' | 'pickup'>('pickup');
+  const savingLock = useRef(false);
 
   const getDefaultShippingInfo = useCallback(() => {
     if (!orderItems?.length) return { weight: '', dimensions: '' };
@@ -1475,13 +1606,18 @@ function ShipOrderModal({
     let hasDimensions = false;
     let maxDimensions = '';
     for (const item of orderItems) {
-      const productWeight = item.product?.weight;
-      if (productWeight && productWeight > 0) {
-        totalWeight += productWeight * item.quantity;
+      const pkgWt = item.product?.packageWeightKg ?? item.product?.weight;
+      if (pkgWt && pkgWt > 0) {
+        totalWeight += pkgWt * item.quantity;
       }
-      const productDimensions = item.product?.dimensions;
-      if (productDimensions && !hasDimensions) {
-        maxDimensions = productDimensions;
+      const dimStr =
+        composePackageDimsString(
+          item.product?.packageLengthCm,
+          item.product?.packageWidthCm,
+          item.product?.packageHeightCm,
+        ) || item.product?.dimensions;
+      if (dimStr && !hasDimensions) {
+        maxDimensions = dimStr;
         hasDimensions = true;
       }
     }
@@ -1544,6 +1680,8 @@ function ShipOrderModal({
               estimatedDays: courier.estimatedDays ?? null,
               estimatedDelivery: formatDeliveryDate(courier.estimatedDelivery) || computeEstDeliveryDate(courier.estimatedDays),
               serviceable: true,
+              carrierBackend:
+                typeof courier.carrierBackend === 'string' ? courier.carrierBackend : undefined,
             });
           }
         } else if (val.serviceable) {
@@ -1555,6 +1693,10 @@ function ShipOrderModal({
             estimatedDays: val.estimatedDays ?? null,
             estimatedDelivery: formatDeliveryDate(val.estimatedDelivery) || computeEstDeliveryDate(val.estimatedDays),
             serviceable: true,
+            carrierBackend:
+              key === 'XELNOVA_COURIER' && typeof val.carrierBackend === 'string'
+                ? val.carrierBackend
+                : undefined,
           });
         }
       }
@@ -1653,18 +1795,22 @@ function ShipOrderModal({
         if (selectedPickupLocationId) {
           body.pickupLocationId = selectedPickupLocationId;
         }
-        if (!skipPickupAtBooking && shipPickupDate) {
+        if (!skipPickupAtBooking && shipPickupDate && selectedCourier === 'XELNOVA_COURIER') {
           body.pickupDate = shipPickupDate;
           body.pickupTime = shipPickupTime
             ? `${shipPickupTime}${shipPickupTime.length === 5 ? ':00' : ''}`
             : undefined;
           body.expectedPackageCount = Math.max(1, shipPickupPackages || 1);
         }
+        if (selectedCourier === 'XELNOVA_COURIER' && selectedRate?.carrierBackend) {
+          body.platformCourier = selectedRate.carrierBackend;
+        }
       }
       return body;
     },
     [
       selectedCourier,
+      selectedRate,
       carrierName,
       awbNumber,
       weight,
@@ -1684,6 +1830,8 @@ function ShipOrderModal({
   };
 
   const submitShipment = async (mode: 'courier' | 'selfship'): Promise<boolean> => {
+    if (savingLock.current) return false;
+    savingLock.current = true;
     setSaving(true);
     try {
       const body = buildShipBody(mode);
@@ -1701,6 +1849,7 @@ function ShipOrderModal({
       toast.error(err instanceof Error ? err.message : 'Failed to ship order');
       return false;
     } finally {
+      savingLock.current = false;
       setSaving(false);
     }
   };
@@ -1759,7 +1908,13 @@ function ShipOrderModal({
   };
 
   return (
-    <Modal open={open} onClose={onClose} title="Ship Order" size="2xl">
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="Ship Order"
+      size="2xl"
+      className="max-w-5xl w-[calc(100vw-1rem)] sm:w-full max-h-[min(92vh,900px)] overflow-y-auto overscroll-contain"
+    >
       <AnimatePresence mode="wait">
         {step === 'loading' && (
           <motion.div key="loading" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="py-12 flex flex-col items-center gap-3">
@@ -2036,7 +2191,14 @@ function ShipOrderModal({
               />
             </div>
 
-            {pickupLocations.length > 0 && (() => {
+            {selectedCourier !== 'XELNOVA_COURIER' && pickupLocations.length > 0 && (
+              <p className="text-[11px] text-text-muted rounded-lg border border-border bg-gray-50 px-3 py-2">
+                Booking uses your default pickup address on file. Manage locations in{' '}
+                <a href="/shipping" className="text-primary-600 font-medium hover:underline">Shipping</a>.
+              </p>
+            )}
+
+            {selectedCourier === 'XELNOVA_COURIER' && pickupLocations.length > 0 && (() => {
               const selected = pickupLocations.find((l) => l.id === selectedPickupLocationId);
               const showDropdown = pickupLocations.length > 1;
               return (
@@ -2079,51 +2241,51 @@ function ShipOrderModal({
               );
             })()}
 
-            <div className="rounded-xl bg-blue-50 border border-blue-200 p-3">
-              <p className="text-xs text-blue-800 leading-relaxed">
-                {selectedCourier === 'XELNOVA_COURIER' ? (
-                  <>Tell <strong>Xelgo</strong> when the partner courier should arrive at your warehouse.</>
-                ) : (
-                  <>Tell <strong>{getProviderName(selectedCourier)}</strong> when to send a rider. Same-day cutoff is <strong>2 PM IST</strong>.</>
-                )}
-              </p>
-            </div>
+            {selectedCourier === 'XELNOVA_COURIER' && (
+              <>
+                <div className="rounded-xl bg-blue-50 border border-blue-200 p-3">
+                  <p className="text-xs text-blue-800 leading-relaxed">
+                    Tell <strong>Xelgo</strong> when the partner courier should arrive at your warehouse.
+                  </p>
+                </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-medium text-text-muted mb-1.5">Pickup date *</label>
-                <input
-                  type="date"
-                  value={shipPickupDate}
-                  min={new Date().toISOString().slice(0, 10)}
-                  onChange={(e) => { setShipPickupDate(e.target.value); setSkipPickupAtBooking(false); }}
-                  disabled={skipPickupAtBooking}
-                  className="w-full rounded-xl border border-border bg-surface-raised px-4 py-3 text-sm text-text-primary outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30 disabled:opacity-50"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-text-muted mb-1.5">Pickup time (IST)</label>
-                <input
-                  type="time"
-                  value={shipPickupTime}
-                  onChange={(e) => { setShipPickupTime(e.target.value); setSkipPickupAtBooking(false); }}
-                  disabled={skipPickupAtBooking}
-                  className="w-full rounded-xl border border-border bg-surface-raised px-4 py-3 text-sm text-text-primary outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30 disabled:opacity-50"
-                />
-              </div>
-            </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-text-muted mb-1.5">Pickup date *</label>
+                    <input
+                      type="date"
+                      value={shipPickupDate}
+                      min={new Date().toISOString().slice(0, 10)}
+                      onChange={(e) => { setShipPickupDate(e.target.value); setSkipPickupAtBooking(false); }}
+                      disabled={skipPickupAtBooking}
+                      className="w-full rounded-xl border border-border bg-surface-raised px-4 py-3 text-sm text-text-primary outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30 disabled:opacity-50"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-text-muted mb-1.5">Pickup time (IST)</label>
+                    <input
+                      type="time"
+                      value={shipPickupTime}
+                      onChange={(e) => { setShipPickupTime(e.target.value); setSkipPickupAtBooking(false); }}
+                      disabled={skipPickupAtBooking}
+                      className="w-full rounded-xl border border-border bg-surface-raised px-4 py-3 text-sm text-text-primary outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30 disabled:opacity-50"
+                    />
+                  </div>
+                </div>
 
-            <label className="flex items-start gap-2 cursor-pointer select-none rounded-xl border border-border p-3 hover:bg-gray-50/50">
-              <input
-                type="checkbox"
-                checked={skipPickupAtBooking}
-                onChange={(e) => setSkipPickupAtBooking(e.target.checked)}
-                className="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-              />
-              <span className="text-xs text-text-secondary leading-relaxed">
-                <span className="font-medium text-text-primary">Book shipment only — schedule pickup later.</span>
-              </span>
-            </label>
+                <label className="flex items-start gap-2 cursor-pointer select-none rounded-xl border border-border p-3 hover:bg-gray-50/50">
+                  <input
+                    type="checkbox"
+                    checked={skipPickupAtBooking}
+                    onChange={(e) => setSkipPickupAtBooking(e.target.checked)}
+                    className="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                  />
+                  <span className="text-xs text-text-secondary leading-relaxed">
+                    <span className="font-medium text-text-primary">Book shipment only — schedule pickup later.</span>
+                  </span>
+                </label>
+              </>
+            )}
 
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" onClick={() => setStep('rates')} disabled={saving}>Back</Button>

@@ -11,8 +11,8 @@ export default function SellerPanelLayout({ children }: { children: React.ReactN
       <SellerProfileProvider>
         <div className="relative h-dvh min-h-0 overflow-hidden bg-surface-raised">
           <DashboardSidebar />
-          <div className="lg:ml-64 flex h-full min-h-0 min-w-0 flex-col overflow-y-auto">
-            <div className="flex items-center gap-3 px-4 sm:px-6 py-2 pl-14 lg:pl-6">
+          <div className="lg:ml-64 flex h-full min-h-0 min-w-0 flex-col overflow-y-auto pb-[env(safe-area-inset-bottom)]">
+            <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-6 py-2 pl-12 sm:pl-14 lg:pl-6">
               <GlobalSearch />
               <div className="flex-1" />
               <NotificationBell />

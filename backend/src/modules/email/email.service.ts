@@ -1,6 +1,7 @@
 import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Resend } from 'resend';
+import type { OrderCancelledNotifyParams } from '../../common/helpers/order-cancel-notify';
 
 export interface EmailOptions {
   to: string;
@@ -303,7 +304,34 @@ export class EmailService {
 
   // ─── Order Lifecycle Emails ───
 
-  async sendOrderCancelled(to: string, name: string, orderNumber: string, refundAmount: number) {
+  async sendOrderCancelled(to: string, name: string, orderNumber: string, params: OrderCancelledNotifyParams) {
+    const baseUrl = this.config.get('APP_URL') || 'https://xelnova.in';
+    const orderLink = `${baseUrl}/account/orders/${encodeURIComponent(orderNumber)}`;
+    const amt = params.refundAmount ?? 0;
+
+    let detail = '';
+    switch (params.outcome) {
+      case 'NO_PAYMENT':
+        detail =
+          '<p>No payment was captured for this order, so <strong>you have not been charged</strong>.</p>';
+        break;
+      case 'WALLET_CREDITED':
+        detail = `<p><strong>₹${amt.toFixed(0)}</strong> has been credited to your <strong>Xelnova Wallet</strong>. You can use it on your next purchase.</p>`;
+        break;
+      case 'ORIGINAL_METHOD_PENDING':
+        detail = `<p>A refund of <strong>₹${amt.toFixed(0)}</strong> to your <strong>original payment method</strong> has been <strong>initiated</strong>. It typically appears within <strong>5–7 business days</strong>.</p>`;
+        break;
+      case 'REFUND_FAILED':
+        detail = `<p>We could not finish an automatic refund immediately. If you were charged, please contact support with order <strong>#${orderNumber}</strong>.</p>`;
+        break;
+      case 'STATUS_UPDATE_UNCONFIRMED':
+        detail =
+          '<p>If any payment was captured, our team will confirm refund details separately.</p>';
+        break;
+      default:
+        detail = '<p>If you have questions, please visit your orders page or contact support.</p>';
+    }
+
     return this.sendEmail({
       to,
       subject: `Order #${orderNumber} Cancelled - XelNova`,
@@ -312,10 +340,10 @@ export class EmailService {
           <h1 style="color:#7c3aed">Order Cancelled</h1>
           <p>Hi ${this.cleanName(name)},</p>
           <p>Your order <strong>#${orderNumber}</strong> has been cancelled.</p>
-          <p>Refund of <strong>₹${refundAmount}</strong> will be processed within 5-7 business days.</p>
-          <a href="${this.config.get('APP_URL') || 'https://xelnova.in'}/account/orders" 
+          ${detail}
+          <a href="${orderLink}" 
              style="display:inline-block;padding:12px 24px;background:#7c3aed;color:white;text-decoration:none;border-radius:8px;margin-top:16px">
-            View Orders
+            View Order
           </a>
         </div>
       `,
@@ -377,11 +405,11 @@ export class EmailService {
         <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
           <h1 style="color:#dc2626">Payment Failed</h1>
           <p>Hi ${this.cleanName(name)},</p>
-          <p>Your payment for order <strong>#${orderNumber}</strong> was unsuccessful.</p>
-          <p>Please retry to avoid order cancellation.</p>
+          <p>Your payment for order <strong>#${orderNumber}</strong> did not complete — <strong>no charge is finalized</strong> until payment succeeds.</p>
+          <p>Open your order and try again. If your bank shows a pending deduction, it is usually reversed automatically within a few days.</p>
           <a href="${paymentUrl}" 
              style="display:inline-block;padding:12px 24px;background:#7c3aed;color:white;text-decoration:none;border-radius:8px;margin-top:16px">
-            Retry Payment
+            View order &amp; retry
           </a>
         </div>
       `,
@@ -390,7 +418,17 @@ export class EmailService {
 
   // ─── Refund & Return Emails ───
 
-  async sendRefundProcessed(to: string, name: string, orderNumber: string, amount: number) {
+  async sendRefundProcessed(
+    to: string,
+    name: string,
+    orderNumber: string,
+    amount: number,
+    creditTo: 'ORIGINAL_PAYMENT' | 'WALLET' = 'ORIGINAL_PAYMENT',
+  ) {
+    const settlement =
+      creditTo === 'WALLET'
+        ? '<p>The amount is available in your <strong>Xelnova Wallet</strong> now.</p>'
+        : '<p>It usually reflects on your <strong>original payment method</strong> within <strong>5–7 business days</strong>.</p>';
     return this.sendEmail({
       to,
       subject: `Refund Processed for Order #${orderNumber} - XelNova`,
@@ -399,7 +437,7 @@ export class EmailService {
           <h1 style="color:#7c3aed">Refund Processed</h1>
           <p>Hi ${this.cleanName(name)},</p>
           <p>Your refund of <strong>₹${amount}</strong> for order <strong>#${orderNumber}</strong> has been processed.</p>
-          <p>It will reflect in your account within 5-7 business days.</p>
+          ${settlement}
         </div>
       `,
     });
@@ -611,7 +649,16 @@ export class EmailService {
     });
   }
 
-  async sendOrderCancelledNotification(to: string, name: string, orderNumber: string, reason?: string) {
+  async sendOrderCancelledNotification(
+    to: string,
+    name: string,
+    orderNumber: string,
+    reason?: string,
+    refundDetailHtml?: string,
+  ) {
+    const refundBlock =
+      refundDetailHtml ||
+      '<p>If you were charged for this order, our team will confirm how your refund is settled.</p>';
     return this.sendEmail({
       to,
       subject: `Order #${orderNumber} Cancelled - XelNova`,
@@ -621,7 +668,7 @@ export class EmailService {
           <p>Hi ${this.cleanName(name)},</p>
           <p>Your order <strong>#${orderNumber}</strong> has been cancelled by the seller.</p>
           ${reason ? `<p><strong>Reason:</strong> ${reason}</p>` : ''}
-          <p>If you paid for this order, the amount will be refunded to your original payment method within 3-5 business days.</p>
+          ${refundBlock}
           <p>If you have any questions, please contact our support team.</p>
         </div>
       `,

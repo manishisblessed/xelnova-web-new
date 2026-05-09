@@ -21,14 +21,14 @@ function syncToken() {
   if (m) setAccessToken(decodeURIComponent(m[1]));
 }
 
-type ItemRow = OrderItem & { product?: { name?: string; slug?: string; images?: string[] } };
+type ItemRow = OrderItem & { product?: { name?: string; slug?: string; images?: string[]; xelnovaProductId?: string | null } };
 
 function itemName(item: ItemRow) {
   return item.product?.name ?? item.productName;
 }
 
 function itemImage(item: ItemRow) {
-  return item.product?.images?.[0] ?? item.productImage;
+  return item.variantImage || item.product?.images?.[0] || item.productImage;
 }
 
 function itemSlug(item: ItemRow) {
@@ -337,7 +337,27 @@ export default function OrderDetailPage() {
                         <p className="font-medium text-text-primary text-sm truncate">{name}</p>
                       )}
                       <p className="text-xs text-text-muted mt-0.5">Qty: {item.quantity} × {formatCurrency(item.price)}</p>
-                      {item.variant && <p className="text-xs text-text-muted">Variant: {item.variant}</p>}
+                      {item.product?.xelnovaProductId ? (
+                        <p className="text-[10px] font-mono text-text-muted mt-0.5">{item.product.xelnovaProductId}</p>
+                      ) : null}
+                      {item.variantSku || (item.variantAttributes && Object.keys(item.variantAttributes).length > 0) ? (
+                        <div className="mt-1 space-y-0.5 text-[11px] text-text-secondary">
+                          {item.variantAttributes &&
+                            Object.entries(item.variantAttributes).map(([k, v]) => (
+                              <p key={k} className="text-text-muted">
+                                <span className="font-medium text-text-secondary">{k}:</span> {v}
+                              </p>
+                            ))}
+                          {item.variantSku ? (
+                            <p className="text-text-muted">
+                              SKU:{' '}
+                              <code className="font-mono text-[11px] bg-surface-muted px-1 rounded">{item.variantSku}</code>
+                            </p>
+                          ) : null}
+                        </div>
+                      ) : item.variant ? (
+                        <p className="text-xs text-text-muted mt-0.5">Variant: {item.variant.replace(/-/g, ' / ')}</p>
+                      ) : null}
                     </div>
                     <p className="font-bold text-text-primary text-sm shrink-0">
                       {formatCurrency(item.quantity * item.price)}

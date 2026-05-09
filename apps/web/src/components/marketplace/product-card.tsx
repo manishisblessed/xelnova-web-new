@@ -4,7 +4,7 @@ import { useState, memo } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
-import { Heart, ShoppingCart, Star, Truck, Eye } from 'lucide-react';
+import { Heart, ShoppingCart, Star, Truck, Plus, Minus } from 'lucide-react';
 import { cn, formatCurrency, priceInclusiveOfGst } from '@xelnova/utils';
 import type { Product } from '@/lib/data/products';
 import { useCartStore } from '@/lib/store/cart-store';
@@ -81,6 +81,9 @@ export const ProductCard = memo(function ProductCard({ product, index = 0 }: Pro
   const [imgLoaded, setImgLoaded] = useState(false);
   const [imgError, setImgError] = useState(false);
   const addItem = useCartStore((s) => s.addItem);
+  const removeItem = useCartStore((s) => s.removeItem);
+  const updateQty = useCartStore((s) => s.updateQuantity);
+  const cartItems = useCartStore((s) => s.items);
   const toggle = useWishlistStore((s) => s.toggle);
   const isInWishlist = useWishlistStore((s) => s.isInWishlist(product.id));
 
@@ -92,7 +95,10 @@ export const ProductCard = memo(function ProductCard({ product, index = 0 }: Pro
   const variantImages = getVariantImages(product.variants);
   const displayImage = product.images[0] || variantImages[0] || '';
 
-  const handleAddToCart = (e: React.MouseEvent) => {
+  const cartItem = cartItems.find((i) => i.productId === product.id && !i.variant);
+  const qty = cartItem?.quantity ?? 0;
+
+  const handleAdd = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     addItem({
@@ -106,6 +112,23 @@ export const ProductCard = memo(function ProductCard({ product, index = 0 }: Pro
       seller: product.seller.name,
       gstRate: product.gstRate ?? null,
     });
+  };
+
+  const handleIncrease = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (cartItem) updateQty(cartItem.id, cartItem.quantity + 1);
+  };
+
+  const handleDecrease = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!cartItem) return;
+    if (cartItem.quantity <= 1) {
+      removeItem(cartItem.id);
+    } else {
+      updateQty(cartItem.id, cartItem.quantity - 1);
+    }
   };
 
   const handleToggleWishlist = (e: React.MouseEvent) => {
@@ -204,21 +227,43 @@ export const ProductCard = memo(function ProductCard({ product, index = 0 }: Pro
               <Heart className="w-3.5 h-3.5" fill={isInWishlist ? 'currentColor' : 'none'} />
             </motion.button>
 
-            {/* Quick actions on hover */}
+            {/* Add to cart / qty stepper */}
             {product.inStock && (
               <div className={cn(
-                "absolute left-3 right-3 flex gap-2 opacity-0 group-hover:opacity-100 translate-y-4 group-hover:translate-y-0 transition-all duration-400 ease-[cubic-bezier(0.16,1,0.3,1)]",
+                "absolute left-3 right-3 flex justify-end",
                 variantSummary && variantSummary.count >= 2 ? "bottom-12" : "bottom-3"
               )}>
-                <button
-                  onClick={handleAddToCart}
-                  className="btn-premium flex-1 rounded-xl py-2.5 text-xs font-bold text-white active:scale-[0.97]"
-                >
-                  <span className="relative z-10 flex items-center justify-center gap-1.5">
-                    <ShoppingCart size={14} />
-                    Add to Cart
-                  </span>
-                </button>
+                {qty === 0 ? (
+                  <motion.button
+                    whileTap={{ scale: 0.88 }}
+                    onClick={handleAdd}
+                    className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary-600 text-white shadow-lg shadow-primary-600/30 hover:bg-primary-700 transition-colors"
+                  >
+                    <Plus size={18} strokeWidth={2.5} />
+                  </motion.button>
+                ) : (
+                  <motion.div
+                    initial={{ scale: 0.85, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    className="flex items-center gap-0 rounded-xl bg-primary-600 shadow-lg shadow-primary-600/30 overflow-hidden"
+                  >
+                    <button
+                      onClick={handleDecrease}
+                      className="flex h-9 w-9 items-center justify-center text-white hover:bg-primary-700 transition-colors"
+                    >
+                      <Minus size={14} strokeWidth={2.5} />
+                    </button>
+                    <span className="min-w-[1.75rem] text-center text-sm font-bold text-white">
+                      {qty}
+                    </span>
+                    <button
+                      onClick={handleIncrease}
+                      className="flex h-9 w-9 items-center justify-center text-white hover:bg-primary-700 transition-colors"
+                    >
+                      <Plus size={14} strokeWidth={2.5} />
+                    </button>
+                  </motion.div>
+                )}
               </div>
             )}
 
@@ -266,24 +311,28 @@ export const ProductCard = memo(function ProductCard({ product, index = 0 }: Pro
 
             {/* Variant Images Preview */}
             {variantImages.length > 0 && (
-              <div className="flex items-center gap-1.5 mt-2 overflow-x-auto scrollbar-hide">
-                {variantImages.slice(0, 5).map((img, idx) => (
+              <div
+                className="-mx-0.5 mt-2 flex snap-x snap-mandatory items-center gap-1.5 overflow-x-auto overscroll-x-contain scroll-smooth px-0.5 pb-0.5 scrollbar-hide"
+                style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-x' }}
+              >
+                {variantImages.slice(0, 8).map((img, idx) => (
                   <div
                     key={idx}
-                    className="relative flex-shrink-0 w-9 h-9 rounded-lg overflow-hidden border border-border/50 bg-surface-raised group-hover:border-primary-200 transition-colors"
+                    className="relative h-10 w-10 shrink-0 snap-start overflow-hidden rounded-lg border border-border/50 bg-surface-raised transition-colors group-hover:border-primary-200 sm:h-9 sm:w-9"
                   >
                     <Image
                       src={img}
                       alt={`Variant ${idx + 1}`}
                       fill
-                      sizes="36px"
+                      sizes="40px"
+                      quality={85}
                       className="object-cover"
                     />
                   </div>
                 ))}
-                {variantImages.length > 5 && (
-                  <span className="text-[10px] text-text-muted font-semibold px-1.5 py-0.5 bg-surface-raised rounded-md border border-border/30 flex-shrink-0">
-                    +{variantImages.length - 5}
+                {variantImages.length > 8 && (
+                  <span className="shrink-0 snap-start rounded-md border border-border/30 bg-surface-raised px-2 py-1.5 text-[10px] font-semibold text-text-muted">
+                    +{variantImages.length - 8}
                   </span>
                 )}
               </div>

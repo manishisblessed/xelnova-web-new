@@ -172,7 +172,7 @@ export function HeroCarousel() {
 
   return (
     <div className="group relative h-full overflow-hidden rounded-2xl border border-white/10 bg-surface-dark shadow-2xl shadow-black/25 ring-1 ring-white/5 transition-shadow duration-500 hover:shadow-[0_32px_64px_-16px_rgba(12,131,31,0.40)] lg:rounded-3xl">
-      <div className="relative h-full min-h-[260px] sm:min-h-[320px] md:min-h-[380px]">
+      <div className="relative h-full min-h-[220px] sm:min-h-[300px] md:min-h-[360px]">
         <AnimatePresence initial={false} custom={direction} mode="popLayout">
           <motion.div
             key={page}
@@ -292,14 +292,18 @@ export function HeroCarousel() {
         </AnimatePresence>
 
         <button
+          type="button"
           onClick={() => paginate(-1)}
-          className="absolute left-3 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-white/10 hover:bg-white/25 text-white flex items-center justify-center backdrop-blur-md border border-white/10 opacity-0 group-hover:opacity-100 transition-all duration-300 active:scale-90"
+          aria-label="Previous slide"
+          className="absolute left-2 top-1/2 z-20 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border border-white/15 bg-black/35 text-white shadow-lg backdrop-blur-md transition-all duration-300 hover:bg-black/45 active:scale-90 sm:left-3 md:opacity-0 md:group-hover:opacity-100 opacity-90"
         >
           <ChevronLeft className="w-5 h-5" />
         </button>
         <button
+          type="button"
           onClick={() => paginate(1)}
-          className="absolute right-3 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-white/10 hover:bg-white/25 text-white flex items-center justify-center backdrop-blur-md border border-white/10 opacity-0 group-hover:opacity-100 transition-all duration-300 active:scale-90"
+          aria-label="Next slide"
+          className="absolute right-2 top-1/2 z-20 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border border-white/15 bg-black/35 text-white shadow-lg backdrop-blur-md transition-all duration-300 hover:bg-black/45 active:scale-90 sm:right-3 md:opacity-0 md:group-hover:opacity-100 opacity-90"
         >
           <ChevronRight className="w-5 h-5" />
         </button>

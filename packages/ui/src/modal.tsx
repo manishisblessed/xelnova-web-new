@@ -51,7 +51,7 @@ export function Modal({
   return (
     <AnimatePresence>
       {open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4">
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -66,7 +66,7 @@ export function Modal({
             exit={{ opacity: 0, scale: 0.95, y: 10 }}
             transition={{ duration: 0.2, ease: "easeOut" }}
             className={cn(
-              "relative w-full rounded-2xl border border-border bg-surface shadow-xl max-h-[90vh] flex flex-col",
+              "relative w-full border border-border bg-surface shadow-xl max-h-[min(92dvh,900px)] flex flex-col rounded-t-2xl sm:rounded-2xl",
               sizeStyles[size],
               className
             )}

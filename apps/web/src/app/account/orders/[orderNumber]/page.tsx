@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
@@ -9,12 +9,14 @@ import {
   Package, Truck, CheckCircle, Clock, ChevronLeft, MapPin, Phone,
   CreditCard, AlertCircle, Ban, RotateCcw, Banknote, Loader2,
   Copy, ShoppingBag, User, XCircle, Download, RefreshCw, Wallet,
-  Info, ShieldCheck,
+  Info, ShieldCheck, ExternalLink,
 } from "lucide-react";
-import { formatCurrency } from "@xelnova/utils";
-import { ordersApi, returnsApi, setAccessToken, type Order, type OrderItem } from "@xelnova/api";
+import { formatCurrency, cn } from "@xelnova/utils";
+import { ordersApi, returnsApi, paymentApi, setAccessToken, uploadApi, type Order, type OrderItem } from "@xelnova/api";
 import { useRouter } from "next/navigation";
 import { useCartStore } from "@/lib/store/cart-store";
+import { loadRazorpayScript } from "@/lib/load-razorpay";
+import { isAxiosError } from "axios";
 
 function syncToken() {
   if (typeof document === "undefined") return;
@@ -22,14 +24,25 @@ function syncToken() {
   if (m) setAccessToken(decodeURIComponent(m[1]));
 }
 
-type ItemRow = OrderItem & { product?: { name?: string; slug?: string; images?: string[] } };
+type ItemRow = OrderItem & {
+  product?: {
+    name?: string;
+    slug?: string;
+    images?: string[];
+    xelnovaProductId?: string | null;
+    isReturnable?: boolean;
+    isReplaceable?: boolean;
+    returnWindow?: number;
+    replacementWindow?: number | null;
+  };
+};
 
 function itemName(item: ItemRow) {
   return item.product?.name ?? item.productName;
 }
 
 function itemImage(item: ItemRow) {
-  return item.product?.images?.[0] ?? item.productImage;
+  return item.variantImage || item.product?.images?.[0] || item.productImage;
 }
 
 function itemSlug(item: ItemRow) {
@@ -86,6 +99,28 @@ function refundDescription(method?: string | null): { destination: string; timel
 
 const PROGRESS_STEPS = ["PENDING", "PROCESSING", "CONFIRMED", "SHIPPED", "DELIVERED"];
 
+const SHIPMENT_TRACK_LABELS: Record<string, string> = {
+  PENDING: "Processing",
+  BOOKED: "Booked",
+  PICKUP_SCHEDULED: "Pickup scheduled",
+  PICKED_UP: "Shipped",
+  IN_TRANSIT: "In transit",
+  OUT_FOR_DELIVERY: "Out for delivery",
+  DELIVERED: "Delivered",
+  RTO_INITIATED: "RTO",
+  RTO_DELIVERED: "RTO delivered",
+  CANCELLED: "Cancelled",
+};
+
+const RETURN_REASON_OPTIONS: { value: string; label: string }[] = [
+  { value: "DEFECTIVE", label: "Damaged / defective" },
+  { value: "WRONG_ITEM", label: "Wrong item received" },
+  { value: "NOT_AS_DESCRIBED", label: "Not as described" },
+  { value: "SIZE_FIT", label: "Size / fit issue" },
+  { value: "CHANGED_MIND", label: "Changed mind" },
+  { value: "OTHER", label: "Other" },
+];
+
 export default function OrderDetailPage() {
   const params = useParams<{ orderNumber: string }>();
   const router = useRouter();
@@ -100,9 +135,16 @@ export default function OrderDetailPage() {
   const [selectedRefundTo, setSelectedRefundTo] = useState<'WALLET' | 'SOURCE'>('WALLET');
   const [loadingRefundOptions, setLoadingRefundOptions] = useState(false);
   const [returnModalOpen, setReturnModalOpen] = useState(false);
+  const [returnFlowKind, setReturnFlowKind] = useState<"RETURN" | "REPLACEMENT">("RETURN");
+  const [returnReasonCode, setReturnReasonCode] = useState("DEFECTIVE");
   const [returnReason, setReturnReason] = useState("");
+  const [returnDescription, setReturnDescription] = useState("");
+  const [returnImageUrls, setReturnImageUrls] = useState<string[]>([]);
+  const [returnUploadBusy, setReturnUploadBusy] = useState(false);
   const [submittingReturn, setSubmittingReturn] = useState(false);
   const [downloadingInvoice, setDownloadingInvoice] = useState(false);
+  const [retryPaymentBusy, setRetryPaymentBusy] = useState(false);
+  const [retryPaymentHint, setRetryPaymentHint] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -116,6 +158,31 @@ export default function OrderDetailPage() {
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [params.orderNumber]);
+
+  const returnEligibility = useMemo(() => {
+    if (!order || order.status.toUpperCase() !== "DELIVERED") return null;
+    const items = order.items as ItemRow[];
+    if (!items.length) return null;
+    const deliveredAt = order.shipment?.deliveredAt
+      ? new Date(order.shipment.deliveredAt)
+      : new Date(order.updatedAt || order.createdAt);
+    const days = Math.floor((Date.now() - deliveredAt.getTime()) / (24 * 60 * 60 * 1000));
+    const allReturnable = items.every((i) => i.product?.isReturnable !== false);
+    const allReplaceable = items.every((i) => !!i.product?.isReplaceable);
+    const returnWindows = items.map((i) => Number(i.product?.returnWindow ?? 7));
+    const replWindows = items.map((i) =>
+      Number(i.product?.replacementWindow ?? i.product?.returnWindow ?? 7),
+    );
+    const returnLimit = Math.min(...returnWindows);
+    const replLimit = Math.min(...replWindows);
+    return {
+      canReturn: allReturnable && days <= returnLimit,
+      canReplace: allReplaceable && days <= replLimit,
+      daysSinceDelivery: days,
+      returnLimit,
+      replLimit,
+    };
+  }, [order]);
 
   const canCancel = order && ["PENDING", "PROCESSING", "CONFIRMED"].includes(order.status.toUpperCase());
 
@@ -158,19 +225,38 @@ export default function OrderDetailPage() {
     }
   };
 
-  const canReturn = order && order.status.toUpperCase() === "DELIVERED";
+  const openReturnModal = (kind: "RETURN" | "REPLACEMENT") => {
+    setReturnFlowKind(kind);
+    setReturnReasonCode("DEFECTIVE");
+    setReturnReason("");
+    setReturnDescription("");
+    setReturnImageUrls([]);
+    setReturnModalOpen(true);
+  };
 
   const handleReturnRequest = async () => {
-    if (!order || !returnReason.trim()) return;
+    if (!order) return;
+    if (returnReasonCode === "OTHER" && !returnDescription.trim() && !returnReason.trim()) {
+      alert("Please add a short description for your request.");
+      return;
+    }
     setSubmittingReturn(true);
     try {
       syncToken();
-      await returnsApi.createReturn(order.orderNumber, returnReason);
+      await returnsApi.createReturn(order.orderNumber, {
+        kind: returnFlowKind,
+        reasonCode: returnReasonCode,
+        reason: returnReason.trim() || undefined,
+        description: returnDescription.trim() || undefined,
+        imageUrls: returnImageUrls.length ? returnImageUrls : undefined,
+      });
       setReturnModalOpen(false);
       setReturnReason("");
-      alert("Return request submitted successfully!");
-    } catch (e: any) {
-      alert(e.message || "Failed to submit return request");
+      setReturnDescription("");
+      setReturnImageUrls([]);
+      alert("Request submitted successfully. The seller and our team have been notified.");
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : "Failed to submit request");
     } finally {
       setSubmittingReturn(false);
     }
@@ -213,6 +299,74 @@ export default function OrderDetailPage() {
     router.push("/cart");
   };
 
+  const handleRetryPayment = async () => {
+    if (!order) return;
+    setRetryPaymentBusy(true);
+    setRetryPaymentHint(null);
+    syncToken();
+    try {
+      await loadRazorpayScript();
+      const RazorpayCtor = window.Razorpay;
+      if (!RazorpayCtor) throw new Error("Payment gateway is loading. Try again in a moment.");
+      const paymentOrder = await paymentApi.createPaymentOrder(order.id);
+      await new Promise<void>((resolve, reject) => {
+        const addr = order.shippingAddress;
+        const options: Record<string, unknown> = {
+          key: paymentOrder.keyId,
+          amount: paymentOrder.amount,
+          currency: paymentOrder.currency,
+          name: "Xelnova",
+          description: `Order #${order.orderNumber}`,
+          order_id: paymentOrder.razorpayOrderId,
+          prefill: {
+            name: addr?.fullName || "",
+            contact: addr?.phone || "",
+          },
+          theme: { color: "#10b981" },
+          handler: async (response: {
+            razorpay_order_id: string;
+            razorpay_payment_id: string;
+            razorpay_signature: string;
+          }) => {
+            try {
+              syncToken();
+              await paymentApi.verifyPayment({
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature: response.razorpay_signature,
+              });
+              resolve();
+            } catch (verErr: unknown) {
+              const st = isAxiosError(verErr) ? verErr.response?.status : undefined;
+              reject(
+                new Error(
+                  st === 400
+                    ? "We could not verify this payment. If your bank deducted an amount, it is usually reversed within a few days."
+                    : "Verification failed due to a network issue — please retry.",
+                ),
+              );
+            }
+          },
+          modal: {
+            ondismiss: () => reject(new Error("Payment window closed before completion.")),
+          },
+        };
+        const rzp = new RazorpayCtor(options);
+        rzp.on("payment.failed", () =>
+          reject(new Error("Payment failed or was declined — you have not been charged.")),
+        );
+        rzp.open();
+      });
+      const refreshed = await ordersApi.getOrderByNumber(order.orderNumber);
+      setOrder(refreshed);
+      setRetryPaymentHint("Payment successful. Thank you!");
+    } catch (e: unknown) {
+      setRetryPaymentHint(e instanceof Error ? e.message : "Payment could not be completed.");
+    } finally {
+      setRetryPaymentBusy(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center py-20">
@@ -244,6 +398,11 @@ export default function OrderDetailPage() {
   const copyOrderNumber = () => {
     navigator.clipboard.writeText(order.orderNumber);
   };
+
+  const showRetryRazorpay =
+    !isCancelled &&
+    (order.paymentMethod || "").toLowerCase() === "razorpay" &&
+    ["PENDING", "FAILED"].includes((order.paymentStatus || "").toUpperCase());
 
   return (
     <div className="space-y-5">
@@ -371,7 +530,27 @@ export default function OrderDetailPage() {
                         <p className="font-medium text-text-primary text-sm truncate">{name}</p>
                       )}
                       <p className="text-xs text-text-muted mt-0.5">Qty: {item.quantity} × {formatCurrency(item.price)}</p>
-                      {item.variant && <p className="text-xs text-text-muted">Variant: {item.variant}</p>}
+                      {item.product?.xelnovaProductId ? (
+                        <p className="text-[10px] font-mono text-text-muted mt-0.5">{item.product.xelnovaProductId}</p>
+                      ) : null}
+                      {item.variantSku || (item.variantAttributes && Object.keys(item.variantAttributes).length > 0) ? (
+                        <div className="mt-1 space-y-0.5 text-[11px] text-text-secondary">
+                          {item.variantAttributes &&
+                            Object.entries(item.variantAttributes).map(([k, v]) => (
+                              <p key={k} className="text-text-muted">
+                                <span className="font-medium text-text-secondary">{k}:</span> {v}
+                              </p>
+                            ))}
+                          {item.variantSku ? (
+                            <p className="text-text-muted">
+                              SKU:{' '}
+                              <code className="font-mono text-[11px] bg-surface-muted px-1 rounded">{item.variantSku}</code>
+                            </p>
+                          ) : null}
+                        </div>
+                      ) : item.variant ? (
+                        <p className="text-xs text-text-muted mt-0.5">Variant: {item.variant.replace(/-/g, ' / ')}</p>
+                      ) : null}
                     </div>
                     <p className="font-bold text-text-primary text-sm shrink-0">
                       {formatCurrency(item.quantity * item.price)}
@@ -433,6 +612,99 @@ export default function OrderDetailPage() {
             )}
           </motion.div>
 
+          {/* Shipment / tracking (when API includes `shipment`) */}
+          {order.shipment && !isCancelled && (
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.12 }}
+              className="rounded-2xl border border-border bg-white p-5 shadow-card"
+            >
+              <h3 className="text-sm font-bold text-text-primary mb-3 flex items-center gap-1.5">
+                <Truck size={14} /> Shipment &amp; tracking
+              </h3>
+              <div className="text-sm space-y-2">
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-text-secondary">
+                  <span>
+                    <span className="text-text-muted">Status</span>{" "}
+                    <span className="font-semibold text-text-primary">
+                      {SHIPMENT_TRACK_LABELS[order.shipment.shipmentStatus] || order.shipment.shipmentStatus.replace(/_/g, " ")}
+                    </span>
+                  </span>
+                  {order.shipment.awbNumber && (
+                    <span>
+                      <span className="text-text-muted">AWB</span>{" "}
+                      <span className="font-mono font-medium text-text-primary">{order.shipment.awbNumber}</span>
+                    </span>
+                  )}
+                  {order.shipment.courierProvider && (
+                    <span>
+                      <span className="text-text-muted">Partner</span>{" "}
+                      <span className="font-medium text-text-primary">{order.shipment.courierProvider}</span>
+                    </span>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-2 pt-1">
+                  {order.shipment.trackingUrl && /^https?:\/\//i.test(order.shipment.trackingUrl) && (
+                    <a
+                      href={order.shipment.trackingUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-xs font-semibold text-primary-600 hover:text-primary-700"
+                    >
+                      Track on courier site <ExternalLink size={12} />
+                    </a>
+                  )}
+                  {order.shipment.labelUrl && /^https?:\/\//i.test(order.shipment.labelUrl) && (
+                    <a
+                      href={order.shipment.labelUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-xs font-semibold text-text-secondary hover:text-text-primary"
+                    >
+                      Shipping label (PDF) <Download size={12} />
+                    </a>
+                  )}
+                </div>
+                {Array.isArray(order.shipment.statusHistory) && order.shipment.statusHistory.length > 0 && (
+                  <div className="mt-3 border-t border-border pt-3 space-y-2">
+                    <p className="text-xs font-semibold text-text-muted uppercase tracking-wide">Tracking timeline</p>
+                    <ul className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                      {[...order.shipment.statusHistory]
+                        .slice()
+                        .sort(
+                          (a, b) =>
+                            new Date(String(b.timestamp)).getTime() -
+                            new Date(String(a.timestamp)).getTime(),
+                        )
+                        .slice(0, 20)
+                        .map((ev, i) => (
+                          <li key={i} className="text-xs text-text-secondary border-l-2 border-primary-200 pl-2.5 py-0.5">
+                            <span className="font-medium text-text-primary">
+                              {SHIPMENT_TRACK_LABELS[ev.status] || ev.status.replace(/_/g, " ")}
+                            </span>
+                            <span className="text-text-muted">
+                              {" · "}
+                              {new Date(ev.timestamp).toLocaleString("en-IN", {
+                                dateStyle: "medium",
+                                timeStyle: "short",
+                              })}
+                            </span>
+                            {ev.location && (
+                              <span className="block text-[11px] text-text-muted mt-0.5">{ev.location}</span>
+                            )}
+                            {ev.remark && (
+                              <span className="block text-[11px] italic mt-0.5">{ev.remark}</span>
+                            )}
+                          </li>
+                        ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          )}
+
           {/* Payment */}
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="rounded-2xl border border-border bg-white p-5 shadow-card">
             <h3 className="text-sm font-bold text-text-primary mb-3 flex items-center gap-1.5">
@@ -460,6 +732,39 @@ export default function OrderDetailPage() {
               {order.couponCode && (
                 <p className="text-success-600 text-xs font-medium">Coupon applied: {order.couponCode}</p>
               )}
+              {showRetryRazorpay && (
+                <div className="mt-4 border-t border-border pt-4 space-y-2">
+                  <p className="text-xs text-text-secondary leading-relaxed">
+                    Complete payment for this order securely. You are only charged after verification succeeds.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => void handleRetryPayment()}
+                    disabled={retryPaymentBusy}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary-600 py-2.5 text-sm font-semibold text-white hover:bg-primary-700 disabled:opacity-50"
+                  >
+                    {retryPaymentBusy ? (
+                      <>
+                        <Loader2 size={16} className="animate-spin" /> Opening payment…
+                      </>
+                    ) : (
+                      <>
+                        <CreditCard size={16} /> Retry payment
+                      </>
+                    )}
+                  </button>
+                  {retryPaymentHint && (
+                    <p
+                      className={cn(
+                        "text-xs",
+                        retryPaymentHint.includes("successful") ? "text-success-700" : "text-danger-600",
+                      )}
+                    >
+                      {retryPaymentHint}
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           </motion.div>
 
@@ -469,48 +774,77 @@ export default function OrderDetailPage() {
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.18 }}
-              className="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-5 shadow-card"
+              className={cn(
+                "rounded-2xl border p-5 shadow-card",
+                (() => {
+                  const ps = (order.paymentStatus || "").toUpperCase();
+                  const wasCaptured = ps === "PAID" || ps === "REFUNDED";
+                  return wasCaptured
+                    ? "border-emerald-200 bg-emerald-50/60"
+                    : "border-border bg-gray-50";
+                })(),
+              )}
             >
-              <h3 className="text-sm font-bold text-emerald-900 mb-2 flex items-center gap-1.5">
+              <h3
+                className={cn(
+                  "text-sm font-bold mb-2 flex items-center gap-1.5",
+                  (() => {
+                    const ps = (order.paymentStatus || "").toUpperCase();
+                    return ps === "PAID" || ps === "REFUNDED"
+                      ? "text-emerald-900"
+                      : "text-text-primary";
+                  })(),
+                )}
+              >
                 <Banknote size={14} /> Refund Status
               </h3>
               {(() => {
-                const ps = (order.paymentStatus || '').toUpperCase();
-                const refunded = ps === 'REFUNDED';
-                const wasPaid = ps === 'PAID' || refunded;
+                const ps = (order.paymentStatus || "").toUpperCase();
+                const refunded = ps === "REFUNDED";
+                const wasCaptured = ps === "PAID" || ps === "REFUNDED";
                 const { destination, timeline } = refundDescription(order.paymentMethod);
-                if (!wasPaid && (order.paymentMethod || '').toLowerCase() !== 'cod') {
+                const isCod = (order.paymentMethod || "").toLowerCase() === "cod";
+
+                if (!wasCaptured) {
                   return (
                     <p className="text-sm text-text-secondary">
-                      No payment was captured for this order, so there is nothing to refund.
+                      {isCod
+                        ? "This order was cancelled before cash was collected. No payment was taken."
+                        : "No payment was captured for this order, so there is nothing to refund."}
                     </p>
                   );
                 }
+
                 return (
                   <div className="text-sm space-y-2">
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between gap-2">
                       <span className="text-text-secondary">Refund amount</span>
-                      <span className="font-bold text-text-primary">{formatCurrency(order.total)}</span>
+                      <span className="font-bold text-text-primary tabular-nums">{formatCurrency(order.total)}</span>
                     </div>
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between gap-2">
                       <span className="text-text-secondary">Refunded to</span>
                       <span className="font-medium text-text-primary text-right">{destination}</span>
                     </div>
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between gap-2">
                       <span className="text-text-secondary">Timeline</span>
                       <span className="font-medium text-text-primary text-right">{timeline}</span>
                     </div>
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between gap-2">
                       <span className="text-text-secondary">Status</span>
-                      <span className={`text-xs font-semibold rounded-full px-2 py-0.5 ${refunded ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
-                        {refunded ? 'Refund Processed' : 'In Progress'}
+                      <span
+                        className={`text-xs font-semibold rounded-full px-2 py-0.5 shrink-0 ${
+                          refunded ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"
+                        }`}
+                      >
+                        {refunded ? "Refund processed" : "Refund in progress"}
                       </span>
                     </div>
-                    <p className="text-xs text-text-muted pt-2 border-t border-emerald-200">
-                      You will receive an email & in-app notification once the refund is settled.
-                      {(order.paymentMethod || '').toLowerCase() === 'wallet' || (order.paymentMethod || '').toLowerCase() === 'cod'
-                        ? ' Wallet refunds appear under Account → Wallet immediately.'
-                        : ' Razorpay refunds reflect on your bank statement within 5–7 business days.'}
+                    <p className="text-xs text-text-muted pt-2 border-t border-emerald-200/80">
+                      You will receive email and in-app updates when the refund is settled.
+                      {(order.paymentMethod || "").toLowerCase() === "wallet" ||
+                      (order.paymentMethod || "").toLowerCase() === "cod"
+                        ? " Wallet refunds appear under Account → Wallet."
+                        : " Razorpay refunds typically appear on your bank statement within 5–7 business days."}
                     </p>
                   </div>
                 );
@@ -574,13 +908,26 @@ export default function OrderDetailPage() {
             >
               <RefreshCw size={15} /> Buy Again
             </button>
-            {canReturn && (
+            {returnEligibility?.canReturn && (
               <button
-                onClick={() => setReturnModalOpen(true)}
+                onClick={() => openReturnModal("RETURN")}
                 className="w-full flex items-center gap-2 rounded-xl border border-orange-200 bg-orange-50 px-4 py-2.5 text-sm font-medium text-orange-700 hover:bg-orange-100 transition-colors"
               >
-                <RotateCcw size={15} /> Request Return
+                <RotateCcw size={15} /> Return item
               </button>
+            )}
+            {returnEligibility?.canReplace && (
+              <button
+                onClick={() => openReturnModal("REPLACEMENT")}
+                className="w-full flex items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm font-medium text-indigo-800 hover:bg-indigo-100 transition-colors"
+              >
+                <RefreshCw size={15} /> Request replacement
+              </button>
+            )}
+            {order?.status.toUpperCase() === "DELIVERED" && returnEligibility && !returnEligibility.canReturn && !returnEligibility.canReplace && (
+              <p className="text-xs text-text-muted text-center px-1">
+                Return or replacement window has ended for this order.
+              </p>
             )}
           </motion.div>
 
@@ -731,48 +1078,131 @@ export default function OrderDetailPage() {
         </div>
       )}
 
-      {/* Return Request Modal */}
+      {/* Return / replacement modal */}
       {returnModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 overflow-y-auto">
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 space-y-4"
+            className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 space-y-4 my-8"
           >
             <div className="flex items-center gap-3">
-              <div className="flex items-center justify-center h-10 w-10 rounded-full bg-orange-50">
-                <RotateCcw size={22} className="text-orange-600" />
+              <div
+                className={`flex items-center justify-center h-10 w-10 rounded-full ${
+                  returnFlowKind === "REPLACEMENT" ? "bg-indigo-50" : "bg-orange-50"
+                }`}
+              >
+                {returnFlowKind === "REPLACEMENT" ? (
+                  <RefreshCw size={22} className="text-indigo-600" />
+                ) : (
+                  <RotateCcw size={22} className="text-orange-600" />
+                )}
               </div>
               <div>
-                <h3 className="text-lg font-bold text-text-primary">Request Return</h3>
+                <h3 className="text-lg font-bold text-text-primary">
+                  {returnFlowKind === "REPLACEMENT" ? "Request replacement" : "Request return"}
+                </h3>
                 <p className="text-sm text-text-secondary">Order #{order?.orderNumber}</p>
               </div>
             </div>
 
             <div>
+              <label className="block text-sm font-medium text-text-primary mb-1.5">Reason</label>
+              <select
+                value={returnReasonCode}
+                onChange={(e) => setReturnReasonCode(e.target.value)}
+                className="w-full rounded-xl border border-border px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary-500"
+              >
+                {RETURN_REASON_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
               <label className="block text-sm font-medium text-text-primary mb-1.5">
-                Reason for return <span className="text-red-500">*</span>
+                Notes <span className="text-text-muted font-normal">(optional)</span>
               </label>
               <textarea
                 value={returnReason}
                 onChange={(e) => setReturnReason(e.target.value)}
-                placeholder="e.g. Product damaged, wrong item received, not as described..."
+                placeholder="Short summary for the seller"
+                rows={2}
+                className="w-full rounded-xl border border-border px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-none"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-text-primary mb-1.5">
+                Details {returnReasonCode === "OTHER" ? <span className="text-red-500">*</span> : null}
+              </label>
+              <textarea
+                value={returnDescription}
+                onChange={(e) => setReturnDescription(e.target.value)}
+                placeholder="Describe the issue (required when reason is Other)"
                 rows={3}
                 className="w-full rounded-xl border border-border px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-none"
               />
             </div>
 
+            <div>
+              <label className="block text-sm font-medium text-text-primary mb-1.5">
+                Photos <span className="text-text-muted font-normal">(optional, up to 3)</span>
+              </label>
+              <input
+                type="file"
+                accept="image/*"
+                multiple
+                disabled={returnUploadBusy || returnImageUrls.length >= 3}
+                className="block w-full text-xs text-text-secondary file:mr-2 file:rounded-lg file:border-0 file:bg-primary-50 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-primary-700"
+                onChange={async (e) => {
+                  const files = Array.from(e.target.files || []).slice(0, 3 - returnImageUrls.length);
+                  if (!files.length) return;
+                  setReturnUploadBusy(true);
+                  try {
+                    syncToken();
+                    const urls: string[] = [];
+                    for (const f of files) {
+                      urls.push(await uploadApi.uploadImage(f));
+                    }
+                    setReturnImageUrls((prev) => [...prev, ...urls].slice(0, 3));
+                  } catch (err) {
+                    alert(err instanceof Error ? err.message : "Upload failed");
+                  } finally {
+                    setReturnUploadBusy(false);
+                    e.target.value = "";
+                  }
+                }}
+              />
+              {returnImageUrls.length > 0 && (
+                <p className="text-xs text-text-muted mt-1">{returnImageUrls.length} image(s) attached</p>
+              )}
+            </div>
+
             <div className="flex gap-3 pt-2">
               <button
-                onClick={() => { setReturnModalOpen(false); setReturnReason(""); }}
+                type="button"
+                onClick={() => {
+                  setReturnModalOpen(false);
+                  setReturnReason("");
+                  setReturnDescription("");
+                  setReturnImageUrls([]);
+                }}
                 disabled={submittingReturn}
                 className="flex-1 rounded-xl border border-border px-4 py-2.5 text-sm font-semibold text-text-primary hover:bg-gray-50 transition-colors"
               >
                 Cancel
               </button>
               <button
+                type="button"
                 onClick={() => void handleReturnRequest()}
-                disabled={submittingReturn || !returnReason.trim()}
+                disabled={
+                  submittingReturn ||
+                  returnUploadBusy ||
+                  (returnReasonCode === "OTHER" && !returnDescription.trim() && !returnReason.trim())
+                }
                 className="flex-1 rounded-xl bg-orange-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-orange-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
               >
                 {submittingReturn ? (
@@ -780,7 +1210,7 @@ export default function OrderDetailPage() {
                     <Loader2 size={14} className="animate-spin" /> Submitting...
                   </>
                 ) : (
-                  "Submit Return"
+                  "Submit"
                 )}
               </button>
             </div>

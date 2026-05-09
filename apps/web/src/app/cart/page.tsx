@@ -85,16 +85,18 @@ export default function CartPage() {
   const compareTotal = inclusiveCompareTotal(items);
   const savings = Math.max(0, compareTotal - priceTotal);
   const itemCount = totalItems();
+  const shippingCharge = priceTotal >= shippingConfig.freeShippingMin ? 0 : shippingConfig.defaultRate;
+  const orderTotal = priceTotal + shippingCharge;
 
   return (
     <div className="min-h-screen bg-surface-raised">
-      <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-        <div className="mb-6 flex items-center justify-between">
-          <h1 className="text-2xl font-bold text-text-primary font-display">Shopping Cart ({itemCount} {itemCount === 1 ? "item" : "items"})</h1>
-          <button onClick={clearCart} className="text-sm font-medium text-danger-600 hover:text-danger-700 transition-colors">Clear Cart</button>
+      <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
+        <div className="mb-5 flex flex-col gap-3 sm:mb-6 sm:flex-row sm:items-center sm:justify-between">
+          <h1 className="text-xl font-bold text-text-primary font-display sm:text-2xl">Shopping Cart ({itemCount} {itemCount === 1 ? "item" : "items"})</h1>
+          <button type="button" onClick={clearCart} className="self-start text-sm font-medium text-danger-600 transition-colors hover:text-danger-700 sm:self-auto">Clear Cart</button>
         </div>
-        <div className="grid gap-8 lg:grid-cols-3">
-          <div className="lg:col-span-2 space-y-4">
+        <div className="grid gap-6 lg:grid-cols-3 lg:gap-8">
+          <div className="space-y-4 lg:col-span-2">
             <AnimatePresence>
               {items.map((item) => (
                 <CartItemCard key={item.id} item={item} onRemove={removeItem} onUpdateQty={updateQuantity} onSaveForLater={(id, productId) => { toggleWishlist(productId); removeItem(id); }} />
@@ -102,18 +104,21 @@ export default function CartPage() {
             </AnimatePresence>
           </div>
           <div className="lg:col-span-1">
-            <div className="sticky top-28 rounded-2xl border border-border bg-white p-6 shadow-card">
+            <div className="rounded-2xl border border-border bg-white p-5 shadow-card sm:p-6 lg:sticky lg:top-24 xl:top-28">
               <h2 className="mb-4 text-lg font-bold text-text-primary">Order Summary</h2>
               <div className="space-y-3 text-sm">
                 <div className="flex justify-between text-text-secondary"><span>Price ({itemCount} {itemCount === 1 ? "item" : "items"})</span><span className="font-medium text-text-primary">{formatCurrency(compareTotal)}</span></div>
                 {savings > 0 && (<div className="flex justify-between text-success-600"><span className="flex items-center gap-1"><Tag size={14} />Discount</span><span className="font-medium">-{formatCurrency(savings)}</span></div>)}
                 <div className="flex justify-between text-text-secondary"><span>Delivery</span><span className={priceTotal >= shippingConfig.freeShippingMin ? "font-semibold text-success-600" : "font-medium text-text-primary"}>{priceTotal >= shippingConfig.freeShippingMin ? "FREE" : formatCurrency(shippingConfig.defaultRate)}</span></div>
                 <hr className="border-border-light" />
-                <div className="flex justify-between text-lg font-bold text-text-primary"><span>Total</span><span>{formatCurrency(priceTotal)}</span></div>
+                <div className="flex justify-between text-lg font-bold text-text-primary">
+                  <span>Total</span>
+                  <span>{formatCurrency(orderTotal)}</span>
+                </div>
                 <p className="text-[11px] text-text-muted">Inclusive of all taxes</p>
                 {savings > 0 && (<p className="rounded-xl bg-success-50 border border-success-100 px-3 py-2 text-center text-sm font-medium text-success-700">You save {formatCurrency(savings)} on this order</p>)}
               </div>
-              <button onClick={handleCheckout} className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-primary-600 py-3.5 text-sm font-bold text-white shadow-primary hover:bg-primary-700 transition-all cursor-pointer">
+              <button type="button" onClick={handleCheckout} className="mt-6 flex min-h-[48px] w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-primary-600 py-3.5 text-sm font-bold text-white shadow-primary transition-all hover:bg-primary-700">
                 Proceed to Checkout <ArrowRight size={16} />
               </button>
               <div className="mt-5 grid grid-cols-3 gap-2">
@@ -144,16 +149,16 @@ function CartItemCard({ item, onRemove, onUpdateQty, onSaveForLater }: { item: C
   const compareIncl = priceInclusiveOfGst(Math.max(item.price, item.comparePrice), item.gstRate ?? null);
   return (
     <motion.div layout initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, x: -100, height: 0, marginBottom: 0, padding: 0 }} transition={{ duration: 0.3 }} className="rounded-2xl border border-border bg-white p-4 shadow-card sm:p-5">
-      <div className="flex gap-4">
-        <Link href={`/products/${item.slug || '#'}`} className="relative h-28 w-28 shrink-0 overflow-hidden rounded-xl border border-border-light bg-surface-muted sm:h-32 sm:w-32">
+      <div className="flex flex-col gap-4 sm:flex-row">
+        <Link href={`/products/${item.slug || '#'}`} className="relative mx-auto h-28 w-28 shrink-0 overflow-hidden rounded-xl border border-border-light bg-surface-muted sm:mx-0 sm:h-32 sm:w-32">
           {item.image ? (
             <Image src={item.image} alt={item.name} fill sizes="128px" className="object-cover" />
           ) : (
             <div className="flex h-full w-full items-center justify-center"><ShoppingBag size={24} className="text-text-muted" /></div>
           )}
         </Link>
-        <div className="flex flex-1 flex-col">
-          <Link href={`/products/${item.slug}`} className="text-sm font-medium text-text-primary hover:text-primary-600 transition-colors line-clamp-2 sm:text-base">{item.name}</Link>
+        <div className="flex min-w-0 flex-1 flex-col">
+          <Link href={`/products/${item.slug}`} className="break-words text-sm font-medium text-text-primary transition-colors hover:text-primary-600 line-clamp-3 sm:line-clamp-2 sm:text-base">{item.name}</Link>
           <p className="mt-0.5 text-xs text-text-muted">Sold by {item.seller}</p>
           {item.variant && <p className="mt-0.5 text-xs text-text-muted">Variant: {item.variant}</p>}
           <div className="mt-2 flex items-baseline gap-2">
@@ -162,9 +167,9 @@ function CartItemCard({ item, onRemove, onUpdateQty, onSaveForLater }: { item: C
           </div>
           <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center rounded-lg border border-gray-200">
-              <button onClick={() => onUpdateQty(item.id, item.quantity - 1)} className="px-2.5 py-1.5 text-text-secondary hover:text-text-primary hover:bg-gray-50 transition-colors rounded-l-lg"><Minus size={14} /></button>
+              <button type="button" onClick={() => onUpdateQty(item.id, item.quantity - 1)} className="rounded-l-lg px-2.5 py-1.5 text-text-secondary transition-colors hover:bg-gray-50 hover:text-text-primary"><Minus size={14} /></button>
               <span className="min-w-[32px] border-x border-gray-200 text-center text-sm font-semibold text-text-primary py-1.5">{item.quantity}</span>
-              <button onClick={() => onUpdateQty(item.id, Math.min(10, item.quantity + 1))} className="px-2.5 py-1.5 text-text-secondary hover:text-text-primary hover:bg-gray-50 transition-colors rounded-r-lg"><Plus size={14} /></button>
+              <button type="button" onClick={() => onUpdateQty(item.id, Math.min(50, item.quantity + 1))} className="rounded-r-lg px-2.5 py-1.5 text-text-secondary transition-colors hover:bg-gray-50 hover:text-text-primary"><Plus size={14} /></button>
             </div>
             <div className="flex items-center gap-3">
               <button onClick={() => onSaveForLater(item.id, item.productId)} className="flex items-center gap-1 text-xs font-medium text-text-secondary hover:text-primary-600 transition-colors"><Heart size={14} /><span className="hidden sm:inline">Save</span></button>

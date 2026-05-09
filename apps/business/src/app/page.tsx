@@ -139,27 +139,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* ─── 2. TRENDING SEARCHES ─── */}
-      {trendingSearches.length > 0 && (
-        <section className="pb-2">
-          <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
-            <div className="flex items-center gap-2.5 overflow-x-auto scrollbar-hide py-1">
-              <span className="flex-shrink-0 text-xs font-semibold text-text-muted flex items-center gap-1">
-                <TrendingUp size={12} className="text-primary-500" /> Trending:
-              </span>
-              {trendingSearches.map((term) => (
-                <Link
-                  key={term}
-                  href={`/products?search=${encodeURIComponent(term)}`}
-                  className="flex-shrink-0 text-xs glass-subtle border border-white/70 rounded-full px-3.5 py-1.5 text-text-secondary shadow-sm hover:border-primary-300/80 hover:text-primary-700 hover:bg-primary-50/90 hover:shadow-md hover:-translate-y-0.5 transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]"
-                >
-                  {term}
-                </Link>
-              ))}
-            </div>
-          </div>
-        </section>
-      )}
+      {/* ─── 2. TRENDING SEARCHES — hidden temporarily ─── */}
 
       {/* ─── 3. SOCIAL PROOF STATS ─── */}
       <section className="py-5">

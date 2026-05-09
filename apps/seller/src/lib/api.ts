@@ -32,6 +32,44 @@ function authHeaders(): Record<string, string> {
 let isRefreshing = false;
 let refreshPromise: Promise<boolean> | null = null;
 
+/** Deduplicate identical in-flight GET requests (same URL) to avoid stampedes. */
+const inflightGet = new Map<string, Promise<Response>>();
+
+function getRequestDedupeKey(input: RequestInfo | URL, init?: RequestInit): string {
+  const method = (init?.method || 'GET').toUpperCase();
+  if (method !== 'GET' && method !== 'HEAD') return '';
+  const url =
+    typeof input === 'string'
+      ? input
+      : input instanceof URL
+        ? input.href
+        : (input as Request).url;
+  return `${method} ${url}`;
+}
+
+async function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+function formatApiError(json: unknown): string {
+  if (!json || typeof json !== 'object') return 'Request failed';
+  const o = json as Record<string, unknown>;
+  const raw = o.message;
+  if (typeof raw === 'string' && raw.trim()) return raw;
+  if (Array.isArray(raw)) {
+    const parts = raw
+      .map((x) => (typeof x === 'string' ? x : (x as any)?.constraints && Object.values((x as any).constraints).join(', ')))
+      .filter(Boolean);
+    if (parts.length) return parts.join('. ');
+  }
+  if (raw && typeof raw === 'object' && 'message' in (raw as object)) {
+    const inner = (raw as { message?: unknown }).message;
+    if (typeof inner === 'string') return inner;
+  }
+  if (typeof o.error === 'string' && o.error.trim()) return o.error;
+  return 'Request failed';
+}
+
 async function refreshSession(): Promise<boolean> {
   if (isRefreshing && refreshPromise) {
     return refreshPromise;
@@ -58,29 +96,78 @@ async function refreshSession(): Promise<boolean> {
 }
 
 async function handleResponse<T = unknown>(res: Response): Promise<T> {
-  const json = await res.json();
+  let json: unknown;
+  try {
+    json = await res.json();
+  } catch {
+    if (!res.ok) throw new Error(res.statusText || 'Request failed');
+    throw new Error('Invalid response from server');
+  }
   if (!res.ok) {
     if (res.status === 401 && typeof window !== 'undefined') {
       window.location.href = '/login?error=' + encodeURIComponent('Session expired. Please sign in again.');
       throw new Error('Session expired');
     }
-    throw new Error(json.message || 'Request failed');
+    throw new Error(formatApiError(json));
   }
-  return json.data;
+  return (json as { data: T }).data;
 }
 
 async function fetchWithRefresh(
   input: RequestInfo | URL,
   init?: RequestInit,
 ): Promise<Response> {
-  const res = await fetch(input, init);
-  if (res.status === 401 && typeof window !== 'undefined') {
-    const refreshed = await refreshSession();
-    if (refreshed) {
-      return fetch(input, { ...init, headers: authHeaders() });
+  const method = (init?.method || 'GET').toUpperCase();
+  const dedupeKey = getRequestDedupeKey(input, init);
+
+  const runOnce = async (): Promise<Response> => {
+    let res = await fetch(input, init);
+    if (res.status === 401 && typeof window !== 'undefined') {
+      const refreshed = await refreshSession();
+      if (refreshed) {
+        const headers = new Headers(init?.headers as HeadersInit | undefined);
+        for (const [k, v] of Object.entries(authHeaders())) {
+          if (v) headers.set(k, v);
+        }
+        res = await fetch(input, { ...init, headers });
+      }
     }
+    return res;
+  };
+
+  const runWithRetry = async (): Promise<Response> => {
+    let res = await runOnce();
+    const idempotent = method === 'GET' || method === 'HEAD';
+    if (
+      idempotent &&
+      (res.status === 502 || res.status === 503 || res.status === 504)
+    ) {
+      await sleep(400);
+      res = await runOnce();
+    }
+    if (
+      idempotent &&
+      (res.status === 502 || res.status === 503 || res.status === 504)
+    ) {
+      await sleep(900);
+      res = await runOnce();
+    }
+    return res;
+  };
+
+  if (dedupeKey) {
+    const existing = inflightGet.get(dedupeKey);
+    if (existing) {
+      return existing.then((r) => r.clone());
+    }
+    const started = runWithRetry().finally(() => {
+      inflightGet.delete(dedupeKey);
+    });
+    inflightGet.set(dedupeKey, started);
+    return started.then((r) => r.clone());
   }
-  return res;
+
+  return runWithRetry();
 }
 
 /** Public user profile (any authenticated role). Used e.g. seller /register to skip duplicate OTP when already verified. */
@@ -201,6 +288,13 @@ export async function apiGetOrders(params?: Record<string, string>) {
   return handleResponse(res);
 }
 
+export async function apiGetSellerOrder(orderId: string) {
+  const res = await fetchWithRefresh(`${API_URL}/seller/orders/${encodeURIComponent(orderId)}`, {
+    headers: authHeaders(),
+  });
+  return handleResponse(res);
+}
+
 export async function apiUpdateOrderStatus(orderId: string, status: string) {
   const res = await fetchWithRefresh(`${API_URL}/seller/orders/${orderId}/status`, {
     method: 'PATCH',
@@ -229,6 +323,8 @@ export async function apiShipOrder(orderId: string, body: {
   /** Which seller pickup location to dispatch from. Omit to use the
    *  seller's default location. */
   pickupLocationId?: string;
+  /** When booking Xelgo (`XELNOVA_COURIER`), selects which platform courier row quoted the rate. */
+  platformCourier?: string;
 }) {
   const res = await fetchWithRefresh(`${API_URL}/seller/orders/${orderId}/ship`, {
     method: 'POST',

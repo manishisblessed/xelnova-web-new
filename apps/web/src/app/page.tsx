@@ -5,9 +5,9 @@ import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import Image from 'next/image';
 import {
-  TrendingUp, ArrowRight, Package, Users, Store, Truck,
+  ArrowRight, Package, Users, Store, Truck,
 } from 'lucide-react';
-import { searchApi, productsApi } from '@xelnova/api';
+import { productsApi } from '@xelnova/api';
 import type { Banner } from '@xelnova/api';
 import { HeroCarousel } from '@/components/marketplace/hero-carousel';
 import { CategoryCard } from '@/components/marketplace/category-card';
@@ -24,8 +24,6 @@ const HomeBelowFold = dynamic(
     ),
   }
 );
-
-const fallbackSearches: string[] = [];
 
 const defaultSidePromos: { image: string; title: string; subtitle: string; href: string; badge: string; accent: string }[] = [];
 
@@ -49,7 +47,6 @@ const statLabels: Record<string, string> = {
 
 export default function HomePage() {
   const { data: categories } = useCategories();
-  const [trendingSearches, setTrendingSearches] = useState(fallbackSearches);
   const [stats, setStats] = useState<{ icon: typeof Package; value: string; label: string }[]>([
     { icon: Package, value: '...', label: 'Products' },
     { icon: Store, value: '...', label: 'Trusted Sellers' },
@@ -62,15 +59,11 @@ export default function HomePage() {
   useEffect(() => {
     let cancelled = false;
     Promise.allSettled([
-      searchApi.getPopularSearches(),
       productsApi.getStats(),
       productsApi.getBanners('side'),
       productsApi.getBrands(),
-    ]).then(([searchesResult, statsResult, bannersResult, brandsResult]) => {
+    ]).then(([statsResult, bannersResult, brandsResult]) => {
       if (cancelled) return;
-      if (searchesResult.status === 'fulfilled' && searchesResult.value?.length) {
-        setTrendingSearches(searchesResult.value);
-      }
       if (statsResult.status === 'fulfilled') {
         const data = statsResult.value;
         const keys = ['products', 'sellers', 'customers', 'orders'] as const;
@@ -114,7 +107,7 @@ export default function HomePage() {
       <section className="pt-3 pb-2">
         <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
           <div className={`grid grid-cols-1 ${sidePromos.length > 0 ? 'lg:grid-cols-4' : ''} gap-3 lg:gap-4 lg:h-[420px]`}>
-            <div className={`${sidePromos.length > 0 ? 'lg:col-span-3' : ''} h-[220px] sm:h-[300px] lg:h-full`}>
+            <div className={`${sidePromos.length > 0 ? 'lg:col-span-3' : ''} min-h-[200px] h-[clamp(200px,52vw,260px)] sm:h-[300px] lg:h-full`}>
               <HeroCarousel />
             </div>
             {sidePromos.length > 0 && (
@@ -139,29 +132,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* ─── 2. TRENDING SEARCHES ─── */}
-      {trendingSearches.length > 0 && (
-        <section className="pb-2">
-          <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
-            <div className="flex items-center gap-2.5 overflow-x-auto scrollbar-hide py-1">
-              <span className="flex-shrink-0 text-xs font-semibold text-text-muted flex items-center gap-1">
-                <TrendingUp size={12} className="text-primary-500" /> Trending:
-              </span>
-              {trendingSearches.map((term) => (
-                <Link
-                  key={term}
-                  href={`/products?search=${encodeURIComponent(term)}`}
-                  className="flex-shrink-0 text-xs glass-subtle border border-white/70 rounded-full px-3.5 py-1.5 text-text-secondary shadow-sm hover:border-primary-300/80 hover:text-primary-700 hover:bg-primary-50/90 hover:shadow-md hover:-translate-y-0.5 transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]"
-                >
-                  {term}
-                </Link>
-              ))}
-            </div>
-          </div>
-        </section>
-      )}
-
-      {/* ─── 3. SOCIAL PROOF STATS (hidden for now — uncomment to restore) ─── */}
+      {/* ─── 2. SOCIAL PROOF STATS (hidden for now — uncomment to restore) ─── */}
       {/* <section className="py-5">
         <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
           <div className="stats-ribbon p-5 md:p-7">
@@ -187,19 +158,24 @@ export default function HomePage() {
         </div>
       </section> */}
 
-      {/* ─── 4. CATEGORIES ─── */}
+      {/* ─── 3. CATEGORIES ─── */}
       <section className="py-5">
         <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
-          <div className="relative panel-glass py-7 px-4 sm:px-6 transition-all duration-500 hover:shadow-[0_24px_56px_-14px_rgba(12,131,31,0.22)]">
+          <div className="relative panel-glass py-6 px-3 sm:py-7 sm:px-6 transition-all duration-500 hover:shadow-[0_24px_56px_-14px_rgba(12,131,31,0.22)]">
             {/* Decorative background shapes */}
             <div className="absolute inset-0 overflow-hidden rounded-[1.25rem] pointer-events-none">
               <div className="absolute -top-10 -left-10 w-40 h-40 bg-gradient-to-br from-primary-200/30 to-transparent rounded-full blur-2xl" />
               <div className="absolute -bottom-10 -right-10 w-32 h-32 bg-gradient-to-tl from-accent-200/25 to-transparent rounded-full blur-2xl" />
             </div>
-            
-            <div className="relative flex items-center justify-between sm:justify-center gap-5 sm:gap-7 lg:gap-10 overflow-x-auto scrollbar-hide pb-1">
+
+            <div
+              className="relative flex gap-4 overflow-x-auto overscroll-x-contain scroll-smooth scrollbar-hide pb-2 pt-1 snap-x snap-mandatory sm:gap-6 md:gap-8"
+              style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-x' }}
+            >
               {(categories || []).map((cat, i) => (
-                <CategoryCard key={cat.id} category={cat} index={i} />
+                <div key={cat.id} className="snap-start shrink-0 min-w-[4.75rem] sm:min-w-[5.5rem] md:min-w-0 md:shrink">
+                  <CategoryCard category={cat} index={i} />
+                </div>
               ))}
             </div>
           </div>

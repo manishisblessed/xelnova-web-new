@@ -58,15 +58,17 @@ export function LocationModal({ open, onClose }: LocationModalProps) {
     }
   };
 
-  const handleGeolocate = () => {
+  const handleGeolocate = async (silent = false) => {
     if (!navigator.geolocation) {
-      setError('Geolocation is not supported by your browser');
+      if (!silent) setError('Geolocation is not supported by your browser');
       return;
     }
 
-    setGeoLoading(true);
-    setError('');
-    setPreview(null);
+    if (!silent) {
+      setGeoLoading(true);
+      setError('');
+      setPreview(null);
+    }
 
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
@@ -85,21 +87,30 @@ export function LocationModal({ open, onClose }: LocationModalProps) {
             setLocation(locationData);
             onClose();
           } else {
-            setError('Could not detect pincode from your location. Please enter manually.');
+            if (!silent) setError('Could not detect pincode from your location. Please enter manually.');
           }
         } catch {
-          setError('Failed to detect location. Please enter pincode manually.');
+          if (!silent) setError('Failed to detect location. Please enter pincode manually.');
         } finally {
-          setGeoLoading(false);
+          if (!silent) setGeoLoading(false);
         }
       },
       () => {
-        setGeoLoading(false);
-        setError('Location access denied. Please enter pincode manually.');
+        if (!silent) {
+          setGeoLoading(false);
+          setError('Location access denied. Please enter pincode manually.');
+        }
       },
       { enableHighAccuracy: false, timeout: 10000 },
     );
   };
+
+  // Auto-trigger geolocation when modal opens
+  useEffect(() => {
+    if (open) {
+      handleGeolocate(true);
+    }
+  }, [open]);
 
   return (
     <AnimatePresence>
@@ -142,16 +153,21 @@ export function LocationModal({ open, onClose }: LocationModalProps) {
             <div className="px-6 py-5 space-y-4">
               {/* Detect location button */}
               <button
-                onClick={handleGeolocate}
+                onClick={() => handleGeolocate(false)}
                 disabled={geoLoading}
                 className="w-full flex items-center justify-center gap-2 rounded-xl border-2 border-dashed border-primary-200 bg-primary-50/50 px-4 py-3 text-sm font-medium text-primary-700 hover:border-primary-400 hover:bg-primary-50 transition-all disabled:opacity-60"
               >
                 {geoLoading ? (
-                  <Loader2 size={16} className="animate-spin" />
+                  <>
+                    <Loader2 size={16} className="animate-spin" />
+                    Detecting location...
+                  </>
                 ) : (
-                  <Navigation size={16} />
+                  <>
+                    <Navigation size={16} />
+                    Detect my location
+                  </>
                 )}
-                {geoLoading ? 'Detecting...' : 'Detect my location'}
               </button>
 
               <div className="flex items-center gap-3">

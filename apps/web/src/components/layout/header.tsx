@@ -30,7 +30,6 @@ import { useWishlistStore } from '@/lib/store/wishlist-store';
 import { useLocationStore, autoDetectLocation } from '@/lib/store/location-store';
 import { useCategories } from '@/lib/api';
 import { useAuth, searchApi, getAccessToken, setAccessToken, notificationsApi } from '@xelnova/api';
-import { LocationModal } from '@/components/location-modal';
 import { priceInclusiveOfGst } from '@xelnova/utils';
 
 type AutocompleteResult = {
@@ -94,7 +93,6 @@ export function Header() {
   const { results: autocomplete, clear: clearAutocomplete } = useAutocomplete(searchQuery);
 
   const [mounted, setMounted] = useState(false);
-  const [locationModalOpen, setLocationModalOpen] = useState(false);
   const rawCartCount = useCartStore((s) => s.totalItems());
   const rawWishlistCount = useWishlistStore((s) => s.items.length);
   const cartItemCount = mounted ? rawCartCount : 0;
@@ -103,8 +101,6 @@ export function Header() {
   const setLocation = useLocationStore((s) => s.setLocation);
   const autoDetected = useLocationStore((s) => s.autoDetected);
   const setAutoDetected = useLocationStore((s) => s.setAutoDetected);
-  const promptDismissed = useLocationStore((s) => s.promptDismissed);
-  const setPromptDismissed = useLocationStore((s) => s.setPromptDismissed);
   const { data: categories } = useCategories();
   const { user, isAuthenticated, logout, loading: authLoading } = useAuth();
 
@@ -155,15 +151,6 @@ export function Header() {
     return () => { cancelled = true; };
   }, [mounted, location, autoDetected, setLocation, setAutoDetected]);
 
-  // Auto-show location modal only on home page if no location is set and user hasn't dismissed it
-  useEffect(() => {
-    const isHomePage = pathname === '/';
-    if (!mounted || location || promptDismissed || locationModalOpen || !isHomePage) return;
-    const timer = setTimeout(() => {
-      setLocationModalOpen(true);
-    }, 2000);
-    return () => clearTimeout(timer);
-  }, [mounted, location, promptDismissed, locationModalOpen, pathname]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -269,22 +256,17 @@ export function Header() {
         <div className="pointer-events-none absolute inset-0 opacity-25 bg-[radial-gradient(ellipse_60%_120%_at_85%_50%,rgba(247,197,43,0.35),transparent_60%),radial-gradient(ellipse_40%_120%_at_15%_50%,rgba(255,255,255,0.18),transparent_60%)]" />
         <div className="relative mx-auto max-w-[1440px] flex items-center justify-between px-4 py-1.5 sm:px-6">
           <div className="flex items-center gap-3 text-white/95">
-            <button
-              onClick={() => setLocationModalOpen(true)}
-              className="flex items-center gap-1.5 hover:text-white transition-colors group"
-            >
+            <div className="flex items-center gap-1.5 text-white/95">
               <MapPin size={10} className="shrink-0 opacity-90" aria-hidden />
               {location ? (
                 <span className="inline max-w-[min(100%,14rem)] truncate sm:max-w-none">
                   Deliver to <strong className="text-white">{location.city} {location.pincode}</strong>
                 </span>
               ) : (
-                <span className="inline">
-                  Select your <strong className="text-white">location</strong>
-                </span>
+                <span className="inline opacity-75">
+                  Detecting location…</span>
               )}
-              <ChevronDown size={9} className="group-hover:rotate-180 transition-transform shrink-0" />
-            </button>
+            </div>
             <span className="text-white/45 hidden sm:inline">|</span>
             <a
               href="tel:+919259131155"
@@ -773,13 +755,6 @@ export function Header() {
         )}
       </AnimatePresence>
 
-      <LocationModal 
-        open={locationModalOpen} 
-        onClose={() => {
-          setLocationModalOpen(false);
-          setPromptDismissed(true);
-        }} 
-      />
     </header>
   );
 }

@@ -19,8 +19,58 @@ import { useCartStore } from "@/lib/store/cart-store";
 import { useWishlistStore } from "@/lib/store/wishlist-store";
 import { ProductCard } from "@/components/marketplace/product-card";
 import type { SizeChartRow } from "@/lib/data/products";
+import { toast } from "sonner";
 
 type TabId = "description" | "specifications" | "reviews" | "product-info";
+
+/** Same semantics as admin product review — hide seller brand-cert fields from the consumer PDP. */
+const BRAND_CERT_DETAIL_KEY_MATCHERS = [
+  "brand authorization certificate",
+  "brand authorisation certificate",
+  "brand authorisation",
+  "brand authorization",
+  "brand certificate",
+  "authorization certificate",
+  "authorisation certificate",
+];
+
+function filterConsumerAdditionalDetails(
+  additionalDetails: Record<string, string> | null | undefined,
+): Record<string, string> | undefined {
+  if (!additionalDetails || typeof additionalDetails !== "object") return undefined;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(additionalDetails)) {
+    const norm = k.toLowerCase().trim();
+    if (BRAND_CERT_DETAIL_KEY_MATCHERS.includes(norm)) continue;
+    if (typeof v === "string") out[k] = v;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
+ * Specifications come from JSON columns and are often `null` / omitted at runtime.
+ * `Object.keys(null)` throws and crashes the PDP tab → error boundary.
+ * Nested values must be stringified so React never tries to render plain objects.
+ */
+function normalizeProductSpecifications(specs: unknown): Record<string, string> {
+  if (specs == null || typeof specs !== "object" || Array.isArray(specs)) {
+    return {};
+  }
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(specs as Record<string, unknown>)) {
+    if (v === null || v === undefined) out[k] = "";
+    else if (typeof v === "object") {
+      try {
+        out[k] = JSON.stringify(v);
+      } catch {
+        out[k] = "";
+      }
+    } else {
+      out[k] = String(v);
+    }
+  }
+  return out;
+}
 
 export default function ProductDetail() {
   const params = useParams();
@@ -131,7 +181,18 @@ export default function ProductDetail() {
     });
   })();
 
-  const variantString = Object.entries(selectedVariants).map(([, v]) => v).join("-");
+  const variantString = (() => {
+    if (product?.variants?.length) {
+      const ordered = product.variants
+        .map((g) => selectedVariants[g.type])
+        .filter((v) => v != null && String(v).length > 0);
+      if (ordered.length > 0) return ordered.join("-");
+    }
+    return Object.entries(selectedVariants)
+      .map(([, v]) => v)
+      .filter((v) => v != null && String(v).length > 0)
+      .join("-");
+  })();
 
   const effectivePrice = (() => {
     if (!product) return 0;
@@ -209,7 +270,12 @@ export default function ProductDetail() {
 
   const selectedVariantImage = (() => {
     if (!product) return "";
-    for (const variant of augmentedVariants) {
+    const colorFirst = [...augmentedVariants].sort((a, b) => {
+      const isColor = (v: typeof a) =>
+        v.type === "color" || v.options.some((o) => o.hex || (o.images && o.images.length > 0));
+      return (isColor(a) ? 0 : 1) - (isColor(b) ? 0 : 1);
+    });
+    for (const variant of colorFirst) {
       const sel = selectedVariants[variant.type];
       if (!sel) continue;
       const opt = variant.options.find((o) => o.value === sel);
@@ -233,13 +299,11 @@ export default function ProductDetail() {
 
   const handleAddToCart = () => {
     if (!cartItemPayload) return;
-    if (isInCart) {
-      router.push("/cart");
-      return;
-    }
+    if (isInCart) return;
     const qty = Math.max(1, Math.min(pendingQty, maxQty));
     setItemQuantity(cartItemPayload, qty);
     setJustAdded(true);
+    toast.success("Added to cart", { description: "Adjust quantity below anytime." });
     setTimeout(() => setJustAdded(false), 2000);
   };
 
@@ -305,8 +369,9 @@ export default function ProductDetail() {
     });
   };
 
-  const hasProductInfo = product.featuresAndSpecs || product.materialsAndCare || 
-    product.itemDetails || product.additionalDetails || product.productDescription || 
+  const consumerAdditionalDetails = filterConsumerAdditionalDetails(product.additionalDetails);
+  const hasProductInfo = product.featuresAndSpecs || product.materialsAndCare ||
+    product.itemDetails || consumerAdditionalDetails || product.productDescription ||
     product.safetyInfo || product.regulatoryInfo;
 
   const tabs: { id: TabId; label: string }[] = [
@@ -315,6 +380,8 @@ export default function ProductDetail() {
     { id: "specifications", label: "Specifications" },
     { id: "reviews", label: `Reviews (${product.reviewCount.toLocaleString("en-IN")})` },
   ];
+
+  const specificationRows = normalizeProductSpecifications(product.specifications);
 
   const allVariantImages = (() => {
     if (!product?.variants?.length) return [];
@@ -355,9 +422,32 @@ export default function ProductDetail() {
   // at all (see Admin → Settings → Return & cancellation).
   const marketplaceReturnsAllowed = marketplacePolicy?.returnPolicy?.isReturnable !== false;
   const productReturnsAllowed = product.isReturnable !== false;
-  const showReturnPolicy = marketplaceReturnsAllowed && productReturnsAllowed;
+  const returnPreset = (product as { returnPolicyPreset?: string | null }).returnPolicyPreset ?? null;
+  const replacementOnlyPreset = returnPreset === 'REPLACEMENT_ONLY';
+  const showReturnPolicy =
+    marketplaceReturnsAllowed && productReturnsAllowed && !replacementOnlyPreset;
   const effectiveReturnWindow =
     product.returnWindow ?? marketplacePolicy?.returnPolicy?.returnWindow ?? 7;
+
+  const returnPolicyHeadline = (() => {
+    if (!showReturnPolicy) return '';
+    if (returnPreset === 'EASY_RETURN_3_DAYS') return '3 Days Easy Return';
+    if (returnPreset === 'EASY_RETURN_7_DAYS') return '7 Days Easy Return';
+    if (returnPreset === 'RETURN_PLUS_REPLACEMENT')
+      return `${effectiveReturnWindow} Days Easy Return`;
+    return `${effectiveReturnWindow} days easy return policy`;
+  })();
+
+  // Replacement eligibility is admin-controlled at approval time — the seller
+  // cannot self-declare it. We surface a dedicated "X Days Replacement" promise
+  // when both the marketplace allows replacements AND the admin flagged this
+  // specific listing as eligible. `replacementWindow` is the admin-picked
+  // window (2 / 5 / 7 days); it falls back to the return window when the
+  // admin enabled replacement without picking a specific value.
+  const marketplaceReplacementsAllowed = marketplacePolicy?.returnPolicy?.isReplaceable !== false;
+  const showReplacement = !!product.isReplaceable && marketplaceReplacementsAllowed;
+  const effectiveReplacementWindow =
+    product.replacementWindow ?? product.returnWindow ?? effectiveReturnWindow;
 
   // Media gallery: images first, then video (if exists)
   // Use variant video if available, otherwise fall back to product video
@@ -391,12 +481,12 @@ export default function ProductDetail() {
         </div>
       </div>
 
-      <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-        <div className="grid grid-cols-1 gap-8 lg:grid-cols-12">
+      <div className="mx-auto max-w-7xl px-4 py-5 sm:px-6 sm:py-6 lg:px-8">
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-12 lg:gap-8">
 
           {/* ─── Image Gallery ─── */}
           <div className="lg:col-span-5 xl:col-span-5">
-            <div className="sticky top-28">
+            <div className="lg:sticky lg:top-24 xl:top-28">
               {/* Main image/video */}
               <motion.div
                 className={cn(
@@ -466,14 +556,18 @@ export default function ProductDetail() {
 
               {/* Thumbnails (images + video) */}
               {mediaGallery.length > 1 && (
-                <div className="flex gap-2.5 mt-3 overflow-x-auto pb-1 scrollbar-hide">
+                <div
+                  className="mt-3 -mx-1 flex snap-x snap-mandatory gap-2 overflow-x-auto overscroll-x-contain scroll-smooth px-1 pb-2 pt-0.5 scrollbar-hide"
+                  style={{ WebkitOverflowScrolling: "touch", touchAction: "pan-x" }}
+                >
                   {mediaGallery.map((media, i) => (
                     <button
+                      type="button"
                       key={`${variantGallery ? 'v' : 'p'}-${media.type}-${i}`}
                       onClick={() => setSelectedImage(i)}
                       onMouseEnter={() => media.type === 'image' && setSelectedImage(i)}
                       className={cn(
-                        "relative h-16 w-16 shrink-0 overflow-hidden rounded-xl border-2 transition-all",
+                        "relative h-[4.25rem] w-[4.25rem] shrink-0 snap-start overflow-hidden rounded-xl border-2 transition-all sm:h-[5rem] sm:w-[5rem]",
                         selectedImage === i
                           ? "border-primary-500 ring-2 ring-primary-500/20"
                           : "border-border hover:border-gray-300"
@@ -485,16 +579,23 @@ export default function ProductDetail() {
                             src={media.url}
                             muted
                             playsInline
-                            className="absolute inset-0 w-full h-full object-cover"
+                            className="absolute inset-0 h-full w-full object-cover"
                           />
                           <div className="absolute inset-0 flex items-center justify-center bg-black/30">
-                            <div className="w-7 h-7 rounded-full bg-white/90 flex items-center justify-center shadow-sm">
-                              <Play size={14} className="text-primary-600 ml-0.5" fill="currentColor" />
+                            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-white/90 shadow-sm">
+                              <Play size={14} className="ml-0.5 text-primary-600" fill="currentColor" />
                             </div>
                           </div>
                         </>
                       ) : (
-                        <Image src={media.url} alt={`View ${i + 1}`} fill sizes="64px" className="object-cover" />
+                        <Image
+                          src={media.url}
+                          alt={`View ${i + 1}`}
+                          fill
+                          sizes="(max-width:640px) 18vw, 80px"
+                          quality={82}
+                          className="object-cover"
+                        />
                       )}
                     </button>
                   ))}
@@ -511,7 +612,30 @@ export default function ProductDetail() {
                 {product.brand && (
                   <p className="mb-1 text-xs font-bold uppercase tracking-widest text-primary-600">{product.brand}</p>
                 )}
-                <h1 className="text-xl font-bold text-text-primary sm:text-2xl leading-tight">{product.name}</h1>
+                <h1 className="break-words text-xl font-bold leading-tight text-text-primary sm:text-2xl">{product.name}</h1>
+                {product.xelnovaProductId ? (
+                  <p className="mt-1.5 text-xs text-text-muted">
+                    Item code:{' '}
+                    <span className="font-mono font-medium text-text-secondary">{product.xelnovaProductId}</span>
+                  </p>
+                ) : null}
+                {(() => {
+                  const L = product.productLengthCm;
+                  const W = product.productWidthCm;
+                  const H = product.productHeightCm;
+                  const Wt = product.productWeightKg;
+                  if (L == null && W == null && H == null && Wt == null) return null;
+                  const parts: string[] = [];
+                  if (L != null && W != null && H != null) {
+                    parts.push(`${L} × ${W} × ${H} cm`);
+                  } else {
+                    if (L != null) parts.push(`L ${L} cm`);
+                    if (W != null) parts.push(`W ${W} cm`);
+                    if (H != null) parts.push(`H ${H} cm`);
+                  }
+                  if (Wt != null) parts.push(`${Wt} kg`);
+                  return <p className="mt-1 text-xs text-text-muted">Size & weight: {parts.join(' · ')}</p>;
+                })()}
               </div>
 
               {/* Ratings */}
@@ -552,12 +676,12 @@ export default function ProductDetail() {
 
               {/* Amazon-style service badges */}
               <div className="flex flex-wrap gap-4 text-xs text-center">
-                {product.isReplaceable && marketplacePolicy?.returnPolicy?.isReplaceable !== false && (
+                {showReplacement && (
                   <div className="flex flex-col items-center gap-1.5">
                     <div className="w-10 h-10 rounded-full bg-primary-50 border border-primary-100 flex items-center justify-center">
                       <RefreshCw size={18} className="text-primary-600" />
                     </div>
-                    <span className="text-text-secondary font-medium">{effectiveReturnWindow} Days<br/>Replacement</span>
+                    <span className="text-text-secondary font-medium">{effectiveReplacementWindow} Days<br/>Replacement</span>
                   </div>
                 )}
                 <div className="flex flex-col items-center gap-1.5">
@@ -585,12 +709,21 @@ export default function ProductDetail() {
                     <span className="text-text-secondary">by {deliveryDate}</span>
                   </span>
                 </div>
-                {showReturnPolicy ? (
+                {replacementOnlyPreset ? (
+                  <div className="flex items-center gap-3 text-sm">
+                    <div className="w-8 h-8 rounded-lg bg-gray-50 flex items-center justify-center shrink-0">
+                      <RotateCcw size={16} className="text-text-muted" />
+                    </div>
+                    <span className="text-text-secondary">
+                      Refund returns not offered — replacement within {effectiveReplacementWindow} days if eligible.
+                    </span>
+                  </div>
+                ) : showReturnPolicy ? (
                   <div className="flex items-center gap-3 text-sm">
                     <div className="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center shrink-0">
                       <RotateCcw size={16} className="text-primary-600" />
                     </div>
-                    <span className="text-text-secondary">{effectiveReturnWindow} days easy return policy</span>
+                    <span className="text-text-secondary">{returnPolicyHeadline}</span>
                   </div>
                 ) : (
                   <div className="flex items-center gap-3 text-sm">
@@ -598,6 +731,23 @@ export default function ProductDetail() {
                       <RotateCcw size={16} className="text-text-muted" />
                     </div>
                     <span className="text-text-secondary">Non-returnable</span>
+                  </div>
+                )}
+                {showReplacement ? (
+                  <div className="flex items-center gap-3 text-sm">
+                    <div className="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center shrink-0">
+                      <RefreshCw size={16} className="text-primary-600" />
+                    </div>
+                    <span className="text-text-secondary">
+                      {effectiveReplacementWindow} days replacement — get a new piece if the item arrives damaged or defective.
+                    </span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-3 text-sm">
+                    <div className="w-8 h-8 rounded-lg bg-gray-50 flex items-center justify-center shrink-0">
+                      <RefreshCw size={16} className="text-text-muted" />
+                    </div>
+                    <span className="text-text-secondary">Not eligible for replacement</span>
                   </div>
                 )}
                 {product.warrantyInfo && (
@@ -772,7 +922,7 @@ export default function ProductDetail() {
 
           {/* ─── Buy Box (right sidebar) ─── */}
           <div className="lg:col-span-3 xl:col-span-3">
-            <div className="sticky top-28 rounded-2xl border border-border bg-white p-5 shadow-sm space-y-4">
+            <div className="rounded-2xl border border-border bg-white p-4 shadow-sm space-y-4 sm:p-5 lg:sticky lg:top-24 xl:top-28">
               {/* Price repeat */}
               <div>
                 <div className="flex items-baseline gap-1">
@@ -798,30 +948,34 @@ export default function ProductDetail() {
                 <p className="text-sm font-semibold text-danger-600">Out of Stock</p>
               )}
 
-              {/* Quantity — always visible; mirrors cart when item is in cart */}
+              {/* Quantity — [- n +]; updates cart immediately when the line exists */}
               <div>
                 <p className="mb-1.5 text-xs font-medium text-text-muted">Quantity</p>
-                <div className="inline-flex items-center rounded-xl border-2 border-primary-200 bg-primary-50/50">
+                <div className="inline-flex min-h-[44px] w-full max-w-full items-center justify-center rounded-xl border-2 border-primary-200 bg-primary-50/50 sm:w-auto sm:justify-start">
                   <button
+                    type="button"
                     onClick={handleDecrement}
                     disabled={displayQty <= 1}
                     aria-label="Decrease quantity"
-                    className="rounded-l-xl px-3 py-2 text-primary-600 hover:bg-primary-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="flex flex-1 items-center justify-center rounded-l-xl px-4 py-2.5 text-primary-600 transition-colors hover:bg-primary-100 disabled:cursor-not-allowed disabled:opacity-40 sm:flex-initial sm:px-3 sm:py-2"
                   >
-                    <Minus size={14} />
+                    <Minus size={16} strokeWidth={2.5} />
                   </button>
-                  <span className="min-w-[44px] text-center text-sm font-bold text-primary-700">{displayQty}</span>
+                  <span className="min-w-[48px] flex-none text-center text-base font-bold tabular-nums text-primary-700 sm:min-w-[44px] sm:text-sm">
+                    {displayQty}
+                  </span>
                   <button
+                    type="button"
                     onClick={handleIncrement}
                     disabled={displayQty >= maxQty}
                     aria-label="Increase quantity"
-                    className="rounded-r-xl px-3 py-2 text-primary-600 hover:bg-primary-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="flex flex-1 items-center justify-center rounded-r-xl px-4 py-2.5 text-primary-600 transition-colors hover:bg-primary-100 disabled:cursor-not-allowed disabled:opacity-40 sm:flex-initial sm:px-3 sm:py-2"
                   >
-                    <Plus size={14} />
+                    <Plus size={16} strokeWidth={2.5} />
                   </button>
                 </div>
                 {effectiveStock > 0 && effectiveStock < 20 && effectiveInStock && (
-                  <p className="mt-1.5 text-xs text-danger-600 font-medium">
+                  <p className="mt-1.5 text-xs font-medium text-danger-600">
                     Only {effectiveStock} left in stock — order soon
                   </p>
                 )}
@@ -829,30 +983,41 @@ export default function ProductDetail() {
 
               {/* Action buttons */}
               <div className="space-y-2.5 pt-1">
+                {!isInCart ? (
+                  <button
+                    type="button"
+                    onClick={handleAddToCart}
+                    disabled={!effectiveInStock}
+                    className={cn(
+                      "flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold text-white shadow-sm transition-all active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50",
+                      justAdded ? "bg-success-500" : "bg-primary-600 hover:bg-primary-700"
+                    )}
+                  >
+                    {justAdded ? (
+                      <>
+                        <Check size={16} /> Added
+                      </>
+                    ) : effectiveInStock ? (
+                      <>
+                        <ShoppingCart size={16} /> Add to Cart
+                      </>
+                    ) : (
+                      "Out of Stock"
+                    )}
+                  </button>
+                ) : (
+                  <Link
+                    href="/cart"
+                    className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-primary-200 bg-white py-3 text-sm font-bold text-primary-700 shadow-sm transition-all hover:bg-primary-50 active:scale-[0.99]"
+                  >
+                    <ShoppingCart size={16} /> View cart
+                  </Link>
+                )}
                 <button
-                  onClick={handleAddToCart}
-                  disabled={!product.inStock}
-                  className={cn(
-                    "w-full rounded-xl py-3 text-sm font-bold text-white shadow-sm transition-all active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2",
-                    isInCart
-                      ? "bg-success-600 hover:bg-success-700"
-                      : justAdded
-                        ? "bg-success-500"
-                        : "bg-primary-600 hover:bg-primary-700"
-                  )}
-                >
-                  {isInCart ? (
-                    <><ShoppingCart size={16} /> Go to Cart ({cartQty} {cartQty === 1 ? 'item' : 'items'})</>
-                  ) : justAdded ? (
-                    <><Check size={16} /> Added to Cart</>
-                  ) : (
-                    product.inStock ? "Add to Cart" : "Out of Stock"
-                  )}
-                </button>
-                <button
+                  type="button"
                   onClick={handleBuyNow}
-                  disabled={!product.inStock}
-                  className="w-full rounded-xl bg-accent-500 py-3 text-sm font-bold text-white shadow-sm transition-all hover:bg-accent-600 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled={!effectiveInStock}
+                  className="w-full rounded-xl bg-accent-500 py-3 text-sm font-bold text-white shadow-sm transition-all hover:bg-accent-600 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Buy Now
                 </button>
@@ -922,13 +1087,14 @@ export default function ProductDetail() {
 
         {/* ─── Tabs ─── */}
         <div className="mt-10 rounded-2xl border border-border bg-white shadow-sm overflow-hidden">
-          <div className="flex border-b border-border">
+          <div className="flex overflow-x-auto scrollbar-hide scroll-smooth border-b border-border snap-x snap-mandatory">
             {tabs.map((tab) => (
               <button
                 key={tab.id}
+                type="button"
                 onClick={() => setActiveTab(tab.id)}
                 className={cn(
-                  "relative px-6 py-4 text-sm font-medium transition-colors",
+                  "relative shrink-0 snap-start px-4 py-3.5 text-sm font-medium transition-colors sm:px-6 sm:py-4",
                   activeTab === tab.id ? "text-primary-700" : "text-text-muted hover:text-text-primary"
                 )}
               >
@@ -952,10 +1118,10 @@ export default function ProductDetail() {
               )}
               {activeTab === "specifications" && (
                 <motion.div key="specs" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
-                  {Object.keys(product.specifications).length > 0 ? (
+                  {Object.keys(specificationRows).length > 0 ? (
                     <table className="w-full">
                       <tbody>
-                        {Object.entries(product.specifications).map(([key, value], i) => (
+                        {Object.entries(specificationRows).map(([key, value], i) => (
                           <tr key={key} className={i % 2 === 0 ? "bg-gray-50" : "bg-white"}>
                             <td className="px-4 py-3 text-sm font-medium text-text-secondary w-1/3">{key}</td>
                             <td className="px-4 py-3 text-sm text-text-primary">{value}</td>
@@ -969,7 +1135,7 @@ export default function ProductDetail() {
                 </motion.div>
               )}
               {activeTab === "product-info" && (
-                <ProductInfoTab product={product} />
+                <ProductInfoTab product={product} additionalDetails={consumerAdditionalDetails} />
               )}
               {activeTab === "reviews" && (
                 <ReviewsTab product={product} />
@@ -1171,7 +1337,14 @@ function BulletText({ text }: { text: string }) {
   );
 }
 
-function ProductInfoTab({ product }: { product: any }) {
+function ProductInfoTab({
+  product,
+  additionalDetails,
+}: {
+  product: any;
+  /** Consumer-safe additional fields (brand authorization URLs excluded). */
+  additionalDetails?: Record<string, string>;
+}) {
   return (
     <motion.div 
       key="product-info" 
@@ -1201,12 +1374,6 @@ function ProductInfoTab({ product }: { product: any }) {
         </CollapsibleSection>
       )}
 
-      {/* Additional Details */}
-      {product.additionalDetails && Object.keys(product.additionalDetails).length > 0 && (
-        <CollapsibleSection title="Additional Details" icon={FileText}>
-          <KeyValueTable data={product.additionalDetails} />
-        </CollapsibleSection>
-      )}
 
       {/* Product Description */}
       {product.productDescription && (

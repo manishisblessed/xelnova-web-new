@@ -25,6 +25,31 @@ export async function getOrderByNumber(orderNumber: string): Promise<Order> {
   return data.data;
 }
 
+export async function quoteCheckout(payload: {
+  items: { productId: string; quantity: number; variant?: string }[];
+  couponCode?: string;
+}): Promise<{
+  subtotal: number;
+  discount: number;
+  shipping: number;
+  tax: number;
+  total: number;
+  couponCode: string | null;
+}> {
+  const { data, status } = await api.post<ApiResponse<{
+    subtotal: number;
+    discount: number;
+    shipping: number;
+    tax: number;
+    total: number;
+    couponCode: string | null;
+  }>>('/orders/checkout/quote', payload);
+  if (!data.success || data.data == null) {
+    throw apiError(data.message || 'Quote failed', status >= 400 ? status : 500);
+  }
+  return data.data;
+}
+
 export interface CreateOrderPayload {
   items: { productId: string; quantity: number; variant?: string }[];
   shippingAddress: {

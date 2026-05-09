@@ -1,8 +1,10 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import type { MouseEvent as ReactMouseEvent } from 'react';
 import { Bell, ChevronRight } from 'lucide-react';
-import { useRouter, usePathname } from 'next/navigation';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { toast } from 'sonner';
 import { useDashboardAuth } from '@/lib/auth-context';
 import { useSellerProfile } from '@/lib/seller-profile-context';
@@ -31,6 +33,11 @@ function authHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+function inventoryHref(data: Record<string, unknown> | null): string {
+  const productName = typeof data?.productName === 'string' ? data.productName.trim() : '';
+  return productName ? `/inventory?search=${encodeURIComponent(productName)}` : '/inventory';
+}
+
 /**
  * Resolve the in-app destination for a seller-dashboard notification.
  * Returns `null` when the notification has no actionable target — the row
@@ -51,18 +58,28 @@ function getNotificationHref(n: Notification): string | null {
       return '/profile';
     case 'PRODUCT_APPROVED':
     case 'PRODUCT_REJECTED':
+    case 'PRODUCT_CHANGES_APPROVED':
+    case 'PRODUCT_CHANGES_REJECTED':
+    case 'PRODUCT_IMAGE_FEEDBACK':
     case 'LOW_STOCK_ALERT':
-      return '/inventory';
+      return inventoryHref(data);
     case 'NEW_ORDER':
+    case 'SELLER_RETURN_REQUESTED':
+    case 'SELLER_REVERSE_PICKUP':
+    case 'SELLER_SHIPMENT_STATUS':
       return orderNumber ? `/orders?orderNumber=${encodeURIComponent(orderNumber)}` : '/orders';
     case 'PAYOUT_PROCESSED':
     case 'PAYOUT_REJECTED':
       return '/payouts';
     case 'TICKET_ASSIGNED':
+    case 'TICKET_FORWARDED':
     case 'TICKET_CREATED':
     case 'TICKET_REPLY':
     case 'TICKET_UPDATE':
       return ticketId ? `/tickets?ticketId=${encodeURIComponent(ticketId)}` : '/tickets';
+    case 'COUPON_APPROVED':
+    case 'COUPON_REJECTED':
+      return '/coupons';
     default:
       break;
   }
@@ -77,7 +94,6 @@ function getNotificationHref(n: Notification): string | null {
 export function NotificationBell() {
   const { isAuthenticated } = useDashboardAuth();
   const { refresh: refreshProfile, isApproved } = useSellerProfile();
-  const router = useRouter();
   const pathname = usePathname();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unread, setUnread] = useState(0);
@@ -90,10 +106,7 @@ export function NotificationBell() {
       const headers = authHeaders();
       if (!headers.Authorization) return;
       const res = await fetch(`${API_URL}/notifications?limit=10`, { headers });
-      if (!res.ok) {
-        console.warn(`[NotificationBell] fetch failed: ${res.status} ${res.statusText}`);
-        return;
-      }
+      if (!res.ok) return;
       const data = await res.json();
       if (data.success) {
         const newNotifications: Notification[] = data.data?.notifications || [];
@@ -126,7 +139,7 @@ export function NotificationBell() {
   }, [isAuthenticated, fetchNotifications]);
 
   useEffect(() => {
-    const handler = (e: MouseEvent) => {
+    const handler = (e: Event) => {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     };
     document.addEventListener('mousedown', handler);
@@ -157,32 +170,16 @@ export function NotificationBell() {
     } catch {}
   }, []);
 
-  const handleRowClick = useCallback(
+  const activateRow = useCallback(
     (n: Notification) => {
-      const href = getNotificationHref(n);
       if (!n.read) {
         setNotifications((prev) => prev.map((x) => (x.id === n.id ? { ...x, read: true } : x)));
         setUnread((prev) => Math.max(0, prev - 1));
         void markOneRead(n.id);
       }
       setOpen(false);
-      if (!href) return;
-
-      // Compare just the pathname (ignore query) — if we're already on the
-      // target route, `router.push` is a no-op and the user sees nothing
-      // happen. Force a full reload so client-fetched data (e.g. the
-      // verification banner / stat cards) re-fetches and reflects the new
-      // state implied by the notification.
-      const targetPath = href.split('?')[0] ?? href;
-      if (pathname === targetPath) {
-        if (typeof window !== 'undefined') window.location.assign(href);
-        return;
-      }
-
-      router.push(href);
-      router.refresh();
     },
-    [markOneRead, router, pathname],
+    [markOneRead],
   );
 
   const handleToggle = () => {
@@ -224,15 +221,11 @@ export function NotificationBell() {
               notifications.map((n) => {
                 const href = getNotificationHref(n);
                 const interactive = href !== null;
-                return (
-                  <button
-                    key={n.id}
-                    type="button"
-                    onClick={() => handleRowClick(n)}
-                    className={`w-full text-left px-4 py-3 border-b border-gray-50 last:border-0 flex items-start gap-2 transition-colors ${
-                      interactive ? 'hover:bg-gray-50 cursor-pointer' : 'cursor-default'
-                    } ${!n.read ? 'bg-primary-50/30' : ''}`}
-                  >
+                const rowClass = `w-full text-left px-4 py-3 border-b border-gray-50 last:border-0 flex items-start gap-2 transition-colors ${
+                  interactive ? 'hover:bg-gray-50 cursor-pointer' : 'cursor-default'
+                } ${!n.read ? 'bg-primary-50/30' : ''}`;
+                const inner = (
+                  <>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-gray-900">{n.title}</p>
                       <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{n.body}</p>
@@ -248,6 +241,32 @@ export function NotificationBell() {
                     {interactive && (
                       <ChevronRight size={14} className="shrink-0 text-gray-300 mt-1" aria-hidden />
                     )}
+                  </>
+                );
+                if (href) {
+                  const onLinkClick = (e: ReactMouseEvent<HTMLAnchorElement>) => {
+                    activateRow(n);
+                    const targetBase = href.split('?')[0] ?? href;
+                    if (pathname === targetBase) {
+                      e.preventDefault();
+                      window.location.assign(href);
+                    }
+                  };
+                  return (
+                    <Link
+                      key={n.id}
+                      href={href}
+                      prefetch={false}
+                      className={rowClass}
+                      onClick={onLinkClick}
+                    >
+                      {inner}
+                    </Link>
+                  );
+                }
+                return (
+                  <button key={n.id} type="button" onClick={() => activateRow(n)} className={rowClass}>
+                    {inner}
                   </button>
                 );
               })

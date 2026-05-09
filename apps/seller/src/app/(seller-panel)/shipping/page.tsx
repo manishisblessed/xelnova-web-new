@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Truck, Plus, Trash2, Edit2, Check, Eye, EyeOff,
-  ExternalLink, Loader2, AlertCircle, CheckCircle2, Settings,
+  ExternalLink, Loader2, AlertCircle, AlertTriangle, CheckCircle2, Settings,
   Shield, Link2, MapPin, Star,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -203,10 +203,10 @@ const PROVIDERS: ProviderDef[] = [
       },
       {
         key: 'warehouseId',
-        label: 'Pickup Location Alias',
-        required: false,
-        placeholder: 'e.g. Delhi-Warehouse',
-        helpText: 'Registered pickup location alias in Ekart. Leave empty to use default.',
+        label: 'Pickup Location Name',
+        required: true,
+        placeholder: 'e.g. DELHI or Main_Warehouse',
+        helpText: 'EXACT name of your registered pickup address from Ekart Elite → Settings → Addresses. Must match exactly (case-sensitive).',
       },
     ],
     docsUrl: 'https://app.elite.ekartlogistics.in/',
@@ -715,7 +715,8 @@ export default function ShippingSettingsPage() {
           <div className="grid gap-3">
             {PROVIDERS.map((provider, i) => {
               const config = getConfigForProvider(provider.id);
-              const isConfigured = !!config;
+              const disconnected = !!(config && config.isActive === false);
+              const isConfigured = !!config && !disconnected;
 
               return (
                 <motion.div
@@ -724,7 +725,7 @@ export default function ShippingSettingsPage() {
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.1 + i * 0.04 }}
                   className={`rounded-2xl border bg-white p-4 transition-shadow hover:shadow-md ${
-                    isConfigured ? 'border-green-200' : 'border-border'
+                    isConfigured ? 'border-green-200' : disconnected ? 'border-amber-200' : 'border-border'
                   }`}
                 >
                   <div className="flex items-center justify-between gap-3">
@@ -738,12 +739,17 @@ export default function ShippingSettingsPage() {
                               <CheckCircle2 size={9} className="mr-0.5" />
                               Connected
                             </Badge>
+                          ) : disconnected ? (
+                            <Badge variant="warning" className="text-[10px] px-1.5 py-0">
+                              <AlertTriangle size={9} className="mr-0.5" />
+                              Invalid / inactive
+                            </Badge>
                           ) : (
                             <Badge variant="default" className="text-[10px] px-1.5 py-0">Not Connected</Badge>
                           )}
                         </div>
                         <p className="text-xs text-text-muted mt-0.5">{provider.tagline}</p>
-                        {isConfigured && config.accountId && (
+                        {(isConfigured || disconnected) && config?.accountId && (
                           <p className="text-[11px] text-text-muted mt-1 truncate">
                             Account: <span className="font-medium text-text-secondary">{config.accountId}</span>
                           </p>
@@ -751,7 +757,7 @@ export default function ShippingSettingsPage() {
                       </div>
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">
-                      {isConfigured && (
+                      {(isConfigured || disconnected) && (
                         <button
                           onClick={() => setDeleteConfirm(provider.id)}
                           className="p-1.5 rounded-lg hover:bg-red-50 text-text-muted hover:text-red-500 transition-colors"
@@ -770,6 +776,11 @@ export default function ShippingSettingsPage() {
                           <>
                             <Edit2 size={12} />
                             Edit
+                          </>
+                        ) : disconnected ? (
+                          <>
+                            <AlertTriangle size={12} />
+                            Fix credentials
                           </>
                         ) : (
                           <>

@@ -113,7 +113,8 @@ export class XpressBeesProvider implements CourierProvider {
       package_length: dims[0] || '10',
       package_breadth: dims[1] || '10',
       package_height: dims[2] || '10',
-      request_auto_pickup: 'Y',
+      request_auto_pickup: 'yes',
+      ...(isCod && { collectable_amount: details.totalAmount || 0 }),
       consignee: {
         name: details.deliveryAddress.fullName,
         address: details.deliveryAddress.addressLine1,
@@ -158,12 +159,24 @@ export class XpressBeesProvider implements CourierProvider {
       throw new Error(`XpressBees rejected: ${data.message || data.error || 'Unknown error'}`);
     }
 
-    const awb = data.data?.awb_number || data.awb_number || '';
+    const awbWrapper = data.data || data;
+    const awb = awbWrapper?.awb_number || data.awb_number || '';
+
+    const labelRaw =
+      awbWrapper?.label_url ||
+      awbWrapper?.labelUrl ||
+      awbWrapper?.shipping_label_url ||
+      data.label_url ||
+      '';
 
     return {
       awbNumber: String(awb),
-      courierOrderId: data.data?.order_id?.toString() || '',
+      courierOrderId: awbWrapper?.order_id?.toString() || '',
       trackingUrl: `https://shipment.xpressbees.com/tracking?awb=${awb}`,
+      labelUrl:
+        typeof labelRaw === 'string' && /^https?:\/\//i.test(labelRaw.trim())
+          ? labelRaw.trim()
+          : undefined,
     };
   }
 
@@ -288,6 +301,145 @@ export class XpressBeesProvider implements CourierProvider {
       serviceable: data.data?.serviceable === true || data.status === 1,
       estimatedDays: data.data?.estimated_days || 5,
     };
+  }
+
+  /** Recursively find HTTPS strings that look like label/PDF links. */
+  private collectLabelPdfUrls(root: unknown, out: Set<string>, depth = 0): void {
+    if (depth > 14 || root == null) return;
+    if (typeof root === 'string') {
+      const s = root.trim();
+      if (
+        /^https?:\/\//i.test(s) &&
+        (/\blabel\b/i.test(s) || /\.pdf(\?|$)/i.test(s) || /shipping/i.test(s) || /waybill/i.test(s))
+      ) {
+        out.add(s);
+      }
+      return;
+    }
+    if (Array.isArray(root)) {
+      root.forEach((x) => this.collectLabelPdfUrls(x, out, depth + 1));
+      return;
+    }
+    if (typeof root === 'object') {
+      for (const v of Object.values(root as Record<string, unknown>)) {
+        this.collectLabelPdfUrls(v, out, depth + 1);
+      }
+    }
+  }
+
+  private async fetchPdfWithAuth(
+    urlOrPath: string,
+    headers: Record<string, string>,
+    init?: RequestInit,
+  ): Promise<Buffer | null> {
+    try {
+      const target = /^https?:\/\//i.test(urlOrPath)
+        ? urlOrPath
+        : `${this.baseUrl}${urlOrPath.startsWith('/') ? '' : '/'}${urlOrPath}`;
+      const r = await fetch(target, {
+        ...init,
+        headers: {
+          ...headers,
+          Accept: 'application/pdf,application/octet-stream;q=0.9,*/*;q=0.8',
+          ...(init?.headers as Record<string, string>),
+        },
+      });
+      if (!r.ok) return null;
+      const buf = Buffer.from(await r.arrayBuffer());
+      if (buf.length > 8 && buf.slice(0, 4).toString('ascii') === '%PDF') return buf;
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Official XpressBees label PDF when their API exposes one (path varies by
+   * account). `getCarrierIssuedLabel` already tries `Shipment.labelUrl`
+   * from booking; this covers track-payload links + common REST paths.
+   */
+  async downloadLabelPdf(awbNumber: string, config: SellerCourierConfig): Promise<Buffer | null> {
+    const headers = await this.authHeaders(config);
+    const fromTrack = new Set<string>();
+
+    try {
+      const res = await fetch(
+        `${this.baseUrl}/shipments2/track/${encodeURIComponent(awbNumber)}`,
+        { headers },
+      );
+      if (res.ok) {
+        const data = await res.json();
+        this.collectLabelPdfUrls(data, fromTrack);
+      }
+    } catch {
+      /* ignore */
+    }
+
+    const getPaths = [
+      `/shipments2/shipping_label/${encodeURIComponent(awbNumber)}`,
+      `/shipments2/label/${encodeURIComponent(awbNumber)}`,
+      `/shipments2/printlabel/${encodeURIComponent(awbNumber)}`,
+      `/shipments2/print_label/${encodeURIComponent(awbNumber)}`,
+      `/shipments2/downloadlabel/${encodeURIComponent(awbNumber)}`,
+      `/shipments2/labels/${encodeURIComponent(awbNumber)}`,
+    ];
+
+    for (const p of getPaths) {
+      const pdf = await this.fetchPdfWithAuth(p, headers);
+      if (pdf) {
+        this.logger.log(`XpressBees label PDF via GET ${p}, ${pdf.length} bytes.`);
+        return pdf;
+      }
+    }
+
+    const postPaths = ['/shipments2/label', '/shipments2/shipping_label', '/shipments2/print'];
+    const postBodies = [{ awb_number: awbNumber }, { awb: awbNumber }, { awbs: [awbNumber] }];
+
+    for (const path of postPaths) {
+      for (const body of postBodies) {
+        try {
+          const r = await fetch(`${this.baseUrl}${path}`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(body),
+          });
+          if (!r.ok) continue;
+          const buf = Buffer.from(await r.arrayBuffer());
+          if (buf.length > 8 && buf.slice(0, 4).toString('ascii') === '%PDF') {
+            this.logger.log(`XpressBees label PDF via POST ${path}, ${buf.length} bytes.`);
+            return buf;
+          }
+          if (buf.length > 0 && buf[0] === 0x7b) {
+            try {
+              const j = JSON.parse(buf.toString('utf8'));
+              const nested = new Set<string>();
+              this.collectLabelPdfUrls(j, nested);
+              for (const u of nested) {
+                const pdf = await this.fetchPdfWithAuth(u, headers);
+                if (pdf) {
+                  this.logger.log(`XpressBees label PDF via nested URL, ${pdf.length} bytes.`);
+                  return pdf;
+                }
+              }
+            } catch {
+              /* not JSON */
+            }
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+
+    for (const u of fromTrack) {
+      const pdf = await this.fetchPdfWithAuth(u, headers);
+      if (pdf) {
+        this.logger.log(`XpressBees label PDF from track payload, ${pdf.length} bytes.`);
+        return pdf;
+      }
+    }
+
+    return null;
   }
 
   private mapXBStatus(status: string): string {

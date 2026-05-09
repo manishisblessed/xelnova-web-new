@@ -48,6 +48,26 @@ function normalizeVariants(raw: unknown): Product['variants'] {
   });
 }
 
+function normalizeSpecificationsApi(raw: unknown): Record<string, string> {
+  if (!raw) return {};
+  if (Array.isArray(raw)) {
+    const out: Record<string, string> = {};
+    for (const row of raw) {
+      if (row && typeof row === 'object') {
+        const o = row as Record<string, unknown>;
+        const k = String(o.key ?? '').trim();
+        const v = String(o.value ?? '').trim();
+        if (k && v) out[k] = v;
+      }
+    }
+    return out;
+  }
+  if (typeof raw === 'object') {
+    return raw as Record<string, string>;
+  }
+  return {};
+}
+
 // ─── Product mapper: API → Frontend ───
 
 export function mapProduct(p: ApiProduct): Product {
@@ -60,6 +80,7 @@ export function mapProduct(p: ApiProduct): Product {
   return {
     id: p.id,
     slug: p.slug,
+    xelnovaProductId: p.xelnovaProductId ?? null,
     name: p.name,
     description: p.description || p.shortDescription || '',
     price: p.price,
@@ -80,7 +101,11 @@ export function mapProduct(p: ApiProduct): Product {
       slug: (p.seller as any)?.slug || undefined,
     },
     variants: normalizeVariants(p.variants),
-    specifications: (p.specifications && typeof p.specifications === 'object') ? p.specifications as Record<string, string> : {},
+    specifications: normalizeSpecificationsApi(p.specifications),
+    productLengthCm: p.productLengthCm ?? null,
+    productWidthCm: p.productWidthCm ?? null,
+    productHeightCm: p.productHeightCm ?? null,
+    productWeightKg: p.productWeightKg ?? null,
     reviews: [],
     tags: p.tags || [],
     createdAt: p.createdAt,
@@ -102,6 +127,7 @@ export function mapProduct(p: ApiProduct): Product {
     isReturnable: p.isReturnable !== false,
     isCancellable: p.isCancellable !== false,
     returnWindow: p.returnWindow ?? 7,
+    replacementWindow: p.replacementWindow ?? null,
   };
 }
 

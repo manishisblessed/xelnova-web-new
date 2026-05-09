@@ -28,14 +28,15 @@ interface Review {
   comment: string | null;
   images: string[];
   verified: boolean;
-  approved: boolean;
+  moderationStatus: 'PENDING' | 'APPROVED' | 'REJECTED';
+  moderationNote?: string | null;
   helpful: number;
   createdAt: string;
   user: ReviewUser;
   product: ReviewProduct;
 }
 
-type TabFilter = 'pending' | 'approved' | 'all';
+type TabFilter = 'pending' | 'approved' | 'rejected' | 'all';
 
 export default function ReviewsPage() {
   const [reviews, setReviews] = useState<Review[]>([]);
@@ -47,22 +48,33 @@ export default function ReviewsPage() {
   const [confirmAction, setConfirmAction] = useState<{ id: string; type: 'approve' | 'reject' } | null>(null);
   const [previewReview, setPreviewReview] = useState<Review | null>(null);
 
+  const extractItems = (payload: unknown): Review[] => {
+    if (Array.isArray(payload)) return payload as Review[];
+    if (payload && typeof payload === 'object' && Array.isArray((payload as { items?: unknown }).items)) {
+      return (payload as { items: Review[] }).items;
+    }
+    return [];
+  };
+
   const fetchReviews = useCallback(async () => {
     setLoading(true);
     try {
       const params: Record<string, string> = {};
       if (search.trim()) params.search = search.trim();
 
-      let data: Review[];
+      let payload: unknown;
       if (tab === 'pending') {
-        data = (await apiGetPendingReviews(params)) as Review[];
+        payload = await apiGetPendingReviews(params);
       } else if (tab === 'approved') {
-        params.approved = 'true';
-        data = (await apiGetReviews(params)) as Review[];
+        params.moderationStatus = 'APPROVED';
+        payload = await apiGetReviews(params);
+      } else if (tab === 'rejected') {
+        params.moderationStatus = 'REJECTED';
+        payload = await apiGetReviews(params);
       } else {
-        data = (await apiGetReviews(params)) as Review[];
+        payload = await apiGetReviews(params);
       }
-      setReviews(data);
+      setReviews(extractItems(payload));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to load reviews');
       setReviews([]);
@@ -80,7 +92,7 @@ export default function ReviewsPage() {
     try {
       await apiApproveReview(id);
       toast.success('Review approved');
-      setReviews((prev) => prev.map((r) => (r.id === id ? { ...r, approved: true } : r)));
+      setReviews((prev) => prev.map((r) => (r.id === id ? { ...r, moderationStatus: 'APPROVED' } : r)));
       if (tab === 'pending') {
         setReviews((prev) => prev.filter((r) => r.id !== id));
       }
@@ -92,9 +104,13 @@ export default function ReviewsPage() {
   };
 
   const handleReject = async (id: string) => {
+    const reason =
+      typeof window !== 'undefined'
+        ? window.prompt('Optional rejection note for the customer (leave blank for none):', '') ?? ''
+        : '';
     setActionLoading(id);
     try {
-      await apiRejectReview(id);
+      await apiRejectReview(id, reason.trim() || undefined);
       toast.success('Review rejected');
       setReviews((prev) => prev.filter((r) => r.id !== id));
     } catch (err) {
@@ -126,7 +142,13 @@ export default function ReviewsPage() {
   const formatDate = (iso: string) =>
     new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 
-  const pendingCount = reviews.filter((r) => !r.approved).length;
+  const pendingCount = tab === 'pending' ? reviews.filter((r) => r.moderationStatus === 'PENDING').length : 0;
+
+  const moderationBadge = (status: Review['moderationStatus']) => {
+    if (status === 'APPROVED') return <Badge variant="success" className="text-xs">Approved</Badge>;
+    if (status === 'REJECTED') return <Badge variant="danger" className="text-xs">Rejected</Badge>;
+    return <Badge variant="warning" className="text-xs">Pending</Badge>;
+  };
 
   return (
     <div className="space-y-6">
@@ -141,7 +163,7 @@ export default function ReviewsPage() {
 
       <div className="flex flex-col sm:flex-row sm:items-center gap-4">
         <div className="flex items-center gap-2 bg-surface-muted rounded-xl p-1">
-          {(['pending', 'approved', 'all'] as const).map((t) => (
+          {(['pending', 'approved', 'rejected', 'all'] as const).map((t) => (
             <button
               key={t}
               type="button"
@@ -154,6 +176,7 @@ export default function ReviewsPage() {
             >
               {t === 'pending' && <Clock size={14} className="inline mr-1.5 -mt-0.5" />}
               {t === 'approved' && <CheckCircle size={14} className="inline mr-1.5 -mt-0.5" />}
+              {t === 'rejected' && <XCircle size={14} className="inline mr-1.5 -mt-0.5" />}
               {t === 'all' && <Filter size={14} className="inline mr-1.5 -mt-0.5" />}
               {t.charAt(0).toUpperCase() + t.slice(1)}
               {t === 'pending' && pendingCount > 0 && (
@@ -219,9 +242,7 @@ export default function ReviewsPage() {
                         </p>
                         <div className="flex items-center gap-2 mt-0.5">
                           {renderStars(review.rating)}
-                          <Badge variant={review.approved ? 'success' : 'warning'} className="text-xs">
-                            {review.approved ? 'Approved' : 'Pending'}
-                          </Badge>
+                          {moderationBadge(review.moderationStatus)}
                           {review.verified && (
                             <Badge variant="info" className="text-xs">
                               Verified Purchase
@@ -276,7 +297,7 @@ export default function ReviewsPage() {
                   >
                     <Eye size={18} />
                   </button>
-                  {!review.approved && (
+                  {review.moderationStatus === 'PENDING' && (
                     <>
                       <button
                         type="button"
@@ -399,13 +420,17 @@ export default function ReviewsPage() {
               )}
 
               <div className="flex items-center gap-2 pt-2">
-                <Badge variant={previewReview.approved ? 'success' : 'warning'}>
-                  {previewReview.approved ? 'Approved' : 'Pending Approval'}
+                <Badge variant={previewReview.moderationStatus === 'APPROVED' ? 'success' : previewReview.moderationStatus === 'REJECTED' ? 'danger' : 'warning'}>
+                  {previewReview.moderationStatus === 'APPROVED'
+                    ? 'Approved'
+                    : previewReview.moderationStatus === 'REJECTED'
+                      ? 'Rejected'
+                      : 'Pending Approval'}
                 </Badge>
                 {previewReview.verified && <Badge variant="info">Verified Purchase</Badge>}
               </div>
 
-              {!previewReview.approved && (
+              {previewReview.moderationStatus === 'PENDING' && (
                 <div className="flex items-center gap-2 pt-4 border-t border-border">
                   <button
                     type="button"

@@ -42,7 +42,16 @@ export class ForwardTicketDto {
 }
 
 export class UpdateTicketStatusDto {
-  @ApiProperty({ enum: ['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'] })
+  @ApiProperty({
+    enum: [
+      'OPEN',
+      'IN_PROGRESS',
+      'FORWARDED',
+      'SELLER_REPLIED',
+      'RESOLVED',
+      'CLOSED',
+    ],
+  })
   @IsString()
   status: string;
 

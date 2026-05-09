@@ -5,6 +5,7 @@ import {
   resolveVariantCompareAtPrice,
   resolveVariantPrice,
 } from '../../common/helpers/variant-price';
+import { buildVariantLineSnapshot } from '../../common/helpers/variant-selection';
 import { gstAmountFromInclusive } from '@xelnova/utils';
 
 @Injectable()
@@ -40,12 +41,19 @@ export class CartService {
       const price = resolveVariantPrice(variants, v) ?? item.product.price;
       const compareAtPrice =
         resolveVariantCompareAtPrice(variants, v) ?? item.product.compareAtPrice;
+      const snap = buildVariantLineSnapshot(
+        variants,
+        v || undefined,
+        item.product.images[0] || null,
+      );
+      const productImage =
+        (v ? snap.productImage : null) || item.product.images[0] || '';
       return {
         id: item.id,
         productId: item.product.id,
         productName: item.product.name,
         productSlug: item.product.slug,
-        productImage: item.product.images[0] || '',
+        productImage,
         price,
         compareAtPrice,
         quantity: item.quantity,
@@ -176,7 +184,7 @@ export class CartService {
     const coupon = await this.prisma.coupon.findUnique({
       where: { code: code.toUpperCase() },
     });
-    if (!coupon || !coupon.isActive) {
+    if (!coupon || !coupon.isActive || coupon.moderationStatus !== 'APPROVED') {
       throw new BadRequestException('Invalid or expired coupon code');
     }
     if (coupon.validUntil && coupon.validUntil < new Date()) {
@@ -184,6 +192,19 @@ export class CartService {
     }
     if (coupon.usageLimit && coupon.usedCount >= coupon.usageLimit) {
       throw new BadRequestException('Coupon usage limit reached');
+    }
+
+    if (coupon.maxRedemptionsPerUser != null) {
+      const priorUses = await this.prisma.order.count({
+        where: {
+          userId,
+          couponCode: coupon.code,
+          status: { not: 'CANCELLED' },
+        },
+      });
+      if (priorUses >= coupon.maxRedemptionsPerUser) {
+        throw new BadRequestException('You have already used this coupon the maximum number of times');
+      }
     }
 
     const cart = await this.getCart(userId);

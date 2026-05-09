@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
@@ -8,7 +8,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   MapPin, CreditCard, Plus, ChevronRight,
   ShieldCheck, Truck, X, Loader2, Wallet,
-  Check, ArrowLeft,
+  Check, ArrowLeft, Tag,
 } from "lucide-react";
 import { cn, priceInclusiveOfGst } from "@xelnova/utils";
 import { formatCurrency } from "@xelnova/utils";
@@ -17,12 +17,7 @@ import { isAxiosError } from "axios";
 import { useCartStore } from "@/lib/store/cart-store";
 import { lookupPincode } from "@/lib/store/location-store";
 import { INDIAN_STATES } from "@/lib/indian-states";
-
-declare global {
-  interface Window {
-    Razorpay?: new (options: Record<string, unknown>) => { open: () => void; on: (event: string, cb: () => void) => void };
-  }
-}
+import { loadRazorpayScript } from "@/lib/load-razorpay";
 
 function hasAuthCookie(): boolean {
   if (typeof document === "undefined") return false;
@@ -99,6 +94,57 @@ export default function CheckoutPage() {
   const clearCart = useCartStore((s) => s.clearCart);
   const [shippingConfig, setShippingConfig] = useState<{ freeShippingMin: number; defaultRate: number }>({ freeShippingMin: 499, defaultRate: 49 });
 
+  const priceTotal = useMemo(
+    () =>
+      items.reduce(
+        (sum, item) =>
+          sum + priceInclusiveOfGst(item.price, item.gstRate ?? null) * item.quantity,
+        0,
+      ),
+    [items],
+  );
+  const compareTotal = useMemo(
+    () =>
+      items.reduce(
+        (sum, item) =>
+          sum +
+          priceInclusiveOfGst(Math.max(item.price, item.comparePrice), item.gstRate ?? null) *
+            item.quantity,
+        0,
+      ),
+    [items],
+  );
+  const savings = Math.max(0, compareTotal - priceTotal);
+  const cartFingerprint = useMemo(
+    () => items.map((i) => `${i.productId}:${i.variant ?? ""}:${i.quantity}`).join("|"),
+    [items],
+  );
+
+  const [pricedFromServer, setPricedFromServer] = useState<{
+    subtotal: number;
+    discount: number;
+    shipping: number;
+    tax: number;
+    total: number;
+  } | null>(null);
+  const [couponInput, setCouponInput] = useState("");
+  const [couponApplying, setCouponApplying] = useState(false);
+  const [appliedCouponCode, setAppliedCouponCode] = useState<string | null>(null);
+
+  const shippingCharge = useMemo(() => {
+    if (pricedFromServer) return pricedFromServer.shipping;
+    return priceTotal >= shippingConfig.freeShippingMin ? 0 : shippingConfig.defaultRate;
+  }, [pricedFromServer, priceTotal, shippingConfig.freeShippingMin, shippingConfig.defaultRate]);
+
+  const discountApplied = pricedFromServer?.discount ?? 0;
+
+  const grandTotal = useMemo(() => {
+    if (pricedFromServer) return pricedFromServer.total;
+    return priceTotal + shippingCharge;
+  }, [pricedFromServer, priceTotal, shippingCharge]);
+
+  const itemCount = totalItems();
+
   const [paymentChoice, setPaymentChoice] = useState<PaymentChoice>("razorpay");
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
   const [walletLoading, setWalletLoading] = useState(false);
@@ -120,9 +166,13 @@ export default function CheckoutPage() {
     if (!needsEmail && user.email) setContactEmail((v) => v || user.email!);
   }, [user, needsName, needsEmail]);
 
-  const razorpayLoaded = useRef(false);
-
   useEffect(() => setMounted(true), []);
+
+  useEffect(() => {
+    setAppliedCouponCode(null);
+    setPricedFromServer(null);
+    setCouponInput("");
+  }, [cartFingerprint]);
 
   useEffect(() => {
     cartApi.getShippingConfig().then(setShippingConfig).catch(() => {});
@@ -172,22 +222,59 @@ export default function CheckoutPage() {
     }).catch(() => {});
   }, [authLoading, isAuthenticated, router, pathname]);
 
-  useEffect(() => {
-    if (razorpayLoaded.current || typeof window === "undefined") return;
-    if (document.querySelector('script[src="https://checkout.razorpay.com/v1/checkout.js"]')) {
-      razorpayLoaded.current = true;
-      return;
-    }
-    const script = document.createElement("script");
-    script.src = "https://checkout.razorpay.com/v1/checkout.js";
-    script.async = true;
-    script.onload = () => { razorpayLoaded.current = true; };
-    document.head.appendChild(script);
-  }, []);
-
   const syncToken = useCallback(() => {
     const m = document.cookie.match(/(?:^|;\s*)xelnova-token=([^;]*)/);
     if (m) setAccessToken(decodeURIComponent(m[1]));
+  }, []);
+
+  const syncLocalCartToServer = useCallback(async () => {
+    const existing = await cartApi.getCart();
+    for (const row of existing.items) {
+      await cartApi.removeFromCart(row.productId);
+    }
+    for (const item of items) {
+      await cartApi.addToCart(item.productId, item.quantity, item.variant || undefined);
+    }
+  }, [items]);
+
+  const handleApplyCoupon = useCallback(async () => {
+    const code = couponInput.trim();
+    if (!code) return;
+    setCouponApplying(true);
+    setOrderError("");
+    try {
+      syncToken();
+      const quote = await ordersApi.quoteCheckout({
+        items: items.map((i) => ({
+          productId: i.productId,
+          quantity: i.quantity,
+          variant: i.variant,
+        })),
+        couponCode: code,
+      });
+      const applied = quote.couponCode || code.toUpperCase();
+      setAppliedCouponCode(applied);
+      setPricedFromServer({
+        subtotal: quote.subtotal,
+        discount: quote.discount,
+        shipping: quote.shipping,
+        tax: quote.tax,
+        total: quote.total,
+      });
+    } catch (e) {
+      setAppliedCouponCode(null);
+      setPricedFromServer(null);
+      setOrderError(e instanceof Error ? e.message : "Could not apply coupon.");
+    } finally {
+      setCouponApplying(false);
+    }
+  }, [couponInput, items, syncToken]);
+
+  const clearAppliedCoupon = useCallback(() => {
+    setAppliedCouponCode(null);
+    setPricedFromServer(null);
+    setCouponInput("");
+    setOrderError("");
   }, []);
 
   const openRazorpay = useCallback((paymentOrder: {
@@ -198,49 +285,78 @@ export default function CheckoutPage() {
     orderId: string;
   }, dbOrderNumber: string) => {
     return new Promise<void>((resolve, reject) => {
-      if (!window.Razorpay) {
-        reject(new Error("Payment gateway is loading. Please try again."));
-        return;
-      }
+      void (async () => {
+        try {
+          await loadRazorpayScript();
+        } catch {
+          reject(new Error("Payment gateway failed to load. Check your connection and try again."));
+          return;
+        }
+        if (!window.Razorpay) {
+          reject(new Error("Payment gateway is loading. Please try again."));
+          return;
+        }
 
-      const addr = addresses.find((a) => a.id === selectedAddress);
-      const options: Record<string, unknown> = {
-        key: paymentOrder.keyId,
-        amount: paymentOrder.amount,
-        currency: paymentOrder.currency,
-        name: "Xelnova",
-        description: `Order #${dbOrderNumber}`,
-        order_id: paymentOrder.razorpayOrderId,
-        prefill: {
-          name: addr?.name || "",
-          contact: addr?.phone || user?.phone || "",
-        },
-        theme: { color: "#10b981" },
-        handler: async (response: { razorpay_order_id: string; razorpay_payment_id: string; razorpay_signature: string }) => {
-          try {
-            syncToken();
-            await paymentApi.verifyPayment({
-              razorpay_order_id: response.razorpay_order_id,
-              razorpay_payment_id: response.razorpay_payment_id,
-              razorpay_signature: response.razorpay_signature,
-            });
-            resolve();
-          } catch {
-            reject(new Error("Payment verification failed. If money was deducted, it will be refunded within 5-7 days."));
-          }
-        },
-        modal: {
-          ondismiss: () => {
-            reject(new Error("Payment was cancelled. Your order has been saved — you can retry payment from your orders page."));
+        const addr = addresses.find((a) => a.id === selectedAddress);
+        const options: Record<string, unknown> = {
+          key: paymentOrder.keyId,
+          amount: paymentOrder.amount,
+          currency: paymentOrder.currency,
+          name: "Xelnova",
+          description: `Order #${dbOrderNumber}`,
+          order_id: paymentOrder.razorpayOrderId,
+          prefill: {
+            name: addr?.name || "",
+            contact: addr?.phone || user?.phone || "",
           },
-        },
-      };
+          theme: { color: "#10b981" },
+          handler: async (response: { razorpay_order_id: string; razorpay_payment_id: string; razorpay_signature: string }) => {
+            try {
+              syncToken();
+              await paymentApi.verifyPayment({
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature: response.razorpay_signature,
+              });
+              resolve();
+            } catch (verErr: unknown) {
+              const st = isAxiosError(verErr) ? verErr.response?.status : undefined;
+              if (st === 400) {
+                reject(
+                  new Error(
+                    "We could not verify this payment with our server. If your bank deducted an amount, it is usually reversed automatically within a few days — or contact support with your order number.",
+                  ),
+                );
+              } else {
+                reject(
+                  new Error(
+                    "Payment verification failed due to a network or server issue. Please retry from your order page — you are not charged until verification succeeds.",
+                  ),
+                );
+              }
+            }
+          },
+          modal: {
+            ondismiss: () => {
+              reject(
+                new Error(
+                  "Payment window closed before completion. Your order is saved — open My Orders to retry payment. No charge is completed until you pay successfully.",
+                ),
+              );
+            },
+          },
+        };
 
-      const rzp = new window.Razorpay(options);
-      rzp.on("payment.failed", () => {
-        reject(new Error("Payment failed. Please try again or choose a different payment method."));
-      });
-      rzp.open();
+        const rzp = new window.Razorpay(options);
+        rzp.on("payment.failed", () => {
+          reject(
+            new Error(
+              "Payment failed or was declined. You have not been charged — try again or use another payment method.",
+            ),
+          );
+        });
+        rzp.open();
+      })();
     });
   }, [addresses, selectedAddress, syncToken, user?.phone]);
 
@@ -485,24 +601,6 @@ export default function CheckoutPage() {
     );
   }
 
-  // Use the same tax-inclusive prices that the cart and product cards display.
-  const priceTotal = items.reduce(
-    (sum, item) =>
-      sum + priceInclusiveOfGst(item.price, item.gstRate ?? null) * item.quantity,
-    0,
-  );
-  const compareTotal = items.reduce(
-    (sum, item) =>
-      sum +
-      priceInclusiveOfGst(Math.max(item.price, item.comparePrice), item.gstRate ?? null) *
-        item.quantity,
-    0,
-  );
-  const savings = Math.max(0, compareTotal - priceTotal);
-  const itemCount = totalItems();
-  const shippingCharge = priceTotal >= shippingConfig.freeShippingMin ? 0 : shippingConfig.defaultRate;
-  const grandTotal = priceTotal + shippingCharge;
-
   const updateField = async (field: string, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
     setFormErrors((prev) => ({ ...prev, [field]: undefined }));
@@ -615,6 +713,7 @@ export default function CheckoutPage() {
     try {
       syncToken();
       const wm = await walletApi.createAddMoneyOrder(amt);
+      await loadRazorpayScript();
       if (!window.Razorpay) throw new Error("Payment gateway is loading. Please try again in a moment.");
       await new Promise<void>((resolve, reject) => {
         const rzp = new window.Razorpay!({
@@ -727,6 +826,7 @@ export default function CheckoutPage() {
         paymentMethod: paymentChoice === "wallet" ? "wallet" : "razorpay",
         ...(needsName && contactName.trim() ? { customerName: contactName.trim() } : {}),
         ...(needsEmail && contactEmail.trim() ? { customerEmail: contactEmail.trim() } : {}),
+        ...(appliedCouponCode ? { couponCode: appliedCouponCode } : {}),
       });
 
       if (!order?.id) {
@@ -776,15 +876,15 @@ export default function CheckoutPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:px-8">
-        <div className="mb-6 flex items-center gap-2 text-text-secondary">
-          <MapPin size={18} className="text-primary-600" />
+    <div className="min-h-screen bg-gray-50 pb-[calc(5.5rem+env(safe-area-inset-bottom))] lg:pb-0">
+      <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
+        <div className="mb-5 flex flex-wrap items-center gap-2 text-text-secondary sm:mb-6">
+          <MapPin size={18} className="shrink-0 text-primary-600" />
           <h1 className="text-lg font-bold text-text-primary">Checkout</h1>
-          <span className="text-sm text-text-muted hidden sm:inline">— delivery &amp; payment</span>
+          <span className="hidden text-sm text-text-muted sm:inline">— delivery &amp; payment</span>
         </div>
 
-        <div className="grid gap-6 lg:grid-cols-3">
+        <div className="grid gap-6 lg:grid-cols-3 lg:gap-8">
           {/* Left column */}
           <div className="lg:col-span-2">
             <div className="space-y-5">
@@ -1113,58 +1213,116 @@ export default function CheckoutPage() {
 
           {/* Right column — Price Details */}
           <div className="lg:col-span-1">
-            <div className="sticky top-28 rounded-2xl border border-border bg-white p-6 shadow-sm">
-              <h2 className="mb-4 text-lg font-bold text-text-primary">Order Summary</h2>
-              {(() => {
-                const amountForFreeShipping = shippingConfig.freeShippingMin - priceTotal;
-                return (
-              <div className="space-y-3 text-sm">
-                <div className="flex justify-between text-text-secondary">
-                  <span>Price ({itemCount} {itemCount === 1 ? "item" : "items"})</span>
-                  <span>{formatCurrency(compareTotal)}</span>
-                </div>
-                {savings > 0 && (
-                  <div className="flex justify-between text-success-600">
-                    <span>Discount</span>
-                    <span>-{formatCurrency(savings)}</span>
-                  </div>
-                )}
-                <div className="flex justify-between text-text-secondary">
-                  <span>Delivery</span>
-                  {shippingCharge === 0 ? (
-                    <span className="font-semibold text-success-600">FREE</span>
+            <div className="sticky top-28 rounded-2xl border border-border bg-white p-5 shadow-sm sm:p-6">
+              <h2 className="mb-3 text-lg font-bold text-text-primary">Order Summary</h2>
+
+              <div className="mb-4 space-y-2">
+                <label className="text-xs font-medium text-text-secondary">Promo code</label>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
+                  <input
+                    type="text"
+                    value={couponInput}
+                    onChange={(e) => setCouponInput(e.target.value.toUpperCase())}
+                    disabled={!!appliedCouponCode || couponApplying}
+                    placeholder="e.g. SAVE10"
+                    autoCapitalize="characters"
+                    className="min-h-[42px] flex-1 rounded-xl border border-border bg-white px-3 py-2 text-sm text-text-primary outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30 disabled:bg-gray-50"
+                  />
+                  {appliedCouponCode ? (
+                    <button
+                      type="button"
+                      onClick={clearAppliedCoupon}
+                      className="rounded-xl border border-border px-4 py-2 text-sm font-semibold text-text-primary hover:bg-gray-50 sm:shrink-0"
+                    >
+                      Remove
+                    </button>
                   ) : (
-                    <span>{formatCurrency(shippingCharge)}</span>
+                    <button
+                      type="button"
+                      onClick={() => void handleApplyCoupon()}
+                      disabled={couponApplying || !couponInput.trim()}
+                      className="inline-flex min-h-[42px] items-center justify-center rounded-xl bg-primary-600 px-4 py-2 text-sm font-semibold text-white hover:bg-primary-700 disabled:opacity-40 sm:shrink-0"
+                    >
+                      {couponApplying ? <Loader2 size={16} className="animate-spin" /> : "Apply"}
+                    </button>
                   )}
                 </div>
-                {shippingCharge > 0 && amountForFreeShipping > 0 && (
+                {appliedCouponCode && (
+                  <p className="text-xs font-medium text-success-700">
+                    Applied <span className="font-mono">{appliedCouponCode}</span>
+                  </p>
+                )}
+              </div>
+
+              {(() => {
+                const baseSubtotal = pricedFromServer ? pricedFromServer.subtotal : priceTotal;
+                const amountForFreeShipping = shippingConfig.freeShippingMin - baseSubtotal;
+                return (
+              <div className="space-y-3 text-sm">
+                {!pricedFromServer ? (
+                  <>
+                    <div className="flex justify-between gap-3 text-text-secondary">
+                      <span className="min-w-0">Price ({itemCount} {itemCount === 1 ? "item" : "items"})</span>
+                      <span className="shrink-0 tabular-nums">{formatCurrency(compareTotal)}</span>
+                    </div>
+                    {savings > 0 && (
+                      <div className="flex justify-between gap-3 text-success-600">
+                        <span>Product savings</span>
+                        <span className="shrink-0 tabular-nums">-{formatCurrency(savings)}</span>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="flex justify-between gap-3 text-text-secondary">
+                    <span className="min-w-0">Items ({itemCount})</span>
+                    <span className="shrink-0 tabular-nums">{formatCurrency(pricedFromServer.subtotal)}</span>
+                  </div>
+                )}
+                {pricedFromServer && discountApplied > 0 && (
+                  <div className="flex justify-between gap-3 text-success-600">
+                    <span className="flex min-w-0 items-center gap-1">
+                      <Tag size={14} className="shrink-0" />
+                      Coupon ({appliedCouponCode})
+                    </span>
+                    <span className="shrink-0 tabular-nums">-{formatCurrency(discountApplied)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between gap-3 text-text-secondary">
+                  <span>Delivery</span>
+                  {shippingCharge === 0 ? (
+                    <span className="shrink-0 font-semibold text-success-600">FREE</span>
+                  ) : (
+                    <span className="shrink-0 tabular-nums">{formatCurrency(shippingCharge)}</span>
+                  )}
+                </div>
+                {!pricedFromServer && shippingCharge > 0 && amountForFreeShipping > 0 && (
                   <p className="text-xs text-text-muted">
                     Add {formatCurrency(amountForFreeShipping)} more for free delivery
                   </p>
                 )}
                 <hr className="border-border" />
-                <div className="flex justify-between text-lg font-bold text-text-primary">
-                  <span>Total Amount</span>
-                  <span>{formatCurrency(grandTotal)}</span>
+                <div className="flex justify-between gap-3 text-lg font-bold text-text-primary">
+                  <span>Total</span>
+                  <span className="shrink-0 tabular-nums">{formatCurrency(grandTotal)}</span>
                 </div>
                 <p className="text-xs text-text-muted">Inclusive of all taxes</p>
-                {savings > 0 && (
-                  <p className="rounded-xl bg-success-50 border border-success-200 p-2.5 text-center text-sm font-medium text-success-700">
-                    You will save {formatCurrency(savings)}
+                {!pricedFromServer && savings > 0 && (
+                  <p className="rounded-xl border border-success-200 bg-success-50 p-2.5 text-center text-sm font-medium text-success-700">
+                    You save {formatCurrency(savings)} on product prices
                   </p>
                 )}
               </div>
                 );
               })()}
 
-              <div className="mt-6">
+              <div className="mt-6 hidden lg:block">
                 <button
                   type="button"
                   onClick={() => void placeOrder()}
                   disabled={!canPay()}
                   className={cn(
                     "flex w-full items-center justify-center gap-2 rounded-xl bg-success-600 py-3 text-sm font-bold text-white transition-all hover:bg-success-700",
-                    "disabled:cursor-not-allowed disabled:opacity-40"
+                    "disabled:cursor-not-allowed disabled:opacity-40",
                   )}
                 >
                   {placingOrder ? (
@@ -1246,6 +1404,33 @@ export default function CheckoutPage() {
               </div>
             </div>
           </div>
+        </div>
+      </div>
+
+      <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-border bg-white/95 px-4 py-3 backdrop-blur-md lg:hidden pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_-4px_24px_rgba(0,0,0,0.06)]">
+        <div className="mx-auto flex max-w-lg items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-text-muted">Total</p>
+            <p className="truncate text-lg font-bold text-text-primary tabular-nums">{formatCurrency(grandTotal)}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void placeOrder()}
+            disabled={!canPay()}
+            className={cn(
+              "flex min-w-[148px] flex-1 items-center justify-center gap-2 rounded-xl bg-success-600 py-3 text-sm font-bold text-white",
+              "disabled:cursor-not-allowed disabled:opacity-40",
+            )}
+          >
+            {placingOrder ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : (
+              <>
+                {paymentChoice === "wallet" ? "Pay" : "Pay Now"}
+                <ChevronRight size={16} />
+              </>
+            )}
+          </button>
         </div>
       </div>
     </div>

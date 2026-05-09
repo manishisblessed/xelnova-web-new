@@ -65,7 +65,10 @@ function getNotificationHref(n: Notification): string | null {
         : '/seller-onboarding';
     case 'ADMIN_SUPPORT_TICKET':
     case 'ADMIN_TICKET_CUSTOMER_REPLY':
+    case 'ADMIN_TICKET_SELLER_REPLY':
       return ticketId ? `/tickets?ticketId=${encodeURIComponent(ticketId)}` : '/tickets';
+    case 'COUPON_PENDING':
+      return '/coupons';
     case 'ADMIN_PRODUCT_SUBMITTED':
       // For re-approval (edited products), link without status filter since product stays ACTIVE
       // For new products, filter by PENDING status

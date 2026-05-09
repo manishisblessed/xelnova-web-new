@@ -832,12 +832,16 @@ function PlatformLogisticsEkart({ data, setData }: ProviderProps) {
         />
       </FormField>
       <div className="sm:col-span-2">
-        <FormField label="Pickup location alias (optional)">
+        <FormField label="Pickup location alias (required for shipment booking)">
           <FormInput
             value={d.pickupAlias ?? ''}
             onChange={(e) => patch('pickupAlias', e.target.value)}
-            placeholder="e.g. Delhi-Warehouse"
+            placeholder="e.g. DELHI or OPULENCE TRADER"
           />
+          <p className="text-xs text-gray-500 mt-1">
+            Enter the EXACT name of one of your registered pickup addresses from{' '}
+            <strong>Ekart Elite → Settings → Addresses</strong>. This must match exactly (case-sensitive).
+          </p>
         </FormField>
       </div>
       <div className="sm:col-span-2">

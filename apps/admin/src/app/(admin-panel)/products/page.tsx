@@ -27,6 +27,8 @@ interface Product {
   id: string;
   name: string;
   slug: string;
+  /** Auto-generated public item code (e.g. XEL9045). */
+  xelnovaProductId?: string | null;
   price: number;
   compareAtPrice: number | null;
   stock: number;
@@ -49,7 +51,23 @@ interface Product {
   hasPendingChanges?: boolean;
   pendingChangesData?: unknown;
   pendingChangesSubmittedAt?: string | null;
+  /** Admin-controlled replacement eligibility (set at approval time). */
+  isReplaceable?: boolean;
+  /** Replacement window in days. Currently the admin chooses between 2 / 5 / 7. */
+  replacementWindow?: number | null;
 }
+
+/** Replacement windows admins can pick from at approval time. */
+const REPLACEMENT_WINDOW_OPTIONS = [2, 5, 7] as const;
+type ReplacementWindow = (typeof REPLACEMENT_WINDOW_OPTIONS)[number];
+
+const RETURN_POLICY_PRESETS = [
+  { value: 'NON_RETURNABLE', label: 'Non-returnable' },
+  { value: 'EASY_RETURN_3_DAYS', label: '3 Days Easy Return' },
+  { value: 'EASY_RETURN_7_DAYS', label: '7 Days Easy Return' },
+  { value: 'REPLACEMENT_ONLY', label: 'Replacement only' },
+  { value: 'RETURN_PLUS_REPLACEMENT', label: 'Return + Replacement' },
+] as const;
 
 interface BrandRecord {
   id: string;
@@ -75,6 +93,9 @@ type AdminProductDetail = Product & {
   safetyInfo?: string | null;
   regulatoryInfo?: string | null;
   warrantyInfo?: string | null;
+  returnPolicyPreset?: string | null;
+  warrantyDurationValue?: number | null;
+  warrantyDurationUnit?: string | null;
   highlights?: string[];
   tags?: string[];
   weight?: number | null;
@@ -94,6 +115,8 @@ type AdminProductDetail = Product & {
   /** Extra proof URLs for authorized-dealer listings (brand registered by another seller). */
   brandAuthAdditionalDocumentUrls?: string[];
   deliveredBy?: string | null;
+  isReplaceable?: boolean;
+  replacementWindow?: number | null;
   category?: { id: string; name: string } | null;
   seller?: { id?: string; storeName: string; email?: string | null; phone?: string | null } | null;
   /**
@@ -556,6 +579,23 @@ function collectProductGallery(p: { images?: string[] | null; variants?: unknown
   return out;
 }
 
+/**
+ * Brand certificate URL as stored on the product — either a legacy top-level
+ * field from API serialization or (normally) inside additionalDetails.
+ * Pending-change diffs must compare against this, otherwise unchanged certs look
+ * like "Not set → URL" when the seller resends the cert on every save.
+ */
+function getStoredBrandAuthorizationCertificate(p: Record<string, unknown>): unknown {
+  const top = p['brandAuthorizationCertificate'];
+  if (typeof top === 'string' && top.trim()) return top.trim();
+  const ad = p['additionalDetails'];
+  if (ad && typeof ad === 'object' && !Array.isArray(ad)) {
+    const v = (ad as Record<string, unknown>)['Brand Authorization Certificate'];
+    if (typeof v === 'string' && v.trim()) return v.trim();
+  }
+  return null;
+}
+
 function PendingChangesDisplay({
   changes,
   currentProduct,
@@ -741,7 +781,10 @@ function PendingChangesDisplay({
    * actually moved, which was the whole point of this review screen.
    */
   const realChanges = Object.entries(changes).filter(([key, newValue]) => {
-    const oldValue = currentProduct[key];
+    const oldValue =
+      key === 'brandAuthorizationCertificate'
+        ? getStoredBrandAuthorizationCertificate(currentProduct)
+        : currentProduct[key];
 
     if (key === 'variants' && Array.isArray(newValue)) {
       return hasVariantDiff(
@@ -764,7 +807,10 @@ function PendingChangesDisplay({
   return (
     <div className="space-y-4">
       {realChanges.map(([key, newValue]) => {
-        const oldValue = currentProduct[key];
+        const oldValue =
+          key === 'brandAuthorizationCertificate'
+            ? getStoredBrandAuthorizationCertificate(currentProduct)
+            : currentProduct[key];
         const label = FIELD_LABELS[key] || key.replace(/([A-Z])/g, ' $1').trim();
 
         return (
@@ -867,6 +913,17 @@ export default function ProductsPage() {
   const [approveCommission, setApproveCommission] = useState<string>('10');
   // Optional curated bestseller rank set at approval time. Empty = no rank.
   const [approveBestSellersRank, setApproveBestSellersRank] = useState<string>('');
+  // Replacement policy chosen by the admin at approval time. Disabled by
+  // default — enabling it forces the admin to pick a window from
+  // REPLACEMENT_WINDOW_OPTIONS so buyers always see a concrete "X days
+  // replacement" promise on the product page.
+  const [approveReplaceable, setApproveReplaceable] = useState<boolean>(false);
+  const [approveReplacementWindow, setApproveReplacementWindow] = useState<ReplacementWindow>(7);
+  const [approveReturnPolicyPreset, setApproveReturnPolicyPreset] =
+    useState<(typeof RETURN_POLICY_PRESETS)[number]['value']>('EASY_RETURN_7_DAYS');
+  const [approveReturnPlusDays, setApproveReturnPlusDays] = useState<string>('7');
+  const [approveWarrantyValue, setApproveWarrantyValue] = useState('');
+  const [approveWarrantyUnit, setApproveWarrantyUnit] = useState<'DAYS' | 'MONTHS' | 'YEARS' | ''>('');
   const [viewOpen, setViewOpen] = useState(false);
   const [viewing, setViewing] = useState<AdminProductDetail | null>(null);
   const [viewLoading, setViewLoading] = useState(false);
@@ -886,6 +943,8 @@ export default function ProductsPage() {
     commissionRate: '',
     // Empty string = "no rank". Stored as string so the input behaves naturally.
     bestSellersRank: '',
+    isReplaceable: false,
+    replacementWindow: 7 as ReplacementWindow,
   });
 
   const openEdit = (p: Product) => {
@@ -903,6 +962,10 @@ export default function ProductsPage() {
           : '',
       bestSellersRank:
         p.bestSellersRank != null && p.bestSellersRank > 0 ? String(p.bestSellersRank) : '',
+      isReplaceable: !!p.isReplaceable,
+      replacementWindow: REPLACEMENT_WINDOW_OPTIONS.includes(p.replacementWindow as ReplacementWindow)
+        ? (p.replacementWindow as ReplacementWindow)
+        : 7,
     });
     setModalOpen(true);
   };
@@ -921,9 +984,33 @@ export default function ProductsPage() {
     setViewing(null);
     setApproveCommission('10');
     setApproveBestSellersRank('');
+    setApproveReturnPolicyPreset('EASY_RETURN_7_DAYS');
+    setApproveReturnPlusDays('7');
+    setApproveWarrantyValue('');
+    setApproveWarrantyUnit('');
+    // Pre-fill replacement policy from the list row so the admin keeps the
+    // existing choice when re-opening an already-approved product (the full
+    // detail we fetch next will refine it if it differs).
+    setApproveReplaceable(!!p.isReplaceable);
+    setApproveReplacementWindow(
+      REPLACEMENT_WINDOW_OPTIONS.includes(p.replacementWindow as ReplacementWindow)
+        ? (p.replacementWindow as ReplacementWindow)
+        : 7,
+    );
     try {
       const detail = await apiGetAdminProduct<AdminProductDetail>(p.id);
       setViewing(detail);
+      setApproveReplaceable(!!detail.isReplaceable);
+      setApproveReplacementWindow(
+        REPLACEMENT_WINDOW_OPTIONS.includes(detail.replacementWindow as ReplacementWindow)
+          ? (detail.replacementWindow as ReplacementWindow)
+          : 7,
+      );
+      if (detail.returnPolicyPreset) {
+        setApproveReturnPolicyPreset(detail.returnPolicyPreset as (typeof RETURN_POLICY_PRESETS)[number]['value']);
+      }
+      if (detail.warrantyDurationValue != null) setApproveWarrantyValue(String(detail.warrantyDurationValue));
+      if (detail.warrantyDurationUnit) setApproveWarrantyUnit(detail.warrantyDurationUnit as 'DAYS' | 'MONTHS' | 'YEARS');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to load product');
       setViewOpen(false);
@@ -962,11 +1049,57 @@ export default function ProductsPage() {
       rank = n;
     }
 
+    const presetNeedsReplacement =
+      approveReturnPolicyPreset === 'REPLACEMENT_ONLY' ||
+      approveReturnPolicyPreset === 'RETURN_PLUS_REPLACEMENT';
+
+    if (presetNeedsReplacement && !REPLACEMENT_WINDOW_OPTIONS.includes(approveReplacementWindow)) {
+      toast.error('Pick a replacement window (2, 5, or 7 days) before approving');
+      return;
+    }
+
+    if (approveReturnPolicyPreset === 'RETURN_PLUS_REPLACEMENT') {
+      const rd = Number(approveReturnPlusDays.trim());
+      if (!Number.isFinite(rd) || rd < 1 || rd > 365) {
+        toast.error('Return window for “Return + Replacement” must be between 1 and 365 days');
+        return;
+      }
+    }
+
+    if (approveReplaceable && !presetNeedsReplacement && !REPLACEMENT_WINDOW_OPTIONS.includes(approveReplacementWindow)) {
+      toast.error('Pick a replacement window (2, 5, or 7 days) before approving');
+      return;
+    }
+
     setApproving(product.id);
     try {
+      const warrantyPayload: Record<string, unknown> = {};
+      const wvRaw = approveWarrantyValue.trim();
+      if (wvRaw || approveWarrantyUnit) {
+        if (!approveWarrantyUnit || !wvRaw) {
+          toast.error('Set both warranty value and unit, or leave warranty blank');
+          return;
+        }
+        const n = Number(wvRaw);
+        if (!Number.isFinite(n) || n < 1 || !Number.isInteger(n)) {
+          toast.error('Warranty value must be a positive whole number');
+          return;
+        }
+        warrantyPayload.warrantyDurationValue = n;
+        warrantyPayload.warrantyDurationUnit = approveWarrantyUnit;
+      }
+
       await apiPost(`products/${product.id}/approve`, {
         commissionRate: rate,
         ...(rank !== null ? { bestSellersRank: rank } : {}),
+        returnPolicyPreset: approveReturnPolicyPreset,
+        replacementWindow: presetNeedsReplacement ? approveReplacementWindow : approveReplaceable ? approveReplacementWindow : null,
+        returnWindowDays:
+          approveReturnPolicyPreset === 'RETURN_PLUS_REPLACEMENT'
+            ? Number(approveReturnPlusDays.trim()) || 7
+            : undefined,
+        isReplaceable: presetNeedsReplacement ? true : approveReplaceable,
+        ...warrantyPayload,
       });
       toast.success(
         rank !== null
@@ -1086,6 +1219,11 @@ export default function ProductsPage() {
       return;
     }
 
+    if (form.isReplaceable && !REPLACEMENT_WINDOW_OPTIONS.includes(form.replacementWindow)) {
+      toast.error('Pick a replacement window (2, 5, or 7 days) before saving');
+      return;
+    }
+
     setSaving(true);
     try {
       await apiUpdate('products', editing.id, {
@@ -1098,6 +1236,8 @@ export default function ProductsPage() {
         imageRejectionReason: form.imageRejectionReason.trim(),
         bestSellersRank: rankPayload,
         ...(commissionPayload !== undefined ? { commissionRate: commissionPayload } : {}),
+        isReplaceable: form.isReplaceable,
+        replacementWindow: form.isReplaceable ? form.replacementWindow : null,
       });
       toast.success('Product updated');
       setModalOpen(false);
@@ -1151,6 +1291,17 @@ export default function ProductsPage() {
           </div>
         );
       },
+    },
+    {
+      key: 'xelnovaProductId',
+      header: 'Xel ID',
+      className: 'whitespace-nowrap w-[100px]',
+      render: (r) =>
+        r.xelnovaProductId ? (
+          <code className="text-[11px] font-mono text-text-secondary">{r.xelnovaProductId}</code>
+        ) : (
+          <span className="text-text-muted">—</span>
+        ),
     },
     {
       key: 'category',
@@ -1301,7 +1452,7 @@ export default function ProductsPage() {
         section="products"
         columns={columns}
         keyExtractor={(r) => r.id}
-        searchKeys={['name', 'slug', 'sku']}
+        searchKeys={['name', 'slug', 'sku', 'xelnovaProductId']}
         filterKey="status"
         filterOptions={[...STATUS_OPTIONS]}
         refreshTrigger={refreshTrigger}
@@ -1400,6 +1551,12 @@ export default function ProductsPage() {
                 <span className="text-text-secondary">Stock:</span>{' '}
                 <span className="font-medium text-text-primary">{viewing.stock}</span>
               </span>
+              {viewing.xelnovaProductId?.trim() ? (
+                <span>
+                  <span className="text-text-secondary">Xel ID:</span>{' '}
+                  <code className="font-mono font-medium text-text-primary">{viewing.xelnovaProductId}</code>
+                </span>
+              ) : null}
             </div>
             {(viewing.seller?.email || viewing.seller?.phone) && (
               <p className="text-xs text-text-muted">
@@ -1789,6 +1946,12 @@ export default function ProductsPage() {
             )}
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs text-text-secondary">
+              {viewing.xelnovaProductId?.trim() && (
+                <p>
+                  <span className="text-text-muted">Xelnova ID:</span>{' '}
+                  <code className="font-mono text-text-primary">{viewing.xelnovaProductId}</code>
+                </p>
+              )}
               {viewing.sku?.trim() && (
                 <p>
                   <span className="text-text-muted">SKU:</span> {viewing.sku}
@@ -1912,6 +2075,133 @@ export default function ProductsPage() {
                     />
                   </div>
                 </div>
+
+                <div className="rounded-xl border border-border bg-surface-muted/50 px-3 py-3 space-y-3">
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wide text-text-muted">
+                      Return / replacement policy
+                    </label>
+                    <p className="mt-1 text-xs text-text-muted">
+                      Shown to buyers (e.g. &quot;7 Days Easy Return&quot;). Replacement window chips apply when the preset includes replacement.
+                    </p>
+                    <select
+                      value={approveReturnPolicyPreset}
+                      onChange={(e) =>
+                        setApproveReturnPolicyPreset(e.target.value as (typeof RETURN_POLICY_PRESETS)[number]['value'])
+                      }
+                      className="mt-2 w-full max-w-md rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/30"
+                    >
+                      {RETURN_POLICY_PRESETS.map((opt) => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  {approveReturnPolicyPreset === 'RETURN_PLUS_REPLACEMENT' && (
+                    <div>
+                      <label className="block text-[11px] font-medium uppercase tracking-wide text-text-muted">
+                        Money-back return window (days)
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={365}
+                        value={approveReturnPlusDays}
+                        onChange={(e) => setApproveReturnPlusDays(e.target.value)}
+                        className="mt-1 w-32 rounded-lg border border-border bg-surface px-3 py-2 text-sm font-semibold outline-none focus:border-primary-500"
+                      />
+                    </div>
+                  )}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <div className="sm:col-span-1">
+                      <label className="block text-[11px] font-medium uppercase tracking-wide text-text-muted">
+                        Warranty (optional)
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        placeholder="e.g. 6"
+                        value={approveWarrantyValue}
+                        onChange={(e) => setApproveWarrantyValue(e.target.value)}
+                        className="mt-1 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-primary-500"
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="block text-[11px] font-medium uppercase tracking-wide text-text-muted">
+                        Warranty unit
+                      </label>
+                      <select
+                        value={approveWarrantyUnit}
+                        onChange={(e) => setApproveWarrantyUnit(e.target.value as '' | 'DAYS' | 'MONTHS' | 'YEARS')}
+                        className="mt-1 w-full max-w-xs rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-primary-500"
+                      >
+                        <option value="">— none —</option>
+                        <option value="DAYS">Days</option>
+                        <option value="MONTHS">Months</option>
+                        <option value="YEARS">Years</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-border bg-surface-muted/50 px-3 py-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="block text-xs font-semibold uppercase tracking-wide text-text-muted">
+                        Replacement eligibility
+                      </p>
+                      <p className="mt-1 text-xs text-text-muted">
+                        When enabled, buyers will see a &quot;{approveReplaceable ? approveReplacementWindow : 'X'} Days Replacement&quot; badge on the product page and can request a replacement within this window after delivery.
+                      </p>
+                    </div>
+                    <label
+                      htmlFor="approve-replaceable"
+                      className="inline-flex shrink-0 cursor-pointer items-center gap-2 text-xs font-semibold text-text-primary"
+                    >
+                      <input
+                        id="approve-replaceable"
+                        type="checkbox"
+                        checked={approveReplaceable}
+                        onChange={(e) => setApproveReplaceable(e.target.checked)}
+                        className="h-4 w-4 rounded border-border text-primary-600 focus:ring-primary-500/30"
+                      />
+                      Eligible
+                    </label>
+                  </div>
+                  {(approveReplaceable ||
+                    approveReturnPolicyPreset === 'REPLACEMENT_ONLY' ||
+                    approveReturnPolicyPreset === 'RETURN_PLUS_REPLACEMENT') && (
+                    <div className="mt-3">
+                      <label
+                        htmlFor="approve-replacement-window"
+                        className="block text-[11px] font-medium uppercase tracking-wide text-text-muted"
+                      >
+                        Replacement window
+                      </label>
+                      <div className="mt-1.5 flex flex-wrap gap-2">
+                        {REPLACEMENT_WINDOW_OPTIONS.map((days) => {
+                          const active = approveReplacementWindow === days;
+                          return (
+                            <button
+                              key={days}
+                              type="button"
+                              onClick={() => setApproveReplacementWindow(days)}
+                              className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                                active
+                                  ? 'border-primary-500 bg-primary-50 text-primary-700'
+                                  : 'border-border bg-surface text-text-secondary hover:border-primary-300 hover:text-text-primary'
+                              }`}
+                            >
+                              {days} Days
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 <div className="flex flex-wrap gap-2 justify-end">
                   <Button
                     type="button"
@@ -2047,6 +2337,44 @@ export default function ProductsPage() {
               onChange={(e) => setForm((f) => ({ ...f, bestSellersRank: e.target.value }))}
               className="w-32 rounded-lg border border-border bg-surface px-3 py-2 text-sm font-semibold text-text-primary outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/30"
             />
+          </div>
+        </FormField>
+        <FormField
+          label="Replacement eligibility"
+          hint="When enabled, buyers see a replacement badge on the product page and can request a replacement within the chosen window after delivery."
+        >
+          <div className="space-y-3">
+            <FormToggle
+              label={form.isReplaceable ? 'Eligible for replacement' : 'Not eligible'}
+              checked={form.isReplaceable}
+              onChange={(v) => setForm((f) => ({ ...f, isReplaceable: v }))}
+            />
+            {form.isReplaceable && (
+              <div>
+                <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-text-muted">
+                  Replacement window
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {REPLACEMENT_WINDOW_OPTIONS.map((days) => {
+                    const active = form.replacementWindow === days;
+                    return (
+                      <button
+                        key={days}
+                        type="button"
+                        onClick={() => setForm((f) => ({ ...f, replacementWindow: days }))}
+                        className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                          active
+                            ? 'border-primary-500 bg-primary-50 text-primary-700'
+                            : 'border-border bg-surface text-text-secondary hover:border-primary-300 hover:text-text-primary'
+                        }`}
+                      >
+                        {days} Days
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         </FormField>
       </ActionModal>

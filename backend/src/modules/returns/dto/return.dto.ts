@@ -1,14 +1,38 @@
-import { IsString, IsOptional, IsNumber, Min, IsBoolean } from 'class-validator';
+import { IsString, IsOptional, IsNumber, Min, IsArray, IsIn } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateReturnDto {
-  @ApiProperty({ description: 'Order number to return' })
+  @ApiProperty({ description: 'Order number to return or replace' })
   @IsString()
   orderNumber: string;
 
-  @ApiProperty({ description: 'Reason for return' })
+  @ApiPropertyOptional({ enum: ['RETURN', 'REPLACEMENT'], default: 'RETURN' })
+  @IsOptional()
+  @IsIn(['RETURN', 'REPLACEMENT'])
+  kind?: 'RETURN' | 'REPLACEMENT';
+
+  @ApiPropertyOptional({
+    description: 'Structured reason code (e.g. DEFECTIVE). Falls back to OTHER when omitted.',
+  })
+  @IsOptional()
   @IsString()
-  reason: string;
+  reasonCode?: string;
+
+  @ApiPropertyOptional({ description: 'Legacy / human-readable reason (used when reasonCode is generic)' })
+  @IsOptional()
+  @IsString()
+  reason?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @ApiPropertyOptional({ type: [String] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  imageUrls?: string[];
 }
 
 export class UpdateReturnStatusDto {

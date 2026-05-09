@@ -3,7 +3,7 @@ import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { Response } from 'express';
 import { OrdersService } from './orders.service';
 import { InvoiceService } from './invoice.service';
-import { CreateOrderDto, CancelOrderDto } from './dto/order.dto';
+import { CreateOrderDto, CancelOrderDto, CheckoutQuoteDto } from './dto/order.dto';
 import {
   successResponse,
 } from '../../common/helpers/response.helper';
@@ -25,6 +25,16 @@ export class OrdersController {
     return successResponse(
       await this.ordersService.findAll(userId),
       'Orders fetched successfully',
+    );
+  }
+
+  @Post('checkout/quote')
+  @Auth()
+  @ApiOperation({ summary: 'Preview checkout totals (coupon validation, shipping)' })
+  async quoteCheckout(@CurrentUser('id') userId: string, @Body() dto: CheckoutQuoteDto) {
+    return successResponse(
+      await this.ordersService.quoteCheckout(userId, dto),
+      'Quote ready',
     );
   }
 

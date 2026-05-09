@@ -39,8 +39,8 @@ export function DataTable<T>({
 
   if (loading) {
     return (
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+      <div className="min-w-0 overflow-x-auto rounded-xl border border-border/70 -mx-1 sm:mx-0">
+        <table className="w-full text-sm min-w-[640px]">
           <thead>
             <tr className="border-b border-gray-200/80">
               {renderExpanded && <th className="w-10 py-3 px-2" />}
@@ -78,8 +78,8 @@ export function DataTable<T>({
   }
 
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
+    <div className="min-w-0 overflow-x-auto rounded-xl border border-border/70 -mx-1 sm:mx-0">
+      <table className="w-full text-sm min-w-[640px]">
         <thead>
           <tr className="border-b border-gray-200/80">
             {renderExpanded && <th className="w-10 py-3 px-1" />}

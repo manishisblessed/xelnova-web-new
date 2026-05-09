@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { PrismaService } from '../../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
 
 const escapeHtml = (raw: string) =>
@@ -17,6 +18,7 @@ export class ContactService {
   constructor(
     private readonly emailService: EmailService,
     private readonly config: ConfigService,
+    private readonly prisma: PrismaService,
   ) {}
 
   private get supportInbox(): string {
@@ -98,7 +100,18 @@ export class ContactService {
   }
 
   async subscribeNewsletter(email: string) {
-    const safeEmail = escapeHtml(email);
+    const normalized = email.trim().toLowerCase();
+    const safeEmail = escapeHtml(normalized);
+
+    try {
+      await this.prisma.newsletterSubscriber.upsert({
+        where: { email: normalized },
+        create: { email: normalized, source: 'web_footer' },
+        update: { updatedAt: new Date() },
+      });
+    } catch (e) {
+      this.logger.warn(`Newsletter subscriber DB upsert failed for ${normalized}: ${(e as Error).message}`);
+    }
 
     const adminHtml = `
       <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;color:#1f2937">
@@ -132,13 +145,13 @@ export class ContactService {
 
     try {
       await this.emailService.sendEmail({
-        to: email,
+        to: normalized,
         from: this.fromAddress,
         subject: 'Welcome to the Xelnova newsletter',
         html: welcomeHtml,
       });
     } catch (e) {
-      this.logger.warn(`Failed to send newsletter welcome to ${email}: ${(e as Error).message}`);
+      this.logger.warn(`Failed to send newsletter welcome to ${normalized}: ${(e as Error).message}`);
     }
 
     return { subscribed: true };

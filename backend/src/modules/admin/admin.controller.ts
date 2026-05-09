@@ -16,7 +16,7 @@ import { Auth } from '../../common/decorators/auth.decorator';
 import { successResponse, paginatedResponse } from '../../common/helpers/response.helper';
 import { getClientIp } from '../../common/helpers/client-ip';
 import {
-  AdminProductQueryDto, AdminUpdateProductDto,
+  AdminProductQueryDto, AdminUpdateProductDto, AdminApproveProductDto,
   AdminOrderQueryDto, AdminUpdateOrderDto, AdminUpdateShipmentDto,
   AdminSellerQueryDto, AdminUpdateSellerDto,
   AdminCustomerQueryDto, AdminUpdateCustomerDto,
@@ -81,17 +81,23 @@ export class AdminController {
   }
 
   @Post('products/:id/approve')
-  @ApiOperation({ summary: 'Approve a pending product (admin sets commission % and optional bestseller rank)' })
-  async approveProduct(
-    @Param('id') id: string,
-    @Body() body: { commissionRate?: number; bestSellersRank?: number | null } = {},
-  ) {
+  @ApiOperation({
+    summary:
+      'Approve a pending product (admin sets commission %, optional bestseller rank, and replacement eligibility/window)',
+  })
+  async approveProduct(@Param('id') id: string, @Body() body: AdminApproveProductDto = {} as AdminApproveProductDto) {
     return successResponse(
       await this.service.updateProduct(id, {
         status: 'ACTIVE',
         isActive: true,
         commissionRate: body.commissionRate,
         bestSellersRank: body.bestSellersRank,
+        isReplaceable: body.isReplaceable,
+        replacementWindow: body.replacementWindow,
+        returnPolicyPreset: body.returnPolicyPreset,
+        returnWindowDays: body.returnWindowDays,
+        warrantyDurationValue: body.warrantyDurationValue,
+        warrantyDurationUnit: body.warrantyDurationUnit,
       }),
       'Product approved and now live',
     );
@@ -340,6 +346,22 @@ export class AdminController {
   @ApiOperation({ summary: 'Delete coupon' })
   async deleteCoupon(@Param('id') id: string) {
     return successResponse(await this.service.deleteCoupon(id), 'Coupon deleted');
+  }
+
+  @Post('coupons/:id/approve')
+  @ApiOperation({ summary: 'Approve a seller-submitted coupon (platform admins)' })
+  async approveSellerCoupon(@Param('id') id: string, @CurrentUser('id') adminId: string) {
+    return successResponse(await this.service.approveSellerCoupon(id, adminId), 'Coupon approved');
+  }
+
+  @Post('coupons/:id/reject')
+  @ApiOperation({ summary: 'Reject a seller-submitted coupon' })
+  async rejectSellerCoupon(
+    @Param('id') id: string,
+    @CurrentUser('id') adminId: string,
+    @Body() body: { reason?: string },
+  ) {
+    return successResponse(await this.service.rejectSellerCoupon(id, adminId, body.reason), 'Coupon rejected');
   }
 
   // ─── Commission Rules ───
@@ -715,18 +737,28 @@ export class AdminController {
   @ApiOperation({ summary: 'List all reviews (with filters)' })
   @ApiQuery({ name: 'page', required: false })
   @ApiQuery({ name: 'limit', required: false })
-  @ApiQuery({ name: 'approved', required: false })
+  @ApiQuery({
+    name: 'moderationStatus',
+    required: false,
+    description: 'Filter: PENDING | APPROVED | REJECTED (preferred)',
+  })
+  @ApiQuery({ name: 'approved', required: false, description: 'Deprecated: true = APPROVED only' })
   @ApiQuery({ name: 'search', required: false })
   async getReviews(
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('moderationStatus') moderationStatus?: string,
     @Query('approved') approved?: string,
     @Query('search') search?: string,
   ) {
+    let ms = moderationStatus as 'PENDING' | 'APPROVED' | 'REJECTED' | undefined;
+    if (!ms && approved !== undefined) {
+      ms = approved === 'true' ? 'APPROVED' : undefined;
+    }
     const { items, total, page: p, limit: l } = await this.reviewsService.findAllForAdmin({
       page: page ? parseInt(page, 10) : 1,
       limit: limit ? parseInt(limit, 10) : 20,
-      approved: approved === undefined ? undefined : approved === 'true',
+      moderationStatus: ms,
       search,
     });
     return paginatedResponse(items, total, p, l, 'Reviews fetched');
@@ -743,21 +775,25 @@ export class AdminController {
     const { items, total, page: p, limit: l } = await this.reviewsService.findAllForAdmin({
       page: page ? parseInt(page, 10) : 1,
       limit: limit ? parseInt(limit, 10) : 20,
-      approved: false,
+      moderationStatus: 'PENDING',
     });
     return paginatedResponse(items, total, p, l, 'Pending reviews fetched');
   }
 
   @Post('reviews/:id/approve')
   @ApiOperation({ summary: 'Approve a review' })
-  async approveReview(@Param('id') id: string) {
-    return successResponse(await this.reviewsService.approveReview(id), 'Review approved');
+  async approveReview(@Param('id') id: string, @CurrentUser('id') adminId: string) {
+    return successResponse(await this.reviewsService.approveReview(id, adminId), 'Review approved');
   }
 
   @Post('reviews/:id/reject')
-  @ApiOperation({ summary: 'Reject and delete a review' })
-  async rejectReview(@Param('id') id: string) {
-    return successResponse(await this.reviewsService.rejectReview(id), 'Review rejected');
+  @ApiOperation({ summary: 'Reject a review (hidden publicly; audit retained)' })
+  async rejectReview(
+    @Param('id') id: string,
+    @CurrentUser('id') adminId: string,
+    @Body() body: { reason?: string },
+  ) {
+    return successResponse(await this.reviewsService.rejectReview(id, adminId, body.reason), 'Review rejected');
   }
 
   // ─── Shipping / Xelgo ───

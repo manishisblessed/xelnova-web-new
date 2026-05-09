@@ -99,10 +99,21 @@ export function Footer() {
       toast.error('Please enter your email');
       return;
     }
+    const normalized = email.toLowerCase();
+    const valid =
+      /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized) &&
+      normalized.length <= 160 &&
+      !normalized.includes('..');
+    if (!valid) {
+      toast.error('Enter a valid email address');
+      return;
+    }
     setSubscribing(true);
     try {
-      await contactApi.subscribeNewsletter(email);
-      toast.success('Subscribed! Thanks for joining our newsletter.');
+      await contactApi.subscribeNewsletter(normalized);
+      toast.success("You're subscribed", {
+        description: 'Confirmations and offers may arrive from info@xelnova.in.',
+      });
       setSubscribeEmail('');
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Failed to subscribe. Please try again.';
@@ -139,26 +150,28 @@ export function Footer() {
 
       {/* Newsletter */}
       <div className="border-b border-white/10">
-        <div className="mx-auto max-w-[1440px] px-6 py-10 lg:px-8">
-          <div className="flex flex-col md:flex-row items-center justify-between gap-6">
-            <div>
+        <div className="mx-auto max-w-[1440px] px-4 py-8 sm:px-6 sm:py-10 lg:px-8">
+          <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
+            <div className="text-center md:text-left">
               <h3 className="text-xl font-bold text-white mb-1 font-display">Stay in the loop</h3>
-              <p className="text-sm text-white/70">Subscribe for exclusive offers, new arrivals & insider-only discounts.</p>
+              <p className="text-sm text-white/70 max-w-md mx-auto md:mx-0">Subscribe for exclusive offers, new arrivals & insider-only discounts.</p>
             </div>
-            <form onSubmit={handleSubscribe} className="flex w-full md:w-auto gap-2">
+            <form onSubmit={handleSubscribe} className="flex w-full flex-col gap-2 sm:flex-row sm:items-stretch md:w-auto md:max-w-xl">
               <input
                 type="email"
                 required
+                autoComplete="email"
+                inputMode="email"
                 value={subscribeEmail}
                 onChange={(e) => setSubscribeEmail(e.target.value)}
                 placeholder="Enter your email"
                 disabled={subscribing}
-                className="flex-1 md:w-80 bg-white/[0.07] border border-white/10 rounded-xl py-3 pl-4 pr-4 text-sm text-white placeholder:text-white/60 focus:outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30 transition-all disabled:opacity-60"
+                className="min-h-[44px] w-full flex-1 rounded-xl border border-white/10 bg-white/[0.07] py-3 pl-4 pr-4 text-sm text-white placeholder:text-white/60 transition-all focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500/30 disabled:opacity-60 md:min-w-[240px] md:flex-initial lg:w-80"
               />
               <button
                 type="submit"
                 disabled={subscribing}
-                className="inline-flex items-center gap-2 bg-primary-600 text-white px-6 py-3 rounded-xl font-semibold text-sm hover:bg-primary-500 transition-all shadow-lg shadow-primary-600/20 active:scale-[0.98] disabled:opacity-70 disabled:cursor-not-allowed"
+                className="inline-flex min-h-[44px] shrink-0 items-center justify-center gap-2 rounded-xl bg-primary-600 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-primary-600/20 transition-all hover:bg-primary-500 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-70"
               >
                 {subscribing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                 {subscribing ? 'Subscribing…' : 'Subscribe'}
@@ -174,9 +187,9 @@ export function Footer() {
         initial="hidden"
         whileInView="visible"
         viewport={{ once: true, amount: 0.15 }}
-        className="mx-auto max-w-[1440px] px-6 py-14 lg:px-8"
+        className="mx-auto max-w-[1440px] px-4 py-12 sm:px-6 sm:py-14 lg:px-8"
       >
-        <div className="grid grid-cols-2 gap-10 md:grid-cols-4 lg:grid-cols-6">
+        <div className="grid grid-cols-2 gap-8 sm:gap-10 md:grid-cols-4 lg:grid-cols-6">
           {/* Brand Column */}
           <motion.div variants={itemVariants} className="col-span-2 mb-4 lg:mb-0">
             <Link href="/" className="inline-block mb-5">
@@ -256,7 +269,7 @@ export function Footer() {
 
       {/* Bottom Bar */}
       <div className="border-t border-white/[0.06]">
-        <div className="mx-auto max-w-[1440px] px-6 py-6 lg:px-8">
+        <div className="mx-auto max-w-[1440px] px-4 py-6 sm:px-6 lg:px-8">
           <div className="flex flex-col md:flex-row items-center justify-between gap-4">
             <div className="flex flex-wrap items-center justify-center gap-5 text-xs text-white/65">
               <Link href="/terms" className="hover:text-primary-400 transition-colors">Terms of Use</Link>

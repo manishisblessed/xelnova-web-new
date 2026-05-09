@@ -590,10 +590,28 @@ export async function apiApproveReview(id: string) {
   return handleResponse(res);
 }
 
-export async function apiRejectReview(id: string) {
+export async function apiRejectReview(id: string, reason?: string) {
   const res = await fetchWithRefresh(`${API_URL}/admin/reviews/${id}/reject`, {
     method: 'POST',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reason }),
+  });
+  return handleResponse(res);
+}
+
+export async function apiApproveSellerCoupon(id: string) {
+  const res = await fetchWithRefresh(`${API_URL}/admin/coupons/${id}/approve`, {
+    method: 'POST',
     headers: authHeaders(),
+  });
+  return handleResponse(res);
+}
+
+export async function apiRejectSellerCoupon(id: string, reason?: string) {
+  const res = await fetchWithRefresh(`${API_URL}/admin/coupons/${id}/reject`, {
+    method: 'POST',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reason }),
   });
   return handleResponse(res);
 }

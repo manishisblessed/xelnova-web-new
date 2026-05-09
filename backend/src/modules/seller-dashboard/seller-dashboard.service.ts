@@ -18,6 +18,8 @@ import {
 } from './dto/seller-dashboard.dto';
 import { Prisma, ProductStatus } from '@prisma/client';
 import { AdminService } from '../admin/admin.service';
+import { isValidOrderTransition } from '../orders/orders.service';
+import { buildCancellationNotifyParams } from '../../common/helpers/order-cancel-notify';
 import type { ProductAttributePresetsPayload } from '../admin/default-product-attribute-presets';
 /**
  * Validate the `variants` JSON payload from the seller.
@@ -65,6 +67,43 @@ function hasAtLeastOneEntry(raw: unknown): boolean {
   return Object.values(raw as Record<string, unknown>).some((v) => String(v ?? '').trim().length > 0);
 }
 
+function composeDimensionsCmString(l?: number | null, w?: number | null, h?: number | null): string | null {
+  if (l == null && w == null && h == null) return null;
+  const a = l != null && !Number.isNaN(Number(l)) ? Number(l) : 0;
+  const b = w != null && !Number.isNaN(Number(w)) ? Number(w) : 0;
+  const c = h != null && !Number.isNaN(Number(h)) ? Number(h) : 0;
+  if (a <= 0 && b <= 0 && c <= 0) return null;
+  return `${a}x${b}x${c}`;
+}
+
+function parseLwhFromLegacyDimensions(s?: string | null): { l?: number; w?: number; h?: number } {
+  if (!s?.trim()) return {};
+  const p = s.split(/[x×]/i).map((x) => parseFloat(String(x).trim()));
+  if (p.length >= 3 && p.every((n) => !Number.isNaN(n))) {
+    return { l: p[0], w: p[1], h: p[2] };
+  }
+  return {};
+}
+
+function sanitizeSpecificationsForDb(raw: unknown): Prisma.InputJsonValue | undefined {
+  if (raw === null || raw === undefined) return undefined;
+  if (Array.isArray(raw)) {
+    const rows = raw
+      .filter((r) => r && typeof r === 'object')
+      .map((r) => r as Record<string, unknown>)
+      .map((r) => ({
+        key: String(r.key ?? '').trim(),
+        value: String(r.value ?? '').trim(),
+      }))
+      .filter((r) => r.key.length > 0 && r.value.length > 0);
+    return rows as unknown as Prisma.InputJsonValue;
+  }
+  if (typeof raw === 'object') {
+    return raw as Prisma.InputJsonValue;
+  }
+  return undefined;
+}
+
 @Injectable()
 export class SellerDashboardService {
   private readonly logger = new Logger(SellerDashboardService.name);
@@ -78,6 +117,65 @@ export class SellerDashboardService {
     private readonly adminService: AdminService,
     private readonly accountUniqueness: AccountUniquenessService,
   ) {}
+
+  private async allocateXelnovaProductId(tx: Prisma.TransactionClient): Promise<string> {
+    const row = await tx.productPublicIdSeq.upsert({
+      where: { id: 1 },
+      create: { id: 1, lastValue: 9045 },
+      update: { lastValue: { increment: 1 } },
+    });
+    return `XEL${row.lastValue}`;
+  }
+
+  private mirrorProductLegacyShippingColumns(
+    existing: {
+      weight: number | null;
+      dimensions: string | null;
+      packageLengthCm: number | null;
+      packageWidthCm: number | null;
+      packageHeightCm: number | null;
+      packageWeightKg: number | null;
+    },
+    data: Record<string, unknown>,
+  ): void {
+    const touched = [
+      'packageLengthCm',
+      'packageWidthCm',
+      'packageHeightCm',
+      'packageWeightKg',
+      'weight',
+      'dimensions',
+    ].some((k) => data[k] !== undefined);
+    if (!touched) return;
+
+    const num = (v: unknown): number | null =>
+      typeof v === 'number' && !Number.isNaN(v) ? v : null;
+
+    const pkgL = num(
+      data.packageLengthCm !== undefined ? data.packageLengthCm : existing.packageLengthCm,
+    );
+    const pkgW = num(
+      data.packageWidthCm !== undefined ? data.packageWidthCm : existing.packageWidthCm,
+    );
+    const pkgH = num(
+      data.packageHeightCm !== undefined ? data.packageHeightCm : existing.packageHeightCm,
+    );
+    const pkgWt = num(
+      data.packageWeightKg !== undefined ? data.packageWeightKg : existing.packageWeightKg,
+    );
+
+    const newDim =
+      composeDimensionsCmString(pkgL, pkgW, pkgH) ||
+      (typeof data.dimensions === 'string' && data.dimensions.trim()
+        ? data.dimensions.trim()
+        : null) ||
+      existing.dimensions;
+
+    const newWt = pkgWt ?? num(data.weight !== undefined ? data.weight : existing.weight);
+
+    if (newDim != null) data.dimensions = newDim;
+    if (newWt != null) data.weight = newWt;
+  }
 
   private async getSellerProfile(userId: string) {
     const profile = await this.prisma.sellerProfile.findUnique({ where: { userId } });
@@ -183,6 +281,7 @@ export class SellerDashboardService {
       where.OR = [
         { name: { contains: query.search, mode: 'insensitive' } },
         { sku: { contains: query.search, mode: 'insensitive' } },
+        { xelnovaProductId: { contains: query.search.trim(), mode: 'insensitive' } },
       ];
     }
     if (query.status) where.status = query.status as ProductStatus;
@@ -229,7 +328,15 @@ export class SellerDashboardService {
     if (dto.gstRate == null || Number.isNaN(Number(dto.gstRate))) {
       throw new BadRequestException('GST rate is required');
     }
+    const hasDynamicSpecs =
+      Array.isArray(dto.specifications) &&
+      (dto.specifications as unknown[]).some((r) => {
+        if (!r || typeof r !== 'object') return false;
+        const o = r as Record<string, unknown>;
+        return String(o.key ?? '').trim().length > 0 && String(o.value ?? '').trim().length > 0;
+      });
     const hasProductInfo =
+      hasDynamicSpecs ||
       hasAtLeastOneEntry(dto.featuresAndSpecs) ||
       hasAtLeastOneEntry(dto.materialsAndCare) ||
       hasAtLeastOneEntry(dto.itemDetails) ||
@@ -271,46 +378,74 @@ export class SellerDashboardService {
     const sku = dto.sku || await this.generateSku(seller.id, dto.categoryId);
     const returnPolicy = await this.adminService.getMarketplaceReturnPolicy();
 
-    const created = await this.prisma.product.create({
-      data: {
-        name: dto.name,
-        slug,
-        shortDescription: dto.shortDescription,
-        description: dto.description,
-        price: dto.price,
-        compareAtPrice: dto.compareAtPrice,
-        categoryId: dto.categoryId,
-        brand: dto.brand,
-        sellerId: seller.id,
-        stock: dto.stock || 0,
-        images: dto.images || [],
-        video: dto.video || null,
-        videoPublicId: dto.videoPublicId || null,
-        highlights: dto.highlights || [],
-        tags: dto.tags || [],
-        variants: variants as any,
-        specifications: dto.specifications,
-        sku,
-        metaTitle: dto.metaTitle,
-        metaDescription: dto.metaDescription,
-        hsnCode: dto.hsnCode,
-        gstRate: dto.gstRate,
-        lowStockThreshold: dto.lowStockThreshold ?? 5,
-        weight: dto.weight,
-        dimensions: dto.dimensions,
-        ...returnPolicy,
-        featuresAndSpecs: dto.featuresAndSpecs,
-        materialsAndCare: dto.materialsAndCare,
-        itemDetails: dto.itemDetails,
-        additionalDetails,
-        productDescription: dto.productDescription,
-        safetyInfo: dto.safetyInfo,
-        regulatoryInfo: dto.regulatoryInfo,
-        warrantyInfo: dto.warrantyInfo,
-        status: initialStatus,
-        brandAuthAdditionalDocumentUrls: extraDocUrls,
-      },
-      include: { category: { select: { name: true } } },
+    const parsedLegacy = parseLwhFromLegacyDimensions(dto.dimensions?.trim() || undefined);
+    const packageLengthCm = dto.packageLengthCm ?? parsedLegacy.l ?? undefined;
+    const packageWidthCm = dto.packageWidthCm ?? parsedLegacy.w ?? undefined;
+    const packageHeightCm = dto.packageHeightCm ?? parsedLegacy.h ?? undefined;
+    const packageWeightKg = dto.packageWeightKg ?? dto.weight ?? undefined;
+    const legacyDimensions =
+      composeDimensionsCmString(
+        packageLengthCm ?? null,
+        packageWidthCm ?? null,
+        packageHeightCm ?? null,
+      ) ||
+      dto.dimensions?.trim() ||
+      undefined;
+    const legacyWeight = packageWeightKg ?? dto.weight ?? dto.productWeightKg ?? undefined;
+    const specificationsJson = sanitizeSpecificationsForDb(dto.specifications);
+
+    const created = await this.prisma.$transaction(async (tx) => {
+      const xelnovaProductId = await this.allocateXelnovaProductId(tx);
+      return tx.product.create({
+        data: {
+          name: dto.name,
+          slug,
+          xelnovaProductId,
+          shortDescription: dto.shortDescription,
+          description: dto.description,
+          price: dto.price,
+          compareAtPrice: dto.compareAtPrice,
+          categoryId: dto.categoryId,
+          brand: dto.brand,
+          sellerId: seller.id,
+          stock: dto.stock || 0,
+          images: dto.images || [],
+          video: dto.video || null,
+          videoPublicId: dto.videoPublicId || null,
+          highlights: dto.highlights || [],
+          tags: dto.tags || [],
+          variants: variants as any,
+          specifications: specificationsJson ?? undefined,
+          sku,
+          metaTitle: dto.metaTitle,
+          metaDescription: dto.metaDescription,
+          hsnCode: dto.hsnCode,
+          gstRate: dto.gstRate,
+          lowStockThreshold: dto.lowStockThreshold ?? 5,
+          productLengthCm: dto.productLengthCm ?? undefined,
+          productWidthCm: dto.productWidthCm ?? undefined,
+          productHeightCm: dto.productHeightCm ?? undefined,
+          productWeightKg: dto.productWeightKg ?? undefined,
+          packageLengthCm: packageLengthCm ?? undefined,
+          packageWidthCm: packageWidthCm ?? undefined,
+          packageHeightCm: packageHeightCm ?? undefined,
+          packageWeightKg: packageWeightKg ?? undefined,
+          weight: legacyWeight ?? undefined,
+          dimensions: legacyDimensions ?? undefined,
+          ...returnPolicy,
+          featuresAndSpecs: dto.featuresAndSpecs,
+          materialsAndCare: dto.materialsAndCare,
+          itemDetails: dto.itemDetails,
+          additionalDetails,
+          productDescription: dto.productDescription,
+          safetyInfo: dto.safetyInfo,
+          regulatoryInfo: dto.regulatoryInfo,
+          warrantyInfo: dto.warrantyInfo,
+          status: initialStatus,
+          brandAuthAdditionalDocumentUrls: extraDocUrls,
+        },
+        include: { category: { select: { name: true } } },
+      });
     });
 
     // Fan out to the admin dashboard bell so reviewers see new submissions
@@ -332,6 +467,7 @@ export class SellerDashboardService {
           productName: created.name,
           slug: created.slug,
           sku: created.sku,
+          xelnovaProductId: created.xelnovaProductId,
           sellerId: seller.id,
           storeName: seller.storeName,
           pendingBrandAuthorization: initialStatus === ProductStatus.PENDING_BRAND_AUTHORIZATION,
@@ -452,6 +588,15 @@ export class SellerDashboardService {
       'warrantyInfo',
       'weight',
       'dimensions',
+      'specifications',
+      'productLengthCm',
+      'productWidthCm',
+      'productHeightCm',
+      'productWeightKg',
+      'packageLengthCm',
+      'packageWidthCm',
+      'packageHeightCm',
+      'packageWeightKg',
       'hsnCode',
       'gstRate',
       'metaTitle',
@@ -483,7 +628,37 @@ export class SellerDashboardService {
           pendingChanges[field] = (dto as Record<string, unknown>)[field];
         }
       }
-      
+
+      // Seller payloads always echo `brandAuthorizationCertificate` even when the
+      // seller only edits price. The live URL is stored under
+      // additionalDetails["Brand Authorization Certificate"], so omit this key
+      // from the pending snapshot when it is unchanged — otherwise admins see a
+      // fake "Not set → <url>" diff.
+      const certOnFile = this.getBrandCertFromProduct(product);
+      if (pendingChanges.brandAuthorizationCertificate !== undefined) {
+        const incomingCert = String(pendingChanges.brandAuthorizationCertificate ?? '').trim();
+        if (incomingCert === certOnFile) {
+          delete pendingChanges.brandAuthorizationCertificate;
+        }
+      }
+      if (pendingChanges.brandAuthAdditionalDocumentUrls !== undefined) {
+        const incoming = (
+          (pendingChanges.brandAuthAdditionalDocumentUrls as unknown[]) ?? []
+        )
+          .map((u) => String(u).trim())
+          .filter(Boolean)
+          .slice()
+          .sort();
+        const existing = (product.brandAuthAdditionalDocumentUrls ?? [])
+          .map((u) => String(u).trim())
+          .filter(Boolean)
+          .slice()
+          .sort();
+        if (JSON.stringify(incoming) === JSON.stringify(existing)) {
+          delete pendingChanges.brandAuthAdditionalDocumentUrls;
+        }
+      }
+
       // Store pending changes instead of applying them immediately
       data.hasPendingChanges = true;
       data.pendingChangesData = pendingChanges;
@@ -547,6 +722,9 @@ export class SellerDashboardService {
         'Brand Authorization Certificate': certUrl,
       };
     }
+    if (dto.specifications !== undefined) {
+      data.specifications = sanitizeSpecificationsForDb(dto.specifications);
+    }
     delete data.isCancellable;
     delete data.isReturnable;
     delete data.isReplaceable;
@@ -558,6 +736,8 @@ export class SellerDashboardService {
     Object.assign(data, returnPolicy);
 
     if (dto.name) data.slug = this.slugify(dto.name) + '-' + Date.now().toString(36);
+
+    this.mirrorProductLegacyShippingColumns(product, data);
 
     const updated = await this.prisma.product.update({
       where: { id: productId },
@@ -669,7 +849,21 @@ export class SellerDashboardService {
           user: { select: { name: true, email: true, phone: true } },
           items: {
             where: { productId: { in: productIds } },
-            include: { product: { select: { name: true, images: true, weight: true, dimensions: true } } },
+            include: {
+              product: {
+                select: {
+                  name: true,
+                  images: true,
+                  weight: true,
+                  dimensions: true,
+                  packageLengthCm: true,
+                  packageWidthCm: true,
+                  packageHeightCm: true,
+                  packageWeightKg: true,
+                  xelnovaProductId: true,
+                },
+              },
+            },
           },
           shippingAddress: true,
           shipment: true,
@@ -679,6 +873,46 @@ export class SellerDashboardService {
     ]);
 
     return { items, total, page, limit };
+  }
+
+  async getOrderById(userId: string, orderId: string) {
+    const seller = await this.getSellerProfile(userId);
+    const productIds = (
+      await this.prisma.product.findMany({ where: { sellerId: seller.id }, select: { id: true } })
+    ).map((p) => p.id);
+
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: {
+        user: { select: { name: true, email: true, phone: true } },
+        items: {
+          where: { productId: { in: productIds } },
+          include: {
+            product: {
+              select: {
+                name: true,
+                images: true,
+                weight: true,
+                dimensions: true,
+                packageLengthCm: true,
+                packageWidthCm: true,
+                packageHeightCm: true,
+                packageWeightKg: true,
+                xelnovaProductId: true,
+              },
+            },
+          },
+        },
+        shippingAddress: true,
+        shipment: true,
+      },
+    });
+
+    if (!order) throw new NotFoundException('Order not found');
+    const hasSellerProducts = order.items.some((item) => productIds.includes(item.productId));
+    if (!hasSellerProducts) throw new ForbiddenException('Order has none of your products');
+
+    return order;
   }
 
   async updateOrderStatus(userId: string, orderId: string, status: string) {
@@ -769,8 +1003,12 @@ export class SellerDashboardService {
         include: { items: true, user: { select: { name: true, email: true, phone: true } }, shippingAddress: true, shipment: true },
       });
 
-      // Notify customer
-      this.notificationService.notifyOrderCancelled(order.userId, order.orderNumber, Number(order.total) || 0).catch((err) =>
+      const cancelNotifyParams = buildCancellationNotifyParams(
+        order.paymentStatus,
+        refundResult,
+        Number(order.total) || 0,
+      );
+      this.notificationService.notifyOrderCancelled(order.userId, order.orderNumber, cancelNotifyParams).catch((err) =>
         this.logger.warn(`Failed to send order-cancelled notification: ${err.message}`),
       );
 
@@ -801,6 +1039,28 @@ export class SellerDashboardService {
     if (status === 'SHIPPED' && order.paymentStatus !== 'PAID') {
       throw new BadRequestException(
         'You can only ship an order after the customer\'s payment has been received.',
+      );
+    }
+
+    // Enforce the same lifecycle graph as admin / system updates so the
+    // seller UI cannot skip states (e.g. shipping while still processing).
+    if (status === order.status) {
+      const unchanged = await this.prisma.order.findUnique({
+        where: { id: orderId },
+        include: {
+          items: true,
+          user: { select: { name: true, email: true, phone: true } },
+          shippingAddress: true,
+          shipment: true,
+        },
+      });
+      if (!unchanged) throw new NotFoundException('Order not found');
+      return unchanged;
+    }
+
+    if (!isValidOrderTransition(order.status, status)) {
+      throw new BadRequestException(
+        `Cannot change order status from ${order.status} to ${status}.`,
       );
     }
 
@@ -892,7 +1152,7 @@ export class SellerDashboardService {
         take: 10,
       }),
       this.prisma.review.findMany({
-        where: { productId: { in: productIds } },
+        where: { productId: { in: productIds }, moderationStatus: 'APPROVED' },
         take: 10,
         orderBy: { createdAt: 'desc' },
         include: { user: { select: { name: true } }, product: { select: { name: true } } },
@@ -993,7 +1253,14 @@ export class SellerDashboardService {
   async bulkUploadProducts(userId: string, rows: Record<string, string>[]) {
     const seller = await this.getSellerProfile(userId);
     const returnPolicy = await this.adminService.getMarketplaceReturnPolicy();
-    const results: { row: number; status: 'ok' | 'error'; message?: string; productId?: string; sku?: string }[] = [];
+    const results: {
+      row: number;
+      status: 'ok' | 'error';
+      message?: string;
+      productId?: string;
+      sku?: string;
+      xelnovaProductId?: string | null;
+    }[] = [];
 
     /**
      * Resolve the seller-supplied category column to a real category id.
@@ -1064,49 +1331,70 @@ export class SellerDashboardService {
         // Always auto-generate SKU for bulk uploads
         const sku = await this.generateSku(seller.id, categoryId);
 
-        const product = await this.prisma.product.create({
-          data: {
-            name: r.name,
-            slug,
-            shortDescription: r.shortDescription || null,
-            description: r.description || null,
-            price,
-            compareAtPrice,
-            categoryId,
-            brand: r.brand || null,
-            sellerId: seller.id,
-            stock: r.stock ? parseInt(r.stock) : 0,
-            images: r.images ? r.images.split('|').map((s) => s.trim()).filter(Boolean) : [],
-            highlights: r.highlights ? r.highlights.split('|').map((s) => s.trim()).filter(Boolean) : [],
-            tags: r.tags ? r.tags.split('|').map((s) => s.trim().toLowerCase()).filter(Boolean) : [],
-            sku,
-            metaTitle: r.metaTitle || null,
-            metaDescription: r.metaDescription || null,
-            hsnCode: r.hsnCode || null,
-            gstRate: r.gstRate ? parseFloat(r.gstRate) : null,
-            lowStockThreshold: r.lowStockThreshold ? parseInt(r.lowStockThreshold) : 5,
+        const parsedLegacy = parseLwhFromLegacyDimensions(r.dimensions || undefined);
+        const pkgWt = r.weight ? parseFloat(r.weight) : null;
+        const pkgL = parsedLegacy.l ?? null;
+        const pkgW = parsedLegacy.w ?? null;
+        const pkgH = parsedLegacy.h ?? null;
+        const legacyDim =
+          composeDimensionsCmString(pkgL, pkgW, pkgH) || (r.dimensions?.trim() || null);
 
-            // Shipping details
-            weight: r.weight ? parseFloat(r.weight) : null,
-            dimensions: r.dimensions || null,
+        const product = await this.prisma.$transaction(async (tx) => {
+          const xelnovaProductId = await this.allocateXelnovaProductId(tx);
+          return tx.product.create({
+            data: {
+              name: r.name,
+              slug,
+              xelnovaProductId,
+              shortDescription: r.shortDescription || null,
+              description: r.description || null,
+              price,
+              compareAtPrice,
+              categoryId,
+              brand: r.brand || null,
+              sellerId: seller.id,
+              stock: r.stock ? parseInt(r.stock) : 0,
+              images: r.images ? r.images.split('|').map((s) => s.trim()).filter(Boolean) : [],
+              highlights: r.highlights ? r.highlights.split('|').map((s) => s.trim()).filter(Boolean) : [],
+              tags: r.tags ? r.tags.split('|').map((s) => s.trim().toLowerCase()).filter(Boolean) : [],
+              sku,
+              metaTitle: r.metaTitle || null,
+              metaDescription: r.metaDescription || null,
+              hsnCode: r.hsnCode || null,
+              gstRate: r.gstRate ? parseFloat(r.gstRate) : null,
+              lowStockThreshold: r.lowStockThreshold ? parseInt(r.lowStockThreshold) : 5,
 
-            // Return/cancel policy — marketplace admin only (CSV columns ignored)
-            ...returnPolicy,
+              packageLengthCm: pkgL ?? undefined,
+              packageWidthCm: pkgW ?? undefined,
+              packageHeightCm: pkgH ?? undefined,
+              packageWeightKg: pkgWt ?? undefined,
+              weight: pkgWt ?? undefined,
+              dimensions: legacyDim ?? undefined,
 
-            // Amazon-style product information
-            featuresAndSpecs: this.parseJsonField(r.featuresAndSpecs),
-            materialsAndCare: this.parseJsonField(r.materialsAndCare),
-            itemDetails: this.parseJsonField(r.itemDetails),
-            additionalDetails: this.parseJsonField(r.additionalDetails),
-            productDescription: r.productDescription || null,
-            safetyInfo: r.safetyInfo || null,
-            regulatoryInfo: r.regulatoryInfo || null,
-            warrantyInfo: r.warrantyInfo || null,
+              // Return/cancel policy — marketplace admin only (CSV columns ignored)
+              ...returnPolicy,
 
-            status: 'PENDING',
-          },
+              // Amazon-style product information
+              featuresAndSpecs: this.parseJsonField(r.featuresAndSpecs),
+              materialsAndCare: this.parseJsonField(r.materialsAndCare),
+              itemDetails: this.parseJsonField(r.itemDetails),
+              additionalDetails: this.parseJsonField(r.additionalDetails),
+              productDescription: r.productDescription || null,
+              safetyInfo: r.safetyInfo || null,
+              regulatoryInfo: r.regulatoryInfo || null,
+              warrantyInfo: r.warrantyInfo || null,
+
+              status: 'PENDING',
+            },
+          });
         });
-        results.push({ row: i + 1, status: 'ok', productId: product.id, sku });
+        results.push({
+          row: i + 1,
+          status: 'ok',
+          productId: product.id,
+          sku,
+          xelnovaProductId: product.xelnovaProductId,
+        });
       } catch (err: any) {
         results.push({ row: i + 1, status: 'error', message: err.message?.slice(0, 200) });
       }
@@ -1427,7 +1715,7 @@ export class SellerDashboardService {
 
     const scope = dto.scope === 'cart' ? 'global' : 'seller';
 
-    return this.prisma.coupon.create({
+    const created = await this.prisma.coupon.create({
       data: {
         code,
         description: dto.description,
@@ -1439,8 +1727,21 @@ export class SellerDashboardService {
         usageLimit: dto.usageLimit,
         scope,
         sellerId: seller.id,
+        moderationStatus: 'PENDING',
+        isActive: false,
       },
     });
+
+    this.notificationService
+      .notifyAllAdmins({
+        type: 'COUPON_PENDING',
+        title: 'Coupon pending approval',
+        body: `${seller.storeName} submitted coupon ${created.code}. Review and approve in Coupons.`,
+        data: { couponId: created.id, code: created.code, sellerId: seller.id },
+      })
+      .catch(() => {});
+
+    return created;
   }
 
   async updateSellerCoupon(userId: string, couponId: string, dto: UpdateSellerCouponDto) {
@@ -1631,12 +1932,16 @@ export class SellerDashboardService {
       where: { id: orderId },
       data: {
         status: 'CANCELLED',
-        paymentStatus: order.paymentStatus === 'PAID' ? 'REFUNDED' : 'PENDING',
+        paymentStatus: order.paymentStatus === 'PAID' ? 'REFUNDED' : order.paymentStatus,
       },
       include: { items: true, user: true },
     });
 
-    // Send notification to customer
+    const refundDetailHtml =
+      order.paymentStatus === 'PAID'
+        ? `<p>A refund of <strong>₹${(Number(order.total) || 0).toFixed(0)}</strong> to your <strong>original payment method</strong> has been <strong>initiated</strong>. It typically reflects within <strong>5–7 business days</strong>.</p>`
+        : '<p>No payment was captured for this order, so <strong>you have not been charged</strong>.</p>';
+
     await this.notificationService.sendOrderCancelledNotification(
       {
         id: updatedOrder.user.id,
@@ -1645,6 +1950,7 @@ export class SellerDashboardService {
       },
       updatedOrder,
       reason,
+      refundDetailHtml,
     );
 
     return {

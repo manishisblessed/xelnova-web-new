@@ -46,7 +46,7 @@ function SectionHeader({
         <div>
           <h2 className="text-2xl sm:text-3xl font-bold text-white">{title}</h2>
           {subtitle && (
-            <p className="text-surface-300 text-sm mt-0.5">{subtitle}</p>
+            <p className="text-primary-300 text-sm mt-0.5">{subtitle}</p>
           )}
         </div>
       </div>

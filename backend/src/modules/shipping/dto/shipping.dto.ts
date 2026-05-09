@@ -6,6 +6,7 @@ import {
   IsBoolean,
   IsObject,
   Min,
+  IsIn,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ShippingMode, ShipmentStatus } from '@prisma/client';
@@ -67,6 +68,21 @@ export class ShipOrderDto {
   @IsString()
   @IsOptional()
   pickupLocationId?: string;
+
+  /**
+   * When `shippingMode` is `XELNOVA_COURIER` ("Ship via Xelgo"), pass the carrier
+   * the seller picked from the serviceability carousel (matches `carrierBackend`
+   * on each Xelgo rate row). Routes booking to Delhivery / XpressBees / etc.
+   * instead of blindly using admin `platformLogistics.xelnovaBackend`.
+   */
+  @ApiPropertyOptional({
+    enum: ['DELHIVERY', 'SHIPROCKET', 'XPRESSBEES', 'EKART'],
+    description:
+      'Active platform courier credential set to book this Xelgo shipment with.',
+  })
+  @IsOptional()
+  @IsIn(['DELHIVERY', 'SHIPROCKET', 'XPRESSBEES', 'EKART'])
+  platformCourier?: 'DELHIVERY' | 'SHIPROCKET' | 'XPRESSBEES' | 'EKART';
 }
 
 // ─── Pickup Locations (multi-warehouse) ───

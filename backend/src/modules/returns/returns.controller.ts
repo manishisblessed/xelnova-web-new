@@ -21,16 +21,12 @@ export class ReturnsController {
 
   @Post()
   @Auth()
-  @ApiOperation({ summary: 'Request a return/refund (customer)' })
+  @ApiOperation({ summary: 'Request a return or replacement (customer)' })
   async create(
     @CurrentUser('id') userId: string,
     @Body() dto: CreateReturnDto,
   ) {
-    const result = await this.returnsService.create(
-      userId,
-      dto.orderNumber,
-      dto.reason,
-    );
+    const result = await this.returnsService.create(userId, dto);
     return successResponse(result, 'Return request submitted');
   }
 

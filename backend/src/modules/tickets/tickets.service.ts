@@ -62,6 +62,8 @@ export class TicketsService {
             senderId: customerId,
             senderRole: 'CUSTOMER',
             message,
+            customerVisible: true,
+            sellerVisible: true,
           },
         },
       },
@@ -99,13 +101,22 @@ export class TicketsService {
     });
   }
 
+  /** Visible on customer portal: never internal; hide seller thread unless relayed to buyer. */
+  private customerMessageWhere(): Record<string, unknown> {
+    return {
+      isInternal: false,
+      customerVisible: true,
+      OR: [{ senderRole: { not: 'SELLER' } }, { isForwarded: true }],
+    };
+  }
+
   async getCustomerTicketDetail(ticketId: string, customerId: string) {
     const ticket = await this.prisma.ticket.findUnique({
       where: { id: ticketId },
       include: {
         ...TICKET_INCLUDE,
         messages: {
-          where: { isInternal: false },
+          where: this.customerMessageWhere(),
           orderBy: { createdAt: 'asc' },
           include: {
             sender: { select: { id: true, name: true, avatar: true, role: true } },
@@ -133,7 +144,7 @@ export class TicketsService {
 
     const [msg] = await this.prisma.$transaction([
       this.prisma.ticketMessage.create({
-        data: { ticketId, senderId: customerId, senderRole: 'CUSTOMER', message },
+        data: { ticketId, senderId: customerId, senderRole: 'CUSTOMER', message, customerVisible: true, sellerVisible: true },
         include: {
           sender: { select: { id: true, name: true, avatar: true, role: true } },
         },
@@ -245,6 +256,8 @@ export class TicketsService {
           senderRole: 'ADMIN',
           message,
           isInternal,
+          customerVisible: !isInternal,
+          sellerVisible: !isInternal,
         },
         include: {
           sender: { select: { id: true, name: true, avatar: true, role: true } },
@@ -295,28 +308,35 @@ export class TicketsService {
     });
     if (!seller) throw new BadRequestException('Seller not found');
 
-    const updates: unknown[] = [
+    const forwardBody =
+      (note && note.trim()) ||
+      'This ticket has been forwarded to your store. Please review and reply — your response will be reviewed by support before sharing with the customer.';
+
+    const updates = [
       this.prisma.ticket.update({
         where: { id: ticketId },
-        data: { assignedSellerId: resolved, assignedAdminId: adminId, updatedAt: new Date() },
+        data: {
+          assignedSellerId: resolved,
+          assignedAdminId: adminId,
+          forwardedAt: new Date(),
+          status: 'FORWARDED',
+          updatedAt: new Date(),
+        },
+      }),
+      this.prisma.ticketMessage.create({
+        data: {
+          ticketId,
+          senderId: adminId,
+          senderRole: 'ADMIN',
+          message: `[Forwarded by support → seller]\n${forwardBody}`,
+          isInternal: false,
+          customerVisible: false,
+          sellerVisible: true,
+        },
       }),
     ];
 
-    if (note) {
-      updates.push(
-        this.prisma.ticketMessage.create({
-          data: {
-            ticketId,
-            senderId: adminId,
-            senderRole: 'ADMIN',
-            message: `[Forwarded to seller] ${note}`,
-            isInternal: true,
-          },
-        }),
-      );
-    }
-
-    await this.prisma.$transaction(updates as any);
+    await this.prisma.$transaction(updates);
 
     this.notificationService.notifyTicketForwarded(resolved, ticket.ticketNumber, ticketId).catch((err) =>
       this.logger.warn(`Failed to notify ticket forwarded: ${err.message}`),
@@ -351,7 +371,7 @@ export class TicketsService {
       include: {
         customer: { select: { id: true, name: true } },
         messages: {
-          where: { isInternal: false },
+          where: { isInternal: false, sellerVisible: true },
           orderBy: { createdAt: 'desc' },
           take: 1,
         },
@@ -366,7 +386,7 @@ export class TicketsService {
       include: {
         ...TICKET_INCLUDE,
         messages: {
-          where: { isInternal: false },
+          where: { isInternal: false, sellerVisible: true },
           orderBy: { createdAt: 'asc' },
           include: {
             sender: { select: { id: true, name: true, avatar: true, role: true } },
@@ -389,17 +409,39 @@ export class TicketsService {
       throw new ForbiddenException('Ticket not assigned to you');
     }
 
-    return this.prisma.ticketMessage.create({
-      data: {
-        ticketId,
-        senderId: sellerId,
-        senderRole: 'SELLER',
-        message,
-      },
-      include: {
-        sender: { select: { id: true, name: true, avatar: true, role: true } },
-      },
+    const [msg] = await this.prisma.$transaction([
+      this.prisma.ticketMessage.create({
+        data: {
+          ticketId,
+          senderId: sellerId,
+          senderRole: 'SELLER',
+          message,
+          customerVisible: false,
+          sellerVisible: true,
+        },
+        include: {
+          sender: { select: { id: true, name: true, avatar: true, role: true } },
+        },
+      }),
+      this.prisma.ticket.update({
+        where: { id: ticketId },
+        data: {
+          status: 'SELLER_REPLIED',
+          updatedAt: new Date(),
+        },
+      }),
+    ]);
+
+    const tn = await this.prisma.ticket.findUnique({
+      where: { id: ticketId },
+      select: { ticketNumber: true },
     });
+
+    this.notificationService
+      .notifyTicketSellerReplyAdmins(tn?.ticketNumber || '', ticketId)
+      .catch((err) => this.logger.warn(`Failed to notify admins of seller reply: ${err.message}`));
+
+    return msg;
   }
 
   // ─── Email helpers ───

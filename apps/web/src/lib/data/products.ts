@@ -41,6 +41,8 @@ export interface ProductVariant {
 export interface Product {
   id: string;
   slug: string;
+  /** Immutable public listing code (e.g. XEL9045) */
+  xelnovaProductId?: string | null;
   name: string;
   description: string;
   price: number;
@@ -57,6 +59,11 @@ export interface Product {
   seller: { name: string; rating: number; slug?: string };
   variants: ProductVariant[];
   specifications: Record<string, string>;
+  /** Buyer-facing dimensions (when set) */
+  productLengthCm?: number | null;
+  productWidthCm?: number | null;
+  productHeightCm?: number | null;
+  productWeightKg?: number | null;
   reviews: ProductReview[];
   tags: string[];
   createdAt: string;
@@ -83,6 +90,8 @@ export interface Product {
   isReturnable?: boolean;
   isCancellable?: boolean;
   returnWindow?: number;
+  /** Replacement window in days (2, 5, or 7) chosen by the admin at approval time. */
+  replacementWindow?: number | null;
   /** GST % from API; consumer prices include this (see `priceInclusiveOfGst`). */
   gstRate?: number | null;
   /** Product video URL */

@@ -30,24 +30,39 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         message = (res as any).message || (res as any).error || message;
         details = (res as any).details;
       }
+      if (status >= 500) {
+        this.logger.error(
+          `[${request.method}] ${request.url} ${status} — ${typeof message === 'string' ? message : JSON.stringify(message)}`,
+        );
+      } else if (status >= 400) {
+        this.logger.warn(
+          `[${request.method}] ${request.url} ${status} — ${typeof message === 'string' ? message : JSON.stringify(message)}`,
+        );
+      }
     } else if (exception instanceof Error) {
       message = exception.message || message;
       this.logger.error(
-        `[${request.method}] ${request.url} - ${exception.message}`,
+        `[${request.method}] ${request.url} — ${exception.message}`,
         exception.stack,
       );
     }
 
-    if (status === HttpStatus.INTERNAL_SERVER_ERROR) {
+    if (
+      !(exception instanceof HttpException) &&
+      !(exception instanceof Error) &&
+      status === HttpStatus.INTERNAL_SERVER_ERROR
+    ) {
       this.logger.error(
-        `[${request.method}] ${request.url} - Unhandled exception`,
-        exception instanceof Error ? exception.stack : String(exception),
+        `[${request.method}] ${request.url} — Unhandled exception`,
+        String(exception),
       );
     }
 
+    const outMessage = Array.isArray(message) ? message.join('; ') : message;
+
     response.status(status).json({
       success: false,
-      message,
+      message: outMessage,
       ...(details && { details }),
       timestamp: new Date().toISOString(),
       path: request.url,

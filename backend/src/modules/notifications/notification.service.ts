@@ -5,6 +5,8 @@ import { ConfigService } from '@nestjs/config';
 import { WhatsAppService } from './whatsapp.service';
 import { WebPushService } from './web-push.service';
 import { SmsService } from './sms.service';
+import type { OrderCancelledNotifyParams } from '../../common/helpers/order-cancel-notify';
+import type { ShipmentStatus } from '@prisma/client';
 
 @Injectable()
 export class NotificationService {
@@ -336,37 +338,39 @@ export class NotificationService {
    * Notify customer when order is cancelled
    * Channels: In-app, Email, SMS (when approved), Push
    */
-  async notifyOrderCancelled(userId: string, orderNumber: string, refundAmount: number) {
+  async notifyOrderCancelled(userId: string, orderNumber: string, params: OrderCancelledNotifyParams) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: { phone: true, email: true, name: true },
     });
 
-    // In-app notification (always works)
+    const amt = params.refundAmount ?? 0;
+    const { title, body, adminBody, sendRefundSms } = this.cancellationCopy(orderNumber, params);
+
     await this.logNotification({
       userId,
       channel: 'in_app',
       type: 'ORDER_CANCELLED',
-      title: 'Order Cancelled',
-      body: `Your order #${orderNumber} has been cancelled. Refund of ₹${refundAmount.toFixed(0)} will be processed.`,
-      data: { orderNumber, refundAmount },
+      title,
+      body,
+      data: { orderNumber, outcome: params.outcome, refundAmount: amt },
     });
 
-    // Push notification
     this.webPush.sendOrderNotification(userId, orderNumber, 'CANCELLED').catch((err) =>
       this.logger.warn(`WebPush failed for order cancelled ${orderNumber}: ${err.message}`),
     );
 
-    // Email (always works)
     if (user?.email) {
-      this.email.sendOrderCancelled(user.email, user.name || 'Customer', orderNumber, refundAmount).catch((err) =>
+      this.email.sendOrderCancelled(user.email, user.name || 'Customer', orderNumber, params).catch((err) =>
         this.logger.warn(`Email failed for order cancelled ${orderNumber}: ${err.message}`),
       );
     }
 
-    // SMS (works when template is approved)
-    if (user?.phone) {
-      this.sms.sendOrderCancelled(user.phone, orderNumber, refundAmount.toFixed(0)).catch((err) =>
+    // DLT template promises "5–7 days" — only send when refund truly goes to original payment rails.
+    // Additional safeguard: only send if outcome explicitly indicates refund to original method
+    const isRefundOutcome = params.outcome === 'ORIGINAL_METHOD_PENDING' || params.outcome === 'WALLET_CREDITED';
+    if (sendRefundSms && isRefundOutcome && user?.phone && amt > 0) {
+      this.sms.sendOrderCancelled(user.phone, orderNumber, amt.toFixed(0)).catch((err) =>
         this.logger.warn(`SMS failed for order cancelled ${orderNumber}: ${err.message}`),
       );
     }
@@ -374,9 +378,60 @@ export class NotificationService {
     this.notifyAllAdmins({
       type: 'ADMIN_ORDER_CANCELLED',
       title: 'Order cancelled',
-      body: `Order #${orderNumber} cancelled. Refund ₹${refundAmount.toFixed(0)}.`,
-      data: { orderNumber, refundAmount },
+      body: adminBody,
+      data: { orderNumber, outcome: params.outcome, refundAmount: amt },
     }).catch(() => {});
+  }
+
+  private cancellationCopy(
+    orderNumber: string,
+    params: OrderCancelledNotifyParams,
+  ): { title: string; body: string; adminBody: string; sendRefundSms: boolean } {
+    const amt = params.refundAmount ?? 0;
+    switch (params.outcome) {
+      case 'NO_PAYMENT':
+        return {
+          title: 'Order Cancelled',
+          body: `Your order #${orderNumber} has been cancelled. No payment was received — you have not been charged.`,
+          adminBody: `Order #${orderNumber} cancelled (no captured payment).`,
+          sendRefundSms: false,
+        };
+      case 'WALLET_CREDITED':
+        return {
+          title: 'Order Cancelled',
+          body: `Your order #${orderNumber} has been cancelled. ₹${amt.toFixed(0)} has been credited to your Xelnova Wallet.`,
+          adminBody: `Order #${orderNumber} cancelled. Wallet credit ₹${amt.toFixed(0)}.`,
+          sendRefundSms: false,
+        };
+      case 'ORIGINAL_METHOD_PENDING':
+        return {
+          title: 'Order Cancelled',
+          body: `Your order #${orderNumber} has been cancelled. A refund of ₹${amt.toFixed(0)} to your original payment method has been initiated; it usually reflects within 5–7 business days.`,
+          adminBody: `Order #${orderNumber} cancelled. Source refund initiated ₹${amt.toFixed(0)}.`,
+          sendRefundSms: true,
+        };
+      case 'REFUND_FAILED':
+        return {
+          title: 'Order Cancelled',
+          body: `Your order #${orderNumber} has been cancelled. We could not complete an automatic refund immediately. If you were charged, please contact support with your order number.`,
+          adminBody: `Order #${orderNumber} cancelled — refund automation failed (paid order).`,
+          sendRefundSms: false,
+        };
+      case 'STATUS_UPDATE_UNCONFIRMED':
+        return {
+          title: 'Order Cancelled',
+          body: `Your order #${orderNumber} has been updated to cancelled. If any payment was captured, our team will confirm refund details separately.`,
+          adminBody: `Order #${orderNumber} marked cancelled (manual status update).`,
+          sendRefundSms: false,
+        };
+      default:
+        return {
+          title: 'Order Cancelled',
+          body: `Your order #${orderNumber} has been cancelled.`,
+          adminBody: `Order #${orderNumber} cancelled.`,
+          sendRefundSms: false,
+        };
+    }
   }
 
   /**
@@ -433,31 +488,39 @@ export class NotificationService {
    * Notify customer when refund is processed
    * Channels: In-app, Email, SMS (when approved)
    */
-  async notifyRefundProcessed(userId: string, orderNumber: string, amount: number) {
+  async notifyRefundProcessed(
+    userId: string,
+    orderNumber: string,
+    amount: number,
+    creditTo: 'ORIGINAL_PAYMENT' | 'WALLET' = 'ORIGINAL_PAYMENT',
+  ) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: { phone: true, email: true, name: true },
     });
 
-    // In-app notification
+    const detail =
+      creditTo === 'WALLET'
+        ? 'The amount is available in your Xelnova Wallet now.'
+        : 'It usually reflects on your original payment method within 5–7 business days.';
+
     await this.logNotification({
       userId,
       channel: 'in_app',
       type: 'REFUND_PROCESSED',
       title: 'Refund Processed',
-      body: `₹${amount.toFixed(0)} has been refunded for order #${orderNumber}.`,
-      data: { orderNumber, amount },
+      body: `₹${amount.toFixed(0)} refund for order #${orderNumber}. ${detail}`,
+      data: { orderNumber, amount, creditTo },
     });
 
-    // Email
     if (user?.email) {
-      this.email.sendRefundProcessed(user.email, user.name || 'Customer', orderNumber, amount).catch((err) =>
+      this.email.sendRefundProcessed(user.email, user.name || 'Customer', orderNumber, amount, creditTo).catch((err) =>
         this.logger.warn(`Email failed for refund ${orderNumber}: ${err.message}`),
       );
     }
 
-    // SMS (when template approved)
-    if (user?.phone) {
+    // Template text assumes bank/card timeline — skip SMS for wallet credits.
+    if (creditTo === 'ORIGINAL_PAYMENT' && user?.phone) {
       this.sms.sendRefundProcessed(user.phone, amount.toFixed(0), orderNumber).catch((err) =>
         this.logger.warn(`SMS failed for refund ${orderNumber}: ${err.message}`),
       );
@@ -466,8 +529,8 @@ export class NotificationService {
     this.notifyAllAdmins({
       type: 'ADMIN_REFUND_PROCESSED',
       title: 'Refund processed',
-      body: `₹${amount.toFixed(0)} refunded for order #${orderNumber}.`,
-      data: { orderNumber, amount },
+      body: `₹${amount.toFixed(0)} refunded for order #${orderNumber} (${creditTo}).`,
+      data: { orderNumber, amount, creditTo },
     }).catch(() => {});
   }
 
@@ -733,19 +796,25 @@ export class NotificationService {
   async notifyPaymentFailed(userId: string, orderNumber: string, orderId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { phone: true },
+      select: { phone: true, email: true, name: true },
     });
 
-    const paymentUrl = `${this.appUrl}/checkout/payment?order=${orderId}`;
+    const paymentUrl = `${this.appUrl}/account/orders/${encodeURIComponent(orderNumber)}`;
 
     await this.logNotification({
       userId,
       channel: 'in_app',
       type: 'PAYMENT_FAILED',
       title: 'Payment Failed',
-      body: `Payment for order #${orderNumber} was unsuccessful. Please retry to avoid cancellation.`,
+      body: `Payment for order #${orderNumber} was unsuccessful. Open your order to retry — no charge is completed until payment succeeds.`,
       data: { orderNumber, orderId, paymentUrl },
     });
+
+    if (user?.email) {
+      this.email.sendPaymentFailed(user.email, user.name || 'Customer', orderNumber, paymentUrl).catch((err) =>
+        this.logger.warn(`Email failed for payment failed ${orderNumber}: ${err.message}`),
+      );
+    }
 
     if (user?.phone) {
       this.sms.sendPaymentFailed(user.phone, orderNumber, paymentUrl).catch((err) =>
@@ -1127,10 +1196,76 @@ export class NotificationService {
     await this.logNotification({
       userId: sellerId,
       channel: 'in_app',
-      type: 'TICKET_ASSIGNED',
-      title: 'Ticket Assigned',
-      body: `A support ticket #${ticketNumber} has been assigned to you. Please review and respond.`,
+      type: 'TICKET_FORWARDED',
+      title: 'Ticket forwarded by support',
+      body: `Support forwarded ticket #${ticketNumber} to you. Open Tickets to reply.`,
       data: { ticketNumber, ticketId },
+    });
+  }
+
+  /** Fan-out to admins when a seller replies on a forwarded ticket */
+  async notifyTicketSellerReplyAdmins(ticketNumber: string, ticketId: string): Promise<void> {
+    await this.notifyAllAdmins({
+      type: 'ADMIN_TICKET_SELLER_REPLY',
+      title: 'Seller replied on ticket',
+      body: `Ticket #${ticketNumber}: the seller added a reply — review in Tickets.`,
+      data: { ticketId, ticketNumber },
+    });
+  }
+
+  async notifyReviewModeration(
+    userId: string,
+    productName: string,
+    decision: 'APPROVED' | 'REJECTED',
+    reviewId: string,
+    reason?: string,
+  ) {
+    await this.logNotification({
+      userId,
+      channel: 'in_app',
+      type: decision === 'APPROVED' ? 'REVIEW_APPROVED' : 'REVIEW_REJECTED',
+      title: decision === 'APPROVED' ? 'Review published' : 'Review not published',
+      body:
+        decision === 'APPROVED'
+          ? `Your review for "${productName}" is now live on Xelnova.`
+          : `Your review for "${productName}" was not published.${reason ? ` ${reason}` : ''}`,
+      data: { reviewId, productName, decision },
+    });
+  }
+
+  async notifyCouponModeration(
+    sellerUserId: string,
+    code: string,
+    decision: 'APPROVED' | 'REJECTED',
+    couponId: string,
+    reason?: string,
+  ) {
+    await this.logNotification({
+      userId: sellerUserId,
+      channel: 'in_app',
+      type: decision === 'APPROVED' ? 'COUPON_APPROVED' : 'COUPON_REJECTED',
+      title: decision === 'APPROVED' ? 'Coupon approved' : 'Coupon rejected',
+      body:
+        decision === 'APPROVED'
+          ? `Your coupon ${code} is approved and can be used by customers.`
+          : `Your coupon ${code} was rejected.${reason ? ` ${reason}` : ''}`,
+      data: { couponId, code, decision },
+    });
+  }
+
+  async notifyReturnRequestUpdate(
+    userId: string,
+    orderNumber: string,
+    status: string,
+    detail?: string,
+  ) {
+    await this.logNotification({
+      userId,
+      channel: 'in_app',
+      type: 'RETURN_STATUS_UPDATE',
+      title: 'Return request update',
+      body: `Order #${orderNumber}: ${status}${detail ? ` — ${detail}` : ''}`,
+      data: { orderNumber, status },
     });
   }
 
@@ -1261,6 +1396,60 @@ export class NotificationService {
     }
   }
 
+  async notifySellerReturnRequested(
+    sellerUserId: string,
+    orderNumber: string,
+    kind: string,
+    reasonCode: string,
+  ) {
+    await this.logNotification({
+      userId: sellerUserId,
+      channel: 'in_app',
+      type: 'SELLER_RETURN_REQUESTED',
+      title: kind === 'REPLACEMENT' ? 'Replacement requested' : 'Return requested',
+      body: `Order #${orderNumber}: buyer submitted ${kind === 'REPLACEMENT' ? 'a replacement' : 'a return'} request (${reasonCode}).`,
+      data: { orderNumber, kind, reasonCode },
+    });
+  }
+
+  async notifySellerReversePickupScheduled(
+    sellerUserId: string,
+    orderNumber: string,
+    pickupDate: string,
+  ) {
+    await this.logNotification({
+      userId: sellerUserId,
+      channel: 'in_app',
+      type: 'SELLER_REVERSE_PICKUP',
+      title: 'Reverse pickup scheduled',
+      body: `Return logistics for order #${orderNumber}: pickup scheduled on ${pickupDate}.`,
+      data: { orderNumber, pickupDate },
+    });
+  }
+
+  async notifySellersShipmentStatusUpdate(
+    order: { orderNumber: string; items: { sellerId: string | null }[] },
+    shipmentStatus: ShipmentStatus,
+  ) {
+    const sellerProfileIds = [...new Set(order.items.map((i) => i.sellerId).filter(Boolean))] as string[];
+    const label = String(shipmentStatus).replace(/_/g, ' ').toLowerCase();
+    for (const sid of sellerProfileIds) {
+      const profile = await this.prisma.sellerProfile.findUnique({
+        where: { id: sid },
+        select: { userId: true },
+      });
+      if (!profile?.userId) continue;
+      await this.logNotification({
+        userId: profile.userId,
+        channel: 'in_app',
+        type: 'SELLER_SHIPMENT_STATUS',
+        title: 'Shipment update',
+        body: `Order #${order.orderNumber} — courier status: ${label}.`,
+        data: { orderNumber: order.orderNumber, shipmentStatus },
+      });
+    }
+  }
+
   private async sendSellerEmail(userId: string, subject: string, body: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { email: true, name: true } });
     if (!user?.email) return;
@@ -1297,20 +1486,25 @@ export class NotificationService {
   /**
    * Notify customer when their order is cancelled by seller
    */
-  async sendOrderCancelledNotification(user: { id: string; email?: string; name?: string }, order: any, reason?: string) {
+  async sendOrderCancelledNotification(
+    user: { id: string; email?: string; name?: string },
+    order: any,
+    reason?: string,
+    refundDetailHtml?: string,
+  ) {
     await this.logNotification({
       userId: user.id,
       channel: 'in_app',
       type: 'ORDER_CANCELLED',
       title: 'Order Cancelled',
-      body: `Your order #${order.orderNumber} has been cancelled by the seller. ${reason ? `Reason: ${reason}` : ''}`,
+      body: `Your order #${order.orderNumber} has been cancelled by the seller.${reason ? ` Reason: ${reason}` : ''} Check your email for refund details.`,
       data: { orderId: order.id, orderNumber: order.orderNumber, reason },
     });
 
     if (user.email) {
-      this.email.sendOrderCancelledNotification(user.email, user.name || 'Customer', order.orderNumber, reason).catch((err) =>
-        this.logger.warn(`Email failed for order cancellation to customer ${user.id}: ${err.message}`),
-      );
+      this.email
+        .sendOrderCancelledNotification(user.email, user.name || 'Customer', order.orderNumber, reason, refundDetailHtml)
+        .catch((err) => this.logger.warn(`Email failed for order cancellation to customer ${user.id}: ${err.message}`));
     }
   }
 

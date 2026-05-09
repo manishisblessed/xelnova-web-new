@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, ConflictException, HttpException, HttpStatus, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { Prisma, Role } from '@prisma/client';
+import { Prisma, Role, ProductReturnPolicyPreset, WarrantyDurationUnit } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
 import { LoggingService } from '../logging/logging.service';
@@ -121,7 +121,7 @@ export class AdminService {
       this.prisma.product.count({
         where: { status: { in: ['PENDING', 'PENDING_BRAND_AUTHORIZATION'] } },
       }),
-      this.prisma.review.count({ where: { approved: false } }),
+      this.prisma.review.count({ where: { moderationStatus: 'PENDING' } }),
     ]);
 
     const recentOrders = await this.prisma.order.findMany({
@@ -153,9 +153,12 @@ export class AdminService {
     const where: Prisma.ProductWhereInput = {};
 
     if (query.search) {
+      const term = query.search.trim();
       where.OR = [
-        { name: { contains: query.search, mode: 'insensitive' } },
-        { sku: { contains: query.search, mode: 'insensitive' } },
+        { name: { contains: term, mode: 'insensitive' } },
+        { slug: { contains: term, mode: 'insensitive' } },
+        { sku: { contains: term, mode: 'insensitive' } },
+        { xelnovaProductId: { contains: term, mode: 'insensitive' } },
       ];
     }
     if (query.status) where.status = query.status as any;
@@ -242,6 +245,8 @@ export class AdminService {
         status: true,
         rejectionReason: true,
         imageRejectionReason: true,
+        isReplaceable: true,
+        replacementWindow: true,
         seller: { select: { userId: true, storeName: true } },
       },
     });
@@ -344,6 +349,129 @@ export class AdminService {
           throw new BadRequestException('bestSellersRank must be a positive integer (1–100000)');
         }
         data.bestSellersRank = rank;
+      }
+    }
+
+    // Admin-controlled replacement policy. The seller's "Can be replaced"
+    // choice (if any) is ignored — only the admin toggles `isReplaceable`
+    // and picks the window at approval time, so it's a deliberate merchandising
+    // decision rather than a seller claim.
+    if (dto.isReplaceable !== undefined) {
+      data.isReplaceable = !!dto.isReplaceable;
+      // When disabling replacement, clear the stored window so the buyer UI
+      // doesn't keep showing a stale "7 days replacement" label.
+      if (!dto.isReplaceable) {
+        data.replacementWindow = null;
+      }
+    }
+    if (dto.replacementWindow !== undefined) {
+      if (dto.replacementWindow === null || (dto.replacementWindow as unknown) === '') {
+        data.replacementWindow = null;
+      } else {
+        const win = Math.floor(Number(dto.replacementWindow));
+        // We currently offer 2 / 5 / 7-day replacement windows. Reject anything
+        // else so we don't end up with exotic values from bad payloads that the
+        // buyer-facing UI can't explain.
+        if (![2, 5, 7].includes(win)) {
+          throw new BadRequestException('replacementWindow must be one of 2, 5, or 7 days');
+        }
+        data.replacementWindow = win;
+      }
+    }
+    // If admin enabled replacement but didn't pass a window, and the product
+    // doesn't already have one on file, surface a clear error rather than
+    // silently publishing with no window.
+    if (dto.isReplaceable === true && dto.replacementWindow === undefined) {
+      // We still allow this when the product already has a stored window —
+      // e.g. the admin is only toggling the flag back on. Look at the row
+      // we fetched at the top of this method.
+      const existingWindow = (product as unknown as { replacementWindow?: number | null } | null)
+        ?.replacementWindow;
+      if (existingWindow == null) {
+        throw new BadRequestException(
+          'Pick a replacement window (2, 5, or 7 days) when enabling replacement.',
+        );
+      }
+    }
+
+    // Return policy preset + optional structured warranty (approval-time merchandising).
+    if (dto.returnPolicyPreset) {
+      const preset = dto.returnPolicyPreset as ProductReturnPolicyPreset;
+      data.returnPolicyPreset = preset;
+
+      const resolvedReplacement =
+        dto.replacementWindow !== undefined &&
+        dto.replacementWindow !== null &&
+        (dto.replacementWindow as unknown) !== ''
+          ? Math.floor(Number(dto.replacementWindow))
+          : product.replacementWindow;
+
+      switch (preset) {
+        case 'NON_RETURNABLE':
+          data.isReturnable = false;
+          data.isReplaceable = false;
+          data.replacementWindow = null;
+          break;
+        case 'EASY_RETURN_3_DAYS':
+          data.isReturnable = true;
+          data.returnWindow = 3;
+          data.isReplaceable = false;
+          data.replacementWindow = null;
+          break;
+        case 'EASY_RETURN_7_DAYS':
+          data.isReturnable = true;
+          data.returnWindow = 7;
+          data.isReplaceable = false;
+          data.replacementWindow = null;
+          break;
+        case 'REPLACEMENT_ONLY':
+          data.isReturnable = false;
+          data.isReplaceable = true;
+          if (resolvedReplacement == null || ![2, 5, 7].includes(resolvedReplacement)) {
+            throw new BadRequestException(
+              'Pick a replacement window (2, 5, or 7 days) for replacement-only policy.',
+            );
+          }
+          data.replacementWindow = resolvedReplacement;
+          break;
+        case 'RETURN_PLUS_REPLACEMENT': {
+          data.isReturnable = true;
+          const rd =
+            dto.returnWindowDays != null && (dto.returnWindowDays as unknown) !== ''
+              ? Math.floor(Number(dto.returnWindowDays))
+              : 7;
+          if (!Number.isFinite(rd) || rd < 1 || rd > 365) {
+            throw new BadRequestException('returnWindowDays must be between 1 and 365');
+          }
+          data.returnWindow = rd;
+          data.isReplaceable = true;
+          if (resolvedReplacement == null || ![2, 5, 7].includes(resolvedReplacement)) {
+            throw new BadRequestException(
+              'Pick a replacement window (2, 5, or 7 days) for return + replacement.',
+            );
+          }
+          data.replacementWindow = resolvedReplacement;
+          break;
+        }
+        default:
+          break;
+      }
+    }
+
+    if (dto.warrantyDurationValue !== undefined || dto.warrantyDurationUnit !== undefined) {
+      const v = dto.warrantyDurationValue;
+      const u = dto.warrantyDurationUnit;
+      if (v == null || (v as unknown) === '' || !u) {
+        data.warrantyDurationValue = null;
+        data.warrantyDurationUnit = null;
+      } else {
+        const num = Math.floor(Number(v));
+        if (!Number.isFinite(num) || num < 1) {
+          throw new BadRequestException('warrantyDurationValue must be a positive integer');
+        }
+        data.warrantyDurationValue = num;
+        data.warrantyDurationUnit = u as WarrantyDurationUnit;
+        data.warrantyInfo = AdminService.formatBrandWarranty(num, data.warrantyDurationUnit as WarrantyDurationUnit);
       }
     }
 
@@ -463,6 +591,15 @@ export class AdminService {
       'safetyInfo',
       'regulatoryInfo',
       'warrantyInfo',
+      'specifications',
+      'productLengthCm',
+      'productWidthCm',
+      'productHeightCm',
+      'productWeightKg',
+      'packageLengthCm',
+      'packageWidthCm',
+      'packageHeightCm',
+      'packageWeightKg',
       'weight',
       'dimensions',
       'hsnCode',
@@ -623,7 +760,7 @@ export class AdminService {
   async updateOrder(id: string, dto: AdminUpdateOrderDto) {
     const order = await this.prisma.order.findUnique({
       where: { id },
-      select: { status: true, userId: true, orderNumber: true, total: true },
+      select: { status: true, userId: true, orderNumber: true, total: true, paymentStatus: true },
     });
     if (!order) throw new NotFoundException('Order not found');
 
@@ -650,7 +787,14 @@ export class AdminService {
           case 'CONFIRMED': this.notifications.notifyOrderPacked(uid, oNum).catch(() => {}); break;
           case 'SHIPPED': this.notifications.notifyOrderShipped(uid, oNum).catch(() => {}); break;
           case 'DELIVERED': this.notifications.notifyOrderDelivered(uid, oNum).catch(() => {}); break;
-          case 'CANCELLED': this.notifications.notifyOrderCancelled(uid, oNum, total).catch(() => {}); break;
+          case 'CANCELLED': {
+            const cancelParams =
+              order.paymentStatus === 'PAID'
+                ? { outcome: 'STATUS_UPDATE_UNCONFIRMED' as const, refundAmount: total }
+                : { outcome: 'NO_PAYMENT' as const };
+            this.notifications.notifyOrderCancelled(uid, oNum, cancelParams).catch(() => {});
+            break;
+          }
           case 'REFUNDED': this.notifications.notifyRefundProcessed(uid, oNum, total).catch(() => {}); break;
         }
       } catch (err) {
@@ -1379,7 +1523,19 @@ export class AdminService {
   // ─── Coupons ───
 
   async getCoupons() {
-    return this.prisma.coupon.findMany({ orderBy: { createdAt: 'desc' } });
+    const rows = await this.prisma.coupon.findMany({ orderBy: { createdAt: 'desc' } });
+    const sellerIds = [...new Set(rows.map((r) => r.sellerId).filter(Boolean))] as string[];
+    if (sellerIds.length === 0) return rows.map((c) => ({ ...c, sellerName: null as string | null }));
+
+    const sellers = await this.prisma.sellerProfile.findMany({
+      where: { id: { in: sellerIds } },
+      select: { id: true, storeName: true },
+    });
+    const map = new Map(sellers.map((s) => [s.id, s.storeName]));
+    return rows.map((c) => ({
+      ...c,
+      sellerName: c.sellerId ? map.get(c.sellerId) ?? null : null,
+    }));
   }
 
   async createCoupon(dto: CreateCouponDto) {
@@ -1393,9 +1549,11 @@ export class AdminService {
         maxDiscount: dto.maxDiscount,
         validUntil: dto.validUntil ? new Date(dto.validUntil) : undefined,
         usageLimit: dto.usageLimit,
+        maxRedemptionsPerUser: dto.maxRedemptionsPerUser ?? null,
         scope: dto.scope || 'global',
         categoryId: dto.categoryId || null,
         sellerId: dto.sellerId || null,
+        moderationStatus: 'APPROVED',
       },
     });
   }
@@ -1410,6 +1568,91 @@ export class AdminService {
   async deleteCoupon(id: string) {
     await this.prisma.coupon.delete({ where: { id } });
     return { deleted: true };
+  }
+
+  async approveSellerCoupon(id: string, adminUserId: string) {
+    const coupon = await this.prisma.coupon.findUnique({ where: { id } });
+    if (!coupon) throw new NotFoundException('Coupon not found');
+    if (!coupon.sellerId) {
+      throw new BadRequestException('Only seller-submitted coupons use this approval flow');
+    }
+    if (coupon.moderationStatus === 'APPROVED') return coupon;
+
+    const updated = await this.prisma.coupon.update({
+      where: { id },
+      data: {
+        moderationStatus: 'APPROVED',
+        moderatedAt: new Date(),
+        moderatedById: adminUserId,
+        rejectionReason: null,
+        isActive: true,
+      },
+    });
+
+    await this.prisma.moderationAuditLog.create({
+      data: {
+        entityType: 'COUPON',
+        entityId: id,
+        action: 'APPROVE',
+        actorUserId: adminUserId,
+        metadata: { code: coupon.code },
+      },
+    });
+
+    const seller = await this.prisma.sellerProfile.findUnique({
+      where: { id: coupon.sellerId },
+      select: { userId: true },
+    });
+    if (seller?.userId) {
+      this.notifications
+        .notifyCouponModeration(seller.userId, coupon.code, 'APPROVED', id)
+        .catch(() => {});
+    }
+
+    return updated;
+  }
+
+  async rejectSellerCoupon(id: string, adminUserId: string, reason?: string) {
+    const coupon = await this.prisma.coupon.findUnique({ where: { id } });
+    if (!coupon) throw new NotFoundException('Coupon not found');
+    if (!coupon.sellerId) {
+      throw new BadRequestException('Only seller-submitted coupons use this rejection flow');
+    }
+
+    const r = (reason ?? '').trim() || 'No reason provided';
+
+    const updated = await this.prisma.coupon.update({
+      where: { id },
+      data: {
+        moderationStatus: 'REJECTED',
+        moderatedAt: new Date(),
+        moderatedById: adminUserId,
+        rejectionReason: r,
+        isActive: false,
+      },
+    });
+
+    await this.prisma.moderationAuditLog.create({
+      data: {
+        entityType: 'COUPON',
+        entityId: id,
+        action: 'REJECT',
+        actorUserId: adminUserId,
+        metadata: { code: coupon.code, reason: r },
+      },
+    });
+
+    const seller = await this.prisma.sellerProfile.findUnique({
+      where: { id: coupon.sellerId },
+      select: { userId: true },
+    });
+    if (seller?.userId) {
+      this.notifications
+        .notifyCouponModeration(seller.userId, coupon.code, 'REJECTED', id, r)
+        .catch(() => {});
+    }
+
+    return updated;
   }
 
   // ─── Commission Rules ───
@@ -2152,5 +2395,21 @@ export class AdminService {
       ...merged,
       platformLogistics: this.shipping.sanitizePlatformLogisticsForResponse(merged.platformLogistics),
     };
+  }
+
+  private static formatBrandWarranty(value: number, unit: WarrantyDurationUnit): string {
+    const label =
+      unit === 'DAYS'
+        ? value === 1
+          ? 'Day'
+          : 'Days'
+        : unit === 'MONTHS'
+          ? value === 1
+            ? 'Month'
+            : 'Months'
+          : value === 1
+            ? 'Year'
+            : 'Years';
+    return `Brand Warranty: ${value} ${label}`;
   }
 }

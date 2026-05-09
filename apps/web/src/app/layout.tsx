@@ -117,7 +117,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <Providers>
           <Toaster />
           <Header />
-          <main className="flex-grow">{children}</main>
+          <main className="flex-grow pb-[env(safe-area-inset-bottom,0px)]">{children}</main>
           <Footer />
         </Providers>
       </body>

@@ -200,7 +200,7 @@ export function HomeBelowFold() {
       <section className="py-6">
         <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
             <div className="panel-glass p-5 md:p-6">
-              <SectionHeader title="Trending Now" subtitle="Products everyone is talking about" seeAllHref="/products?sort=trending" />
+              <SectionHeader title="Trending Now" seeAllHref="/products?sort=trending" />
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 md:gap-4">
               {trendingProducts.map((product, i) => (
                 <ProductCard key={product.id} product={product} index={i} />
@@ -491,7 +491,7 @@ export function HomeBelowFold() {
       </section>
 
       {/* ─── 14. BRAND SHOWCASE ─── */}
-      {brands.length > 0 && (
+      {false && brands.length > 0 && (
         <section className="py-6">
           <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
             <SectionHeader title="Top Brands" subtitle="Shop from the brands you love" />

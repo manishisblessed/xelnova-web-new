@@ -101,29 +101,39 @@ export class LabelGeneratorService {
   ) {}
 
   async generateShippingLabel(orderId: string, sellerUserId: string): Promise<Buffer> {
-    // 1) PREFER the carrier's official label when available.
-    //    Sellers asked us to stop branding the slip as "Xelgo" — the
-    //    actual rider scans the carrier's barcode at pickup, so the
-    //    bytes the seller prints must match what the carrier issued.
-    try {
-      const official = await this.shippingService.getCarrierIssuedLabel(orderId, sellerUserId);
-      if (official && official.length > 0) {
-        this.logger.log(
-          `Returning carrier-issued label for order ${orderId} (${official.length} bytes).`,
-        );
-        return official;
-      }
-    } catch (err) {
-      // Delhivery's packing_slip API returns JSON, not PDF. Their FAQ
-      // explicitly states: "Does this API give PDF? Ans- No. This gives
-      // JSON response only and you need to convert JSON to PDF."
-      // Fall back to our own label generator instead of throwing.
-      this.logger.warn(
-        `Carrier label unavailable for order ${orderId}: ${err instanceof Error ? err.message : String(err)}. Falling back to Xelnova label.`,
+    // Always serve the carrier's official label — never brand it.
+    // The rider scans the carrier's barcode at pickup, so the bytes
+    // the seller prints MUST be exactly what the carrier issued.
+    const official = await this.shippingService.getCarrierIssuedLabel(orderId, sellerUserId);
+    if (official && official.length > 0) {
+      this.logger.log(
+        `Returning carrier-issued label for order ${orderId} (${official.length} bytes).`,
       );
+      return official;
     }
 
-    return this.generateXelnovaFallbackLabel(orderId, sellerUserId);
+    // If getCarrierIssuedLabel returned null, the shipment is either
+    // SELF_SHIP or has no AWB yet — only those use the fallback.
+    const shipment = await this.prisma.shipment.findUnique({
+      where: { orderId },
+      select: { shippingMode: true, awbNumber: true },
+    });
+
+    const isSelfShip = !shipment || shipment.shippingMode === 'SELF_SHIP';
+    if (isSelfShip || !shipment.awbNumber) {
+      return this.generateXelnovaFallbackLabel(orderId, sellerUserId);
+    }
+
+    // Carrier IS integrated but label fetch returned null — don't
+    // serve our own branded label, throw so seller retries.
+    this.logger.warn(
+      `Carrier label unavailable for order ${orderId} (mode=${shipment.shippingMode}, awb=${shipment.awbNumber}). Returning 503 for retry.`,
+    );
+    const err = new Error(
+      'Shipping label is not ready yet. The courier usually generates it within 1-2 minutes after booking. Please try again shortly.',
+    );
+    (err as any).status = 503;
+    throw err;
   }
 
   /**

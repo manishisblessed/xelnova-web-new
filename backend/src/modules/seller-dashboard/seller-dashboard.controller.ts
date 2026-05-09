@@ -92,6 +92,12 @@ export class SellerDashboardController {
     return paginatedResponse(items, total, page, limit, 'Orders fetched');
   }
 
+  @Get('orders/:id')
+  @ApiOperation({ summary: 'Get a single order containing this seller\'s lines' })
+  async getOrderById(@CurrentUser('id') userId: string, @Param('id') id: string) {
+    return successResponse(await this.service.getOrderById(userId, id), 'Order fetched');
+  }
+
   @Patch('orders/:id/status')
   @ApiOperation({ summary: 'Update order status' })
   async updateOrderStatus(

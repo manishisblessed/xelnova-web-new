@@ -88,6 +88,56 @@ export class DelhiveryProvider implements CourierProvider {
   }
 
   /**
+   * Validates the seller API token with a trivial pin-code lookup.
+   * Used when saving courier config so disconnected / invalid setups surface immediately.
+   */
+  async validateSellerApiToken(config: SellerCourierConfig): Promise<void> {
+    const token = String(config.apiKey ?? '').trim();
+    if (!token) {
+      throw new Error('API token is required');
+    }
+    const base = this.getBaseUrl(config);
+    let res: Response;
+    try {
+      res = await fetch(
+        `${base}/c/api/pin-codes/json/?token=${encodeURIComponent(token)}&filter_codes=110001`,
+        { headers: this.authHeaders({ ...config, apiKey: token }) },
+      );
+    } catch (e: any) {
+      this.logger.warn(`Delhivery token validation network error: ${e?.message}`);
+      throw new Error(
+        `Could not reach Delhivery (${e?.message || 'network error'}). Check environment or try again.`,
+      );
+    }
+    const bodyText = await res.text();
+    if (!res.ok) {
+      this.logger.warn(`Delhivery token check HTTP ${res.status}: ${bodyText.slice(0, 480)}`);
+      throw new Error(
+        bodyText.includes('Unauthorized') || res.status === 401
+          ? 'Invalid Delhivery API token or wrong environment (staging vs production).'
+          : `Delhivery returned HTTP ${res.status}.`,
+      );
+    }
+    let data: unknown;
+    try {
+      data = JSON.parse(bodyText);
+    } catch {
+      this.logger.warn(`Delhivery token check: non-JSON body ${bodyText.slice(0, 200)}`);
+      throw new Error('Unexpected response from Delhivery during token check.');
+    }
+    const err =
+      typeof (data as { error?: string })?.error === 'string'
+        ? (data as { error: string }).error
+        : typeof (data as { message?: string })?.message === 'string'
+          ? (data as { message: string }).message
+          : '';
+    if (err && /invalid|unauthor|expired|wrong token|token/i.test(err)) {
+      this.logger.warn(`Delhivery token rejected: ${err}`);
+      throw new Error(err);
+    }
+  }
+
+  /**
    * Strip everything that isn't a digit and return the last 10 characters.
    * Delhivery's CMU validator rejects phone numbers that aren't exactly
    * 10 digits (e.g. `+91 92591 31155` or `09259131155`) with a generic
@@ -427,24 +477,65 @@ export class DelhiveryProvider implements CourierProvider {
   ): Promise<CancelResult> {
     const base = this.getBaseUrl(config);
 
-    const res = await fetch(`${base}/api/p/edit`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Token ${config.apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        waybill: awbNumber,
-        cancellation: 'true',
-      }),
-    });
-
-    if (!res.ok) {
-      const errText = await res.text();
-      return { success: false, message: `Cancel failed: ${errText}` };
+    let res: Response;
+    try {
+      res = await fetch(`${base}/api/p/edit`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Token ${config.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          waybill: awbNumber,
+          cancellation: 'true',
+        }),
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      this.logger.error(`Delhivery cancel network error for ${awbNumber}: ${msg}`);
+      return { success: false, message: `Delhivery cancel failed (network): ${msg}` };
     }
 
-    return { success: true, message: 'Shipment cancelled successfully' };
+    const text = await res.text();
+
+    if (!res.ok) {
+      this.logger.warn(`Delhivery cancel HTTP ${res.status} for ${awbNumber}: ${text.slice(0, 300)}`);
+      return { success: false, message: `Delhivery cancel failed (HTTP ${res.status}): ${text.slice(0, 200)}` };
+    }
+
+    // Delhivery returns XML: <root><status>True|False</status><remark>...</remark></root>
+    const statusMatch = text.match(/<status>(.*?)<\/status>/i);
+    const remarkMatch = text.match(/<remark>(.*?)<\/remark>/i);
+    const status = statusMatch?.[1]?.trim().toLowerCase();
+    const remark = remarkMatch?.[1]?.trim() || '';
+
+    if (status === 'true') {
+      this.logger.log(`Delhivery cancel success for ${awbNumber}: ${remark}`);
+      return { success: true, message: remark || 'Shipment cancelled successfully' };
+    }
+
+    // Also handle JSON responses (some accounts)
+    try {
+      const json = JSON.parse(text);
+      if (json.status === true || json.status === 'true' || json.rmk?.toLowerCase().includes('cancel')) {
+        this.logger.log(`Delhivery cancel success (JSON) for ${awbNumber}`);
+        return { success: true, message: json.rmk || json.remark || 'Shipment cancelled' };
+      }
+      const errMsg = json.rmk || json.remark || json.error || JSON.stringify(json).slice(0, 200);
+      this.logger.warn(`Delhivery cancel rejected for ${awbNumber}: ${errMsg}`);
+      return { success: false, message: `Delhivery rejected cancellation: ${errMsg}` };
+    } catch {
+      /* not JSON, check XML status */
+    }
+
+    if (status === 'false' || (statusMatch && status !== 'true')) {
+      this.logger.warn(`Delhivery cancel failed for ${awbNumber}: ${remark || text.slice(0, 200)}`);
+      return { success: false, message: `Delhivery rejected cancellation: ${remark || 'Unknown reason'}` };
+    }
+
+    // If we can't parse the response, log it and assume failure for safety
+    this.logger.warn(`Delhivery cancel unrecognized response for ${awbNumber}: ${text.slice(0, 300)}`);
+    return { success: false, message: `Delhivery cancel response unclear — please verify on Delhivery portal. Response: ${text.slice(0, 100)}` };
   }
 
   async checkServiceability(
@@ -757,88 +848,157 @@ export class DelhiveryProvider implements CourierProvider {
     config: SellerCourierConfig,
   ): Promise<Buffer> {
     const base = this.getBaseUrl(config);
-    const headers = this.authHeaders(config);
+    const token = config.apiKey;
 
-    const tryFetchPdf = async (url: string): Promise<Buffer | null> => {
+    const isPdf = (buf: Buffer): boolean =>
+      buf.length > 8 &&
+      (buf.slice(0, 4).toString('ascii') === '%PDF' ||
+        (buf[0] === 0x25 && buf[1] === 0x50 && buf[2] === 0x44 && buf[3] === 0x46));
+
+    const fetchAsPdf = async (url: string, hdrs: Record<string, string>): Promise<Buffer | null> => {
       try {
-        const r = await fetch(url, { headers });
-        if (!r.ok) return null;
-        const ct = (r.headers.get('content-type') || '').toLowerCase();
-        if (ct.includes('application/pdf') || ct.includes('octet-stream')) {
-          return Buffer.from(await r.arrayBuffer());
+        const r = await fetch(url, { headers: hdrs, redirect: 'follow' });
+        if (!r.ok) {
+          this.logger.debug(`Delhivery label fetch ${r.status} for: ${url.replace(token, '***')}`);
+          return null;
         }
-        // Some CDN responses elide content-type — peek at magic bytes.
         const buf = Buffer.from(await r.arrayBuffer());
-        if (buf.slice(0, 4).toString('ascii') === '%PDF') return buf;
-        return null;
-      } catch {
-        return null;
-      }
-    };
-
-    // 1. Try direct PDF response from packing_slip.
-    const direct = await tryFetchPdf(
-      `${base}/api/p/packing_slip/?wbns=${encodeURIComponent(awbNumber)}&pdf=true`,
-    );
-    if (direct) {
-      this.logger.log(
-        `Delhivery label (direct PDF) fetched for ${awbNumber}, ${direct.length} bytes.`,
-      );
-      return direct;
-    }
-
-    // 2. Fall back to JSON → resolve a download link → fetch.
-    const jsonRes = await fetch(
-      `${base}/api/p/packing_slip/?wbns=${encodeURIComponent(awbNumber)}`,
-      { headers },
-    );
-    const text = await jsonRes.text();
-    if (!jsonRes.ok) {
-      this.logger.warn(
-        `Delhivery packing_slip failed: HTTP ${jsonRes.status} ${text.slice(0, 200)}`,
-      );
-      const err = new Error(
-        `Delhivery couldn't return a label PDF for AWB ${awbNumber}. The label may not be generated yet — please try again shortly.`,
-      );
-      (err as any).status = 503;
-      throw err;
-    }
-
-    let parsed: any = null;
-    try { parsed = text ? JSON.parse(text) : null; } catch { /* noop */ }
-
-    const candidateUrls: string[] = [];
-    const push = (v: unknown) => {
-      if (typeof v === 'string' && /^https?:\/\//i.test(v)) candidateUrls.push(v);
-    };
-    push(parsed?.pdf_download_link);
-    push(parsed?.data?.url);
-    push(parsed?.data?.pdf_download_link);
-    if (Array.isArray(parsed?.pdf_links)) parsed.pdf_links.forEach(push);
-    if (Array.isArray(parsed?.packages)) {
-      for (const pkg of parsed.packages) {
-        push(pkg?.pdf_download_link);
-        push(pkg?.label_link);
-        push(pkg?.label_url);
-      }
-    }
-
-    for (const url of candidateUrls) {
-      const buf = await tryFetchPdf(url);
-      if (buf) {
-        this.logger.log(
-          `Delhivery label fetched via download link for ${awbNumber}, ${buf.length} bytes.`,
+        if (isPdf(buf)) return buf;
+        this.logger.debug(
+          `Delhivery response (${buf.length}B) not PDF — ct: ${r.headers.get('content-type')}, head: ${buf.slice(0, 30).toString('ascii').replace(/[^\x20-\x7E]/g, '.')}`,
         );
-        return buf;
+        return null;
+      } catch (e) {
+        this.logger.debug(`Delhivery fetch error: ${e instanceof Error ? e.message : String(e)}`);
+        return null;
+      }
+    };
+
+    const collectUrls = (obj: unknown, out: string[], depth = 0): void => {
+      if (obj == null || depth > 10) return;
+      if (typeof obj === 'string') {
+        if (/^https?:\/\//i.test(obj.trim())) out.push(obj.trim());
+        return;
+      }
+      if (Array.isArray(obj)) { obj.forEach((v) => collectUrls(v, out, depth + 1)); return; }
+      if (typeof obj === 'object') {
+        for (const v of Object.values(obj as Record<string, unknown>)) {
+          collectUrls(v, out, depth + 1);
+        }
+      }
+    };
+
+    const wbns = encodeURIComponent(awbNumber);
+    const authHdr = { Authorization: `Token ${token}` };
+    const acceptPdf = { ...authHdr, Accept: 'application/pdf, application/octet-stream, */*' };
+
+    // ── Strategy 1 & 2 combined: Fetch packing_slip (pdf=true first), handle both
+    //    direct-PDF and JSON-with-download-link responses. ──
+    const packingSlipUrls = [
+      `${base}/api/p/packing_slip/?wbns=${wbns}&pdf=true&token=${encodeURIComponent(token)}`,
+      `${base}/api/p/packing_slip/?wbns=${wbns}&pdf=true`,
+      `${base}/api/p/packing_slip/?wbns=${wbns}&token=${encodeURIComponent(token)}`,
+    ];
+    let jsonBody: string | null = null;
+    for (const url of packingSlipUrls) {
+      try {
+        const r = await fetch(url, { headers: acceptPdf, redirect: 'follow' });
+        if (!r.ok) {
+          this.logger.debug(`Delhivery packing_slip ${r.status} for: ${url.replace(token, '***')}`);
+          continue;
+        }
+        const buf = Buffer.from(await r.arrayBuffer());
+        if (isPdf(buf)) {
+          this.logger.log(`Delhivery label (direct PDF) for ${awbNumber}, ${buf.length}B.`);
+          return buf;
+        }
+        // Not PDF — save as JSON candidate for link extraction
+        if (!jsonBody && buf.length > 50) {
+          jsonBody = buf.toString('utf8');
+        }
+      } catch (e) {
+        this.logger.debug(`Delhivery fetch error: ${e instanceof Error ? e.message : String(e)}`);
       }
     }
 
-    this.logger.warn(
-      `Delhivery packing_slip returned no usable PDF for ${awbNumber}. Body: ${text.slice(0, 300)}`,
+    if (jsonBody) {
+      // Response might be raw PDF bytes (some accounts)
+      const rawBuf = Buffer.from(jsonBody, 'binary');
+      if (isPdf(rawBuf)) {
+        this.logger.log(`Delhivery label (binary in JSON response) for ${awbNumber}, ${rawBuf.length}B.`);
+        return rawBuf;
+      }
+
+      let parsed: any = null;
+      try { parsed = JSON.parse(jsonBody); } catch { /* not JSON */ }
+
+      if (parsed) {
+        this.logger.debug(`Delhivery packing_slip JSON keys: ${JSON.stringify(Object.keys(parsed))}`);
+        const allFoundUrls: string[] = [];
+        collectUrls(parsed, allFoundUrls);
+
+        // Prioritize URLs that look like label/packing-slip PDFs
+        const labelUrls = allFoundUrls.filter(
+          (u) => /packing.?slip|label|\.pdf/i.test(u),
+        );
+        const otherUrls = allFoundUrls.filter(
+          (u) => !labelUrls.includes(u),
+        );
+        const allUrls = [...new Set([...labelUrls, ...otherUrls])];
+
+        this.logger.debug(`Delhivery label candidate URLs (${allUrls.length}): ${JSON.stringify(allUrls.slice(0, 3).map(u => u.slice(0, 80)))}`);
+
+        for (const u of allUrls) {
+          const pdf = await fetchAsPdf(u, {});
+          if (pdf) {
+            this.logger.log(`Delhivery label via download URL for ${awbNumber}, ${pdf.length}B.`);
+            return pdf;
+          }
+        }
+
+        // Some responses have base64-encoded PDF
+        const b64 = parsed?.pdf_base64 || parsed?.data?.pdf_base64 || parsed?.label_base64 || '';
+        if (typeof b64 === 'string' && b64.length > 100) {
+          const decoded = Buffer.from(b64, 'base64');
+          if (isPdf(decoded)) {
+            this.logger.log(`Delhivery label (base64) for ${awbNumber}, ${decoded.length}B.`);
+            return decoded;
+          }
+        }
+
+        // Log for debugging if we got here with a valid JSON but no PDF
+        this.logger.warn(
+          `Delhivery packing_slip JSON for ${awbNumber} — no PDF found. Body: ${jsonBody.slice(0, 500)}`,
+        );
+      } else {
+        this.logger.warn(
+          `Delhivery packing_slip response for ${awbNumber} was not JSON/PDF. Head: ${jsonBody.slice(0, 200)}`,
+        );
+      }
+    }
+
+    // ── Strategy 3: Alternate label endpoints (varies by account vintage) ──
+    const altPaths = [
+      `${base}/api/p/download_packing_slip/?wbns=${wbns}&token=${encodeURIComponent(token)}`,
+      `${base}/api/p/label/?wbns=${wbns}&token=${encodeURIComponent(token)}`,
+      `${base}/api/p/download_packing_slip/?wbns=${wbns}`,
+    ];
+    for (const url of altPaths) {
+      const pdf = await fetchAsPdf(url, acceptPdf);
+      if (pdf) {
+        this.logger.log(`Delhivery label (alt endpoint) for ${awbNumber}, ${pdf.length}B.`);
+        return pdf;
+      }
+    }
+
+    this.logger.error(
+      `Delhivery label fetch FAILED for AWB ${awbNumber} on base ${base}. All strategies exhausted.`,
     );
-    throw new Error(
-      `Delhivery couldn't return a label PDF for AWB ${awbNumber}. The label may not be generated yet — please try again shortly.`,
+    const err = new Error(
+      `Delhivery label not available yet for AWB ${awbNumber}. Please try again in 1-2 minutes after manifestation.`,
     );
+    (err as any).status = 503;
+    throw err;
   }
 
   /**

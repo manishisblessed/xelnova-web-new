@@ -40,7 +40,7 @@ export class ProductsService {
 
   async getTopReviews(limit = 6) {
     return this.prisma.review.findMany({
-      where: { rating: { gte: 4 } },
+      where: { rating: { gte: 4 }, moderationStatus: 'APPROVED' },
       orderBy: [{ helpful: 'desc' }, { rating: 'desc' }, { createdAt: 'desc' }],
       take: limit,
       include: {
@@ -96,6 +96,7 @@ export class ProductsService {
         { brand: { contains: query.search, mode: 'insensitive' } },
         { shortDescription: { contains: query.search, mode: 'insensitive' } },
         { tags: { has: query.search.toLowerCase() } },
+        { xelnovaProductId: { contains: query.search.trim(), mode: 'insensitive' } },
       ];
     }
 
@@ -139,13 +140,23 @@ export class ProductsService {
   }
 
   async findBySlug(slug: string) {
-    const product = await this.prisma.product.findUnique({
-      where: { slug },
-      include: {
-        category: { include: { parent: true } },
-        seller: true,
-      },
-    });
+    const trimmed = slug.trim();
+    const isXelCode = /^XEL\d+$/i.test(trimmed);
+    const product = isXelCode
+      ? await this.prisma.product.findFirst({
+          where: { xelnovaProductId: trimmed.toUpperCase() },
+          include: {
+            category: { include: { parent: true } },
+            seller: true,
+          },
+        })
+      : await this.prisma.product.findUnique({
+          where: { slug: trimmed },
+          include: {
+            category: { include: { parent: true } },
+            seller: true,
+          },
+        });
     if (!product) return null;
 
     const relatedProducts = await this.prisma.product.findMany({

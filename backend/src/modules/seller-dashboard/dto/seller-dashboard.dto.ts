@@ -33,7 +33,16 @@ export class CreateProductDto {
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Type(() => Number) lowStockThreshold?: number;
   @ApiPropertyOptional({ description: 'Weight in kg' }) @IsOptional() @IsNumber() @Type(() => Number) weight?: number;
   @ApiPropertyOptional({ description: 'Dimensions in LxWxH cm format (e.g., 30x20x15)' }) @IsOptional() @IsString() dimensions?: string;
-  
+
+  @ApiPropertyOptional({ description: 'Product length in cm (buyer-facing)' }) @IsOptional() @IsNumber() @Min(0) @Type(() => Number) productLengthCm?: number;
+  @ApiPropertyOptional({ description: 'Product width in cm (buyer-facing)' }) @IsOptional() @IsNumber() @Min(0) @Type(() => Number) productWidthCm?: number;
+  @ApiPropertyOptional({ description: 'Product height in cm (buyer-facing)' }) @IsOptional() @IsNumber() @Min(0) @Type(() => Number) productHeightCm?: number;
+  @ApiPropertyOptional({ description: 'Product weight in kg (buyer-facing)' }) @IsOptional() @IsNumber() @Min(0) @Type(() => Number) productWeightKg?: number;
+  @ApiPropertyOptional({ description: 'Package length in cm (courier / booking)' }) @IsOptional() @IsNumber() @Min(0) @Type(() => Number) packageLengthCm?: number;
+  @ApiPropertyOptional({ description: 'Package width in cm (courier / booking)' }) @IsOptional() @IsNumber() @Min(0) @Type(() => Number) packageWidthCm?: number;
+  @ApiPropertyOptional({ description: 'Package height in cm (courier / booking)' }) @IsOptional() @IsNumber() @Min(0) @Type(() => Number) packageHeightCm?: number;
+  @ApiPropertyOptional({ description: 'Package weight in kg (courier / booking)' }) @IsOptional() @IsNumber() @Min(0) @Type(() => Number) packageWeightKg?: number;
+
   // Return/Cancellation/Replacement policies
   @ApiPropertyOptional({ description: 'Can be cancelled before shipping' }) @IsOptional() @IsBoolean() @Transform(({ value }) => value === 'true' || value === true) isCancellable?: boolean;
   @ApiPropertyOptional({ description: 'Can be returned after delivery' }) @IsOptional() @IsBoolean() @Transform(({ value }) => value === 'true' || value === true) isReturnable?: boolean;
@@ -84,7 +93,16 @@ export class UpdateProductDto {
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Type(() => Number) lowStockThreshold?: number;
   @ApiPropertyOptional({ description: 'Weight in kg' }) @IsOptional() @IsNumber() @Type(() => Number) weight?: number;
   @ApiPropertyOptional({ description: 'Dimensions in LxWxH cm format (e.g., 30x20x15)' }) @IsOptional() @IsString() dimensions?: string;
-  
+
+  @ApiPropertyOptional({ description: 'Product length in cm (buyer-facing)' }) @IsOptional() @IsNumber() @Min(0) @Type(() => Number) productLengthCm?: number;
+  @ApiPropertyOptional({ description: 'Product width in cm (buyer-facing)' }) @IsOptional() @IsNumber() @Min(0) @Type(() => Number) productWidthCm?: number;
+  @ApiPropertyOptional({ description: 'Product height in cm (buyer-facing)' }) @IsOptional() @IsNumber() @Min(0) @Type(() => Number) productHeightCm?: number;
+  @ApiPropertyOptional({ description: 'Product weight in kg (buyer-facing)' }) @IsOptional() @IsNumber() @Min(0) @Type(() => Number) productWeightKg?: number;
+  @ApiPropertyOptional({ description: 'Package length in cm (courier / booking)' }) @IsOptional() @IsNumber() @Min(0) @Type(() => Number) packageLengthCm?: number;
+  @ApiPropertyOptional({ description: 'Package width in cm (courier / booking)' }) @IsOptional() @IsNumber() @Min(0) @Type(() => Number) packageWidthCm?: number;
+  @ApiPropertyOptional({ description: 'Package height in cm (courier / booking)' }) @IsOptional() @IsNumber() @Min(0) @Type(() => Number) packageHeightCm?: number;
+  @ApiPropertyOptional({ description: 'Package weight in kg (courier / booking)' }) @IsOptional() @IsNumber() @Min(0) @Type(() => Number) packageWeightKg?: number;
+
   // Return/Cancellation/Replacement policies
   @ApiPropertyOptional({ description: 'Can be cancelled before shipping' }) @IsOptional() @IsBoolean() @Transform(({ value }) => value === 'true' || value === true) isCancellable?: boolean;
   @ApiPropertyOptional({ description: 'Can be returned after delivery' }) @IsOptional() @IsBoolean() @Transform(({ value }) => value === 'true' || value === true) isReturnable?: boolean;

@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { Inter, Plus_Jakarta_Sans } from 'next/font/google';
 import './globals.css';
 import { Toaster } from 'sonner';
+import { AppSupportWidget } from '@/components/app-support-widget';
 
 const inter = Inter({
   subsets: ['latin'],
@@ -27,10 +28,11 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${inter.variable} ${plusJakarta.variable}`}>
+    <html lang="en" data-scroll-behavior="smooth" className={`${inter.variable} ${plusJakarta.variable}`}>
       <body className="font-sans antialiased min-h-screen bg-white" suppressHydrationWarning>
         {children}
         <Toaster position="top-center" richColors closeButton />
+        <AppSupportWidget />
       </body>
     </html>
   );

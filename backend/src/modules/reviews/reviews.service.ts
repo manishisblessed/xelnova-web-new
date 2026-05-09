@@ -1,6 +1,16 @@
-import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationService } from '../notifications/notification.service';
+import type { ReviewModerationStatus } from '@prisma/client';
+
+const PUBLIC_REVIEW: { moderationStatus: ReviewModerationStatus } = {
+  moderationStatus: 'APPROVED',
+};
 
 @Injectable()
 export class ReviewsService {
@@ -9,28 +19,45 @@ export class ReviewsService {
     private readonly notifications: NotificationService,
   ) {}
 
+  private async moderationAudit(
+    entityId: string,
+    action: string,
+    actorUserId: string | undefined,
+    metadata?: Record<string, unknown>,
+  ) {
+    await this.prisma.moderationAuditLog.create({
+      data: {
+        entityType: 'REVIEW',
+        entityId,
+        action,
+        actorUserId: actorUserId ?? null,
+        metadata: metadata ? (metadata as object) : undefined,
+      },
+    });
+  }
+
   async findByProductId(productId: string, page: number = 1, limit: number = 10) {
     const skip = (page - 1) * limit;
-    const approvedFilter = { productId, approved: true };
+    const wherePublic = { productId, ...PUBLIC_REVIEW };
     const [reviews, totalReviews] = await Promise.all([
       this.prisma.review.findMany({
-        where: approvedFilter,
+        where: wherePublic,
         include: { user: { select: { id: true, name: true, avatar: true } } },
         orderBy: { createdAt: 'desc' },
         skip,
         take: limit,
       }),
-      this.prisma.review.count({ where: approvedFilter }),
+      this.prisma.review.count({ where: wherePublic }),
     ]);
 
     const allRatings = await this.prisma.review.groupBy({
       by: ['rating'],
-      where: approvedFilter,
+      where: wherePublic,
       _count: { rating: true },
     });
 
     const avgResult = await this.prisma.review.aggregate({
-      where: approvedFilter,
+      where: wherePublic,
       _avg: { rating: true },
     });
 
@@ -63,15 +90,17 @@ export class ReviewsService {
       throw new BadRequestException('Rating must be between 1 and 5');
     }
 
-    // Prevent duplicate reviews
     const existingReview = await this.prisma.review.findFirst({
-      where: { productId: data.productId, userId },
+      where: {
+        productId: data.productId,
+        userId,
+        moderationStatus: { in: ['PENDING', 'APPROVED'] },
+      },
     });
     if (existingReview) {
       throw new BadRequestException('You have already reviewed this product');
     }
 
-    // Verify purchase — user must have a delivered order containing this product
     const purchaseVerified = await this.prisma.orderItem.findFirst({
       where: {
         productId: data.productId,
@@ -90,17 +119,19 @@ export class ReviewsService {
         title: data.title || null,
         comment: data.comment || null,
         verified: true,
-        approved: false,
+        moderationStatus: 'PENDING',
       },
       include: { user: { select: { id: true, name: true, avatar: true } } },
     });
 
-    this.notifications.notifyAllAdmins({
-      type: 'REVIEW_PENDING',
-      title: 'New review pending approval',
-      body: `A ${data.rating}-star review for "${product.name}" requires approval.`,
-      data: { reviewId: review.id, productId: data.productId, rating: data.rating },
-    }).catch(() => {});
+    this.notifications
+      .notifyAllAdmins({
+        type: 'REVIEW_PENDING',
+        title: 'New review pending approval',
+        body: `A ${data.rating}-star review for "${product.name}" requires approval.`,
+        data: { reviewId: review.id, productId: data.productId, rating: data.rating },
+      })
+      .catch(() => {});
 
     return review;
   }
@@ -108,6 +139,9 @@ export class ReviewsService {
   async markHelpful(reviewId: string, userId: string) {
     const review = await this.prisma.review.findUnique({ where: { id: reviewId } });
     if (!review) throw new NotFoundException('Review not found');
+    if (review.moderationStatus !== 'APPROVED') {
+      throw new BadRequestException('Review is not visible yet');
+    }
     if (review.userId === userId) {
       throw new BadRequestException('Cannot mark your own review as helpful');
     }
@@ -127,12 +161,15 @@ export class ReviewsService {
 
     await this.prisma.review.delete({ where: { id: reviewId } });
     await this.updateProductRating(review.productId);
+    if (isAdmin) {
+      await this.moderationAudit(reviewId, 'DELETE', userId, { productId: review.productId });
+    }
     return { deleted: true };
   }
 
   private async updateProductRating(productId: string) {
     const result = await this.prisma.review.aggregate({
-      where: { productId, approved: true },
+      where: { productId, moderationStatus: 'APPROVED' },
       _avg: { rating: true },
       _count: { rating: true },
     });
@@ -149,15 +186,15 @@ export class ReviewsService {
   async findAllForAdmin(params: {
     page?: number;
     limit?: number;
-    approved?: boolean;
+    moderationStatus?: ReviewModerationStatus;
     search?: string;
   }) {
-    const { page = 1, limit = 20, approved, search } = params;
+    const { page = 1, limit = 20, moderationStatus, search } = params;
     const skip = (page - 1) * limit;
     const where: Record<string, unknown> = {};
 
-    if (approved !== undefined) {
-      where.approved = approved;
+    if (moderationStatus) {
+      where.moderationStatus = moderationStatus;
     }
     if (search) {
       where.OR = [
@@ -185,14 +222,19 @@ export class ReviewsService {
     return { items, total, page, limit };
   }
 
-  async approveReview(reviewId: string) {
+  async approveReview(reviewId: string, adminUserId?: string) {
     const review = await this.prisma.review.findUnique({ where: { id: reviewId } });
     if (!review) throw new NotFoundException('Review not found');
-    if (review.approved) return review;
+    if (review.moderationStatus === 'APPROVED') return review;
 
     const updated = await this.prisma.review.update({
       where: { id: reviewId },
-      data: { approved: true },
+      data: {
+        moderationStatus: 'APPROVED',
+        moderatedAt: new Date(),
+        moderatedById: adminUserId ?? null,
+        moderationNote: null,
+      },
       include: {
         user: { select: { id: true, name: true } },
         product: { select: { id: true, name: true } },
@@ -200,22 +242,53 @@ export class ReviewsService {
     });
 
     await this.updateProductRating(review.productId);
+    await this.moderationAudit(reviewId, 'APPROVE', adminUserId, { productId: review.productId });
+
+    this.notifications
+      .notifyReviewModeration(updated.userId, updated.product.name, 'APPROVED', reviewId)
+      .catch(() => {});
+
     return updated;
   }
 
-  async rejectReview(reviewId: string) {
+  async rejectReview(reviewId: string, adminUserId?: string, reason?: string) {
     const review = await this.prisma.review.findUnique({
       where: { id: reviewId },
       include: { product: { select: { id: true, name: true } } },
     });
     if (!review) throw new NotFoundException('Review not found');
+    if (review.moderationStatus === 'REJECTED') return review;
 
-    await this.prisma.review.delete({ where: { id: reviewId } });
+    const note = (reason ?? '').trim() || null;
+
+    const updated = await this.prisma.review.update({
+      where: { id: reviewId },
+      data: {
+        moderationStatus: 'REJECTED',
+        moderatedAt: new Date(),
+        moderatedById: adminUserId ?? null,
+        moderationNote: note,
+      },
+      include: {
+        user: { select: { id: true, name: true } },
+        product: { select: { id: true, name: true } },
+      },
+    });
+
     await this.updateProductRating(review.productId);
-    return { deleted: true };
+    await this.moderationAudit(reviewId, 'REJECT', adminUserId, {
+      productId: review.productId,
+      reason: note,
+    });
+
+    this.notifications
+      .notifyReviewModeration(updated.userId, updated.product.name, 'REJECTED', reviewId, note || undefined)
+      .catch(() => {});
+
+    return updated;
   }
 
   async getPendingCount(): Promise<number> {
-    return this.prisma.review.count({ where: { approved: false } });
+    return this.prisma.review.count({ where: { moderationStatus: 'PENDING' } });
   }
 }

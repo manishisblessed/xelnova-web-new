@@ -49,6 +49,7 @@ export * as verificationApi from './verification';
 export * as storesApi from './stores';
 export * as businessApi from './business';
 export * as contactApi from './contact';
+export * as uploadApi from './upload';
 
 // Hooks
 export { AuthProvider, useAuth } from './hooks/use-auth';

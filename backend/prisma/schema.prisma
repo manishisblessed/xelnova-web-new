@@ -38,6 +38,38 @@ enum DiscountType {
   FLAT
 }
 
+enum ReturnRequestKind {
+  RETURN
+  REPLACEMENT
+}
+
+enum ReviewModerationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum CouponModerationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+/// Buyer-facing return policy preset chosen by admin at product approval (canonical merchandising label).
+enum ProductReturnPolicyPreset {
+  NON_RETURNABLE
+  EASY_RETURN_3_DAYS
+  EASY_RETURN_7_DAYS
+  REPLACEMENT_ONLY
+  RETURN_PLUS_REPLACEMENT
+}
+
+enum WarrantyDurationUnit {
+  DAYS
+  MONTHS
+  YEARS
+}
+
 enum AddressType {
   HOME
   OFFICE
@@ -503,6 +535,8 @@ model Product {
   id               String   @id @default(cuid())
   name             String
   slug             String   @unique
+  /// Platform-wide public product code, e.g. `XEL9045`. Assigned once at creation; immutable.
+  xelnovaProductId String?  @unique
   shortDescription String?
   description      String?
   price            Float
@@ -540,7 +574,9 @@ model Product {
   productDescription String? @db.Text // Detailed long-form product description
   safetyInfo         String? @db.Text // Safety and product resources information
   regulatoryInfo     String? @db.Text // BIS marking, certifications, etc.
-  warrantyInfo       String? // e.g., "1 Year Manufacturer Warranty"
+  warrantyInfo            String? // Display line, e.g. "Brand Warranty: 1 Year" (may be derived from structured fields)
+  warrantyDurationValue   Int? // e.g. 6 — optional structured warranty for approval UX
+  warrantyDurationUnit    WarrantyDurationUnit?
   deliveredBy        String? @default("Xelnova") // "Xelnova Delivered" or seller name
 
   isActive        Boolean       @default(false)
@@ -582,15 +618,34 @@ model Product {
    */
   bestSellersRank   Int?
 
-  // Shipping details
-  weight     Float? // Weight in kg
-  dimensions String? // Format: LxWxH in cm (e.g., "30x20x15")
+  // Shipping / logistics — package only (consumer sees product* fields below).
+  weight     Float? // Package weight in kg (legacy; mirrored from packageWeightKg when set)
+  dimensions String? // LxWxH cm string (legacy; mirrored from package dimensions when set)
+  /// Individual product measurements shown on the storefront (may differ from shipping package).
+  productLengthCm  Float?
+  productWidthCm   Float?
+  productHeightCm  Float?
+  productWeightKg  Float?
+  /// Measurements used for courier rate / booking (may exceed item size with dunnage).
+  packageLengthCm Float?
+  packageWidthCm  Float?
+  packageHeightCm Float?
+  packageWeightKg Float?
 
   // Return/Cancellation/Replacement policies
   isCancellable      Boolean @default(true) // Can be cancelled before shipping
   isReturnable       Boolean @default(true) // Can be returned after delivery
-  isReplaceable      Boolean @default(false) // Can be replaced (exchange)
+  isReplaceable      Boolean @default(false) // Can be replaced (exchange) — admin sets on approval
   returnWindow       Int     @default(7) // Return window in days after delivery
+  /// Canonical preset for storefront copy and eligibility (nullable = legacy products before presets).
+  returnPolicyPreset ProductReturnPolicyPreset?
+  /**
+   * Replacement window in days after delivery. Admin sets this on approval
+   * alongside `isReplaceable` (currently the admin picks between 2, 5, or 7
+   * days). NULL when the admin hasn't explicitly chosen a window yet — in
+   * that case the buyer-facing UI falls back to `returnWindow`.
+   */
+  replacementWindow  Int?
   cancellationWindow Int     @default(0) // Hours after order placement (0 = until shipped)
 
   /**
@@ -608,6 +663,7 @@ model Product {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@index([xelnovaProductId])
   @@index([categoryId])
   @@index([sellerId])
   @@index([isFeatured])
@@ -630,7 +686,11 @@ model Review {
   comment   String?
   images    String[]
   verified  Boolean  @default(false)
-  approved  Boolean  @default(false)
+  moderationStatus ReviewModerationStatus @default(PENDING)
+  moderatedAt      DateTime?
+  moderatedById    String?
+  moderationNote   String? // rejection reason or internal note
+
   helpful   Int      @default(0)
 
   createdAt DateTime @default(now())
@@ -638,7 +698,7 @@ model Review {
 
   @@index([productId])
   @@index([userId])
-  @@index([approved])
+  @@index([moderationStatus])
   @@map("reviews")
 }
 
@@ -692,6 +752,12 @@ model OrderItem {
   quantity     Int
   price        Float
   variant      String?
+  /// Resolved SKU for the ordered variant at checkout (immutable snapshot).
+  variantSku   String?
+  /// Primary gallery image for the ordered variant at checkout.
+  variantImage String?
+  /// Human-readable attributes at checkout, e.g. { "Color": "Green", "Size": "XL" }.
+  variantAttributes Json?
   // Tax/Invoice fields
   hsnCode      String?
   gstRate      Float?  @default(18)
@@ -718,7 +784,11 @@ model ReturnRequest {
   order        Order        @relation(fields: [orderId], references: [id])
   userId       String
   user         User         @relation(fields: [userId], references: [id])
+  kind         ReturnRequestKind @default(RETURN)
+  reasonCode   String?
   reason       String
+  description  String?
+  imageUrls    String[]     @default([])
   status       ReturnStatus @default(REQUESTED)
   adminNote    String?
   refundAmount Float?
@@ -783,6 +853,13 @@ model Coupon {
   isActive       Boolean      @default(true)
   usageLimit     Int?
   usedCount      Int          @default(0)
+  /// When set, each user can redeem this coupon at most N times (counts placed orders with this code).
+  maxRedemptionsPerUser Int?
+
+  moderationStatus CouponModerationStatus @default(APPROVED)
+  moderatedAt      DateTime?
+  moderatedById    String?
+  rejectionReason  String?
 
   scope      String  @default("global")
   categoryId String?
@@ -791,6 +868,7 @@ model Coupon {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@index([moderationStatus])
   @@map("coupons")
 }
 
@@ -902,6 +980,17 @@ model CmsPage {
   updatedAt DateTime @updatedAt
 
   @@map("cms_pages")
+}
+
+/// Marketing opt-ins captured from the consumer site footer (public subscribe endpoint).
+model NewsletterSubscriber {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  source    String   @default("web_footer")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("newsletter_subscribers")
 }
 
 // ─── Activity Log ───
@@ -1312,6 +1401,8 @@ model SiteSettings {
 enum TicketStatus {
   OPEN
   IN_PROGRESS
+  FORWARDED
+  SELLER_REPLIED
   RESOLVED
   CLOSED
 }
@@ -1335,6 +1426,7 @@ model Ticket {
   orderId          String?
   assignedSellerId String?
   assignedAdminId  String?
+  forwardedAt      DateTime?
 
   messages TicketMessage[]
 
@@ -1358,6 +1450,10 @@ model TicketMessage {
   message     String
   isInternal  Boolean @default(false)
   isForwarded Boolean @default(false)
+  /// When false, message is hidden from the customer portal (e.g. seller replies until relayed).
+  customerVisible Boolean @default(true)
+  /// When false, hidden from seller panel (reserved for future use).
+  sellerVisible   Boolean @default(true)
 
   createdAt DateTime @default(now())
 
@@ -1494,6 +1590,22 @@ model NotificationLog {
   @@map("notification_logs")
 }
 
+/// Lightweight audit trail for moderation actions (reviews, coupons, etc.).
+model ModerationAuditLog {
+  id          String   @id @default(cuid())
+  entityType  String
+  entityId    String
+  action      String
+  actorUserId String?
+  metadata    Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("moderation_audit_logs")
+}
+
 // ─── Feature Flags ───
 
 model FeatureFlag {
@@ -1510,4 +1622,12 @@ model FeatureFlag {
 
   @@index([key])
   @@map("feature_flags")
+}
+
+/// Monotonic sequence for `Product.xelnovaProductId` (`XEL` + number).
+model ProductPublicIdSeq {
+  id        Int @id @default(1)
+  lastValue Int @default(9044)
+
+  @@map("product_public_id_seq")
 }

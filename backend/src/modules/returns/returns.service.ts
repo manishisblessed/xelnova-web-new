@@ -7,6 +7,12 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationService } from '../notifications/notification.service';
 import { WalletService } from '../wallet/wallet.service';
+import { CreateReturnDto } from './dto/return.dto';
+
+function daysBetween(from: Date, to: Date): number {
+  const ms = to.getTime() - from.getTime();
+  return Math.floor(ms / (24 * 60 * 60 * 1000));
+}
 
 @Injectable()
 export class ReturnsService {
@@ -20,10 +26,39 @@ export class ReturnsService {
 
   private static readonly RETURNABLE_STATUSES = ['DELIVERED'];
 
-  async create(userId: string, orderNumber: string, reason: string) {
+  async create(userId: string, dto: CreateReturnDto) {
+    const kind = dto.kind ?? 'RETURN';
+    const reasonCode = (dto.reasonCode?.trim() || 'OTHER').slice(0, 64);
+    const reasonDetail = dto.reason?.trim() || '';
+    const description = dto.description?.trim() || null;
+    const imageUrls = (dto.imageUrls ?? []).filter((u) => typeof u === 'string' && u.trim()).slice(0, 5);
+
+    if (!reasonDetail && reasonCode === 'OTHER' && !description) {
+      throw new BadRequestException('Please select a reason or add a short description');
+    }
+
+    const composedReason =
+      reasonDetail ||
+      (description ? `${reasonCode}: ${description}` : reasonCode);
+
     const order = await this.prisma.order.findUnique({
-      where: { orderNumber },
-      include: { items: true },
+      where: { orderNumber: dto.orderNumber },
+      include: {
+        items: {
+          include: {
+            product: {
+              select: {
+                isReturnable: true,
+                isReplaceable: true,
+                returnWindow: true,
+                replacementWindow: true,
+                returnPolicyPreset: true,
+              },
+            },
+          },
+        },
+        shipment: true,
+      },
     });
 
     if (!order || order.userId !== userId) {
@@ -36,12 +71,68 @@ export class ReturnsService {
       );
     }
 
+    if (order.items.some((i) => i.product?.returnPolicyPreset === 'NON_RETURNABLE')) {
+      throw new BadRequestException('This order includes a non-returnable product');
+    }
+
+    if (
+      kind === 'RETURN' &&
+      order.items.some((i) => i.product?.returnPolicyPreset === 'REPLACEMENT_ONLY')
+    ) {
+      throw new BadRequestException(
+        'One or more items only support replacement — choose replacement instead of return.',
+      );
+    }
+
+    const deliveredAt =
+      order.shipment?.deliveredAt ??
+      (order.status === 'DELIVERED' ? order.updatedAt : null);
+    if (!deliveredAt) {
+      throw new BadRequestException(
+        'Delivery date is not on record yet. Please try again in a few hours.',
+      );
+    }
+
+    const now = new Date();
+    const daysSinceDelivery = daysBetween(deliveredAt, now);
+
+    if (kind === 'REPLACEMENT') {
+      if (!order.items.every((i) => i.product?.isReplaceable)) {
+        throw new BadRequestException(
+          'One or more items in this order are not eligible for replacement',
+        );
+      }
+      const windows = order.items.map((i) => {
+        const p = i.product;
+        return p?.replacementWindow ?? p?.returnWindow ?? 7;
+      });
+      const allowed = Math.min(...windows);
+      if (daysSinceDelivery > allowed) {
+        throw new BadRequestException(
+          `Replacement window ended (${allowed} days from delivery)`,
+        );
+      }
+    } else {
+      if (!order.items.every((i) => i.product?.isReturnable !== false)) {
+        throw new BadRequestException(
+          'One or more items in this order are not eligible for return',
+        );
+      }
+      const windows = order.items.map((i) => i.product?.returnWindow ?? 7);
+      const allowed = Math.min(...windows);
+      if (daysSinceDelivery > allowed) {
+        throw new BadRequestException(
+          `Return window ended (${allowed} days from delivery)`,
+        );
+      }
+    }
+
     const existing = await this.prisma.returnRequest.findFirst({
       where: { orderId: order.id, status: { notIn: ['REJECTED'] } },
     });
     if (existing) {
       throw new BadRequestException(
-        'A return request already exists for this order',
+        'A return or replacement request already exists for this order',
       );
     }
 
@@ -49,8 +140,12 @@ export class ReturnsService {
       data: {
         orderId: order.id,
         userId,
-        reason,
-        refundAmount: order.total,
+        kind,
+        reasonCode,
+        reason: composedReason,
+        description,
+        imageUrls,
+        refundAmount: kind === 'RETURN' ? order.total : null,
       },
       include: {
         order: {
@@ -62,14 +157,54 @@ export class ReturnsService {
     this.notificationService
       .notifyAllAdmins({
         type: 'ADMIN_RETURN_REQUESTED',
-        title: 'New return request',
-        body: `Return requested for order #${created.order.orderNumber}.`,
+        title: kind === 'REPLACEMENT' ? 'New replacement request' : 'New return request',
+        body: `${kind === 'REPLACEMENT' ? 'Replacement' : 'Return'} requested for order #${created.order.orderNumber}.`,
         data: {
           returnRequestId: created.id,
           orderNumber: created.order.orderNumber,
+          kind,
         },
       })
       .catch(() => {});
+
+    const products = await this.prisma.product.findMany({
+      where: { id: { in: order.items.map((x) => x.productId) } },
+      select: { id: true, sellerId: true },
+    });
+    const sellerIds = [...new Set(products.map((p) => p.sellerId).filter(Boolean))] as string[];
+    for (const sellerProfileId of sellerIds) {
+      const profile = await this.prisma.sellerProfile.findUnique({
+        where: { id: sellerProfileId },
+        select: { userId: true, storeName: true },
+      });
+      if (profile?.userId) {
+        this.notificationService
+          .notifySellerReturnRequested(
+            profile.userId,
+            created.order.orderNumber,
+            kind,
+            reasonCode,
+          )
+          .catch(() => {});
+      }
+    }
+
+    if (order.shipment) {
+      const history = [...((order.shipment.statusHistory as object[]) || [])];
+      history.push({
+        status: order.shipment.shipmentStatus,
+        timestamp: new Date().toISOString(),
+        remark:
+          kind === 'REPLACEMENT'
+            ? `Buyer requested replacement (${reasonCode})`
+            : `Buyer requested return (${reasonCode})`,
+        source: 'return_request',
+      });
+      await this.prisma.shipment.update({
+        where: { id: order.shipment.id },
+        data: { statusHistory: history as object[] },
+      });
+    }
 
     return created;
   }
@@ -148,19 +283,20 @@ export class ReturnsService {
         data: { status: 'REFUNDED', paymentStatus: 'REFUNDED' },
       });
 
-      // Process refund to customer wallet
-      const actualRefundAmount = refundAmount ?? Number(request.refundAmount) ?? Number(request.order.total);
-      if (actualRefundAmount > 0) {
-        try {
-          await this.walletService.refundToWallet(
-            request.userId,
-            actualRefundAmount,
-            request.order.orderNumber,
-            'Return approved - refund processed',
-          );
-          this.logger.log(`Refund of ₹${actualRefundAmount} processed for return ${id}`);
-        } catch (err) {
-          this.logger.error(`Failed to process refund for return ${id}: ${err.message}`);
+      if (request.kind === 'RETURN') {
+        const actualRefundAmount = refundAmount ?? Number(request.refundAmount) ?? Number(request.order.total);
+        if (actualRefundAmount > 0) {
+          try {
+            await this.walletService.refundToWallet(
+              request.userId,
+              actualRefundAmount,
+              request.order.orderNumber,
+              'Return approved - refund processed',
+            );
+            this.logger.log(`Refund of ₹${actualRefundAmount} processed for return ${id}`);
+          } catch (err) {
+            this.logger.error(`Failed to process refund for return ${id}: ${err.message}`);
+          }
         }
       }
     }
@@ -176,6 +312,11 @@ export class ReturnsService {
     });
 
     const orderNumber = request.order.orderNumber;
+
+    if (status === 'APPROVED') {
+      await this.autoScheduleReversePickup(id, request.userId, orderNumber, request.kind);
+    }
+
     try {
       if (status === 'APPROVED') {
         this.notificationService.notifyReturnApproved(request.userId, orderNumber).catch(() => {});
@@ -183,12 +324,84 @@ export class ReturnsService {
         this.notificationService.notifyReturnRejected(request.userId, orderNumber, adminNote || 'No reason provided').catch(() => {});
       } else if (status === 'REFUNDED') {
         this.notificationService.notifyRefundProcessed(request.userId, orderNumber, Number(updated.refundAmount || request.order.total)).catch(() => {});
+      } else if (status === 'PICKED_UP') {
+        this.notificationService
+          .notifyReturnRequestUpdate(request.userId, orderNumber, 'Item picked up for return')
+          .catch(() => {});
+      } else {
+        this.notificationService
+          .notifyReturnRequestUpdate(request.userId, orderNumber, `Status: ${status}`)
+          .catch(() => {});
       }
     } catch (err) {
       this.logger.warn(`Failed to send return notification: ${err}`);
     }
 
     return updated;
+  }
+
+  /**
+   * Books a placeholder reverse pickup slot — couriers assign AWB via ops / admin when integrated.
+   */
+  private async autoScheduleReversePickup(
+    returnId: string,
+    userId: string,
+    orderNumber: string,
+    kind: string,
+  ) {
+    const pickupAt = new Date();
+    pickupAt.setDate(pickupAt.getDate() + 1);
+
+    await this.prisma.returnRequest.update({
+      where: { id: returnId },
+      data: {
+        reverseCourier: 'Xelnova Reverse Logistics',
+        reversePickupScheduled: pickupAt,
+      },
+    });
+
+    const dateLabel = pickupAt.toISOString().split('T')[0];
+    this.notificationService
+      .notifyReturnPickupScheduled(userId, orderNumber, dateLabel)
+      .catch(() => {});
+
+    const order = await this.prisma.order.findUnique({
+      where: { orderNumber },
+      include: { shipment: true, items: true },
+    });
+    if (order?.shipment) {
+      const history = [...((order.shipment.statusHistory as object[]) || [])];
+      history.push({
+        status: order.shipment.shipmentStatus,
+        timestamp: new Date().toISOString(),
+        remark:
+          kind === 'REPLACEMENT'
+            ? `Reverse pickup scheduled (replacement) — ${dateLabel}`
+            : `Reverse pickup scheduled (return) — ${dateLabel}`,
+        source: 'auto_pickup',
+      });
+      await this.prisma.shipment.update({
+        where: { id: order.shipment.id },
+        data: { statusHistory: history as object[] },
+      });
+    }
+
+    const products = await this.prisma.product.findMany({
+      where: { id: { in: order?.items.map((i) => i.productId) ?? [] } },
+      select: { sellerId: true },
+    });
+    const sellerIds = [...new Set(products.map((p) => p.sellerId).filter(Boolean))] as string[];
+    for (const sid of sellerIds) {
+      const profile = await this.prisma.sellerProfile.findUnique({
+        where: { id: sid },
+        select: { userId: true },
+      });
+      if (profile?.userId) {
+        this.notificationService
+          .notifySellerReversePickupScheduled(profile.userId, orderNumber, dateLabel)
+          .catch(() => {});
+      }
+    }
   }
 
   async scheduleReversePickup(
@@ -218,10 +431,13 @@ export class ReturnsService {
       },
     });
 
-    this.notificationService.notifyReturnPickupScheduled(
-      request.userId, updated.order.orderNumber,
-      (pickupDate || new Date().toISOString()).split('T')[0],
-    ).catch(() => {});
+    this.notificationService
+      .notifyReturnPickupScheduled(
+        request.userId,
+        updated.order.orderNumber,
+        (pickupDate || new Date().toISOString()).split('T')[0],
+      )
+      .catch(() => {});
 
     return updated;
   }

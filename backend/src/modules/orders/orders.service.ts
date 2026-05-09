@@ -7,9 +7,23 @@ import { AbandonedCartService } from '../notifications/abandoned-cart.service';
 import { LoyaltyService } from '../notifications/loyalty.service';
 import { WalletService } from '../wallet/wallet.service';
 import { PaymentService } from '../payment/payment.service';
-import { CreateOrderDto } from './dto/order.dto';
+import { CreateOrderDto, OrderItemDto, CheckoutQuoteDto } from './dto/order.dto';
 import { resolveVariantPrice } from '../../common/helpers/variant-price';
+import {
+  type VariantGroup,
+  type VariantOption,
+  buildVariantLineSnapshot,
+  findMatchingOption,
+  optionMatchesVariantToken,
+  parseVariantTokens,
+} from '../../common/helpers/variant-selection';
+import {
+  type CouponScopeLine,
+  discountFromCoupon,
+  eligibleSubtotalForCoupon,
+} from '../../common/helpers/coupon-order';
 import { gstAmountFromInclusive } from '@xelnova/utils';
+import { buildCancellationNotifyParams } from '../../common/helpers/order-cancel-notify';
 
 import { OrderStatus } from '@prisma/client';
 
@@ -30,19 +44,6 @@ export function isValidOrderTransition(from: string, to: string): boolean {
   return VALID_ORDER_TRANSITIONS[from]?.includes(to) ?? false;
 }
 
-interface VariantOption {
-  value: string;
-  price?: number;
-  stock?: number;
-  [key: string]: unknown;
-}
-
-interface VariantGroup {
-  type: string;
-  options: VariantOption[];
-  [key: string]: unknown;
-}
-
 /**
  * Check that the requested quantity does not exceed available stock.
  * If the variant option has its own `stock`, use that; otherwise fall back to product stock.
@@ -56,13 +57,11 @@ function checkVariantStock(
 ): void {
   let available = productStock;
   if (variantStr && Array.isArray(variants)) {
-    const parts = new Set(variantStr.split('-'));
+    const parts = parseVariantTokens(variantStr);
     for (const group of variants as VariantGroup[]) {
-      if (!Array.isArray(group?.options)) continue;
-      for (const opt of group.options) {
-        if (parts.has(opt.value) && typeof opt.stock === 'number') {
-          available = Math.min(available, opt.stock);
-        }
+      const opt = findMatchingOption(group, parts);
+      if (opt && typeof opt.stock === 'number') {
+        available = Math.min(available, opt.stock);
       }
     }
   }
@@ -92,8 +91,24 @@ export class OrdersService {
     return this.prisma.order.findMany({
       where: { userId },
       include: {
-        items: { include: { product: { select: { name: true, slug: true, images: true } } } },
+        items: {
+          include: {
+            product: {
+              select: {
+                name: true,
+                slug: true,
+                images: true,
+                xelnovaProductId: true,
+                isReturnable: true,
+                isReplaceable: true,
+                returnWindow: true,
+                replacementWindow: true,
+              },
+            },
+          },
+        },
         shippingAddress: true,
+        shipment: true,
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -103,12 +118,55 @@ export class OrdersService {
     const order = await this.prisma.order.findUnique({
       where: { orderNumber },
       include: {
-        items: { include: { product: { select: { name: true, slug: true, images: true } } } },
+        items: {
+          include: {
+            product: {
+              select: {
+                name: true,
+                slug: true,
+                images: true,
+                xelnovaProductId: true,
+                isReturnable: true,
+                isReplaceable: true,
+                returnWindow: true,
+                replacementWindow: true,
+              },
+            },
+          },
+        },
         shippingAddress: true,
+        shipment: true,
       },
     });
     if (!order || order.userId !== userId) return null;
     return order;
+  }
+
+  async quoteCheckout(userId: string, dto: CheckoutQuoteDto) {
+    const { inclusiveSubtotal, taxableSubtotal, scopeLines } = await this.buildOrderLineDraft(
+      dto.items,
+      { checkStock: false },
+    );
+
+    const { discount } = await this.validateCouponAndDiscount(
+      userId,
+      dto.couponCode,
+      inclusiveSubtotal,
+      scopeLines,
+    );
+
+    const shipping = await this.getShippingRate(inclusiveSubtotal);
+    const tax = Math.round(inclusiveSubtotal - taxableSubtotal);
+    const total = inclusiveSubtotal - discount + shipping;
+
+    return {
+      subtotal: inclusiveSubtotal,
+      discount,
+      shipping,
+      tax,
+      total,
+      couponCode: dto.couponCode?.trim() ? dto.couponCode.trim().toUpperCase() : null,
+    };
   }
 
   async create(userId: string, dto: CreateOrderDto) {
@@ -119,86 +177,25 @@ export class OrdersService {
       await this.upsertCustomerContact(userId, dto.customerName, dto.customerEmail);
     }
 
-    const productUpdates: Array<{
-      productId: string;
-      stockDelta: number;
-      variantValue?: string;
-      variants: unknown;
-    }> = [];
+    const { orderItems, productUpdates, inclusiveSubtotal, taxableSubtotal, scopeLines } =
+      await this.buildOrderLineDraft(dto.items, { checkStock: true });
 
-    const orderItems = await Promise.all(
-      dto.items.map(async (item) => {
-        const product = await this.prisma.product.findUnique({
-          where: { id: item.productId },
-        });
-        if (!product) {
-          throw new NotFoundException(`Product ${item.productId} not found`);
-        }
-
-        checkVariantStock(product.stock, product.variants, item.variant, item.quantity, product.name);
-
-        const variantPrice = resolveVariantPrice(product.variants, item.variant);
-        const price = variantPrice ?? product.price;
-
-        productUpdates.push({
-          productId: product.id,
-          stockDelta: item.quantity,
-          variantValue: item.variant,
-          variants: product.variants,
-        });
-
-        return {
-          productId: item.productId,
-          productName: product.name,
-          productImage: product.images[0] || '',
-          quantity: item.quantity,
-          price,
-          variant: item.variant,
-          gstRate: product.gstRate ?? 18,
-          hsnCode: product.hsnCode || null,
-          sellerId: product.sellerId,
-        };
-      }),
-    );
-
-    // Pricing contract (Apr 2026): `item.price` is already the GST-inclusive
-    // selling price (the seller-typed value). The line total a customer sees
-    // is just price × qty — no extra GST is added on top.
-    const inclusiveLineTotals = orderItems.map((item) => item.price * item.quantity);
-    const inclusiveSubtotal = inclusiveLineTotals.reduce((s, n) => s + n, 0);
-    // The GST portion is derived from the inclusive amount for the invoice
-    // and tax reports, so the customer total stays consistent.
-    const taxableSubtotal = orderItems.reduce(
-      (sum, item) =>
-        sum + (item.price - gstAmountFromInclusive(item.price, item.gstRate ?? null)) * item.quantity,
-      0,
-    );
-    // We persist the inclusive subtotal on the Order so total = subtotal − discount + shipping
-    // continues to balance on existing reports/UIs.
     const subtotal = inclusiveSubtotal;
 
-    let discount = 0;
-    if (dto.couponCode) {
-      const coupon = await this.prisma.coupon.findUnique({
-        where: { code: dto.couponCode.toUpperCase() },
-      });
-      if (coupon && coupon.isActive) {
-        if (coupon.usageLimit && coupon.usedCount >= coupon.usageLimit) {
-          // Coupon exhausted — skip silently
-        } else {
-          if (coupon.discountType === 'PERCENTAGE') {
-            discount = Math.min(
-              Math.round((inclusiveSubtotal * coupon.discountValue) / 100),
-              coupon.maxDiscount || Infinity,
-            );
-          } else {
-            discount = Math.min(coupon.discountValue, inclusiveSubtotal);
-          }
-          await this.prisma.coupon.update({
-            where: { id: coupon.id },
-            data: { usedCount: { increment: 1 } },
-          });
-        }
+    const { discount, appliedCode } = await this.validateCouponAndDiscount(
+      userId,
+      dto.couponCode,
+      inclusiveSubtotal,
+      scopeLines,
+    );
+
+    if (appliedCode) {
+      const couponRow = await this.prisma.coupon.findUnique({ where: { code: appliedCode } });
+      if (couponRow) {
+        await this.prisma.coupon.update({
+          where: { id: couponRow.id },
+          data: { usedCount: { increment: 1 } },
+        });
       }
     }
 
@@ -257,6 +254,9 @@ export class OrdersService {
       quantity: item.quantity,
       price: item.price,
       variant: item.variant,
+      variantSku: item.variantSku ?? null,
+      variantImage: item.variantImage ?? null,
+      variantAttributes: item.variantAttributes ?? undefined,
       hsnCode: item.hsnCode,
       gstRate: item.gstRate,
       sellerId: item.sellerId,
@@ -404,13 +404,20 @@ export class OrdersService {
       };
 
       if (upd.variantValue && Array.isArray(upd.variants)) {
-        const parts = new Set(upd.variantValue.split('-'));
+        const parts = parseVariantTokens(upd.variantValue);
         const updatedVariants = (upd.variants as VariantGroup[]).map((group) => {
           if (!Array.isArray(group.options)) return group;
           return {
             ...group,
             options: group.options.map((opt) => {
-              if (parts.has(opt.value) && typeof opt.stock === 'number') {
+              let matched = false;
+              for (const part of parts) {
+                if (optionMatchesVariantToken(opt, part)) {
+                  matched = true;
+                  break;
+                }
+              }
+              if (matched && typeof opt.stock === 'number') {
                 return { ...opt, stock: Math.max(0, opt.stock - upd.stockDelta) };
               }
               return opt;
@@ -738,12 +745,17 @@ export class OrdersService {
         paymentStatus: refundResult?.success ? 'REFUNDED' : order.paymentStatus,
       },
       include: {
-        items: { include: { product: { select: { name: true, slug: true, images: true } } } },
+        items: { include: { product: { select: { name: true, slug: true, images: true, xelnovaProductId: true } } } },
         shippingAddress: true,
       },
     });
 
-    this.notificationService.notifyOrderCancelled(userId, orderNumber, Number(updated.total) || 0).catch((err) =>
+    const cancelNotifyParams = buildCancellationNotifyParams(
+      order.paymentStatus,
+      refundResult,
+      Number(order.total) || 0,
+    );
+    this.notificationService.notifyOrderCancelled(userId, orderNumber, cancelNotifyParams).catch((err) =>
       this.logger.warn(`Failed to send order-cancelled notification: ${err.message}`),
     );
 
@@ -801,5 +813,193 @@ export class OrdersService {
     const freeShippingMin = Number(config?.freeShippingMin ?? 499);
     const defaultRate = Number(config?.defaultRate ?? 49);
     return subtotal >= freeShippingMin ? 0 : defaultRate;
+  }
+
+  private async buildOrderLineDraft(
+    items: OrderItemDto[],
+    options: { checkStock: boolean },
+  ): Promise<{
+    orderItems: Array<{
+      productId: string;
+      productName: string;
+      productImage: string;
+      quantity: number;
+      price: number;
+      variant?: string;
+      variantSku: string | null;
+      variantImage: string | null;
+      variantAttributes: Record<string, string> | null;
+      gstRate: number;
+      hsnCode: string | null;
+      sellerId: string | null;
+    }>;
+    productUpdates: Array<{
+      productId: string;
+      stockDelta: number;
+      variantValue?: string;
+      variants: unknown;
+    }>;
+    inclusiveSubtotal: number;
+    taxableSubtotal: number;
+    scopeLines: CouponScopeLine[];
+  }> {
+    const productUpdates: Array<{
+      productId: string;
+      stockDelta: number;
+      variantValue?: string;
+      variants: unknown;
+    }> = [];
+
+    const orderItems = await Promise.all(
+      items.map(async (item) => {
+        const product = await this.prisma.product.findUnique({
+          where: { id: item.productId },
+        });
+        if (!product) {
+          throw new NotFoundException(`Product ${item.productId} not found`);
+        }
+
+        if (options.checkStock) {
+          checkVariantStock(product.stock, product.variants, item.variant, item.quantity, product.name);
+        }
+
+        const variantPrice = resolveVariantPrice(product.variants, item.variant);
+        const price = variantPrice ?? product.price;
+
+        const snap = buildVariantLineSnapshot(
+          product.variants,
+          item.variant,
+          product.images[0] || null,
+        );
+
+        productUpdates.push({
+          productId: product.id,
+          stockDelta: item.quantity,
+          variantValue: item.variant,
+          variants: product.variants,
+        });
+
+        return {
+          productId: item.productId,
+          productName: product.name,
+          productImage: snap.productImage || product.images[0] || '',
+          quantity: item.quantity,
+          price,
+          variant: item.variant,
+          variantSku: snap.variantSku,
+          variantImage: item.variant ? snap.productImage : null,
+          variantAttributes:
+            Object.keys(snap.variantAttributes).length > 0 ? snap.variantAttributes : null,
+          gstRate: product.gstRate ?? 18,
+          hsnCode: product.hsnCode || null,
+          sellerId: product.sellerId,
+          categoryId: product.categoryId,
+        };
+      }),
+    );
+
+    const scopeLines: CouponScopeLine[] = orderItems.map((row) => ({
+      price: row.price,
+      quantity: row.quantity,
+      categoryId: row.categoryId,
+      sellerId: row.sellerId || '',
+    }));
+
+    const inclusiveSubtotal = orderItems.reduce((s, it) => s + it.price * it.quantity, 0);
+    const taxableSubtotal = orderItems.reduce(
+      (sum, item) =>
+        sum + (item.price - gstAmountFromInclusive(item.price, item.gstRate ?? null)) * item.quantity,
+      0,
+    );
+
+    const stripped = orderItems.map(
+      ({
+        productId,
+        productName,
+        productImage,
+        quantity,
+        price,
+        variant,
+        variantSku,
+        variantImage,
+        variantAttributes,
+        gstRate,
+        hsnCode,
+        sellerId,
+      }) => ({
+        productId,
+        productName,
+        productImage,
+        quantity,
+        price,
+        variant,
+        variantSku,
+        variantImage,
+        variantAttributes,
+        gstRate,
+        hsnCode,
+        sellerId,
+      }),
+    );
+
+    return {
+      orderItems: stripped,
+      productUpdates,
+      inclusiveSubtotal,
+      taxableSubtotal,
+      scopeLines,
+    };
+  }
+
+  private async validateCouponAndDiscount(
+    userId: string,
+    couponCode: string | undefined,
+    inclusiveSubtotal: number,
+    scopeLines: CouponScopeLine[],
+  ): Promise<{ discount: number; appliedCode?: string }> {
+    const raw = couponCode?.trim();
+    if (!raw) {
+      return { discount: 0 };
+    }
+
+    const coupon = await this.prisma.coupon.findUnique({
+      where: { code: raw.toUpperCase() },
+    });
+    if (!coupon || !coupon.isActive || coupon.moderationStatus !== 'APPROVED') {
+      throw new BadRequestException('Invalid or inactive coupon code');
+    }
+    if (coupon.validUntil && coupon.validUntil < new Date()) {
+      throw new BadRequestException('Coupon has expired');
+    }
+    if (coupon.usageLimit != null && coupon.usedCount >= coupon.usageLimit) {
+      throw new BadRequestException('Coupon usage limit reached');
+    }
+    if (coupon.maxRedemptionsPerUser != null) {
+      const priorUses = await this.prisma.order.count({
+        where: {
+          userId,
+          couponCode: coupon.code,
+          status: { not: 'CANCELLED' },
+        },
+      });
+      if (priorUses >= coupon.maxRedemptionsPerUser) {
+        throw new BadRequestException('You have already used this coupon the maximum number of times');
+      }
+    }
+
+    const eligible = eligibleSubtotalForCoupon(coupon, scopeLines);
+    if ((coupon.scope === 'category' && coupon.categoryId) || (coupon.scope === 'seller' && coupon.sellerId)) {
+      if (eligible <= 0) {
+        throw new BadRequestException('No items in your order match this coupon');
+      }
+    }
+    if (eligible < coupon.minOrderAmount) {
+      throw new BadRequestException(
+        `Minimum order amount of ₹${coupon.minOrderAmount} required for this coupon (eligible amount: ₹${Math.round(eligible)})`,
+      );
+    }
+
+    const discount = discountFromCoupon(coupon, eligible);
+    return { discount, appliedCode: coupon.code };
   }
 }

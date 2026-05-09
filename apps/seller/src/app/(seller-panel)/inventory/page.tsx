@@ -168,6 +168,9 @@ interface SellerProduct {
   brand?: string | null;
   createdAt: string;
   rejectionReason?: string | null;
+  xelnovaProductId?: string | null;
+  hasPendingChanges?: boolean;
+  pendingChangesData?: Record<string, unknown> | null;
 }
 
 /**
@@ -448,6 +451,39 @@ function keyValueArrayToObject(arr: { key: string; value: string }[]): Record<st
   );
   if (filtered.length === 0) return undefined;
   return Object.fromEntries(filtered.map((item) => [item.key.trim(), item.value.trim()]));
+}
+
+function specificationsToFormRows(raw: unknown): { id: string; key: string; value: string }[] {
+  const mkId = () => `sp-${Math.random().toString(36).slice(2, 11)}`;
+  if (!raw) return [];
+  if (Array.isArray(raw)) {
+    return raw
+      .filter((r) => r && typeof r === 'object')
+      .map((r) => {
+        const o = r as Record<string, unknown>;
+        return { id: mkId(), key: String(o.key ?? '').trim(), value: String(o.value ?? '').trim() };
+      })
+      .filter((r) => r.key || r.value);
+  }
+  if (typeof raw === 'object') {
+    return Object.entries(raw as Record<string, unknown>).map(([key, value]) => ({
+      id: mkId(),
+      key: String(key),
+      value: String(value ?? ''),
+    }));
+  }
+  return [];
+}
+
+function listingSpecsPayload(rows: { key: string; value: string }[]): { key: string; value: string }[] | undefined {
+  const out = rows
+    .map((r) => ({ key: r.key.trim(), value: r.value.trim() }))
+    .filter((r) => r.key && r.value);
+  return out.length ? out : undefined;
+}
+
+function hasListingSpecs(rows: { key: string; value: string }[]): boolean {
+  return rows.some((r) => r.key.trim() && r.value.trim());
 }
 
 /**
@@ -1801,111 +1837,124 @@ function PresetKeyValueEditor({ label, description, preset, items, onChange }: P
               Boolean(item.key && item.key !== CUSTOM_ATTRIBUTE_PENDING) && valueIsCustom;
 
             return (
-              <div key={index} className="flex flex-col sm:flex-row sm:items-start gap-2">
-                <div className="flex-1 min-w-0 space-y-1">
-                  <label className="text-[10px] text-text-muted">Attribute</label>
-                  <select
-                    value={keySelectValue}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      if (v === '') {
-                        setRow(index, { key: '', value: '' });
-                        return;
-                      }
-                      if (v === OTHER_KEY_TOKEN) {
-                        setRow(index, { key: CUSTOM_ATTRIBUTE_PENDING, value: '' });
-                        return;
-                      }
-                      // Don't auto-pick a value when the seller chooses an
-                      // attribute — they should pick it themselves. Picking
-                      // the first option used to silently land on
-                      // "Other (specify)" for keys whose only option was OTHER.
-                      setRow(index, { key: v, value: '' });
-                    }}
-                    className="w-full rounded-lg border border-border bg-surface-raised px-2 py-1.5 text-xs text-text-primary outline-none focus:border-primary-500"
-                  >
-                    <option value="">Select attribute…</option>
-                    {preset.keys.map((k) => (
-                      <option key={k} value={k}>
-                        {k}
-                      </option>
-                    ))}
-                    <option value={OTHER_KEY_TOKEN}>Custom attribute…</option>
-                  </select>
-                  {showKeyCustom && (
-                    <input
-                      type="text"
-                      value={keyIsPendingCustom ? '' : item.key}
+              <div key={index} className="flex flex-col gap-2">
+                <div className="flex flex-col sm:flex-row sm:items-start gap-2">
+                  <div className="flex-1 min-w-0 space-y-1">
+                    <label className="text-[10px] text-text-muted">Attribute</label>
+                    <select
+                      value={keySelectValue}
                       onChange={(e) => {
-                        // Preserve spaces as the seller types — we only trim on submit.
-                        const raw = e.target.value;
-                        const isBlank = raw.trim().length === 0;
-                        setRow(index, { key: isBlank ? CUSTOM_ATTRIBUTE_PENDING : raw, value: item.value });
+                        const v = e.target.value;
+                        if (v === '') {
+                          setRow(index, { key: '', value: '' });
+                          return;
+                        }
+                        if (v === OTHER_KEY_TOKEN) {
+                          setRow(index, { key: CUSTOM_ATTRIBUTE_PENDING, value: '' });
+                          return;
+                        }
+                        // Don't auto-pick a value when the seller chooses an
+                        // attribute — they should pick it themselves. Picking
+                        // the first option used to silently land on
+                        // "Other (specify)" for keys whose only option was OTHER.
+                        setRow(index, { key: v, value: '' });
                       }}
-                      placeholder="Type attribute name"
-                      className="w-full rounded-lg border border-dashed border-primary-300 bg-surface-raised px-2 py-1.5 text-xs text-text-primary outline-none focus:border-primary-500"
-                    />
-                  )}
-                </div>
-                <div className="flex-1 min-w-0 space-y-1">
-                  <label className="text-[10px] text-text-muted">Value</label>
-                  {!item.key || item.key === CUSTOM_ATTRIBUTE_PENDING ? (
-                    <p className="text-[10px] text-text-muted py-1.5">
-                      {item.key === CUSTOM_ATTRIBUTE_PENDING ? 'Name your custom attribute above, then pick a value' : 'Choose an attribute first'}
-                    </p>
-                  ) : (
-                    <>
-                      <select
-                        value={valueSelectValue}
+                      className="w-full rounded-lg border border-border bg-surface-raised px-2 py-1.5 text-xs text-text-primary outline-none focus:border-primary-500"
+                    >
+                      <option value="">Select attribute…</option>
+                      {preset.keys.map((k) => (
+                        <option key={k} value={k}>
+                          {k}
+                        </option>
+                      ))}
+                      <option value={OTHER_KEY_TOKEN}>Custom attribute…</option>
+                    </select>
+                    {showKeyCustom && (
+                      <input
+                        type="text"
+                        value={keyIsPendingCustom ? '' : item.key}
                         onChange={(e) => {
-                          const v = e.target.value;
-                          if (v === '') {
-                            setRow(index, { ...item, value: '' });
-                            return;
-                          }
-                          // Both the dedicated "Custom value…" option and the
-                          // legacy "Other (specify)" preset value should drop
-                          // the seller into a free-form input.
-                          if (v === OTHER_VALUE_TOKEN || v === OTHER_VALUE_LABEL) {
-                            setRow(index, { ...item, value: CUSTOM_VALUE_PENDING });
-                            return;
-                          }
-                          setRow(index, { ...item, value: v });
+                          // Preserve spaces as the seller types — we only trim on submit.
+                          const raw = e.target.value;
+                          const isBlank = raw.trim().length === 0;
+                          setRow(index, { key: isBlank ? CUSTOM_ATTRIBUTE_PENDING : raw, value: item.value });
                         }}
-                        className="w-full rounded-lg border border-border bg-surface-raised px-2 py-1.5 text-xs text-text-primary outline-none focus:border-primary-500"
-                      >
-                        <option value="">Select value…</option>
-                        {valueOpts.map((v) => (
-                          <option key={v} value={v}>
-                            {v}
-                          </option>
-                        ))}
-                        <option value={OTHER_VALUE_TOKEN}>Custom value…</option>
-                      </select>
-                      {showValueCustom && (
-                        <input
-                          type="text"
-                          value={valueIsPendingCustom ? '' : item.value}
+                        placeholder="Type attribute name"
+                        className="w-full rounded-lg border border-dashed border-primary-300 bg-surface-raised px-2 py-1.5 text-xs text-text-primary outline-none focus:border-primary-500"
+                      />
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0 space-y-1">
+                    <label className="text-[10px] text-text-muted">Value</label>
+                    {!item.key || item.key === CUSTOM_ATTRIBUTE_PENDING ? (
+                      <p className="text-[10px] text-text-muted py-1.5">
+                        {item.key === CUSTOM_ATTRIBUTE_PENDING ? 'Name your custom attribute above, then pick a value' : 'Choose an attribute first'}
+                      </p>
+                    ) : (
+                      <>
+                        <select
+                          value={valueSelectValue}
                           onChange={(e) => {
-                            const raw = e.target.value;
-                            const isBlank = raw.trim().length === 0;
-                            setRow(index, { ...item, value: isBlank ? CUSTOM_VALUE_PENDING : raw });
+                            const v = e.target.value;
+                            if (v === '') {
+                              setRow(index, { ...item, value: '' });
+                              return;
+                            }
+                            // Both the dedicated "Custom value…" option and the
+                            // legacy "Other (specify)" preset value should drop
+                            // the seller into a free-form input.
+                            if (v === OTHER_VALUE_TOKEN || v === OTHER_VALUE_LABEL) {
+                              setRow(index, { ...item, value: CUSTOM_VALUE_PENDING });
+                              return;
+                            }
+                            setRow(index, { ...item, value: v });
                           }}
-                          placeholder="Type value"
-                          className="w-full rounded-lg border border-dashed border-primary-300 bg-surface-raised px-2 py-1.5 text-xs text-text-primary outline-none focus:border-primary-500"
-                        />
-                      )}
-                    </>
-                  )}
+                          className="w-full rounded-lg border border-border bg-surface-raised px-2 py-1.5 text-xs text-text-primary outline-none focus:border-primary-500"
+                        >
+                          <option value="">Select value…</option>
+                          {valueOpts.map((v) => (
+                            <option key={v} value={v}>
+                              {v}
+                            </option>
+                          ))}
+                          <option value={OTHER_VALUE_TOKEN}>Custom value…</option>
+                        </select>
+                        {showValueCustom && (
+                          <input
+                            type="text"
+                            value={valueIsPendingCustom ? '' : item.value}
+                            onChange={(e) => {
+                              const raw = e.target.value;
+                              const isBlank = raw.trim().length === 0;
+                              setRow(index, { ...item, value: isBlank ? CUSTOM_VALUE_PENDING : raw });
+                            }}
+                            placeholder="Type value"
+                            className="w-full rounded-lg border border-dashed border-primary-300 bg-surface-raised px-2 py-1.5 text-xs text-text-primary outline-none focus:border-primary-500"
+                          />
+                        )}
+                      </>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => removeItem(index)}
+                    className="rounded p-1.5 text-text-muted hover:text-danger-600 hover:bg-danger-50 self-end sm:self-center shrink-0"
+                    aria-label="Remove row"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => removeItem(index)}
-                  className="rounded p-1.5 text-text-muted hover:text-danger-600 hover:bg-danger-50 self-end sm:self-center shrink-0"
-                  aria-label="Remove row"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
+                {/* Add button for quick addition of next row */}
+                {index === items.length - 1 && (
+                  <button
+                    type="button"
+                    onClick={addItem}
+                    className="self-start inline-flex items-center gap-1.5 rounded-lg border border-dashed border-primary-300 bg-primary-50 px-3 py-1.5 text-xs font-medium text-primary-600 hover:bg-primary-100 hover:border-primary-400 transition-colors"
+                  >
+                    <Plus className="h-3 w-3" />
+                    Add custom attribute
+                  </button>
+                )}
               </div>
             );
           })}
@@ -1994,6 +2043,13 @@ export default function SellerInventoryPage() {
   useEffect(() => {
     setFormDimensions(composeDimensionsString(formDimL, formDimW, formDimH));
   }, [formDimL, formDimW, formDimH]);
+
+  const [formProductDimL, setFormProductDimL] = useState('');
+  const [formProductDimW, setFormProductDimW] = useState('');
+  const [formProductDimH, setFormProductDimH] = useState('');
+  const [formProductWeight, setFormProductWeight] = useState('');
+  const [formListingSpecs, setFormListingSpecs] = useState<{ id: string; key: string; value: string }[]>([]);
+  const [displayXelnovaId, setDisplayXelnovaId] = useState<string | null>(null);
 
   // Amazon-style product information
   const [formFeaturesAndSpecs, setFormFeaturesAndSpecs] = useState<{ key: string; value: string }[]>([]);
@@ -2112,6 +2168,11 @@ export default function SellerInventoryPage() {
       formLowStock,
       formWeight,
       formDimensions,
+      formProductDimL,
+      formProductDimW,
+      formProductDimH,
+      formProductWeight,
+      formListingSpecs,
       formFeaturesAndSpecs,
       formMaterialsAndCare,
       formItemDetails,
@@ -2125,7 +2186,9 @@ export default function SellerInventoryPage() {
       formName, formBrand, formPrice, formCompare, formStock, formSku, formCategoryId,
       formShort, formImages, formVariantRows, formMetaTitle, formMetaKeywords,
       formMetaDesc, formHsnCode, formGstRate, formBrandCertificate, formBrandAuthExtraUrls, formLowStock,
-      formWeight, formDimensions, formFeaturesAndSpecs, formMaterialsAndCare,
+      formWeight, formDimensions, formProductDimL, formProductDimW, formProductDimH, formProductWeight,
+      formListingSpecs,
+      formFeaturesAndSpecs, formMaterialsAndCare,
       formItemDetails, formAdditionalDetails, formProductDescription,
       formSafetyInfo, formRegulatoryInfo, formWarrantyInfo,
     ],
@@ -2193,6 +2256,18 @@ export default function SellerInventoryPage() {
       setFormDimL(dimParts.l);
       setFormDimW(dimParts.w);
       setFormDimH(dimParts.h);
+      setFormProductDimL(get('formProductDimL', ''));
+      setFormProductDimW(get('formProductDimW', ''));
+      setFormProductDimH(get('formProductDimH', ''));
+      setFormProductWeight(get('formProductWeight', ''));
+      const specDraft = get<{ key: string; value: string }[]>('formListingSpecs', []);
+      setFormListingSpecs(
+        specDraft.map((r, i) => ({
+          id: `dr-${i}-${r.key}`,
+          key: String(r.key ?? ''),
+          value: String(r.value ?? ''),
+        })),
+      );
       setFormFeaturesAndSpecs(get<{ key: string; value: string }[]>('formFeaturesAndSpecs', []));
       setFormMaterialsAndCare(get<{ key: string; value: string }[]>('formMaterialsAndCare', []));
       setFormItemDetails(get<{ key: string; value: string }[]>('formItemDetails', []));
@@ -2303,6 +2378,12 @@ export default function SellerInventoryPage() {
     setFormDimL('');
     setFormDimW('');
     setFormDimH('');
+    setFormProductDimL('');
+    setFormProductDimW('');
+    setFormProductDimH('');
+    setFormProductWeight('');
+    setFormListingSpecs([]);
+    setDisplayXelnovaId(null);
     setFormFeaturesAndSpecs([]);
     setFormMaterialsAndCare([]);
     setFormItemDetails([]);
@@ -2335,6 +2416,7 @@ export default function SellerInventoryPage() {
     setFormVideoPublicId('');
     setFormVariantRows([]);
     setEditLoading(true);
+    setDisplayXelnovaId(p.xelnovaProductId?.trim() || null);
     apiGetProduct(p.id)
       .then((fullUnknown) => {
         const full = fullUnknown as Record<string, unknown>;
@@ -2358,13 +2440,65 @@ export default function SellerInventoryPage() {
         setFormHsnCode(String(full.hsnCode ?? ''));
         setFormBrand(String(full.brand ?? ''));
         setFormLowStock(String(full.lowStockThreshold ?? '5'));
-        setFormWeight(full.weight != null ? String(full.weight) : '');
-        const dimRaw = String(full.dimensions ?? '');
-        setFormDimensions(dimRaw);
-        const parts = parseDimensionsString(dimRaw);
-        setFormDimL(parts.l);
-        setFormDimW(parts.w);
-        setFormDimH(parts.h);
+        setDisplayXelnovaId(
+          typeof full.xelnovaProductId === 'string' && full.xelnovaProductId.trim()
+            ? full.xelnovaProductId.trim()
+            : null,
+        );
+
+        const pkgL =
+          full.packageLengthCm != null && full.packageLengthCm !== ''
+            ? String(full.packageLengthCm)
+            : '';
+        const pkgW =
+          full.packageWidthCm != null && full.packageWidthCm !== ''
+            ? String(full.packageWidthCm)
+            : '';
+        const pkgH =
+          full.packageHeightCm != null && full.packageHeightCm !== ''
+            ? String(full.packageHeightCm)
+            : '';
+        if (pkgL || pkgW || pkgH) {
+          setFormDimL(pkgL);
+          setFormDimW(pkgW);
+          setFormDimH(pkgH);
+        } else {
+          const dimRaw = String(full.dimensions ?? '');
+          setFormDimensions(dimRaw);
+          const parts = parseDimensionsString(dimRaw);
+          setFormDimL(parts.l);
+          setFormDimW(parts.w);
+          setFormDimH(parts.h);
+        }
+
+        const pkgWgt =
+          full.packageWeightKg != null && full.packageWeightKg !== ''
+            ? String(full.packageWeightKg)
+            : '';
+        setFormWeight(pkgWgt || (full.weight != null ? String(full.weight) : ''));
+
+        setFormProductDimL(
+          full.productLengthCm != null && full.productLengthCm !== ''
+            ? String(full.productLengthCm)
+            : '',
+        );
+        setFormProductDimW(
+          full.productWidthCm != null && full.productWidthCm !== ''
+            ? String(full.productWidthCm)
+            : '',
+        );
+        setFormProductDimH(
+          full.productHeightCm != null && full.productHeightCm !== ''
+            ? String(full.productHeightCm)
+            : '',
+        );
+        setFormProductWeight(
+          full.productWeightKg != null && full.productWeightKg !== ''
+            ? String(full.productWeightKg)
+            : '',
+        );
+
+        setFormListingSpecs(specificationsToFormRows(full.specifications));
         // Amazon-style product information
         setFormFeaturesAndSpecs(objectToKeyValueArray(full.featuresAndSpecs as Record<string, string> | null));
         setFormMaterialsAndCare(objectToKeyValueArray(full.materialsAndCare as Record<string, string> | null));
@@ -2727,6 +2861,7 @@ export default function SellerInventoryPage() {
       return;
     }
     const hasProductInfo =
+      hasListingSpecs(formListingSpecs) ||
       Boolean(keyValueArrayToObject(formFeaturesAndSpecs)) ||
       Boolean(keyValueArrayToObject(formMaterialsAndCare)) ||
       Boolean(keyValueArrayToObject(formItemDetails)) ||
@@ -2778,6 +2913,15 @@ export default function SellerInventoryPage() {
         lowStockThreshold: formLowStock ? Number(formLowStock) : undefined,
         weight: formWeight ? Number(formWeight) : undefined,
         dimensions: formDimensions.trim() || undefined,
+        productLengthCm: formProductDimL.trim() ? Number(formProductDimL) : undefined,
+        productWidthCm: formProductDimW.trim() ? Number(formProductDimW) : undefined,
+        productHeightCm: formProductDimH.trim() ? Number(formProductDimH) : undefined,
+        productWeightKg: formProductWeight.trim() ? Number(formProductWeight) : undefined,
+        packageLengthCm: formDimL.trim() ? Number(formDimL) : undefined,
+        packageWidthCm: formDimW.trim() ? Number(formDimW) : undefined,
+        packageHeightCm: formDimH.trim() ? Number(formDimH) : undefined,
+        packageWeightKg: formWeight.trim() ? Number(formWeight) : undefined,
+        specifications: listingSpecsPayload(formListingSpecs),
         featuresAndSpecs: keyValueArrayToObject(formFeaturesAndSpecs),
         materialsAndCare: keyValueArrayToObject(formMaterialsAndCare),
         itemDetails: keyValueArrayToObject(formItemDetails),
@@ -2835,6 +2979,7 @@ export default function SellerInventoryPage() {
       return;
     }
     const hasProductInfo =
+      hasListingSpecs(formListingSpecs) ||
       Boolean(keyValueArrayToObject(formFeaturesAndSpecs)) ||
       Boolean(keyValueArrayToObject(formMaterialsAndCare)) ||
       Boolean(keyValueArrayToObject(formItemDetails)) ||
@@ -2886,6 +3031,15 @@ export default function SellerInventoryPage() {
         lowStockThreshold: formLowStock ? Number(formLowStock) : undefined,
         weight: formWeight ? Number(formWeight) : undefined,
         dimensions: formDimensions.trim() || undefined,
+        productLengthCm: formProductDimL.trim() ? Number(formProductDimL) : undefined,
+        productWidthCm: formProductDimW.trim() ? Number(formProductDimW) : undefined,
+        productHeightCm: formProductDimH.trim() ? Number(formProductDimH) : undefined,
+        productWeightKg: formProductWeight.trim() ? Number(formProductWeight) : undefined,
+        packageLengthCm: formDimL.trim() ? Number(formDimL) : undefined,
+        packageWidthCm: formDimW.trim() ? Number(formDimW) : undefined,
+        packageHeightCm: formDimH.trim() ? Number(formDimH) : undefined,
+        packageWeightKg: formWeight.trim() ? Number(formWeight) : undefined,
+        specifications: listingSpecsPayload(formListingSpecs),
         featuresAndSpecs: keyValueArrayToObject(formFeaturesAndSpecs),
         materialsAndCare: keyValueArrayToObject(formMaterialsAndCare),
         itemDetails: keyValueArrayToObject(formItemDetails),
@@ -2895,7 +3049,12 @@ export default function SellerInventoryPage() {
         regulatoryInfo: formRegulatoryInfo.trim() || undefined,
         warrantyInfo: formWarrantyInfo.trim() || undefined,
       });
-      toast.success('Product updated');
+      const wasActive = editProduct.status === 'ACTIVE';
+      if (wasActive) {
+        toast.success('Changes submitted for admin approval. Your current listing stays live until approved.');
+      } else {
+        toast.success('Product updated');
+      }
       setEditProduct(null);
       resetForm();
       loadProducts();
@@ -3029,17 +3188,51 @@ export default function SellerInventoryPage() {
       },
     },
     {
+      key: 'xelnovaProductId',
+      header: 'Xel ID',
+      className: 'w-[92px] hidden md:table-cell',
+      render: (row) =>
+        row.xelnovaProductId ? (
+          <code className="text-[11px] font-mono text-text-secondary whitespace-nowrap">{row.xelnovaProductId}</code>
+        ) : (
+          <span className="text-[11px] text-text-muted">—</span>
+        ),
+    },
+    {
       key: 'price',
       header: 'Price',
       className: 'w-[100px]',
-      render: (row) => (
-        <div>
-          <p className="font-semibold text-text-primary">₹{Number(row.price).toLocaleString('en-IN')}</p>
-          {row.compareAtPrice != null && row.compareAtPrice > row.price && (
-            <p className="text-[11px] text-text-muted line-through">₹{Number(row.compareAtPrice).toLocaleString('en-IN')}</p>
-          )}
-        </div>
-      ),
+      render: (row) => {
+        const pendingPrice = row.hasPendingChanges && row.pendingChangesData?.price != null
+          ? Number(row.pendingChangesData.price)
+          : null;
+        const pendingMrp = row.hasPendingChanges && row.pendingChangesData?.compareAtPrice != null
+          ? Number(row.pendingChangesData.compareAtPrice)
+          : null;
+        return (
+          <div>
+            {pendingPrice != null ? (
+              <>
+                <p className="font-semibold text-warning-600" title="New price pending admin approval">
+                  ₹{pendingPrice.toLocaleString('en-IN')}
+                </p>
+                <p className="text-[11px] text-text-muted line-through">₹{Number(row.price).toLocaleString('en-IN')}</p>
+                <span className="text-[10px] text-warning-600">Pending approval</span>
+              </>
+            ) : (
+              <>
+                <p className="font-semibold text-text-primary">₹{Number(row.price).toLocaleString('en-IN')}</p>
+                {row.compareAtPrice != null && row.compareAtPrice > row.price && (
+                  <p className="text-[11px] text-text-muted line-through">₹{Number(row.compareAtPrice).toLocaleString('en-IN')}</p>
+                )}
+              </>
+            )}
+            {pendingMrp != null && pendingPrice == null && (
+              <p className="text-[11px] text-warning-600 italic">MRP pending</p>
+            )}
+          </div>
+        );
+      },
     },
     {
       key: 'stock',
@@ -3983,23 +4176,129 @@ export default function SellerInventoryPage() {
         <p className="mt-1 text-xs text-text-muted">Optional one-liner shown on the product card.</p>
       </div>
 
-      {/* Shipping Details */}
+      {/* Listing specifications (key/value, shown on the product page) */}
       <div className="border-t border-border pt-4 mt-4">
-        <p className="text-sm font-semibold text-text-primary mb-3">Shipping Details</p>
+        <p className="text-sm font-semibold text-text-primary mb-1">Listing specifications</p>
+        <p className="text-[11px] text-text-muted mb-3">
+          Optional attributes buyers see in the Specifications section (e.g. RAM, Color, Material).
+        </p>
+        <div className="space-y-2">
+          {formListingSpecs.map((row) => (
+            <div key={row.id} className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-end">
+              <div className="flex-1 min-w-0">
+                <label className="mb-1 block text-[11px] font-medium text-text-muted">Name</label>
+                <input
+                  type="text"
+                  value={row.key}
+                  onChange={(e) =>
+                    setFormListingSpecs((prev) =>
+                      prev.map((r) => (r.id === row.id ? { ...r, key: e.target.value } : r)),
+                    )
+                  }
+                  placeholder="e.g. RAM"
+                  className="w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-text-primary outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30"
+                />
+              </div>
+              <div className="flex-1 min-w-0">
+                <label className="mb-1 block text-[11px] font-medium text-text-muted">Value</label>
+                <input
+                  type="text"
+                  value={row.value}
+                  onChange={(e) =>
+                    setFormListingSpecs((prev) =>
+                      prev.map((r) => (r.id === row.id ? { ...r, value: e.target.value } : r)),
+                    )
+                  }
+                  placeholder="e.g. 8GB"
+                  className="w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-text-primary outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30"
+                />
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="shrink-0"
+                onClick={() => setFormListingSpecs((prev) => prev.filter((r) => r.id !== row.id))}
+              >
+                Remove
+              </Button>
+            </div>
+          ))}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() =>
+              setFormListingSpecs((prev) => [
+                ...prev,
+                { id: `sp-${Date.now()}`, key: '', value: '' },
+              ])
+            }
+          >
+            Add specification
+          </Button>
+        </div>
+      </div>
+
+      {/* Product dimensions (buyer-facing) */}
+      <div className="border-t border-border pt-4 mt-4">
+        <p className="text-sm font-semibold text-text-primary mb-1">Product dimensions</p>
+        <p className="text-[11px] text-text-muted mb-3">Physical item size and weight — shown to customers on the product page.</p>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          {[
+            { id: 'pdl', label: 'Length (cm)', value: formProductDimL, set: setFormProductDimL },
+            { id: 'pdw', label: 'Width (cm)', value: formProductDimW, set: setFormProductDimW },
+            { id: 'pdh', label: 'Height (cm)', value: formProductDimH, set: setFormProductDimH },
+          ].map(({ id, label, value, set }) => (
+            <div key={id}>
+              <label htmlFor={id} className="mb-1 block text-[11px] font-medium text-text-muted">
+                {label}
+              </label>
+              <input
+                id={id}
+                type="number"
+                step="0.1"
+                min="0"
+                value={value}
+                onChange={(e) => set(e.target.value)}
+                className="w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-text-primary outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30"
+              />
+            </div>
+          ))}
+          <div>
+            <label htmlFor="pdwt" className="mb-1 block text-[11px] font-medium text-text-muted">
+              Weight (kg)
+            </label>
+            <input
+              id="pdwt"
+              type="number"
+              step="0.01"
+              min="0"
+              value={formProductWeight}
+              onChange={(e) => setFormProductWeight(e.target.value)}
+              className="w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-text-primary outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Package dimensions (shipping — couriers & rate estimates) */}
+      <div className="border-t border-border pt-4 mt-4">
+        <p className="text-sm font-semibold text-text-primary mb-3">Package dimensions (shipping)</p>
         <Input
           stackedLabel
-          label="Weight (kg)"
+          label="Package weight (kg)"
           required
           type="number"
           step="0.01"
           min="0"
           value={formWeight}
           onChange={(e) => setFormWeight(e.target.value)}
-          hint="Package weight used for shipping calculations."
+          hint="Used when booking couriers and for shipping estimates. Can include packaging."
         />
         <div className="mt-3">
           <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-text-secondary">
-            Package dimensions (cm)
+            Package size (cm)
             <span className="ml-0.5 text-danger-500">*</span>
           </label>
           <div className="grid grid-cols-3 gap-2">
@@ -4025,7 +4324,7 @@ export default function SellerInventoryPage() {
             ))}
           </div>
           <p className="mt-1 text-xs text-text-muted">
-            Length × Width × Height in centimetres — used for shipping rate calculations.
+            Carton size sent to couriers — can be larger than the product itself.
           </p>
         </div>
       </div>
@@ -4360,8 +4659,13 @@ export default function SellerInventoryPage() {
 
       <Modal
         open={!!editProduct}
-        onClose={() => !saving && !editLoading && setEditProduct(null)}
-        title="Edit product"
+        onClose={() => {
+          if (!saving && !editLoading) {
+            setDisplayXelnovaId(null);
+            setEditProduct(null);
+          }
+        }}
+        title={displayXelnovaId ? `Edit product · ${displayXelnovaId}` : 'Edit product'}
         size="lg"
         className="max-w-5xl w-[95vw] max-h-[92vh] overflow-y-auto"
       >

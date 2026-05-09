@@ -65,6 +65,8 @@ interface Ticket {
 const statusConfig: Record<string, { icon: React.ElementType; color: string; bg: string; label: string }> = {
   OPEN: { icon: Clock, color: 'text-amber-700', bg: 'bg-amber-50', label: 'Open' },
   IN_PROGRESS: { icon: MessageSquare, color: 'text-blue-700', bg: 'bg-blue-50', label: 'In Progress' },
+  FORWARDED: { icon: Forward, color: 'text-violet-700', bg: 'bg-violet-50', label: 'Forwarded' },
+  SELLER_REPLIED: { icon: Store, color: 'text-teal-700', bg: 'bg-teal-50', label: 'Seller replied' },
   RESOLVED: { icon: CheckCircle, color: 'text-emerald-700', bg: 'bg-emerald-50', label: 'Resolved' },
   CLOSED: { icon: XCircle, color: 'text-gray-600', bg: 'bg-gray-100', label: 'Closed' },
 };
@@ -305,6 +307,8 @@ export default function AdminTicketsPage() {
               >
                 <option value="OPEN">Open</option>
                 <option value="IN_PROGRESS">In Progress</option>
+                <option value="FORWARDED">Forwarded</option>
+                <option value="SELLER_REPLIED">Seller replied</option>
                 <option value="RESOLVED">Resolved</option>
                 <option value="CLOSED">Closed</option>
               </select>
@@ -529,7 +533,7 @@ export default function AdminTicketsPage() {
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-lg font-semibold text-text-primary font-display">Support Tickets</h1>
         <div className="flex items-center gap-2">
-          {['', 'OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'].map((s) => (
+          {['', 'OPEN', 'IN_PROGRESS', 'FORWARDED', 'SELLER_REPLIED', 'RESOLVED', 'CLOSED'].map((s) => (
             <button
               key={s}
               onClick={() => setFilterStatus(s)}

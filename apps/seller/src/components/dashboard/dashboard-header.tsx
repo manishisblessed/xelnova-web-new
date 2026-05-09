@@ -1,9 +1,10 @@
 'use client';
 
+import { type ReactNode } from 'react';
 import { useSellerProfile } from '@/lib/seller-profile-context';
 import { CheckCircle } from 'lucide-react';
 
-export function DashboardHeader({ title, subtitle }: { title: string; subtitle?: string }) {
+export function DashboardHeader({ title, subtitle, actions }: { title: string; subtitle?: string; actions?: ReactNode }) {
   const { profile, isApproved } = useSellerProfile();
 
   const displayName = profile?.storeName || profile?.user?.name || 'Seller';
@@ -17,6 +18,7 @@ export function DashboardHeader({ title, subtitle }: { title: string; subtitle?:
           {subtitle ? <p className="text-xs sm:text-sm text-text-muted mt-0.5 line-clamp-2">{subtitle}</p> : null}
         </div>
         <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+          {actions}
           <div className="hidden sm:flex items-center gap-2">
             <span className="text-sm font-medium text-text-primary">{displayName}</span>
             {isApproved && (

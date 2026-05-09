@@ -70,6 +70,8 @@ export interface Product {
   id: string;
   name: string;
   slug: string;
+  /** Public listing code e.g. XEL9045 — immutable after creation */
+  xelnovaProductId?: string | null;
   shortDescription: string | null;
   description: string | null;
   price: number;
@@ -88,7 +90,18 @@ export interface Product {
   isFlashDeal: boolean;
   flashDealEndsAt: string | null;
   variants: any;
+  /** Key/value listing specs; may be an array of {key,value} or a legacy record */
   specifications: any;
+  /** Buyer-facing measurements */
+  productLengthCm?: number | null;
+  productWidthCm?: number | null;
+  productHeightCm?: number | null;
+  productWeightKg?: number | null;
+  /** Shipping / courier measurements */
+  packageLengthCm?: number | null;
+  packageWidthCm?: number | null;
+  packageHeightCm?: number | null;
+  packageWeightKg?: number | null;
   highlights: string[];
   tags: string[];
   isActive: boolean;
@@ -111,6 +124,12 @@ export interface Product {
   isReturnable?: boolean;
   isCancellable?: boolean;
   returnWindow?: number;
+  /**
+   * Replacement window in days (2 / 5 / 7) chosen by the admin at approval
+   * time. Null when the admin hasn't explicitly picked a window — buyer UI
+   * falls back to `returnWindow` in that case.
+   */
+  replacementWindow?: number | null;
 }
 
 // ─── Category ───
@@ -249,6 +268,9 @@ export interface OrderItem {
   quantity: number;
   price: number;
   variant: string | null;
+  variantSku?: string | null;
+  variantImage?: string | null;
+  variantAttributes?: Record<string, string> | null;
   /** HSN code for tax invoice */
   hsnCode?: string | null;
   /** GST rate applied to this item */
@@ -258,7 +280,7 @@ export interface OrderItem {
   /** Seller ID who fulfilled this item */
   sellerId?: string | null;
   /** Present when API includes nested product (e.g. some list/detail responses). */
-  product?: { name?: string; slug?: string; images?: string[] };
+  product?: { name?: string; slug?: string; images?: string[]; xelnovaProductId?: string | null };
 }
 
 export interface Order {
@@ -279,6 +301,23 @@ export interface Order {
   estimatedDelivery: string | null;
   createdAt: string;
   updatedAt?: string;
+  /** Present when backend includes courier row (order detail API). */
+  shipment?: OrderShipment | null;
+}
+
+/** Minimal shipment shape returned on customer order detail for tracking UX. */
+export interface OrderShipment {
+  id: string;
+  shippingMode: string;
+  courierProvider: string | null;
+  awbNumber: string | null;
+  trackingUrl: string | null;
+  labelUrl?: string | null;
+  shipmentStatus: string;
+  statusHistory?: Array<{ status: string; timestamp: string; location?: string; remark?: string }>;
+  createdAt: string;
+  deliveredAt?: string | null;
+  pickupDate?: string | null;
 }
 
 // ─── Address ───
@@ -332,4 +371,5 @@ export interface Coupon {
   maxDiscount: number | null;
   validUntil: string | null;
   isActive: boolean;
+  maxRedemptionsPerUser?: number | null;
 }

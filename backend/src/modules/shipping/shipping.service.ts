@@ -14,7 +14,7 @@ import {
   OrderStatus,
   SellerCourierConfig,
 } from '@prisma/client';
-import { CourierProvider, ShipmentDetails, RegisterWarehouseOptions } from './providers/courier-provider.interface';
+import { CourierProvider, ShipmentDetails, RegisterWarehouseOptions, RegisterWarehouseResult } from './providers/courier-provider.interface';
 import { DelhiveryProvider } from './providers/delhivery.provider';
 import { ShipRocketProvider } from './providers/shiprocket.provider';
 import { XpressBeesProvider } from './providers/xpressbees.provider';
@@ -28,6 +28,9 @@ import {
 import * as crypto from 'crypto';
 
 const ENCRYPTION_ALGORITHM = 'aes-256-cbc';
+
+// Type alias for the four external platform courier modes
+type PlatformCourierMode = 'DELHIVERY' | 'SHIPROCKET' | 'XPRESSBEES' | 'EKART';
 
 @Injectable()
 export class ShippingService {
@@ -109,52 +112,43 @@ export class ShippingService {
     }
   }
 
+  private makePlatformSyntheticCourierConfig(
+    provider: ShippingMode,
+    patch: Partial<SellerCourierConfig> & { apiKey: string },
+  ): SellerCourierConfig {
+    return {
+      id: `platform-${provider.toLowerCase()}`,
+      sellerId: 'platform',
+      provider,
+      apiSecret: null,
+      accountId: null,
+      warehouseId: null,
+      isActive: true,
+      metadata: {},
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      ...patch,
+    } as unknown as SellerCourierConfig;
+  }
+
   /**
-   * Resolve which carrier handles a "Ship with Xelnova" / Xelgo booking.
-   * Returns a synthetic SellerCourierConfig matching the provider so the
-   * rest of the booking pipeline can stay generic.
-   *
-   * Falls back to Delhivery env credentials only — other carriers must be
-   * fully configured by the admin via Settings.
+   * Build platform (admin) credentials for exactly one carrier (Delhivery
+   * / ShipRocket / XpressBees / Ekart). Returns null when that carrier's
+   * credentials are incomplete.
    */
-  private async resolveXelgoBackend(): Promise<
+  private async buildPlatformXelgoCourierConfig(
+    mode: PlatformCourierMode,
+  ): Promise<
     | {
-        mode: Extract<
-          ShippingMode,
-          'DELHIVERY' | 'SHIPROCKET' | 'XPRESSBEES' | 'EKART'
-        >;
+        mode: PlatformCourierMode;
         config: SellerCourierConfig;
         displayName: string;
       }
-    | { mode: 'unconfigured'; reason: string }
+    | null
   > {
     const pl = await this.getMergedPlatformLogistics();
-    const rawBackend = (pl.xelnovaBackend ?? 'delhivery') as XelnovaCourierBackend | 'stub';
-    // 'stub' is a legacy testing value — promote to delhivery.
-    const backend: XelnovaCourierBackend =
-      rawBackend === 'shiprocket' || rawBackend === 'xpressbees' || rawBackend === 'ekart'
-        ? rawBackend
-        : 'delhivery';
 
-    const synthetic = (
-      provider: ShippingMode,
-      patch: Partial<SellerCourierConfig> & { apiKey: string },
-    ): SellerCourierConfig =>
-      ({
-        id: `platform-${provider.toLowerCase()}`,
-        sellerId: 'platform',
-        provider,
-        apiSecret: null,
-        accountId: null,
-        warehouseId: null,
-        isActive: true,
-        metadata: {},
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        ...patch,
-      }) as unknown as SellerCourierConfig;
-
-    if (backend === 'delhivery') {
+    if (mode === ShippingMode.DELHIVERY) {
       const envToken =
         this.config.get<string>('DELHIVERY_API_TOKEN')?.trim() ||
         this.config.get<string>('DELHIVERY_TOKEN')?.trim() ||
@@ -164,13 +158,7 @@ export class ShippingService {
       const apiKey = this.safeDecrypt(pl.delhivery?.apiTokenEnc) || envToken;
       const clientName = pl.delhivery?.clientName?.trim() || envClient;
       const warehouseName = pl.delhivery?.warehouseName?.trim() || envWh;
-      if (!apiKey || !clientName || !warehouseName) {
-        return {
-          mode: 'unconfigured',
-          reason:
-            'Delhivery is the active Xelgo backend but the API token, client name, or warehouse name is missing in admin Settings.',
-        };
-      }
+      if (!apiKey || !clientName || !warehouseName) return null;
       const envDelhiveryEnv = this.config.get<string>('DELHIVERY_ENV')?.trim().toLowerCase();
       const delhiveryEnvironment =
         pl.delhivery?.environment === 'staging' || pl.delhivery?.environment === 'production'
@@ -191,7 +179,7 @@ export class ShippingService {
       return {
         mode: ShippingMode.DELHIVERY,
         displayName: 'Xelnova · Delhivery',
-        config: synthetic(ShippingMode.DELHIVERY, {
+        config: this.makePlatformSyntheticCourierConfig(ShippingMode.DELHIVERY, {
           apiKey,
           accountId: clientName,
           warehouseId: warehouseName,
@@ -200,85 +188,167 @@ export class ShippingService {
       };
     }
 
-    if (backend === 'shiprocket') {
-      const email = pl.shiprocket?.email?.trim() || '';
-      const password = this.safeDecrypt(pl.shiprocket?.passwordEnc);
-      if (!email || !password) {
-        return {
-          mode: 'unconfigured',
-          reason: 'ShipRocket is the active Xelgo backend but the API user email or password is missing.',
-        };
-      }
-      // ShipRocket provider expects accountId=email, apiKey=password.
+    if (mode === ShippingMode.SHIPROCKET) {
+      const email = pl.shiprocket?.email?.trim() || this.config.get<string>('SHIPROCKET_EMAIL')?.trim() || '';
+      const password = this.safeDecrypt(pl.shiprocket?.passwordEnc) || this.config.get<string>('SHIPROCKET_PASSWORD')?.trim() || '';
+      const pickupLocation = pl.shiprocket?.pickupLocation?.trim() || this.config.get<string>('SHIPROCKET_PICKUP_LOCATION')?.trim() || 'Primary';
+      if (!email || !password) return null;
       return {
         mode: ShippingMode.SHIPROCKET,
         displayName: 'Xelnova · ShipRocket',
-        config: synthetic(ShippingMode.SHIPROCKET, {
+        config: this.makePlatformSyntheticCourierConfig(ShippingMode.SHIPROCKET, {
           apiKey: password,
           accountId: email,
-          warehouseId: pl.shiprocket?.pickupLocation?.trim() || 'Primary',
+          warehouseId: pickupLocation,
         }),
       };
     }
 
-    if (backend === 'xpressbees') {
-      const email = pl.xpressbees?.email?.trim() || '';
-      const password = this.safeDecrypt(pl.xpressbees?.passwordEnc);
-      if (!email || !password) {
-        return {
-          mode: 'unconfigured',
-          reason: 'XpressBees is the active Xelgo backend but the login email or password is missing.',
-        };
-      }
-      // XpressBees provider expects accountId=email, apiSecret=password (NEW-auth path).
+    if (mode === ShippingMode.XPRESSBEES) {
+      const email = pl.xpressbees?.email?.trim() || this.config.get<string>('XPRESSBEES_EMAIL')?.trim() || '';
+      const password = this.safeDecrypt(pl.xpressbees?.passwordEnc) || this.config.get<string>('XPRESSBEES_PASSWORD')?.trim() || '';
+      const warehouseName = pl.xpressbees?.warehouseName?.trim() || this.config.get<string>('XPRESSBEES_WAREHOUSE_NAME')?.trim() || 'default';
+      const businessName = pl.xpressbees?.businessName?.trim() || this.config.get<string>('XPRESSBEES_BUSINESS_NAME')?.trim() || '';
+      if (!email || !password) return null;
       return {
         mode: ShippingMode.XPRESSBEES,
         displayName: 'Xelnova · XpressBees',
-        config: synthetic(ShippingMode.XPRESSBEES, {
+        config: this.makePlatformSyntheticCourierConfig(ShippingMode.XPRESSBEES, {
           apiKey: '',
           accountId: email,
           apiSecret: password,
-          warehouseId: pl.xpressbees?.warehouseName?.trim() || 'default',
+          warehouseId: warehouseName,
           metadata: {
             authType: 'NEW',
-            businessName: pl.xpressbees?.businessName?.trim() || '',
+            businessName,
           },
         }),
       };
     }
 
-    // ekart
-    const clientId = pl.ekart?.clientId?.trim() || '';
-    const username = pl.ekart?.username?.trim() || '';
-    const password = this.safeDecrypt(pl.ekart?.passwordEnc);
-    if (!clientId || !username || !password) {
-      return {
-        mode: 'unconfigured',
-        reason:
-          'Ekart is the active Xelgo backend but the Client ID, API username, or API password is missing.',
-      };
-    }
-    // Ekart provider expects accountId=clientId, apiKey=username, apiSecret=password.
+    const clientId = pl.ekart?.clientId?.trim() || this.config.get<string>('EKART_CLIENT_ID')?.trim() || '';
+    const username = pl.ekart?.username?.trim() || this.config.get<string>('EKART_USERNAME')?.trim() || '';
+    const password = this.safeDecrypt(pl.ekart?.passwordEnc) || this.config.get<string>('EKART_PASSWORD')?.trim() || '';
+    const pickupAlias = pl.ekart?.pickupAlias?.trim() || this.config.get<string>('EKART_PICKUP_ALIAS')?.trim() || '';
+    if (!clientId || !username || !password) return null;
     return {
       mode: ShippingMode.EKART,
       displayName: 'Xelnova · Ekart',
-      config: synthetic(ShippingMode.EKART, {
+      config: this.makePlatformSyntheticCourierConfig(ShippingMode.EKART, {
         apiKey: username,
         accountId: clientId,
         apiSecret: password,
-        warehouseId: pl.ekart?.pickupAlias?.trim() || null,
+        warehouseId: pickupAlias || null,
       }),
     };
+  }
+
+  /** Which integrated carrier honours the seller's tapped Xelgo rate row */
+  private async resolveXelnovaBookingCarrier(platformCourier?: ShippingMode): Promise<
+    | {
+        mode: PlatformCourierMode;
+        config: SellerCourierConfig;
+        displayName: string;
+      }
+    | { mode: 'unconfigured'; reason: string }
+  > {
+    const integrated = new Set<ShippingMode>([
+      ShippingMode.DELHIVERY,
+      ShippingMode.SHIPROCKET,
+      ShippingMode.XPRESSBEES,
+      ShippingMode.EKART,
+    ]);
+    if (platformCourier && integrated.has(platformCourier)) {
+      const built = await this.buildPlatformXelgoCourierConfig(platformCourier as PlatformCourierMode);
+      if (built) return built;
+      return {
+        mode: 'unconfigured',
+        reason: `Carrier ${platformCourier} is not configured in Admin → Marketplace settings (platform logistics). Add credentials or choose another courier.`,
+      };
+    }
+    return this.resolveXelgoBackend();
+  }
+
+  /**
+   * Resolve which carrier handles a "Ship with Xelnova" / Xelgo booking when
+   * the seller doesn't pick an explicit carousel carrier (backward compatible).
+   */
+  private async resolveXelgoBackend(): Promise<
+    | {
+        mode: Extract<
+          ShippingMode,
+          'DELHIVERY' | 'SHIPROCKET' | 'XPRESSBEES' | 'EKART'
+        >;
+        config: SellerCourierConfig;
+        displayName: string;
+      }
+    | { mode: 'unconfigured'; reason: string }
+  > {
+    const pl = await this.getMergedPlatformLogistics();
+    const rawBackend = (pl.xelnovaBackend ?? 'delhivery') as XelnovaCourierBackend | 'stub';
+    const backend: XelnovaCourierBackend =
+      rawBackend === 'shiprocket' || rawBackend === 'xpressbees' || rawBackend === 'ekart'
+        ? rawBackend
+        : 'delhivery';
+
+    const mode: PlatformCourierMode =
+      backend === 'shiprocket'
+        ? ShippingMode.SHIPROCKET
+        : backend === 'xpressbees'
+          ? ShippingMode.XPRESSBEES
+          : backend === 'ekart'
+            ? ShippingMode.EKART
+            : ShippingMode.DELHIVERY;
+
+    const built = await this.buildPlatformXelgoCourierConfig(mode);
+    if (!built) {
+      const reason =
+        mode === ShippingMode.DELHIVERY
+          ? 'Delhivery is the active Xelgo backend but the API token, client name, or warehouse name is missing in admin Settings.'
+          : mode === ShippingMode.SHIPROCKET
+            ? 'ShipRocket is the active Xelgo backend but the API user email or password is missing.'
+            : mode === ShippingMode.XPRESSBEES
+              ? 'XpressBees is the active Xelgo backend but the login email or password is missing.'
+              : 'Ekart is the active Xelgo backend but the Client ID, API username, or API password is missing.';
+      return { mode: 'unconfigured', reason };
+    }
+    return { mode: built.mode, config: built.config, displayName: built.displayName };
+  }
+
+  /**
+   * Recover which integrated carrier honoured a Ship-with-Xelgo booking
+   * from the human-readable courier line persisted on shipment rows.
+   */
+  private inferIntegratedCarrierFromCourierLine(line: string | null | undefined): PlatformCourierMode | null {
+    const s = (line || '').toLowerCase();
+    if (s.includes('xpressbees') || s.includes('xpress bees')) return ShippingMode.XPRESSBEES;
+    if (s.includes('shiprocket')) return ShippingMode.SHIPROCKET;
+    if (s.includes('ekart')) return ShippingMode.EKART;
+    if (s.includes('delhivery')) return ShippingMode.DELHIVERY;
+    return null;
+  }
+
+  /** Platform credentials for replaying courier calls on XELNOVA_COURIER rows */
+  private async resolvePlatformCredentialForXelnovaShipmentRow(
+    courierProviderLine: string | null | undefined,
+  ): Promise<{ mode: PlatformCourierMode; config: SellerCourierConfig } | null> {
+    const hinted = this.inferIntegratedCarrierFromCourierLine(courierProviderLine);
+    if (hinted) {
+      const built = await this.buildPlatformXelgoCourierConfig(hinted);
+      if (built) return { mode: built.mode, config: built.config };
+    }
+    const r = await this.resolveXelgoBackend();
+    if (r.mode === 'unconfigured') return null;
+    return { mode: r.mode, config: r.config };
   }
 
   // ─── Carrier-issued (official) shipping label ───
 
   /**
-   * Fetch the EXACT shipping label PDF that the carrier (currently
-   * Delhivery) issues for a given order. Returns the PDF buffer when
-   * available, or `null` when the shipment is not on a label-capable
-   * carrier (e.g. self-ship) so the caller can render a Xelnova
-   * fallback.
+   * Fetch the carrier-issued shipping label PDF (Delhivery packing slip,
+   * ShipRocket generate/label, Ekart package/label, XpressBees when exposed,
+   * or any HTTPS `labelUrl` stored at booking). Returns `null` for self-ship
+   * or unsupported modes so the caller can use the Xelnova fallback.
    *
    * Throws when the carrier IS supported but rejects the request — the
    * caller should surface that error so the seller can retry (labels
@@ -304,10 +374,10 @@ export class ShippingService {
     let config: SellerCourierConfig | null = null;
 
     if (shipment.shippingMode === ShippingMode.XELNOVA_COURIER) {
-      const resolved = await this.resolveXelgoBackend();
-      if (resolved.mode === 'unconfigured') return null;
-      provider = this.providers.get(resolved.mode);
-      config = resolved.config;
+      const pc = await this.resolvePlatformCredentialForXelnovaShipmentRow(shipment.courierProvider);
+      if (!pc) return null;
+      provider = this.providers.get(pc.mode);
+      config = pc.config;
     } else {
       provider = this.providers.get(shipment.shippingMode);
       const cfg = await this.prisma.sellerCourierConfig.findUnique({
@@ -325,10 +395,32 @@ export class ShippingService {
 
     if (!provider || !config) return null;
 
-    // Today only Delhivery exposes a pre-printed label download we can
-    // proxy faithfully. Other providers return JSON / hosted URLs we
-    // either pass through to the seller already, or render via the
-    // Xelnova fallback.
+    if (
+      shipment.labelUrl &&
+      /^https:\/\//i.test(shipment.labelUrl.trim())
+    ) {
+      try {
+        const res = await fetch(shipment.labelUrl.trim(), { redirect: 'follow' });
+        if (res.ok) {
+          const buf = Buffer.from(await res.arrayBuffer());
+          if (
+            buf.length > 8 &&
+            (buf.slice(0, 4).toString() === '%PDF' ||
+              (buf[0] === 0x25 &&
+                buf[1] === 0x50 &&
+                buf[2] === 0x44 &&
+                buf[3] === 0x46))
+          ) {
+            return buf;
+          }
+        }
+      } catch (err) {
+        this.logger.warn(
+          `Label URL fetch failed for order ${orderId}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
     if (
       shipment.shippingMode === ShippingMode.DELHIVERY ||
       (shipment.shippingMode === ShippingMode.XELNOVA_COURIER && provider instanceof DelhiveryProvider)
@@ -338,6 +430,24 @@ export class ShippingService {
         config,
       );
       return pdf;
+    }
+
+    if (provider instanceof ShipRocketProvider) {
+      const pdf = await (provider as ShipRocketProvider).downloadLabelPdf(shipment.awbNumber, config);
+      if (pdf && pdf.length) return pdf;
+    }
+
+    if (provider instanceof EkartProvider) {
+      const pdf = await (provider as EkartProvider).downloadLabelPdf(shipment.awbNumber, config);
+      if (pdf && pdf.length) return pdf;
+    }
+
+    if (provider instanceof XpressBeesProvider) {
+      const pdf = await (provider as XpressBeesProvider).downloadLabelPdf(
+        shipment.awbNumber,
+        config,
+      );
+      if (pdf && pdf.length) return pdf;
     }
 
     return null;
@@ -544,7 +654,14 @@ export class ShippingService {
       xelgoWarehouseRegisteredAt?: Date | null;
       user?: { phone?: string | null; email?: string | null } | null;
     },
-    options: { force?: boolean } = {},
+    options: {
+      force?: boolean;
+      bookingBackend?: {
+        mode: PlatformCourierMode;
+        config: SellerCourierConfig;
+        displayName?: string;
+      };
+    } = {},
   ): Promise<{
     success: boolean;
     warehouseName?: string;
@@ -717,7 +834,18 @@ export class ShippingService {
    */
   async ensurePickupLocationWarehouse(
     locationId: string,
-    options: { force?: boolean } = {},
+    options: {
+      force?: boolean;
+      /**
+       * Booking-time integrated carrier — must match what we call for AWB creation
+       * (e.g. XpressBees vs Delhivery) so pickup registration aligns with shipments.
+       */
+      bookingBackend?: {
+        mode: PlatformCourierMode;
+        config: SellerCourierConfig;
+        displayName?: string;
+      };
+    } = {},
   ): Promise<{
     success: boolean;
     warehouseName?: string;
@@ -754,11 +882,56 @@ export class ShippingService {
       phone,
     });
 
+    // Helper to detect if a warehouse name looks invalid (e.g., a person's name
+    // instead of a proper warehouse ID). This can happen if old buggy code cached
+    // the contact person name instead of the actual registered warehouse.
+    const isLikelyInvalidWarehouseName = (name: string): boolean => {
+      if (!name) return true;
+      const trimmed = name.trim().toLowerCase();
+      // Valid warehouse names typically: start with XN-, contain underscores/dashes,
+      // are mostly uppercase, or are known defaults like 'Primary', 'default', etc.
+      if (trimmed.startsWith('xn-') || trimmed.startsWith('xn_')) return false;
+      if (trimmed === 'primary' || trimmed === 'default' || trimmed === 'main') return false;
+      if (name.includes('_') || /^[A-Z0-9\-_]+$/.test(name)) return false;
+      // Looks like a person's name if it has spaces and is mostly lowercase letters
+      if (name.includes(' ') && /^[a-z\s]+$/i.test(name)) return true;
+      return false;
+    };
+
+    // Check per-courier registration first (more specific than generic xelgoWarehouseName)
+    if (options.bookingBackend) {
+      const perCourierReg = await this.prisma.sellerPickupLocationRegistration.findUnique({
+        where: {
+          pickupLocationId_provider: {
+            pickupLocationId: location.id,
+            provider: options.bookingBackend.mode,
+          },
+        },
+      });
+
+      if (
+        !options.force &&
+        perCourierReg?.warehouseName &&
+        perCourierReg.registeredAt &&
+        perCourierReg.snapshotHash === desiredHash &&
+        !isLikelyInvalidWarehouseName(perCourierReg.warehouseName)
+      ) {
+        return {
+          success: true,
+          warehouseName: perCourierReg.warehouseName,
+          alreadyRegistered: true,
+          message: `Warehouse "${perCourierReg.warehouseName}" already registered with ${options.bookingBackend.mode}.`,
+        };
+      }
+    }
+
+    // Fallback to generic xelgoWarehouseName (but validate it)
     if (
       !options.force &&
       location.xelgoWarehouseName &&
       location.xelgoWarehouseRegisteredAt &&
-      location.xelgoWarehouseSnapshotHash === desiredHash
+      location.xelgoWarehouseSnapshotHash === desiredHash &&
+      !isLikelyInvalidWarehouseName(location.xelgoWarehouseName)
     ) {
       return {
         success: true,
@@ -768,24 +941,63 @@ export class ShippingService {
       };
     }
 
-    const resolved = await this.resolveXelgoBackend();
-    if (resolved.mode === 'unconfigured') {
-      const msg = `Xelgo backend is not configured by the platform admin: ${resolved.reason}`;
+    // If we have a cached name that looks invalid, log it and proceed to re-register
+    if (location.xelgoWarehouseName && isLikelyInvalidWarehouseName(location.xelgoWarehouseName)) {
+      this.logger.warn(
+        `Pickup location ${locationId} has cached warehouse name "${location.xelgoWarehouseName}" which looks invalid. Re-registering.`,
+      );
+    }
+
+    type ActiveCarrier = {
+      mode: PlatformCourierMode;
+      config: SellerCourierConfig;
+      displayName: string;
+    };
+
+    let active: ActiveCarrier | null = null;
+    if (options.bookingBackend) {
+      active = {
+        mode: options.bookingBackend.mode,
+        config: options.bookingBackend.config,
+        displayName:
+          options.bookingBackend.displayName || `Platform · ${options.bookingBackend.mode}`,
+      };
+    } else {
+      const resolved = await this.resolveXelgoBackend();
+      if (resolved.mode !== 'unconfigured') {
+        active = {
+          mode: resolved.mode,
+          config: resolved.config,
+          displayName: resolved.displayName,
+        };
+      }
+    }
+
+    if (!active) {
+      const r = await this.resolveXelgoBackend();
+      const msg =
+        r.mode === 'unconfigured'
+          ? `Xelgo backend is not configured by the platform admin: ${r.reason}`
+          : 'Xelgo backend is not configured.';
       return { success: false, alreadyRegistered: false, message: msg, error: msg };
     }
 
-    const provider = this.providers.get(resolved.mode);
+    const provider = this.providers.get(active.mode);
     if (!provider?.registerWarehouse) {
-      const fallback = resolved.config.warehouseId || '';
+      const fallback = active.config.warehouseId || '';
       return {
         success: true,
         warehouseName: fallback,
         alreadyRegistered: true,
-        message: `${resolved.displayName} doesn't support per-seller warehouses via API — using the platform warehouse "${fallback}".`,
+        message: `${active.displayName} doesn't support per-seller warehouses via API — using the platform warehouse "${fallback}".`,
       };
     }
 
-    const warehouseName = this.buildLocationWarehouseName(location.seller, location);
+    const warehouseName = this.buildLocationWarehouseName(location.seller, {
+      id: location.id,
+      isDefault: location.isDefault ?? false,
+      xelgoWarehouseName: location.xelgoWarehouseName,
+    });
 
     const opts: RegisterWarehouseOptions = {
       name: warehouseName,
@@ -800,13 +1012,34 @@ export class ShippingService {
       pincode: location.pincode.trim(),
     };
 
-    const result = await provider.registerWarehouse(resolved.config, opts);
+    let result: RegisterWarehouseResult = { success: false, message: 'Registration not attempted' };
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        result = await provider.registerWarehouse(active.config, opts);
+        if (result.success) break;
+        this.logger.warn(
+          `Warehouse registration rejected by ${active.mode} (attempt ${attempt + 1}/3): ${result.message}`,
+        );
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        result = { success: false, message: msg };
+        this.logger.warn(
+          `registerWarehouse threw for ${active.mode} (attempt ${attempt + 1}/3): ${msg}`,
+        );
+      }
+      if (attempt < 2 && !result.success) {
+        await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+      }
+    }
 
     if (!result.success) {
       await this.prisma.sellerPickupLocation.update({
         where: { id: location.id },
         data: { xelgoWarehouseRegistrationError: result.message.slice(0, 500) },
       });
+      this.logger.error(
+        `Pickup location ${locationId} warehouse registration exhausted retries for ${active.mode}: ${result.message}`,
+      );
       return {
         success: false,
         alreadyRegistered: false,
@@ -829,6 +1062,28 @@ export class ShippingService {
       },
     });
 
+    await this.prisma.sellerPickupLocationRegistration.upsert({
+      where: {
+        pickupLocationId_provider: { pickupLocationId: location.id, provider: active.mode },
+      },
+      create: {
+        pickupLocationId: location.id,
+        provider: active.mode,
+        warehouseName: finalName,
+        registeredAt: new Date(),
+        registrationError: null,
+        snapshotHash: desiredHash,
+        isActive: true,
+      },
+      update: {
+        warehouseName: finalName,
+        registeredAt: new Date(),
+        registrationError: null,
+        snapshotHash: desiredHash,
+        isActive: true,
+      },
+    });
+
     // Mirror the carrier-side state onto the legacy SellerProfile.xelgoWarehouse*
     // columns IF this is the seller's default location, so any code path
     // still reading from the legacy fields stays in sync until it can be
@@ -848,7 +1103,7 @@ export class ShippingService {
 
     this.logger.log(
       `Xelgo warehouse persisted for location ${location.id} (seller ${location.sellerId}): ` +
-        `name="${finalName}" alreadyExisted=${Boolean(result.alreadyExisted)} ` +
+        `carrier=${active.mode} name="${finalName}" alreadyExisted=${Boolean(result.alreadyExisted)} ` +
         `recoveredFromPriorFailure=${recoveredFromPriorFailure}`,
     );
 
@@ -1356,10 +1611,11 @@ export class ShippingService {
     }
 
     const phone = (location.phone || '').replace(/(?!^\+)\D/g, '');
-    const warehouseName = this.buildLocationWarehouseName(
-      location.seller,
-      { id: location.id, isDefault: false, xelgoWarehouseName: null },
-    );
+    const warehouseName = this.buildLocationWarehouseName(location.seller, {
+      id: location.id,
+      isDefault: (location as { isDefault?: boolean }).isDefault ?? false,
+      xelgoWarehouseName: (location as { xelgoWarehouseName?: string | null }).xelgoWarehouseName ?? null,
+    });
 
     const opts: RegisterWarehouseOptions = {
       name: warehouseName,
@@ -1850,6 +2106,8 @@ export class ShippingService {
       /// has more than one location and wants this order picked up
       /// from a non-default warehouse.
       pickupLocationId?: string;
+      /** Seller-selected integrated carrier for XELNOVA_COURIER bookings */
+      platformCourier?: ShippingMode;
     },
   ) {
     const seller = await this.getSellerProfile(userId);
@@ -1873,14 +2131,28 @@ export class ShippingService {
       );
     }
 
-    const { shippingMode } = dto;
+    if (dto.platformCourier && dto.shippingMode !== ShippingMode.XELNOVA_COURIER) {
+      throw new BadRequestException(
+        'platformCourier is only supported when booking with Xelgo (shippingMode XELNOVA_COURIER).',
+      );
+    }
+
+    const normalizedDto = {
+      ...dto,
+      platformCourier:
+        dto.shippingMode === ShippingMode.XELNOVA_COURIER && dto.platformCourier
+          ? ((String(dto.platformCourier).toUpperCase() || '') as ShippingMode)
+          : undefined,
+    };
+
+    const { shippingMode } = normalizedDto;
 
     if (shippingMode === ShippingMode.SELF_SHIP) {
-      return this.createSelfShipment(order, seller, dto);
+      return this.createSelfShipment(order, seller, normalizedDto);
     }
 
     // For courier-based shipping
-    return this.createCourierShipment(order, seller, shippingMode, dto);
+    return this.createCourierShipment(order, seller, shippingMode, normalizedDto);
   }
 
   private async createSelfShipment(
@@ -1944,6 +2216,8 @@ export class ShippingService {
       pickupTime?: string;
       expectedPackageCount?: number;
       pickupLocationId?: string;
+      /** When booking XELNOVA_COURIER — Delhivery / XpressBees / etc. */
+      platformCourier?: ShippingMode;
     },
   ) {
     let provider = this.providers.get(shippingMode);
@@ -1964,8 +2238,11 @@ export class ShippingService {
     );
 
     if (shippingMode === ShippingMode.XELNOVA_COURIER) {
-      const resolved = await this.resolveXelgoBackend();
+      const resolved = await this.resolveXelnovaBookingCarrier(dto.platformCourier);
       if (resolved.mode === 'unconfigured') {
+        if (dto.platformCourier) {
+          throw new BadRequestException(resolved.reason);
+        }
         this.logger.warn(`Xelgo unconfigured: ${resolved.reason}. Falling back to internal stub AWB.`);
         provider = this.xelnovaCourier;
         courierConfig = null;
@@ -1980,7 +2257,13 @@ export class ShippingService {
         // location triggers registration; later ships reuse the cached
         // name unless the address drifts.
         try {
-          const ensure = await this.ensurePickupLocationWarehouse(pickupLocation.id);
+          const ensure = await this.ensurePickupLocationWarehouse(pickupLocation.id, {
+            bookingBackend: {
+              mode: resolved.mode,
+              config: resolved.config,
+              displayName: resolved.displayName,
+            },
+          });
           if (ensure.success && ensure.warehouseName) {
             // IMPORTANT: clone the synthetic config — it's shared across
             // sellers. Mutating it would leak one seller's warehouse
@@ -2097,7 +2380,8 @@ export class ShippingService {
       // fall back to the internal stub so sellers can still ship. The
       // admin can sort out the carrier config later — but orders must
       // not be blocked indefinitely because of a misconfiguration.
-      if (shippingMode === ShippingMode.XELNOVA_COURIER && provider !== this.xelnovaCourier) {
+      const explicitPlatformCourier = Boolean(dto.platformCourier);
+      if (shippingMode === ShippingMode.XELNOVA_COURIER && provider !== this.xelnovaCourier && !explicitPlatformCourier) {
         this.logger.warn(
           `Xelgo carrier failed (${message}). Falling back to internal stub AWB so the order can still be shipped.`,
         );
@@ -2397,31 +2681,31 @@ export class ShippingService {
     }
 
     if (shipment.shippingMode === ShippingMode.XELNOVA_COURIER) {
-      const resolved = await this.resolveXelgoBackend();
-      if (resolved.mode !== 'unconfigured') {
-        const xprov = this.providers.get(resolved.mode)!;
-        const tracking = await xprov.trackShipment(shipment.awbNumber, resolved.config);
-        if (tracking.status && tracking.status !== 'UNKNOWN') {
-          const mappedStatus = tracking.status as ShipmentStatus;
-          if (Object.values(ShipmentStatus).includes(mappedStatus) && mappedStatus !== shipment.shipmentStatus) {
-            await this.prisma.shipment.update({
-              where: { orderId },
-              data: {
-                shipmentStatus: mappedStatus,
-                statusHistory: tracking.statusHistory as object[],
-                deliveredAt:
-                  mappedStatus === ShipmentStatus.DELIVERED ? new Date() : undefined,
-              },
-            });
-            await this.syncOrderStatus(orderId, mappedStatus);
-          }
-        }
-        return tracking;
+      const pc = await this.resolvePlatformCredentialForXelnovaShipmentRow(shipment.courierProvider);
+      if (!pc) {
+        return {
+          status: shipment.shipmentStatus,
+          statusHistory: shipment.statusHistory,
+        };
       }
-      return {
-        status: shipment.shipmentStatus,
-        statusHistory: shipment.statusHistory,
-      };
+      const xprov = this.providers.get(pc.mode)!;
+      const tracking = await xprov.trackShipment(shipment.awbNumber, pc.config);
+      if (tracking.status && tracking.status !== 'UNKNOWN') {
+        const mappedStatus = tracking.status as ShipmentStatus;
+        if (Object.values(ShipmentStatus).includes(mappedStatus) && mappedStatus !== shipment.shipmentStatus) {
+          await this.prisma.shipment.update({
+            where: { orderId },
+            data: {
+              shipmentStatus: mappedStatus,
+              statusHistory: tracking.statusHistory as object[],
+              deliveredAt:
+                mappedStatus === ShipmentStatus.DELIVERED ? new Date() : undefined,
+            },
+          });
+          await this.syncOrderStatus(orderId, mappedStatus);
+        }
+      }
+      return tracking;
     }
 
     const provider = this.providers.get(shipment.shippingMode);
@@ -2522,30 +2806,22 @@ export class ShippingService {
     let pickupLocation = '';
 
     if (shipment.shippingMode === ShippingMode.XELNOVA_COURIER) {
-      const resolved = await this.resolveXelgoBackend();
-      if (resolved.mode === 'unconfigured') {
-        // No live carrier configured — Xelnova stub handles pickup automatically.
+      const pc = await this.resolvePlatformCredentialForXelnovaShipmentRow(shipment.courierProvider);
+      if (!pc) {
         return {
           success: true,
           message: 'Pickup is auto-scheduled by Xelnova for this shipment. No action needed.',
           scheduledFor: shipment.pickupDate?.toISOString(),
         };
       }
-      provider = this.providers.get(resolved.mode);
-      courierConfig = resolved.config;
+      provider = this.providers.get(pc.mode);
+      courierConfig = pc.config;
 
-      // Use the warehouse that the SHIPMENT was booked from — not the
-      // seller's current default. If a seller has multiple pickup
-      // locations and the order was booked from the overflow warehouse,
-      // the rider must come to that overflow address (Delhivery rejects
-      // pickup-requests that don't match the manifest's warehouse).
-      //
-      // Legacy AWBs issued before multi-pickup support landed have
-      // `pickupLocationId == null` — those fall through to the seller's
-      // default location, which is exactly what they used at booking.
+      const bb = { mode: pc.mode, config: pc.config };
+
       const ensure = shipment.pickupLocationId
-        ? await this.ensurePickupLocationWarehouse(shipment.pickupLocationId)
-        : await this.ensureSellerXelgoWarehouse(seller);
+        ? await this.ensurePickupLocationWarehouse(shipment.pickupLocationId, { bookingBackend: bb })
+        : await this.ensureSellerXelgoWarehouse(seller, { bookingBackend: bb });
       if (ensure.success && ensure.warehouseName) {
         pickupLocation = ensure.warehouseName;
         courierConfig = { ...courierConfig, warehouseId: pickupLocation } as SellerCourierConfig;
@@ -2649,10 +2925,10 @@ export class ShippingService {
     }
 
     if (shipment.shippingMode === ShippingMode.XELNOVA_COURIER) {
-      const resolved = await this.resolveXelgoBackend();
-      if (resolved.mode !== 'unconfigured' && shipment.awbNumber) {
-        const xprov = this.providers.get(resolved.mode)!;
-        const result = await xprov.cancelShipment(shipment.awbNumber, resolved.config);
+      const pc = await this.resolvePlatformCredentialForXelnovaShipmentRow(shipment.courierProvider);
+      if (pc && shipment.awbNumber) {
+        const xprov = this.providers.get(pc.mode)!;
+        const result = await xprov.cancelShipment(shipment.awbNumber, pc.config);
         if (result.success) await this.cancelShipmentLocally(shipment);
         return result;
       }
@@ -2726,6 +3002,27 @@ export class ShippingService {
     return { success: true, message: 'Shipment cancelled. You can now re-ship this order.' };
   }
 
+  private async resolveSellerServiceabilityPickupPincode(
+    sellerId: string,
+    profilePincodeFallback: string,
+  ): Promise<string> {
+    const loc =
+      (await this.prisma.sellerPickupLocation.findFirst({
+        where: { sellerId, isDefault: true },
+        select: { pincode: true },
+      })) ||
+      (await this.prisma.sellerPickupLocation.findFirst({
+        where: { sellerId },
+        orderBy: { createdAt: 'asc' },
+        select: { pincode: true },
+      }));
+    const p = loc?.pincode?.trim();
+    if (p && /^\d{6}$/.test(p)) return p;
+    const f = profilePincodeFallback?.trim();
+    if (f && /^\d{6}$/.test(f)) return f;
+    return f || p || '';
+  }
+
   // ─── Serviceability Check ───
 
   async checkServiceability(userId: string, orderId: string) {
@@ -2737,7 +3034,16 @@ export class ShippingService {
       throw new BadRequestException('Order has no shipping address');
     }
 
-    const pickupPincode = seller.businessPincode || '';
+    const pickupPincode = await this.resolveSellerServiceabilityPickupPincode(
+      seller.id,
+      seller.businessPincode || '',
+    );
+    if (!pickupPincode || !/^\d{6}$/.test(pickupPincode)) {
+      this.logger.warn(
+        `Serviceability: seller ${seller.id} has no valid 6-digit pickup pincode on file. ` +
+          `Add a pickup location (Shipping settings) for accurate quotes.`,
+      );
+    }
     const deliveryPincode = addr.pincode;
 
     const results: Record<string, any> = {};
@@ -2806,6 +3112,8 @@ export class ShippingService {
     {
       const email = pl.xpressbees?.email?.trim() || this.config.get<string>('XPRESSBEES_EMAIL')?.trim() || '';
       const password = this.safeDecrypt(pl.xpressbees?.passwordEnc) || this.config.get<string>('XPRESSBEES_PASSWORD')?.trim() || '';
+      const warehouseName = pl.xpressbees?.warehouseName?.trim() || this.config.get<string>('XPRESSBEES_WAREHOUSE_NAME')?.trim() || 'default';
+      const businessName = pl.xpressbees?.businessName?.trim() || this.config.get<string>('XPRESSBEES_BUSINESS_NAME')?.trim() || '';
       if (email && password) {
         platformCandidates.push({
           mode: ShippingMode.XPRESSBEES,
@@ -2814,10 +3122,10 @@ export class ShippingService {
             apiKey: '',
             accountId: email,
             apiSecret: password,
-            warehouseId: pl.xpressbees?.warehouseName?.trim() || 'default',
+            warehouseId: warehouseName,
             metadata: {
               authType: 'NEW',
-              businessName: pl.xpressbees?.businessName?.trim() || '',
+              businessName,
             },
           }),
         });
@@ -2829,6 +3137,7 @@ export class ShippingService {
       const clientId = pl.ekart?.clientId?.trim() || this.config.get<string>('EKART_CLIENT_ID')?.trim() || '';
       const username = pl.ekart?.username?.trim() || this.config.get<string>('EKART_USERNAME')?.trim() || '';
       const password = this.safeDecrypt(pl.ekart?.passwordEnc) || this.config.get<string>('EKART_PASSWORD')?.trim() || '';
+      const pickupAlias = pl.ekart?.pickupAlias?.trim() || this.config.get<string>('EKART_PICKUP_ALIAS')?.trim() || '';
       if (clientId && username && password) {
         platformCandidates.push({
           mode: ShippingMode.EKART,
@@ -2837,7 +3146,7 @@ export class ShippingService {
             apiKey: username,
             accountId: clientId,
             apiSecret: password,
-            warehouseId: pl.ekart?.pickupAlias?.trim() || null,
+            warehouseId: pickupAlias || null,
           }),
         });
       }
@@ -2847,6 +3156,7 @@ export class ShippingService {
     {
       const email = pl.shiprocket?.email?.trim() || this.config.get<string>('SHIPROCKET_EMAIL')?.trim() || '';
       const password = this.safeDecrypt(pl.shiprocket?.passwordEnc) || this.config.get<string>('SHIPROCKET_PASSWORD')?.trim() || '';
+      const pickupLocation = pl.shiprocket?.pickupLocation?.trim() || this.config.get<string>('SHIPROCKET_PICKUP_LOCATION')?.trim() || 'Primary';
       if (email && password) {
         platformCandidates.push({
           mode: ShippingMode.SHIPROCKET,
@@ -2854,13 +3164,19 @@ export class ShippingService {
           config: synthetic(ShippingMode.SHIPROCKET, {
             apiKey: password,
             accountId: email,
-            warehouseId: pl.shiprocket?.pickupLocation?.trim() || 'Primary',
+            warehouseId: pickupLocation,
           }),
         });
       }
     }
 
-    const xelgoCouriers: Array<{ name: string; estimatedDays: number; charges: number | null; estimatedDelivery: string | null }> = [];
+    const xelgoCouriers: Array<{
+      name: string;
+      estimatedDays: number;
+      charges: number | null;
+      estimatedDelivery: string | null;
+      carrierBackend: ShippingMode;
+    }> = [];
 
     const computeEstDeliveryDate = (days: number | null | undefined): string | null => {
       if (!days) return null;
@@ -2898,6 +3214,7 @@ export class ShippingService {
               estimatedDays: c.estimatedDays,
               charges: applyMarkup(c.charges ?? null),
               estimatedDelivery: computeEstDeliveryDate(c.estimatedDays),
+              carrierBackend: candidate.mode,
             });
           }
         } else {
@@ -2907,6 +3224,7 @@ export class ShippingService {
             estimatedDays: days,
             charges: applyMarkup(result.charges ?? null),
             estimatedDelivery: computeEstDeliveryDate(days),
+            carrierBackend: candidate.mode,
           });
         }
       } catch (err) {
@@ -3029,7 +3347,7 @@ export class ShippingService {
       ? this.encrypt(dto.apiSecret)
       : existing?.apiSecret ?? null;
 
-    return this.prisma.sellerCourierConfig.upsert({
+    let saved = await this.prisma.sellerCourierConfig.upsert({
       where: {
         sellerId_provider: { sellerId: seller.id, provider: dto.provider },
       },
@@ -3050,9 +3368,48 @@ export class ShippingService {
           ? { warehouseId: dto.warehouseId || null }
           : {}),
         metadata: dto.metadata || existing?.metadata || {},
-        isActive: true,
       },
     });
+
+    const decryptedKeyPlain =
+      keepExistingKey && existing
+        ? this.safeDecrypt(existing.apiKey)
+        : (dto.apiKey || '').trim();
+
+    if (dto.provider === ShippingMode.DELHIVERY && decryptedKeyPlain) {
+      const delProv = this.providers.get(ShippingMode.DELHIVERY) as DelhiveryProvider;
+      try {
+        await delProv.validateSellerApiToken({
+          ...saved,
+          apiKey: decryptedKeyPlain,
+          apiSecret: saved.apiSecret ? this.safeDecrypt(saved.apiSecret) : null,
+        } as SellerCourierConfig);
+        saved = await this.prisma.sellerCourierConfig.update({
+          where: { id: saved.id },
+          data: { isActive: true },
+        });
+      } catch (err: any) {
+        const msg =
+          typeof err?.message === 'string' ? err.message : 'Delhivery token validation failed.';
+        this.logger.warn(
+          `Delhivery credentials invalid for seller ${seller.id}: ${msg}`,
+        );
+        saved = await this.prisma.sellerCourierConfig.update({
+          where: { id: saved.id },
+          data: { isActive: false },
+        });
+        throw new BadRequestException(
+          `${msg} Your Delhivery connection was saved but marked inactive until credentials verify successfully.`,
+        );
+      }
+    } else {
+      saved = await this.prisma.sellerCourierConfig.update({
+        where: { id: saved.id },
+        data: { isActive: true },
+      });
+    }
+
+    return saved;
   }
 
   async updateCourierConfig(
@@ -3159,6 +3516,17 @@ export class ShippingService {
         );
         break;
 
+      case ShipmentStatus.IN_TRANSIT:
+        await this.notificationService.logNotification({
+          userId: order.userId,
+          channel: 'in_app',
+          type: 'ORDER_IN_TRANSIT',
+          title: 'Order in transit',
+          body: `Your order #${order.orderNumber} is on the way.`,
+          data: { orderNumber: order.orderNumber, trackingUrl },
+        });
+        break;
+
       case ShipmentStatus.OUT_FOR_DELIVERY:
         await this.notificationService.logNotification({
           userId: order.userId,
@@ -3172,6 +3540,18 @@ export class ShippingService {
 
       case ShipmentStatus.DELIVERED:
         await this.notificationService.notifyOrderDelivered(order.userId, order.orderNumber);
+        break;
+
+      case ShipmentStatus.RTO_INITIATED:
+      case ShipmentStatus.RTO_DELIVERED:
+        await this.notificationService.logNotification({
+          userId: order.userId,
+          channel: 'in_app',
+          type: 'ORDER_RTO',
+          title: 'Return to origin',
+          body: `Your shipment for order #${order.orderNumber} is returning to the seller (${shipmentStatus.replace(/_/g, ' ').toLowerCase()}).`,
+          data: { orderNumber: order.orderNumber, trackingUrl },
+        });
         break;
 
       default:
@@ -3267,8 +3647,28 @@ export class ShippingService {
         return { processed: false, message: `Unknown status: ${status}` };
       }
 
-      const history = (shipment.statusHistory as any[]) || [];
-      history.push({ status, timestamp, location, remark });
+      const history = [...((shipment.statusHistory as any[]) || [])];
+      const entry = {
+        status,
+        timestamp: timestamp || new Date().toISOString(),
+        location,
+        remark,
+        source: 'webhook',
+      };
+      const last = history.length ? history[history.length - 1] : null;
+      const dup =
+        last &&
+        last.status === entry.status &&
+        last.source === 'webhook' &&
+        String(last.remark ?? '') === String(entry.remark ?? '') &&
+        String(last.location ?? '') === String(entry.location ?? '');
+      if (!dup) history.push(entry);
+
+      this.logger.log(
+        `Webhook ${provider}: AWB=${awbNumber} → ${status}` +
+          (location ? ` @ ${location}` : '') +
+          (remark ? ` — ${String(remark).slice(0, 120)}` : ''),
+      );
 
       await this.prisma.shipment.update({
         where: { id: shipment.id },
@@ -3282,6 +3682,16 @@ export class ShippingService {
 
       await this.syncOrderStatus(shipment.orderId, status as ShipmentStatus);
 
+      const orderNotify = await this.prisma.order.findUnique({
+        where: { id: shipment.orderId },
+        include: { items: { select: { sellerId: true } } },
+      });
+      if (orderNotify) {
+        this.notificationService
+          .notifySellersShipmentStatusUpdate(orderNotify, status as ShipmentStatus)
+          .catch((err) => this.logger.warn(`Seller shipment notify failed: ${err.message}`));
+      }
+
       return { processed: true, message: `Status updated to ${status}` };
     } catch (err) {
       this.logger.error(`Webhook processing error: ${err}`);
@@ -3290,16 +3700,25 @@ export class ShippingService {
   }
 
   private mapWebhookStatus(provider: ShippingMode, rawStatus: string): string {
-    const normalized = rawStatus.toLowerCase();
+    const normalized = String(rawStatus || '').toLowerCase();
 
     if (normalized.includes('delivered') && !normalized.includes('out for'))
       return ShipmentStatus.DELIVERED;
     if (normalized.includes('out for delivery'))
       return ShipmentStatus.OUT_FOR_DELIVERY;
-    if (normalized.includes('in transit') || normalized.includes('intransit'))
+    if (normalized.includes('in transit') || normalized.includes('intransit') || normalized.includes('en-route') || normalized.includes('en route'))
       return ShipmentStatus.IN_TRANSIT;
     if (normalized.includes('picked up') || normalized.includes('pickup done'))
       return ShipmentStatus.PICKED_UP;
+    if (
+      /\bshipped\b/.test(normalized) ||
+      normalized.includes('manifested-to-dispatch') ||
+      normalized.includes('dispatch') ||
+      normalized.includes('handover') ||
+      (normalized.includes('picked') && normalized.includes('hub'))
+    ) {
+      return ShipmentStatus.IN_TRANSIT;
+    }
     if (
       normalized.includes('pickup scheduled') ||
       normalized.includes('pickup generated')
@@ -3314,7 +3733,13 @@ export class ShippingService {
       return ShipmentStatus.BOOKED;
     if (normalized.includes('rto delivered'))
       return ShipmentStatus.RTO_DELIVERED;
-    if (normalized.includes('rto initiated') || normalized.includes('rto requested') || normalized.includes('rto in transit'))
+    if (
+      /\brto\b/.test(normalized) ||
+      normalized.includes('return to origin') ||
+      normalized.includes('rto initiated') ||
+      normalized.includes('rto requested') ||
+      normalized.includes('rto in transit')
+    )
       return ShipmentStatus.RTO_INITIATED;
     if (normalized.includes('cancel') || normalized.includes('lost') || normalized.includes('damaged'))
       return ShipmentStatus.CANCELLED;

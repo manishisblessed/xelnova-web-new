@@ -6,10 +6,10 @@ import { AdminListPage } from '@/components/dashboard/admin-list-page';
 import { ActionModal } from '@/components/dashboard/action-modal';
 import { ConfirmDialog } from '@/components/dashboard/confirm-dialog';
 import { FormField, FormInput, FormSelect } from '@/components/dashboard/form-field';
-import { Pencil, Trash2, Copy } from 'lucide-react';
+import { Pencil, Trash2, Copy, CheckCircle, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Column } from '@/components/dashboard/data-table';
-import { apiCreate, apiUpdate, apiDelete } from '@/lib/api';
+import { apiCreate, apiUpdate, apiDelete, apiApproveSellerCoupon, apiRejectSellerCoupon } from '@/lib/api';
 
 interface Coupon {
   id: string;
@@ -21,13 +21,20 @@ interface Coupon {
   maxDiscount: number | null;
   validUntil: string | null;
   usageLimit: number | null;
+  maxRedemptionsPerUser?: number | null;
   usedCount: number;
   isActive: boolean;
+  moderationStatus?: 'PENDING' | 'APPROVED' | 'REJECTED';
+  sellerId?: string | null;
+  sellerName?: string | null;
+  rejectionReason?: string | null;
+  scope?: string;
   createdAt: string;
 }
 
 export default function CouponsPage() {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [moderatingId, setModeratingId] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [editing, setEditing] = useState<Coupon | null>(null);
@@ -190,9 +197,30 @@ export default function CouponsPage() {
       render: (r) => (r.maxDiscount != null ? `₹${Number(r.maxDiscount).toLocaleString()}` : '—'),
     },
     {
+      key: 'seller',
+      header: 'Seller',
+      render: (r) => (
+        <span className="max-w-[140px] truncate block text-xs" title={r.sellerName || ''}>
+          {r.sellerId ? r.sellerName || r.sellerId : '—'}
+        </span>
+      ),
+    },
+    {
+      key: 'moderation',
+      header: 'Moderation',
+      render: (r) => {
+        const st = r.moderationStatus ?? 'APPROVED';
+        const variant = st === 'APPROVED' ? 'success' : st === 'PENDING' ? 'warning' : 'danger';
+        return <Badge variant={variant}>{st}</Badge>;
+      },
+    },
+    {
       key: 'usage',
       header: 'Used',
-      render: (r) => `${r.usedCount}${r.usageLimit != null ? ` / ${r.usageLimit}` : ''}`,
+      render: (r) =>
+        `${r.usedCount}${r.usageLimit != null ? ` / ${r.usageLimit}` : ''}${
+          r.maxRedemptionsPerUser != null ? ` · max/user ${r.maxRedemptionsPerUser}` : ''
+        }`,
     },
     { key: 'isActive', header: 'Status', render: (r) => <Badge variant={r.isActive ? 'success' : 'default'}>{r.isActive ? 'Active' : 'Inactive'}</Badge> },
     {
@@ -215,7 +243,55 @@ export default function CouponsPage() {
         onAdd={openAdd}
         addLabel="Create Coupon"
         renderActions={(r) => (
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 justify-end flex-wrap">
+            {r.moderationStatus === 'PENDING' && r.sellerId && (
+              <>
+                <button
+                  type="button"
+                  disabled={moderatingId === r.id}
+                  title="Approve"
+                  onClick={async () => {
+                    setModeratingId(r.id);
+                    try {
+                      await apiApproveSellerCoupon(r.id);
+                      toast.success('Coupon approved');
+                      setRefreshTrigger((t) => t + 1);
+                    } catch (e) {
+                      toast.error(e instanceof Error ? e.message : 'Approve failed');
+                    } finally {
+                      setModeratingId(null);
+                    }
+                  }}
+                  className="p-1.5 rounded-lg hover:bg-emerald-50 text-emerald-600 disabled:opacity-50"
+                >
+                  <CheckCircle size={15} />
+                </button>
+                <button
+                  type="button"
+                  disabled={moderatingId === r.id}
+                  title="Reject"
+                  onClick={async () => {
+                    const reason =
+                      typeof window !== 'undefined'
+                        ? window.prompt('Rejection reason for seller:', '') ?? ''
+                        : '';
+                    setModeratingId(r.id);
+                    try {
+                      await apiRejectSellerCoupon(r.id, reason.trim() || undefined);
+                      toast.success('Coupon rejected');
+                      setRefreshTrigger((t) => t + 1);
+                    } catch (e) {
+                      toast.error(e instanceof Error ? e.message : 'Reject failed');
+                    } finally {
+                      setModeratingId(null);
+                    }
+                  }}
+                  className="p-1.5 rounded-lg hover:bg-red-50 text-red-600 disabled:opacity-50"
+                >
+                  <XCircle size={15} />
+                </button>
+              </>
+            )}
             <button type="button" onClick={() => openEdit(r)} className="p-1.5 rounded-lg hover:bg-surface-muted text-text-muted hover:text-primary-600"><Pencil size={15} /></button>
             <button type="button" onClick={() => { setEditing(r); setDeleteOpen(true); }} className="p-1.5 rounded-lg hover:bg-danger-50 text-text-muted hover:text-danger-600"><Trash2 size={15} /></button>
           </div>

@@ -5,3 +5,8 @@ export { Skeleton, type SkeletonProps } from "./skeleton";
 export { Rating, type RatingProps } from "./rating";
 export { Modal, type ModalProps } from "./modal";
 export { Card, type CardProps } from "./card";
+export {
+  SupportWidget,
+  type SupportWidgetAudience,
+  type SupportWidgetProps,
+} from "./support-widget";

@@ -7,6 +7,8 @@ import {
   TrackingResult,
   CancelResult,
   ServiceabilityResult,
+  RegisterWarehouseOptions,
+  RegisterWarehouseResult,
 } from './courier-provider.interface';
 
 @Injectable()
@@ -151,10 +153,38 @@ export class ShipRocketProvider implements CourierProvider {
       this.logger.warn('ShipRocket pickup generation failed (non-critical)');
     }
 
+    // Step 4: Request printable label (non-fatal — booking may still succeed).
+    let labelUrl: string | undefined;
+    try {
+      const labelRes = await fetch(`${this.baseUrl}/v1/external/courier/generate/label`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ shipment_id: [shipmentId] }),
+      });
+      if (labelRes.ok) {
+        const labelJson = await labelRes.json();
+        labelUrl =
+          labelJson?.label_url ||
+          labelJson?.label_created_url ||
+          labelJson?.response?.data?.label_url ||
+          labelJson?.tracking_data?.label_url ||
+          '';
+        if (!labelUrl) this.logger.log(`ShipRocket label response had no URL: ${JSON.stringify(labelJson).slice(0, 200)}`);
+      } else {
+        const t = await labelRes.text();
+        this.logger.warn(`ShipRocket generate/label HTTP ${labelRes.status}: ${t.slice(0, 200)}`);
+      }
+    } catch (err) {
+      this.logger.warn(
+        `ShipRocket label generation skipped: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
     return {
       awbNumber: String(awb),
       courierOrderId: String(srOrderId),
       trackingUrl: `https://shiprocket.co/tracking/${awb}`,
+      labelUrl: labelUrl || undefined,
       charges: awbData?.response?.data?.freight_charge,
     };
   }
@@ -262,31 +292,63 @@ export class ShipRocketProvider implements CourierProvider {
     };
   }
 
-  async downloadLabel(
-    awbNumber: string,
-    config: SellerCourierConfig,
-  ): Promise<any> {
+  /**
+   * Downloads the carrier-issued shipping label as binary PDF.
+   * Generates a label URL when needed (AWB → track → shipment id → generate/label).
+   */
+  async downloadLabelPdf(awbNumber: string, config: SellerCourierConfig): Promise<Buffer | null> {
     const headers = await this.authHeaders(config);
 
-    // Shiprocket generates labels by shipment_id, but we can use the generate/label endpoint
-    // which also accepts shipment_ids. Since we store courierOrderId, we use that approach.
-    const res = await fetch(
-      `${this.baseUrl}/v1/external/courier/generate/label`,
-      {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ shipment_id: [awbNumber] }),
-      },
+    const trackRes = await fetch(
+      `${this.baseUrl}/v1/external/courier/track/awb/${encodeURIComponent(awbNumber)}`,
+      { headers },
     );
-
-    if (!res.ok) {
-      throw new Error('Failed to generate ShipRocket label');
+    if (!trackRes.ok) {
+      this.logger.warn(`ShipRocket track AWB failed (${trackRes.status}) for label download`);
+      return null;
     }
 
-    const data = await res.json();
-    return {
-      labelUrl: data?.label_url || data?.label_created_url || null,
-    };
+    const td = await trackRes.json();
+    const tracking = td?.tracking_data || td;
+    const rawSid =
+      tracking?.shipment_id ??
+      td?.shipment_id ??
+      td?.data?.shipment_id ??
+      null;
+    const shipmentId = typeof rawSid === 'number' ? rawSid : parseInt(String(rawSid ?? ''), 10);
+    if (!Number.isFinite(shipmentId)) {
+      this.logger.warn('ShipRocket tracking response missing shipment_id for label generation');
+      return null;
+    }
+
+    const labelRes = await fetch(`${this.baseUrl}/v1/external/courier/generate/label`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ shipment_id: [shipmentId] }),
+    });
+
+    if (!labelRes.ok) {
+      const t = await labelRes.text();
+      this.logger.warn(`ShipRocket generate/label failed: ${labelRes.status} ${t.slice(0, 200)}`);
+      return null;
+    }
+
+    const labelJson = await labelRes.json();
+    const labelUrl =
+      labelJson?.label_url ||
+      labelJson?.label_created_url ||
+      labelJson?.response?.data?.label_url ||
+      '';
+
+    if (labelUrl && /^https?:\/\//i.test(String(labelUrl))) {
+      const pdfRes = await fetch(String(labelUrl), { redirect: 'follow' });
+      if (pdfRes.ok) {
+        const buf = Buffer.from(await pdfRes.arrayBuffer());
+        if (buf.length > 8 && buf.slice(0, 4).toString() === '%PDF') return buf;
+      }
+    }
+
+    return null;
   }
 
   private mapShipRocketStatus(statusCode: string): string {
@@ -307,5 +369,116 @@ export class ShipRocketProvider implements CourierProvider {
       '20': 'IN_TRANSIT',
     };
     return map[statusCode] || 'IN_TRANSIT';
+  }
+
+  /**
+   * Register a pickup location (warehouse) with ShipRocket.
+   * ShipRocket requires pickup locations to be registered via their API
+   * before they can be used for shipments.
+   */
+  async registerWarehouse(
+    config: SellerCourierConfig,
+    options: RegisterWarehouseOptions,
+  ): Promise<RegisterWarehouseResult> {
+    if (!options.name || !options.address || !options.city || !options.state || !options.pincode || !options.phone) {
+      return {
+        success: false,
+        message: 'Missing required fields (name, address, city, state, pincode, phone).',
+      };
+    }
+
+    const headers = await this.authHeaders(config);
+
+    // Check if pickup location already exists
+    try {
+      const listRes = await fetch(`${this.baseUrl}/v1/external/settings/company/pickup`, {
+        headers,
+      });
+
+      if (listRes.ok) {
+        const listData = await listRes.json();
+        const locations = listData?.data?.shipping_address || [];
+        
+        // Check if a location with this name already exists
+        const existing = locations.find(
+          (loc: any) => 
+            loc.pickup_location?.toLowerCase() === options.name.toLowerCase() ||
+            loc.pickup_location === options.name
+        );
+
+        if (existing) {
+          this.logger.log(
+            `ShipRocket pickup location "${options.name}" already registered (ID: ${existing.id}).`,
+          );
+          return {
+            success: true,
+            registeredName: existing.pickup_location || options.name,
+            message: `Pickup location "${options.name}" is already registered with ShipRocket.`,
+          };
+        }
+      }
+    } catch (err) {
+      this.logger.warn(`Failed to check existing ShipRocket pickup locations: ${err}`);
+    }
+
+    // Create new pickup location
+    const nameParts = (options.name || '').split(' ');
+    const firstName = nameParts[0] || 'Seller';
+    const lastName = nameParts.slice(1).join(' ') || 'Pickup';
+
+    const payload = {
+      pickup_location: options.name,
+      name: firstName,
+      last_name: lastName,
+      email: options.email || `pickup-${Date.now()}@seller.local`,
+      phone: options.phone.replace(/\D/g, '').slice(-10),
+      address: options.address,
+      address_2: '',
+      city: options.city,
+      state: options.state,
+      country: options.country || 'India',
+      pin_code: options.pincode,
+    };
+
+    try {
+      const res = await fetch(`${this.baseUrl}/v1/external/settings/company/addpickup`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        this.logger.error(`ShipRocket addpickup failed: ${res.status} ${errText}`);
+        return {
+          success: false,
+          message: `Failed to register pickup location with ShipRocket: ${errText}`,
+        };
+      }
+
+      const data = await res.json();
+
+      if (data.success === false || data.status === false) {
+        return {
+          success: false,
+          message: data.message || 'ShipRocket rejected the pickup location registration.',
+        };
+      }
+
+      this.logger.log(`ShipRocket pickup location "${options.name}" registered successfully.`);
+
+      return {
+        success: true,
+        registeredName: options.name,
+        message: `Pickup location "${options.name}" registered with ShipRocket.`,
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.error(`ShipRocket registerWarehouse failed: ${msg}`);
+      return {
+        success: false,
+        message: `Failed to register pickup location with ShipRocket: ${msg}`,
+      };
+    }
   }
 }

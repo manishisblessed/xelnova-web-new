@@ -38,6 +38,35 @@ export class AdminUpdateProductDto {
   @IsOptional() commissionRate?: number;
   @ApiPropertyOptional({ description: 'Curated bestseller rank (1 = top). null/0 to clear.' })
   @IsOptional() bestSellersRank?: number | null;
+  @ApiPropertyOptional({
+    description:
+      'Whether this listing is eligible for replacement after delivery. ' +
+      'Admin-controlled — sellers cannot self-declare replacement eligibility.',
+  })
+  @IsOptional() @IsBoolean() isReplaceable?: boolean;
+  @ApiPropertyOptional({
+    description:
+      'Replacement window in days after delivery. Only applied when isReplaceable = true. ' +
+      'Currently expected to be one of 2 / 5 / 7; pass null to clear.',
+  })
+  @IsOptional() replacementWindow?: number | null;
+  @ApiPropertyOptional({
+    enum: [
+      'NON_RETURNABLE',
+      'EASY_RETURN_3_DAYS',
+      'EASY_RETURN_7_DAYS',
+      'REPLACEMENT_ONLY',
+      'RETURN_PLUS_REPLACEMENT',
+    ],
+    description: 'Canonical return policy preset; when set, overrides return/replacement flags for this update.',
+  })
+  @IsOptional() @IsString() returnPolicyPreset?: string;
+  @ApiPropertyOptional({ description: 'Return window in days when preset is RETURN_PLUS_REPLACEMENT (default 7).' })
+  @IsOptional() returnWindowDays?: number | null;
+  @ApiPropertyOptional({ description: 'Structured warranty value (use with warrantyDurationUnit).' })
+  @IsOptional() warrantyDurationValue?: number | null;
+  @ApiPropertyOptional({ enum: ['DAYS', 'MONTHS', 'YEARS'] })
+  @IsOptional() @IsString() warrantyDurationUnit?: string | null;
 }
 
 export class AdminApproveProductDto {
@@ -45,6 +74,26 @@ export class AdminApproveProductDto {
   @IsOptional() commissionRate?: number;
   @ApiPropertyOptional({ description: 'Curated bestseller rank (1 = top). Optional.' })
   @IsOptional() bestSellersRank?: number | null;
+  @ApiPropertyOptional({ description: 'Whether the product is eligible for replacement after delivery.' })
+  @IsOptional() @IsBoolean() isReplaceable?: boolean;
+  @ApiPropertyOptional({ description: 'Replacement window in days (2 / 5 / 7) when eligible.' })
+  @IsOptional() replacementWindow?: number | null;
+  @ApiPropertyOptional({
+    enum: [
+      'NON_RETURNABLE',
+      'EASY_RETURN_3_DAYS',
+      'EASY_RETURN_7_DAYS',
+      'REPLACEMENT_ONLY',
+      'RETURN_PLUS_REPLACEMENT',
+    ],
+  })
+  @IsOptional() @IsString() returnPolicyPreset?: string;
+  @ApiPropertyOptional()
+  @IsOptional() returnWindowDays?: number | null;
+  @ApiPropertyOptional()
+  @IsOptional() warrantyDurationValue?: number | null;
+  @ApiPropertyOptional({ enum: ['DAYS', 'MONTHS', 'YEARS'] })
+  @IsOptional() @IsString() warrantyDurationUnit?: string | null;
 }
 
 // ─── Order management ───
@@ -153,6 +202,11 @@ export class CreateCouponDto {
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Type(() => Number) maxDiscount?: number;
   @ApiPropertyOptional() @IsOptional() @IsString() validUntil?: string;
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Type(() => Number) usageLimit?: number;
+  @ApiPropertyOptional({ description: 'Max times a single customer can use this coupon (null = unlimited)' })
+  @IsOptional()
+  @IsNumber()
+  @Type(() => Number)
+  maxRedemptionsPerUser?: number;
   @ApiPropertyOptional({ enum: ['global', 'category', 'seller'] }) @IsOptional() @IsString() scope?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() categoryId?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() sellerId?: string;
