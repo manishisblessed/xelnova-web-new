@@ -13,6 +13,7 @@ import {
   Sparkles,
   Check,
   Zap,
+  Search,
 } from 'lucide-react';
 import { cn } from '@xelnova/utils';
 import type { Category } from '@/lib/data/categories';
@@ -71,6 +72,7 @@ export function HomeFilterBar({ categories, brands }: HomeFilterBarProps) {
 
   const [activeFilters, setActiveFilters] = useState<Record<string, any>>({});
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
+  const [selectedCategorySlug, setSelectedCategorySlug] = useState<string | null>(null);
 
   const checkScroll = () => {
     if (!scrollRef.current) return;
@@ -126,8 +128,19 @@ export function HomeFilterBar({ categories, brands }: HomeFilterBarProps) {
     }
     setActiveFilters(newFilters);
     setOpenDropdown(null);
-    const query = buildQueryString(newFilters);
-    router.push(`/products${query ? `?${query}` : ''}`);
+    if (key === 'category') {
+      setSelectedCategorySlug(value);
+    } else {
+      const query = buildQueryString(newFilters);
+      router.push(`/products${query ? `?${query}` : ''}`);
+    }
+  };
+
+  const handleCategorySearch = () => {
+    if (selectedCategorySlug) {
+      router.push(`/categories/${selectedCategorySlug}`);
+      setSelectedCategorySlug(null);
+    }
   };
 
   const applyPriceRange = (min: number, max: number | null) => {
@@ -162,7 +175,7 @@ export function HomeFilterBar({ categories, brands }: HomeFilterBarProps) {
       <div className="mx-auto max-w-[1440px] px-3 sm:px-6">
         <div className="relative flex items-center gap-2">
           {/* Filter count badge / Filters button */}
-          <div className="flex-shrink-0 flex items-center">
+          <div className="flex-shrink-0 flex items-center gap-2">
             <button
               className={cn(
                 'flex items-center gap-1.5 px-3 py-2 rounded-lg border text-sm font-medium transition-all',
@@ -178,6 +191,17 @@ export function HomeFilterBar({ categories, brands }: HomeFilterBarProps) {
                 </span>
               )}
             </button>
+            
+            {selectedCategorySlug && (
+              <button
+                onClick={handleCategorySearch}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary-600 text-white text-sm font-medium hover:bg-primary-700 transition-all shadow-sm"
+              >
+                <Search size={16} />
+                <span className="hidden sm:inline">Search Category</span>
+                <span className="sm:hidden">Search</span>
+              </button>
+            )}
           </div>
 
           {/* Left scroll button */}

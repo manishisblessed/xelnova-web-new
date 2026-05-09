@@ -380,6 +380,82 @@ export class EmailService {
     });
   }
 
+  async sendOrderInTransit(to: string, name: string, orderNumber: string, trackingUrl: string) {
+    const base = this.config.get('APP_URL') || 'https://xelnova.in';
+    return this.sendEmail({
+      to,
+      subject: `Order #${orderNumber} is on the way - XelNova`,
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+          <h1 style="color:#7c3aed">On the way</h1>
+          <p>Hi ${this.cleanName(name)},</p>
+          <p>Your order <strong>#${orderNumber}</strong> is in transit and moving toward you.</p>
+          <p><a href="${trackingUrl}">Track your shipment</a></p>
+          <a href="${base}/account/orders/${encodeURIComponent(orderNumber)}"
+             style="display:inline-block;padding:12px 24px;background:#7c3aed;color:white;text-decoration:none;border-radius:8px;margin-top:16px">
+            View order
+          </a>
+        </div>
+      `,
+    });
+  }
+
+  async sendOrderShipmentPickupScheduled(
+    to: string,
+    name: string,
+    orderNumber: string,
+    trackingUrl: string,
+  ) {
+    const base = this.config.get('APP_URL') || 'https://xelnova.in';
+    return this.sendEmail({
+      to,
+      subject: `Pickup scheduled — Order #${orderNumber} - XelNova`,
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+          <h1 style="color:#7c3aed">Courier pickup scheduled</h1>
+          <p>Hi ${this.cleanName(name)},</p>
+          <p>The courier has scheduled a pickup for order <strong>#${orderNumber}</strong>. Your package should ship soon.</p>
+          <p><a href="${trackingUrl}">Track your shipment</a></p>
+          <a href="${base}/account/orders/${encodeURIComponent(orderNumber)}"
+             style="display:inline-block;padding:12px 24px;background:#7c3aed;color:white;text-decoration:none;border-radius:8px;margin-top:16px">
+            View order
+          </a>
+        </div>
+      `,
+    });
+  }
+
+  async sendOrderRtoUpdate(
+    to: string,
+    name: string,
+    orderNumber: string,
+    trackingUrl: string,
+    phase: 'initiated' | 'delivered',
+  ) {
+    const base = this.config.get('APP_URL') || 'https://xelnova.in';
+    const title = phase === 'delivered' ? 'Return completed' : 'Shipment returning to seller';
+    const msg =
+      phase === 'delivered'
+        ? `The return shipment for order <strong>#${orderNumber}</strong> has reached the seller.`
+        : `Your shipment for order <strong>#${orderNumber}</strong> is being returned to the seller (RTO).`;
+    return this.sendEmail({
+      to,
+      subject: `${title} — Order #${orderNumber} - XelNova`,
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+          <h1 style="color:#7c3aed">${title}</h1>
+          <p>Hi ${this.cleanName(name)},</p>
+          <p>${msg}</p>
+          <p><a href="${trackingUrl}">Tracking</a></p>
+          <a href="${base}/account/orders/${encodeURIComponent(orderNumber)}"
+             style="display:inline-block;padding:12px 24px;background:#7c3aed;color:white;text-decoration:none;border-radius:8px;margin-top:16px">
+            View order
+          </a>
+        </div>
+      `,
+    });
+  }
+
   // ─── Payment Emails ───
 
   async sendPaymentSuccess(to: string, name: string, orderNumber: string, amount: number) {

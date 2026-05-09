@@ -97,4 +97,18 @@ export class WebPushService {
       url: `/account/orders/${orderNumber}`,
     });
   }
+
+  /** Shipment milestones from courier webhooks (not always same as order status strings). */
+  async sendShipmentMilestonePush(
+    userId: string,
+    orderNumber: string,
+    title: string,
+    body: string,
+  ) {
+    return this.sendToUser(userId, {
+      title,
+      body,
+      url: `/account/orders/${encodeURIComponent(orderNumber)}`,
+    });
+  }
 }

@@ -6,7 +6,7 @@ import { WhatsAppService } from './whatsapp.service';
 import { WebPushService } from './web-push.service';
 import { SmsService } from './sms.service';
 import type { OrderCancelledNotifyParams } from '../../common/helpers/order-cancel-notify';
-import type { ShipmentStatus } from '@prisma/client';
+import { ShipmentStatus } from '@prisma/client';
 
 @Injectable()
 export class NotificationService {
@@ -283,6 +283,15 @@ export class NotificationService {
       );
     }
 
+    const track = trackingUrl || `${this.appUrl}/account/orders/${encodeURIComponent(orderNumber)}`;
+    if (user?.phone && this.whatsapp.isEnabled()) {
+      this.whatsapp
+        .sendShipmentUpdate(user.phone, orderNumber, track)
+        .catch((err) =>
+          this.logger.warn(`WhatsApp failed for order shipped ${orderNumber}: ${err instanceof Error ? err.message : err}`),
+        );
+    }
+
     this.notifyAllAdmins({
       type: 'ADMIN_ORDER_SHIPPED',
       title: 'Order shipped',
@@ -326,12 +335,213 @@ export class NotificationService {
       );
     }
 
+    if (user?.phone && this.whatsapp.isEnabled()) {
+      this.whatsapp
+        .sendTextMessage(
+          user.phone,
+          `Xelnova: Your order #${orderNumber} was delivered. Thank you for shopping with us!`,
+        )
+        .catch((err) =>
+          this.logger.warn(`WhatsApp failed for order delivered ${orderNumber}: ${err instanceof Error ? err.message : err}`),
+        );
+    }
+
     this.notifyAllAdmins({
       type: 'ADMIN_ORDER_DELIVERED',
       title: 'Order delivered',
       body: `Order #${orderNumber} was delivered.`,
       data: { orderNumber },
     }).catch(() => {});
+  }
+
+  /**
+   * Customer notifications for all courier shipment milestones (webhooks + sync).
+   * Covers email, SMS (DLT templates where available), web push, WhatsApp, in-app log.
+   */
+  async notifyCustomerShipmentTrackingUpdate(
+    userId: string,
+    orderNumber: string,
+    shipmentStatus: ShipmentStatus,
+    courier: string,
+    trackingUrl: string,
+  ) {
+    const track = trackingUrl || `${this.appUrl}/account/orders/${encodeURIComponent(orderNumber)}`;
+
+    switch (shipmentStatus) {
+      case ShipmentStatus.BOOKED:
+      case ShipmentStatus.PICKED_UP:
+        await this.notifyOrderShipped(userId, orderNumber, courier, track);
+        return;
+      case ShipmentStatus.DELIVERED:
+        await this.notifyOrderDelivered(userId, orderNumber);
+        return;
+      default:
+        break;
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { phone: true, email: true, name: true },
+    });
+
+    const safeWa = (text: string) => {
+      if (!user?.phone || !this.whatsapp.isEnabled()) return;
+      this.whatsapp.sendTextMessage(user.phone, text).catch((err) =>
+        this.logger.warn(`WhatsApp shipment ${shipmentStatus} ${orderNumber}: ${err instanceof Error ? err.message : err}`),
+      );
+    };
+
+    switch (shipmentStatus) {
+      case ShipmentStatus.PICKUP_SCHEDULED: {
+        await this.logNotification({
+          userId,
+          channel: 'in_app',
+          type: 'ORDER_PICKUP_SCHEDULED',
+          title: 'Courier pickup scheduled',
+          body: `A pickup has been scheduled for order #${orderNumber}.`,
+          data: { orderNumber, trackingUrl: track },
+        });
+        this.webPush
+          .sendShipmentMilestonePush(
+            userId,
+            orderNumber,
+            'Pickup scheduled',
+            `Courier pickup scheduled for order #${orderNumber}.`,
+          )
+          .catch((err) => this.logger.warn(`WebPush pickup scheduled: ${err.message}`));
+        if (user?.phone) {
+          this.sms.sendOrderProcessing(user.phone, orderNumber).catch((err) =>
+            this.logger.warn(`SMS pickup scheduled: ${err.message}`),
+          );
+        }
+        if (user?.email) {
+          this.email
+            .sendOrderShipmentPickupScheduled(user.email, user.name || 'Customer', orderNumber, track)
+            .catch((err) => this.logger.warn(`Email pickup scheduled: ${err.message}`));
+        }
+        safeWa(`Xelnova: Courier pickup scheduled for order #${orderNumber}. Track: ${track}`);
+        break;
+      }
+      case ShipmentStatus.IN_TRANSIT: {
+        await this.logNotification({
+          userId,
+          channel: 'in_app',
+          type: 'ORDER_IN_TRANSIT',
+          title: 'Order in transit',
+          body: `Your order #${orderNumber} is on the way.`,
+          data: { orderNumber, trackingUrl: track },
+        });
+        this.webPush
+          .sendShipmentMilestonePush(userId, orderNumber, 'In transit', `Order #${orderNumber} is on the way.`)
+          .catch((err) => this.logger.warn(`WebPush in transit: ${err.message}`));
+        if (user?.phone) {
+          this.sms.sendOrderProcessing(user.phone, orderNumber).catch((err) =>
+            this.logger.warn(`SMS in transit: ${err.message}`),
+          );
+        }
+        if (user?.email) {
+          this.email
+            .sendOrderInTransit(user.email, user.name || 'Customer', orderNumber, track)
+            .catch((err) => this.logger.warn(`Email in transit: ${err.message}`));
+        }
+        safeWa(`Xelnova: Your order #${orderNumber} is in transit. Track: ${track}`);
+        break;
+      }
+      case ShipmentStatus.OUT_FOR_DELIVERY: {
+        await this.logNotification({
+          userId,
+          channel: 'in_app',
+          type: 'ORDER_OUT_FOR_DELIVERY',
+          title: 'Out for Delivery',
+          body: `Your order #${orderNumber} is out for delivery today!`,
+          data: { orderNumber, trackingUrl: track },
+        });
+        this.webPush
+          .sendShipmentMilestonePush(
+            userId,
+            orderNumber,
+            'Out for delivery',
+            `Order #${orderNumber} is out for delivery today.`,
+          )
+          .catch((err) => this.logger.warn(`WebPush OFD: ${err.message}`));
+        if (user?.phone) {
+          this.sms.sendOrderOutForDelivery(user.phone, orderNumber).catch((err) =>
+            this.logger.warn(`SMS OFD: ${err.message}`),
+          );
+        }
+        if (user?.email) {
+          this.email
+            .sendOrderOutForDelivery(user.email, user.name || 'Customer', orderNumber)
+            .catch((err) => this.logger.warn(`Email OFD: ${err.message}`));
+        }
+        safeWa(`Xelnova: Your order #${orderNumber} is out for delivery today. ${track}`);
+        break;
+      }
+      case ShipmentStatus.RTO_INITIATED:
+      case ShipmentStatus.RTO_DELIVERED: {
+        const phase = shipmentStatus === ShipmentStatus.RTO_DELIVERED ? 'delivered' : 'initiated';
+        await this.logNotification({
+          userId,
+          channel: 'in_app',
+          type: 'ORDER_RTO',
+          title: 'Return to origin',
+          body: `Your shipment for order #${orderNumber} is returning to the seller (${String(shipmentStatus).replace(/_/g, ' ').toLowerCase()}).`,
+          data: { orderNumber, trackingUrl: track },
+        });
+        this.webPush
+          .sendShipmentMilestonePush(
+            userId,
+            orderNumber,
+            'Return shipment',
+            phase === 'delivered'
+              ? `RTO for order #${orderNumber} has been delivered to the seller.`
+              : `Order #${orderNumber} is returning to the seller.`,
+          )
+          .catch((err) => this.logger.warn(`WebPush RTO: ${err.message}`));
+        if (user?.email) {
+          this.email
+            .sendOrderRtoUpdate(user.email, user.name || 'Customer', orderNumber, track, phase)
+            .catch((err) => this.logger.warn(`Email RTO: ${err.message}`));
+        }
+        safeWa(
+          phase === 'delivered'
+            ? `Xelnova: RTO for order #${orderNumber} completed at seller. ${track}`
+            : `Xelnova: Order #${orderNumber} is returning to the seller (RTO). ${track}`,
+        );
+        break;
+      }
+      case ShipmentStatus.CANCELLED: {
+        await this.logNotification({
+          userId,
+          channel: 'in_app',
+          type: 'SHIPMENT_CANCELLED_COURIER',
+          title: 'Shipment cancelled',
+          body: `The courier reported your shipment for order #${orderNumber} as cancelled.`,
+          data: { orderNumber, trackingUrl: track },
+        });
+        this.webPush
+          .sendShipmentMilestonePush(
+            userId,
+            orderNumber,
+            'Shipment update',
+            `Shipment for order #${orderNumber} was cancelled by the courier.`,
+          )
+          .catch((err) => this.logger.warn(`WebPush shipment cancelled: ${err.message}`));
+        if (user?.email) {
+          this.email
+            .sendGenericEmail(
+              user.email,
+              `Shipment cancelled — Order #${orderNumber}`,
+              `Hi ${user.name || 'Customer'},\n\nThe carrier reported that the shipment for order #${orderNumber} was cancelled.\nTrack or contact support: ${track}\n`,
+            )
+            .catch((err) => this.logger.warn(`Email shipment cancelled: ${err.message}`));
+        }
+        safeWa(`Xelnova: Shipment for order #${orderNumber} was cancelled. See ${track}`);
+        break;
+      }
+      default:
+        break;
+    }
   }
 
   /**
@@ -1433,20 +1643,59 @@ export class NotificationService {
   ) {
     const sellerProfileIds = [...new Set(order.items.map((i) => i.sellerId).filter(Boolean))] as string[];
     const label = String(shipmentStatus).replace(/_/g, ' ').toLowerCase();
+    const ordersUrl = `${this.sellerUrl}/orders`;
+
     for (const sid of sellerProfileIds) {
       const profile = await this.prisma.sellerProfile.findUnique({
         where: { id: sid },
-        select: { userId: true },
+        select: { userId: true, storeName: true },
       });
       if (!profile?.userId) continue;
+      const userId = profile.userId;
+
       await this.logNotification({
-        userId: profile.userId,
+        userId,
         channel: 'in_app',
         type: 'SELLER_SHIPMENT_STATUS',
         title: 'Shipment update',
         body: `Order #${order.orderNumber} — courier status: ${label}.`,
         data: { orderNumber: order.orderNumber, shipmentStatus },
       });
+
+      this.webPush
+        .sendShipmentMilestonePush(
+          userId,
+          order.orderNumber,
+          'Shipment update',
+          `Order #${order.orderNumber}: ${label}.`,
+        )
+        .catch((err) =>
+          this.logger.warn(`Seller web push shipment ${order.orderNumber}: ${err.message}`),
+        );
+
+      const emailBody = `Courier reported status: <strong>${label}</strong> for order <strong>#${order.orderNumber}</strong>. <a href="${ordersUrl}">Open your orders</a> in the seller panel.`;
+      this.sendSellerEmail(
+        userId,
+        `Shipment update — #${order.orderNumber}`,
+        emailBody,
+      ).catch((err) =>
+        this.logger.warn(`Seller email shipment ${order.orderNumber}: ${err instanceof Error ? err.message : err}`),
+      );
+
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { phone: true },
+      });
+      if (user?.phone && this.whatsapp.isEnabled()) {
+        this.whatsapp
+          .sendTextMessage(
+            user.phone,
+            `Xelnova Seller: Order #${order.orderNumber} — ${label}. Dashboard: ${ordersUrl}`,
+          )
+          .catch((err) =>
+            this.logger.warn(`Seller WhatsApp shipment ${order.orderNumber}: ${err instanceof Error ? err.message : err}`),
+          );
+      }
     }
   }
 

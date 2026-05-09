@@ -3503,60 +3503,15 @@ export class ShippingService {
     shipmentStatus: ShipmentStatus,
   ) {
     const courier = order.shipment?.courierProvider || 'Xelnova Courier';
-    const trackingUrl = order.shipment?.trackingUrl || `https://xelnova.in/track/${order.orderNumber}`;
+    const trackingUrl = order.shipment?.trackingUrl || `${this.config.get('APP_URL') || 'https://xelnova.in'}/account/orders/${encodeURIComponent(order.orderNumber)}`;
 
-    switch (shipmentStatus) {
-      case ShipmentStatus.BOOKED:
-      case ShipmentStatus.PICKED_UP:
-        await this.notificationService.notifyOrderShipped(
-          order.userId,
-          order.orderNumber,
-          courier,
-          trackingUrl,
-        );
-        break;
-
-      case ShipmentStatus.IN_TRANSIT:
-        await this.notificationService.logNotification({
-          userId: order.userId,
-          channel: 'in_app',
-          type: 'ORDER_IN_TRANSIT',
-          title: 'Order in transit',
-          body: `Your order #${order.orderNumber} is on the way.`,
-          data: { orderNumber: order.orderNumber, trackingUrl },
-        });
-        break;
-
-      case ShipmentStatus.OUT_FOR_DELIVERY:
-        await this.notificationService.logNotification({
-          userId: order.userId,
-          channel: 'in_app',
-          type: 'ORDER_OUT_FOR_DELIVERY',
-          title: 'Out for Delivery',
-          body: `Your order #${order.orderNumber} is out for delivery today!`,
-          data: { orderNumber: order.orderNumber },
-        });
-        break;
-
-      case ShipmentStatus.DELIVERED:
-        await this.notificationService.notifyOrderDelivered(order.userId, order.orderNumber);
-        break;
-
-      case ShipmentStatus.RTO_INITIATED:
-      case ShipmentStatus.RTO_DELIVERED:
-        await this.notificationService.logNotification({
-          userId: order.userId,
-          channel: 'in_app',
-          type: 'ORDER_RTO',
-          title: 'Return to origin',
-          body: `Your shipment for order #${order.orderNumber} is returning to the seller (${shipmentStatus.replace(/_/g, ' ').toLowerCase()}).`,
-          data: { orderNumber: order.orderNumber, trackingUrl },
-        });
-        break;
-
-      default:
-        break;
-    }
+    await this.notificationService.notifyCustomerShipmentTrackingUpdate(
+      order.userId,
+      order.orderNumber,
+      shipmentStatus,
+      courier,
+      trackingUrl,
+    );
   }
 
   // ─── Webhook Processing ───
