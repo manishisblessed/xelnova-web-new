@@ -33,6 +33,12 @@ export class ShippingWebhookController {
     return successResponse(result, 'Webhook processed');
   }
 
+  @Post('sr-updates')
+  @ApiOperation({ summary: 'ShipRocket status webhook (alias)' })
+  async shiprocketWebhookAlias(@Body() payload: any) {
+    return this.shiprocketWebhook(payload);
+  }
+
   @Post('xpressbees')
   @ApiOperation({ summary: 'XpressBees status webhook' })
   async xpressbeesWebhook(@Body() payload: any) {
