@@ -141,8 +141,21 @@ export class ShipRocketProvider implements CourierProvider {
     }
 
     const awbData = await awbRes.json();
-    const awb =
-      awbData?.response?.data?.awb_code || awbData?.awb_code || '';
+    const awb = String(
+      awbData?.response?.data?.awb_code ||
+      awbData?.awb_code ||
+      awbData?.data?.awb_code ||
+      '',
+    ).trim();
+
+    if (!awb) {
+      this.logger.error(
+        `ShipRocket AWB assign returned 200 but no awb_code found. Response: ${JSON.stringify(awbData).slice(0, 500)}`,
+      );
+      throw new Error(
+        'ShipRocket accepted the order but did not assign an AWB number. This usually means no courier is available for this route/weight. Try a different shipping option.',
+      );
+    }
 
     // Step 3: Generate pickup request
     try {
@@ -183,7 +196,7 @@ export class ShipRocketProvider implements CourierProvider {
     }
 
     return {
-      awbNumber: String(awb),
+      awbNumber: awb,
       courierOrderId: String(srOrderId),
       trackingUrl: `https://shiprocket.co/tracking/${awb}`,
       labelUrl: labelUrl || undefined,
@@ -296,33 +309,85 @@ export class ShipRocketProvider implements CourierProvider {
 
   /**
    * Downloads the carrier-issued shipping label as binary PDF.
-   * Generates a label URL when needed (AWB → track → shipment id → generate/label).
+   *
+   * Resolution order:
+   * 1. AWB → track → shipment_id → generate/label
+   * 2. courierOrderId (SR order_id) → order details → shipment_id → generate/label
    */
-  async downloadLabelPdf(awbNumber: string, config: SellerCourierConfig): Promise<Buffer | null> {
+  async downloadLabelPdf(
+    awbNumber: string,
+    config: SellerCourierConfig,
+    courierOrderId?: string | null,
+  ): Promise<Buffer | null> {
     const headers = await this.authHeaders(config);
+    let shipmentId: number | null = null;
 
-    const trackRes = await fetch(
-      `${this.baseUrl}/v1/external/courier/track/awb/${encodeURIComponent(awbNumber)}`,
-      { headers },
-    );
-    if (!trackRes.ok) {
-      this.logger.warn(`ShipRocket track AWB failed (${trackRes.status}) for label download`);
+    if (awbNumber) {
+      shipmentId = await this.resolveShipmentIdFromAwb(awbNumber, headers);
+    }
+
+    if (!shipmentId && courierOrderId) {
+      shipmentId = await this.resolveShipmentIdFromOrder(courierOrderId, headers);
+    }
+
+    if (!shipmentId) {
+      this.logger.warn(
+        `ShipRocket: cannot resolve shipment_id for label (awb=${awbNumber || '—'}, orderId=${courierOrderId || '—'})`,
+      );
       return null;
     }
 
-    const td = await trackRes.json();
-    const tracking = td?.tracking_data || td;
-    const rawSid =
-      tracking?.shipment_id ??
-      td?.shipment_id ??
-      td?.data?.shipment_id ??
-      null;
-    const shipmentId = typeof rawSid === 'number' ? rawSid : parseInt(String(rawSid ?? ''), 10);
-    if (!Number.isFinite(shipmentId)) {
-      this.logger.warn('ShipRocket tracking response missing shipment_id for label generation');
+    return this.generateLabelFromShipmentId(shipmentId, headers);
+  }
+
+  private async resolveShipmentIdFromAwb(
+    awbNumber: string,
+    headers: Record<string, string>,
+  ): Promise<number | null> {
+    try {
+      const trackRes = await fetch(
+        `${this.baseUrl}/v1/external/courier/track/awb/${encodeURIComponent(awbNumber)}`,
+        { headers },
+      );
+      if (!trackRes.ok) return null;
+      const td = await trackRes.json();
+      const tracking = td?.tracking_data || td;
+      const rawSid = tracking?.shipment_id ?? td?.shipment_id ?? td?.data?.shipment_id ?? null;
+      const sid = typeof rawSid === 'number' ? rawSid : parseInt(String(rawSid ?? ''), 10);
+      return Number.isFinite(sid) ? sid : null;
+    } catch {
       return null;
     }
+  }
 
+  private async resolveShipmentIdFromOrder(
+    courierOrderId: string,
+    headers: Record<string, string>,
+  ): Promise<number | null> {
+    try {
+      const res = await fetch(
+        `${this.baseUrl}/v1/external/orders/show/${encodeURIComponent(courierOrderId)}`,
+        { headers },
+      );
+      if (!res.ok) return null;
+      const data = await res.json();
+      const rawSid =
+        data?.data?.shipments?.[0]?.id ??
+        data?.shipments?.[0]?.id ??
+        data?.data?.shipment_id ??
+        data?.shipment_id ??
+        null;
+      const sid = typeof rawSid === 'number' ? rawSid : parseInt(String(rawSid ?? ''), 10);
+      return Number.isFinite(sid) ? sid : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async generateLabelFromShipmentId(
+    shipmentId: number,
+    headers: Record<string, string>,
+  ): Promise<Buffer | null> {
     const labelRes = await fetch(`${this.baseUrl}/v1/external/courier/generate/label`, {
       method: 'POST',
       headers,
@@ -339,7 +404,6 @@ export class ShipRocketProvider implements CourierProvider {
     const labelUrl =
       labelJson?.label_url ||
       labelJson?.label_created_url ||
-      labelJson?.response?.data?.label_url ||
       '';
 
     if (labelUrl && /^https?:\/\//i.test(String(labelUrl))) {
@@ -392,37 +456,17 @@ export class ShipRocketProvider implements CourierProvider {
       const locations = listData?.data?.shipping_address || [];
       if (locations.length === 0) return { found: false, locations: [] };
 
-      // 1. Exact name match
+      const displayName = (options.label || options.name).slice(0, 36);
+
+      // Only match by exact pickup_location name — never by pincode/city
+      // because a seller can have multiple locations in the same area.
       const byName = locations.find(
         (loc: any) =>
-          loc.pickup_location?.toLowerCase() === options.name.toLowerCase() ||
-          loc.pickup_location === options.name,
+          loc.pickup_location?.toLowerCase() === displayName.toLowerCase() ||
+          loc.pickup_location?.toLowerCase() === options.name.toLowerCase(),
       );
       if (byName) {
         return { found: true, name: byName.pickup_location, id: byName.id, locations };
-      }
-
-      // 2. Match by pincode (most reliable address-based match)
-      const byPincode = locations.find(
-        (loc: any) => String(loc.pin_code || loc.pincode) === options.pincode,
-      );
-      if (byPincode) {
-        return { found: true, name: byPincode.pickup_location, id: byPincode.id, locations };
-      }
-
-      // 3. Match by city (partial)
-      const optCity = (options.city || '').toLowerCase().trim();
-      const byCity = locations.find(
-        (loc: any) => (loc.city || '').toLowerCase().trim() === optCity,
-      );
-      if (byCity) {
-        return { found: true, name: byCity.pickup_location, id: byCity.id, locations };
-      }
-
-      // 4. Fall back to the first active location
-      const firstActive = locations.find((loc: any) => loc.status === 1 || loc.status === '1') || locations[0];
-      if (firstActive?.pickup_location) {
-        return { found: true, name: firstActive.pickup_location, id: firstActive.id, locations };
       }
 
       return { found: false, locations };
@@ -467,19 +511,22 @@ export class ShipRocketProvider implements CourierProvider {
     }
 
     // No matching location found — create a new one
-    const contactName = options.contactPerson || options.registeredName || options.name;
-    const nameParts = contactName.split(' ');
-    const firstName = nameParts[0] || 'Seller';
-    const lastName = nameParts.slice(1).join(' ') || 'Pickup';
+    const phone = options.phone.replace(/\D/g, '').slice(-10);
+    const shipperName = options.contactPerson || options.registeredName || options.name;
+    const displayName = (options.label || options.name).slice(0, 36);
+
+    const email = options.email?.trim()
+      || (phone ? `pickup.${phone}@xelnova.in` : `pickup.${Date.now()}@xelnova.in`);
+
+    const addressLine2Parts = [options.addressLine2, options.landmark].filter(Boolean);
 
     const payload = {
-      pickup_location: options.name,
-      name: firstName,
-      last_name: lastName,
-      email: options.email || `pickup-${Date.now()}@seller.local`,
-      phone: options.phone.replace(/\D/g, '').slice(-10),
-      address: options.address,
-      address_2: '',
+      pickup_location: displayName,
+      name: shipperName,
+      email,
+      phone,
+      address: options.address.slice(0, 80),
+      address_2: addressLine2Parts.join(', ').slice(0, 80) || '',
       city: options.city,
       state: options.state,
       country: options.country || 'India',
@@ -493,12 +540,14 @@ export class ShipRocketProvider implements CourierProvider {
         body: JSON.stringify(payload),
       });
 
-      if (!res.ok) {
-        const errText = await res.text();
-        this.logger.error(`ShipRocket addpickup failed: ${res.status} ${errText}`);
+      const resText = await res.text();
+      let data: any = {};
+      try { data = JSON.parse(resText); } catch { /* not JSON */ }
 
-        // If it failed because the location already exists, re-fetch to get the actual name
-        if (errText.toLowerCase().includes('already') || errText.toLowerCase().includes('exists')) {
+      if (!res.ok) {
+        this.logger.error(`ShipRocket addpickup failed: ${res.status} ${resText.slice(0, 400)}`);
+
+        if (resText.toLowerCase().includes('already') || resText.toLowerCase().includes('exists')) {
           const retry = await this.findExistingPickupLocation(headers, options);
           if (retry.found && retry.name) {
             return {
@@ -510,16 +559,27 @@ export class ShipRocketProvider implements CourierProvider {
           }
         }
 
+        // Parse validation errors from ShipRocket into a human-readable message
+        let userMessage = `ShipRocket rejected the address (HTTP ${res.status}).`;
+        try {
+          const parsed = typeof data.message === 'string' ? JSON.parse(data.message) : data.message;
+          if (parsed && typeof parsed === 'object') {
+            const errors = Object.entries(parsed)
+              .map(([field, msgs]) => `${field}: ${Array.isArray(msgs) ? msgs.join(', ') : msgs}`)
+              .join('; ');
+            if (errors) userMessage = `ShipRocket: ${errors}`;
+          }
+        } catch { /* use default message */ }
+
         return {
           success: false,
-          message: `Failed to register pickup location with ShipRocket: ${errText}`,
+          message: userMessage,
         };
       }
 
-      const data = await res.json();
-
       if (data.success === false || data.status === false) {
-        // ShipRocket returned 200 but with success=false — try to find existing
+        this.logger.warn(`ShipRocket addpickup returned 200 but rejected: ${resText.slice(0, 300)}`);
+
         const retry = await this.findExistingPickupLocation(headers, options);
         if (retry.found && retry.name) {
           return {
@@ -529,22 +589,42 @@ export class ShipRocketProvider implements CourierProvider {
             message: `Using existing ShipRocket pickup location "${retry.name}".`,
           };
         }
+
         return {
           success: false,
           message: data.message || 'ShipRocket rejected the pickup location registration.',
         };
       }
 
-      this.logger.log(`ShipRocket pickup location "${options.name}" registered successfully.`);
+      // ShipRocket assigns its own pickup_code (e.g. "TESTADI") — use
+      // the pickup_location we sent (which is what the order API expects),
+      // but log the internal pickup_code for debugging.
+      const pickupCode = data?.address?.pickup_code || '';
+      const pickupName =
+        data?.address?.pickup_location || data?.pickup_location || displayName;
+      this.logger.log(
+        `ShipRocket pickup "${pickupName}" registered (pickup_code: ${pickupCode}, id: ${data?.pickup_id || 'n/a'}).`,
+      );
 
       return {
         success: true,
-        registeredName: options.name,
-        message: `Pickup location "${options.name}" registered with ShipRocket.`,
+        registeredName: pickupName,
+        message: `Pickup location "${pickupName}" registered with ShipRocket.`,
       };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this.logger.error(`ShipRocket registerWarehouse failed: ${msg}`);
+
+      if (config.warehouseId?.trim()) {
+        const alias = config.warehouseId.trim();
+        return {
+          success: true,
+          registeredName: alias,
+          alreadyExisted: true,
+          message: `Using configured ShipRocket pickup location "${alias}" (API unavailable).`,
+        };
+      }
+
       return {
         success: false,
         message: `Failed to register pickup location with ShipRocket: ${msg}`,

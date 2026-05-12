@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   ChevronDown,
@@ -72,25 +72,32 @@ export function HomeFilterBar({ categories, brands }: HomeFilterBarProps) {
   const [activeFilters, setActiveFilters] = useState<Record<string, any>>({});
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
 
-  const checkScroll = () => {
-    if (!scrollRef.current) return;
-    const { scrollLeft, scrollWidth, clientWidth } = scrollRef.current;
-    setCanScrollLeft(scrollLeft > 5);
-    setCanScrollRight(scrollLeft < scrollWidth - clientWidth - 5);
-  };
+  const rafRef = useRef<number>(0);
+
+  const checkScroll = useCallback(() => {
+    if (rafRef.current) return;
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = 0;
+      if (!scrollRef.current) return;
+      const { scrollLeft, scrollWidth, clientWidth } = scrollRef.current;
+      setCanScrollLeft(scrollLeft > 5);
+      setCanScrollRight(scrollLeft < scrollWidth - clientWidth - 5);
+    });
+  }, []);
 
   useEffect(() => {
     checkScroll();
     const el = scrollRef.current;
     if (el) {
-      el.addEventListener('scroll', checkScroll);
+      el.addEventListener('scroll', checkScroll, { passive: true });
       window.addEventListener('resize', checkScroll);
     }
     return () => {
       el?.removeEventListener('scroll', checkScroll);
       window.removeEventListener('resize', checkScroll);
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
-  }, []);
+  }, [checkScroll]);
 
   const scroll = (direction: 'left' | 'right') => {
     if (!scrollRef.current) return;
@@ -164,10 +171,17 @@ export function HomeFilterBar({ categories, brands }: HomeFilterBarProps) {
           {/* Filter count badge / Filters button */}
           <div className="flex-shrink-0 flex items-center">
             <button
+              onClick={() => {
+                if (hasActiveFilters) {
+                  setActiveFilters({});
+                  router.push('/');
+                }
+              }}
+              title={hasActiveFilters ? 'Clear all filters' : 'Filters'}
               className={cn(
                 'flex items-center gap-1.5 px-3 py-2 rounded-lg border text-sm font-medium transition-all',
                 hasActiveFilters
-                  ? 'border-primary-400 bg-primary-50 text-primary-700 shadow-sm'
+                  ? 'border-primary-400 bg-primary-50 text-primary-700 shadow-sm cursor-pointer'
                   : 'border-gray-200 bg-white text-gray-700 hover:border-primary-300 hover:bg-primary-50/50'
               )}
             >

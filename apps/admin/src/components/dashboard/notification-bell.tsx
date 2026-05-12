@@ -57,8 +57,11 @@ function getNotificationHref(n: Notification): string | null {
     case 'ADMIN_WALLET_CREDITED':
     case 'ADMIN_WALLET_DEBITED':
       return '/wallets';
-    case 'ADMIN_RETURN_REQUESTED':
-      return orderNumber ? `/orders?orderNumber=${encodeURIComponent(orderNumber)}` : '/orders';
+    case 'ADMIN_RETURN_REQUESTED': {
+      const returnRequestId = typeof data?.returnRequestId === 'string' ? data.returnRequestId : null;
+      if (returnRequestId) return `/returns?returnRequestId=${encodeURIComponent(returnRequestId)}`;
+      return orderNumber ? `/returns?orderNumber=${encodeURIComponent(orderNumber)}` : '/returns';
+    }
     case 'ADMIN_SELLER_ONBOARDING_REVIEW':
       return sellerId
         ? `/seller-onboarding?sellerId=${encodeURIComponent(sellerId)}`

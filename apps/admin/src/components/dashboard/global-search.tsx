@@ -45,6 +45,8 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Coupons', href: '/coupons', group: 'Ecommerce' },
   { label: 'CMS Pages', href: '/pages', group: 'Ecommerce' },
   { label: 'Orders', href: '/orders', group: 'Orders & users' },
+  { label: 'Courier Summary', href: '/courier-summary', group: 'Orders & users' },
+  { label: 'Returns', href: '/returns', group: 'Orders & users' },
   { label: 'Support Tickets', href: '/tickets', group: 'Orders & users' },
   { label: 'Customers', href: '/customers', group: 'Orders & users' },
   { label: 'Sellers', href: '/sellers', group: 'Orders & users' },

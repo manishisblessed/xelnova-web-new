@@ -41,6 +41,32 @@ export class ForwardTicketDto {
   note?: string;
 }
 
+export class ForwardToCustomerDto {
+  @ApiProperty({ description: 'ID of the seller ticket message to relay to the customer' })
+  @IsString()
+  messageId: string;
+
+  @ApiPropertyOptional({
+    description: 'Optional note shown above the quoted seller reply',
+  })
+  @IsOptional()
+  @IsString()
+  note?: string;
+}
+
+export class ForwardToSellerDto {
+  @ApiProperty({ description: 'ID of the customer ticket message to relay to the seller' })
+  @IsString()
+  messageId: string;
+
+  @ApiPropertyOptional({
+    description: 'Optional note shown above the quoted customer message',
+  })
+  @IsOptional()
+  @IsString()
+  note?: string;
+}
+
 export class UpdateTicketStatusDto {
   @ApiProperty({
     enum: [
@@ -59,4 +85,15 @@ export class UpdateTicketStatusDto {
   @IsOptional()
   @IsString()
   priority?: string;
+}
+
+export class ChatMessageDto {
+  @ApiProperty({ description: 'Customer message to the chatbot' })
+  @IsString()
+  message: string;
+
+  @ApiPropertyOptional({ description: 'Order number for order-specific queries' })
+  @IsOptional()
+  @IsString()
+  orderNumber?: string;
 }

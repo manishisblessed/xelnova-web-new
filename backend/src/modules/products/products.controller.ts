@@ -120,4 +120,25 @@ export class ProductsController {
     }
     return successResponse(product, 'Product fetched successfully');
   }
+
+  @Get(':slug/coupons')
+  @ApiOperation({ summary: 'Get available coupons for a product' })
+  async getProductCoupons(@Param('slug') slug: string) {
+    const coupons = await this.productsService.getCouponsBySlug(slug);
+    return successResponse(coupons, 'Product coupons fetched successfully');
+  }
+
+  @Get('debug/all-coupons')
+  @ApiOperation({ summary: 'Debug: Get all coupons with details' })
+  async debugAllCoupons() {
+    const coupons = await this.productsService.debugGetAllCoupons();
+    return successResponse(coupons, 'All coupons fetched');
+  }
+
+  @Get('debug/:slug/info')
+  @ApiOperation({ summary: 'Debug: Get product seller info' })
+  async debugProductInfo(@Param('slug') slug: string) {
+    const info = await this.productsService.debugGetProductInfo(slug);
+    return successResponse(info, 'Product info fetched');
+  }
 }

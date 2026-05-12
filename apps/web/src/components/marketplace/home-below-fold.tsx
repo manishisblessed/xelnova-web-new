@@ -145,10 +145,10 @@ export function HomeBelowFold() {
                   </Link>
                 </div>
               </div>
-              <div className="flex-1 overflow-x-auto scrollbar-hide">
-                <div className="flex gap-4 p-4 min-w-max">
+              <div className="flex-1 overflow-x-auto scrollbar-hide xl:overflow-visible">
+                <div className="flex gap-4 p-4 min-w-max xl:grid xl:min-w-0 xl:grid-cols-6 xl:gap-3">
                   {showFlashDealsSkeleton && (
-                    <div className="flex items-center justify-center min-w-[280px] w-full py-10 text-text-muted text-sm">
+                    <div className="flex items-center justify-center min-w-[280px] w-full py-10 text-text-muted text-sm xl:col-span-6 xl:min-w-0">
                       <span className="inline-flex items-center gap-2">
                         <span className="h-4 w-4 animate-spin rounded-full border-2 border-primary-500 border-t-transparent" />
                         Loading deals…
@@ -160,7 +160,7 @@ export function HomeBelowFold() {
                       <FlashDealCard key={product.id} product={product} />
                     ))}
                   {!flashDealsLoading && flashDealProducts.length === 0 && (
-                    <div className="flex flex-col items-center justify-center min-w-[min(100%,320px)] w-full py-10 px-4 text-center">
+                    <div className="flex flex-col items-center justify-center min-w-[min(100%,320px)] w-full py-10 px-4 text-center xl:col-span-6 xl:min-w-0">
                       <p className="text-sm font-medium text-text-secondary">No flash deals right now</p>
                       <p className="text-xs text-text-muted mt-1 max-w-sm">
                         Check back soon, or browse all products for the best prices.
@@ -186,7 +186,7 @@ export function HomeBelowFold() {
           <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
             <div className="panel-glass p-5 md:p-6">
               <SectionHeader title="Featured Products" subtitle="Handpicked by our team" seeAllHref="/products?featured=true" />
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 md:gap-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3 md:gap-4">
                 {featuredProducts.slice(0, 8).map((product, i) => (
                   <ProductCard key={product.id} product={product} index={i} />
                 ))}
@@ -201,7 +201,7 @@ export function HomeBelowFold() {
         <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
             <div className="panel-glass p-5 md:p-6">
               <SectionHeader title="Trending Now" seeAllHref="/products?sort=trending" />
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 md:gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3 md:gap-4">
               {trendingProducts.map((product, i) => (
                 <ProductCard key={product.id} product={product} index={i} />
               ))}
@@ -397,7 +397,7 @@ export function HomeBelowFold() {
           <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
             <div className="panel-glass p-5 md:p-6">
               <SectionHeader title="Recommended for You" subtitle="Handpicked based on top ratings" seeAllHref="/products" />
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 md:gap-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3 md:gap-4">
                 {recommended.map((product, i) => (
                   <ProductCard key={product.id} product={product} index={i} />
                 ))}

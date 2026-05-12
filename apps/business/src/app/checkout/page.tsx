@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
@@ -8,12 +8,12 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   MapPin, CreditCard, Plus, ChevronRight,
   ShieldCheck, Truck, X, Loader2, Wallet,
-  Check, ArrowLeft,
+  Check, ArrowLeft, Tag,
 } from "lucide-react";
 import { cn, priceInclusiveOfGst } from "@xelnova/utils";
 import { formatCurrency } from "@xelnova/utils";
-import { useAuth, ordersApi, usersApi, paymentApi, cartApi, setAccessToken, walletApi } from "@xelnova/api";
-import { useCartStore } from "@/lib/store/cart-store";
+import { useAuth, ordersApi, usersApi, paymentApi, cartApi, setAccessToken, walletApi, productsApi } from "@xelnova/api";
+import { useCartStore, type CartItem } from "@/lib/store/cart-store";
 import { lookupPincode } from "@/lib/store/location-store";
 import { INDIAN_STATES } from "@/lib/indian-states";
 
@@ -85,6 +85,17 @@ export default function CheckoutPage() {
   const [addMoneyAmount, setAddMoneyAmount] = useState("");
   const [addingMoney, setAddingMoney] = useState(false);
 
+  const [couponInput, setCouponInput] = useState("");
+  const [couponApplying, setCouponApplying] = useState(false);
+  const [appliedCouponCode, setAppliedCouponCode] = useState<string | null>(null);
+  const [pricedFromServer, setPricedFromServer] = useState<{
+    subtotal: number;
+    discount: number;
+    shipping: number;
+    tax: number;
+    total: number;
+  } | null>(null);
+
   // Contact info captured for phone-only signups (no name/email yet).
   const [contactName, setContactName] = useState("");
   const [contactEmail, setContactEmail] = useState("");
@@ -107,6 +118,119 @@ export default function CheckoutPage() {
   useEffect(() => {
     cartApi.getShippingConfig().then(setShippingConfig).catch(() => {});
   }, []);
+
+  const cartFingerprint = useMemo(
+    () => items.map((i) => `${i.productId}:${i.variant ?? ""}:${i.quantity}`).join("|"),
+    [items],
+  );
+
+  const prevFingerprintRef = useRef(cartFingerprint);
+  useEffect(() => {
+    if (prevFingerprintRef.current === cartFingerprint) return;
+    const wasEmpty = prevFingerprintRef.current === "";
+    prevFingerprintRef.current = cartFingerprint;
+    if (wasEmpty) return;
+    setAppliedCouponCode(null);
+    setPricedFromServer(null);
+    setCouponInput("");
+  }, [cartFingerprint]);
+
+  const validateCouponWithServer = useCallback(async (code: string) => {
+    const m = document.cookie.match(/(?:^|;\s*)xelnova-token=([^;]*)/);
+    if (m) setAccessToken(decodeURIComponent(m[1]));
+    const quote = await ordersApi.quoteCheckout({
+      items: useCartStore.getState().items.map((i) => ({
+        productId: i.productId,
+        quantity: i.quantity,
+        variant: i.variant,
+      })),
+      couponCode: code,
+    });
+    setAppliedCouponCode(quote.couponCode || code.toUpperCase());
+    setPricedFromServer({
+      subtotal: quote.subtotal,
+      discount: quote.discount,
+      shipping: quote.shipping,
+      tax: quote.tax,
+      total: quote.total,
+    });
+    return quote;
+  }, []);
+
+  const itemCouponCode = useMemo(
+    () => items.find((i) => i.appliedCoupon?.code)?.appliedCoupon?.code ?? null,
+    [items],
+  );
+  const [autoAppliedCoupon, setAutoAppliedCoupon] = useState(false);
+  useEffect(() => {
+    if (!authChecked || autoAppliedCoupon || !itemCouponCode || appliedCouponCode) return;
+    setAutoAppliedCoupon(true);
+    setCouponInput(itemCouponCode);
+    validateCouponWithServer(itemCouponCode).catch(() => {});
+  }, [authChecked, itemCouponCode, autoAppliedCoupon, appliedCouponCode, validateCouponWithServer]);
+
+  const [couponsByProduct, setCouponsByProduct] = useState<Record<string, { id: string; code: string; description: string | null; discountType: "PERCENTAGE" | "FLAT"; discountValue: number; minOrderAmount: number; maxDiscount: number | null; validUntil: string | null }[]>>({});
+
+  const productSlugs = useMemo(
+    () => [...new Set(items.map((i) => i.slug).filter(Boolean))],
+    [items],
+  );
+
+  useEffect(() => {
+    if (!mounted || productSlugs.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      const results: typeof couponsByProduct = {};
+      await Promise.all(
+        productSlugs.map(async (slug) => {
+          try {
+            const data = await productsApi.getProductBySlug(slug);
+            if (data?.availableCoupons?.length) {
+              const productId = items.find((i) => i.slug === slug)?.productId;
+              if (productId) results[productId] = data.availableCoupons;
+            }
+          } catch { /* ignore */ }
+        }),
+      );
+      if (!cancelled) setCouponsByProduct(results);
+    })();
+    return () => { cancelled = true; };
+  }, [mounted, productSlugs, items]);
+
+  const handleToggleCoupon = useCallback(
+    (item: CartItem, coupon: { code: string; discountType: "PERCENTAGE" | "FLAT"; discountValue: number; minOrderAmount: number; maxDiscount: number | null }) => {
+      const isApplied = item.appliedCoupon?.code === coupon.code;
+      const priceIncl = priceInclusiveOfGst(item.price, item.gstRate ?? null);
+      let discountAmount = 0;
+      if (!isApplied) {
+        if (coupon.minOrderAmount > 0 && priceIncl < coupon.minOrderAmount) discountAmount = 0;
+        else if (coupon.discountType === "PERCENTAGE") {
+          const d = Math.round(priceIncl * coupon.discountValue / 100);
+          discountAmount = coupon.maxDiscount && d > coupon.maxDiscount ? coupon.maxDiscount : d;
+        } else {
+          discountAmount = Math.min(coupon.discountValue, priceIncl);
+        }
+      }
+      useCartStore.setState((state) => ({
+        items: state.items.map((i) =>
+          i.id === item.id
+            ? {
+                ...i,
+                appliedCoupon: isApplied
+                  ? null
+                  : { code: coupon.code, discountType: coupon.discountType, discountValue: coupon.discountValue, discountAmount },
+              }
+            : i,
+        ),
+      }));
+      setAppliedCouponCode(null);
+      setPricedFromServer(null);
+      if (!isApplied) {
+        validateCouponWithServer(coupon.code).catch(() => {});
+      }
+    },
+    [validateCouponWithServer],
+  );
 
   useEffect(() => {
     if (!authChecked) return;
@@ -464,7 +588,6 @@ export default function CheckoutPage() {
     );
   }
 
-  // Use the same tax-inclusive prices that the cart and product cards display.
   const priceTotal = items.reduce(
     (sum, item) =>
       sum + priceInclusiveOfGst(item.price, item.gstRate ?? null) * item.quantity,
@@ -479,8 +602,67 @@ export default function CheckoutPage() {
   );
   const savings = Math.max(0, compareTotal - priceTotal);
   const itemCount = totalItems();
-  const shippingCharge = priceTotal >= shippingConfig.freeShippingMin ? 0 : shippingConfig.defaultRate;
-  const grandTotal = priceTotal + shippingCharge;
+
+  const appliedItemCouponsTotal = useMemo(
+    () =>
+      items.reduce(
+        (sum, item) => sum + (item.appliedCoupon?.discountAmount ?? 0) * item.quantity,
+        0,
+      ),
+    [items],
+  );
+
+  const discountApplied = pricedFromServer?.discount ?? 0;
+
+  const shippingCharge = useMemo(() => {
+    if (pricedFromServer) return pricedFromServer.shipping;
+    return priceTotal >= shippingConfig.freeShippingMin ? 0 : shippingConfig.defaultRate;
+  }, [pricedFromServer, priceTotal, shippingConfig.freeShippingMin, shippingConfig.defaultRate]);
+
+  const grandTotal = useMemo(() => {
+    if (pricedFromServer) return pricedFromServer.total;
+    return priceTotal - appliedItemCouponsTotal + shippingCharge;
+  }, [pricedFromServer, priceTotal, appliedItemCouponsTotal, shippingCharge]);
+
+  const handleApplyCoupon = useCallback(async () => {
+    const code = couponInput.trim();
+    if (!code) return;
+    setCouponApplying(true);
+    setOrderError("");
+    try {
+      syncToken();
+      const quote = await ordersApi.quoteCheckout({
+        items: items.map((i) => ({
+          productId: i.productId,
+          quantity: i.quantity,
+          variant: i.variant,
+        })),
+        couponCode: code,
+      });
+      const applied = quote.couponCode || code.toUpperCase();
+      setAppliedCouponCode(applied);
+      setPricedFromServer({
+        subtotal: quote.subtotal,
+        discount: quote.discount,
+        shipping: quote.shipping,
+        tax: quote.tax,
+        total: quote.total,
+      });
+    } catch (e) {
+      setAppliedCouponCode(null);
+      setPricedFromServer(null);
+      setOrderError(e instanceof Error ? e.message : "Could not apply coupon.");
+    } finally {
+      setCouponApplying(false);
+    }
+  }, [couponInput, items, syncToken]);
+
+  const clearAppliedCoupon = useCallback(() => {
+    setAppliedCouponCode(null);
+    setPricedFromServer(null);
+    setCouponInput("");
+    setOrderError("");
+  }, []);
 
   const updateField = async (field: string, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -658,6 +840,26 @@ export default function CheckoutPage() {
     syncToken();
 
     try {
+      let couponToSend = appliedCouponCode
+        || items.find((i) => i.appliedCoupon?.code)?.appliedCoupon?.code
+        || undefined;
+
+      if (couponToSend && !pricedFromServer) {
+        try {
+          const quote = await ordersApi.quoteCheckout({
+            items: items.map((i) => ({
+              productId: i.productId,
+              quantity: i.quantity,
+              variant: i.variant,
+            })),
+            couponCode: couponToSend,
+          });
+          couponToSend = quote.couponCode || couponToSend.toUpperCase();
+        } catch {
+          couponToSend = undefined;
+        }
+      }
+
       const order = await ordersApi.createOrder({
         items: items.map((item) => ({
           productId: item.productId,
@@ -677,6 +879,7 @@ export default function CheckoutPage() {
         paymentMethod: paymentChoice === "wallet" ? "wallet" : "razorpay",
         ...(needsName && contactName.trim() ? { customerName: contactName.trim() } : {}),
         ...(needsEmail && contactEmail.trim() ? { customerEmail: contactEmail.trim() } : {}),
+        ...(couponToSend ? { couponCode: couponToSend } : {}),
       });
 
       if (!order?.id) {
@@ -998,31 +1201,76 @@ export default function CheckoutPage() {
               <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
                     <h3 className="mb-4 text-sm font-bold text-text-primary">Order Items ({itemCount})</h3>
                     <div className="space-y-3">
-                      {items.map((item) => (
-                        <div key={item.id} className="flex gap-3">
-                          <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-border bg-gray-50">
-                            {item.image ? (
-                              <Image src={item.image} alt={item.name} fill sizes="64px" className="object-cover" />
-                            ) : (
-                              <div className="flex h-full w-full items-center justify-center text-text-muted">
-                                <Truck size={20} />
-                              </div>
-                            )}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-text-primary truncate">{item.name}</p>
-                            {item.variant && (
-                              <p className="text-xs text-text-muted capitalize">{item.variant.replace(/-/g, " / ")}</p>
-                            )}
-                            <p className="text-xs text-text-muted">Qty: {item.quantity}</p>
-                            <p className="text-sm font-semibold text-text-primary">
-                              {formatCurrency(
-                                priceInclusiveOfGst(item.price, item.gstRate ?? null) * item.quantity,
+                      {items.map((item) => {
+                        const itemCoupons = couponsByProduct[item.productId] ?? [];
+                        const couponsToShow = itemCoupons.filter(
+                          (c) => !item.appliedCoupon || item.appliedCoupon.code === c.code,
+                        );
+                        return (
+                        <div key={item.id}>
+                          <div className="flex gap-3">
+                            <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-border bg-gray-50">
+                              {item.image ? (
+                                <Image src={item.image} alt={item.name} fill sizes="64px" className="object-cover" />
+                              ) : (
+                                <div className="flex h-full w-full items-center justify-center text-text-muted">
+                                  <Truck size={20} />
+                                </div>
                               )}
-                            </p>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-text-primary truncate">{item.name}</p>
+                              {item.variant && item.variant !== '__default__' && (
+                                <p className="text-xs text-text-muted capitalize">{item.variant.replace(/-/g, " / ")}</p>
+                              )}
+                              <p className="text-xs text-text-muted">Qty: {item.quantity}</p>
+                              <p className="text-sm font-semibold text-text-primary">
+                                {formatCurrency(
+                                  priceInclusiveOfGst(item.price, item.gstRate ?? null) * item.quantity,
+                                )}
+                              </p>
+                            </div>
                           </div>
+                          {couponsToShow.length > 0 && (
+                            <div className="mt-2 ml-[76px] space-y-1.5">
+                              {couponsToShow.slice(0, 2).map((coupon) => {
+                                const discountText = coupon.discountType === "PERCENTAGE"
+                                  ? `${coupon.discountValue}% off`
+                                  : `₹${coupon.discountValue} off`;
+                                const isSelected = item.appliedCoupon?.code === coupon.code;
+                                return (
+                                  <div key={coupon.id} className="flex items-center gap-2">
+                                    <input
+                                      type="checkbox"
+                                      id={`co-coupon-${item.id}-${coupon.id}`}
+                                      checked={isSelected}
+                                      onChange={() => handleToggleCoupon(item, coupon)}
+                                      className="w-4 h-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                                    />
+                                    <label
+                                      htmlFor={`co-coupon-${item.id}-${coupon.id}`}
+                                      className="flex items-center gap-1.5 text-xs cursor-pointer"
+                                    >
+                                      <span className="text-text-primary">Apply</span>
+                                      <span className="font-semibold text-emerald-700">{discountText} coupon</span>
+                                      <span className="text-text-muted">({coupon.code})</span>
+                                    </label>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                          {item.appliedCoupon && !couponsToShow.some((c) => c.code === item.appliedCoupon?.code) && (
+                            <div className="mt-2 ml-[76px] inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 border border-emerald-200 px-2 py-1">
+                              <Tag size={12} className="text-emerald-600 shrink-0" />
+                              <span className="text-xs font-medium text-emerald-700">
+                                {item.appliedCoupon.code} (-{formatCurrency(item.appliedCoupon.discountAmount * item.quantity)})
+                              </span>
+                            </div>
+                          )}
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
               </div>
             </div>
@@ -1032,18 +1280,47 @@ export default function CheckoutPage() {
           <div className="lg:col-span-1">
             <div className="sticky top-28 rounded-2xl border border-border bg-white p-6 shadow-sm">
               <h2 className="mb-4 text-lg font-bold text-text-primary">Order Summary</h2>
+
               {(() => {
-                const amountForFreeShipping = shippingConfig.freeShippingMin - priceTotal;
+                const baseSubtotal = pricedFromServer ? pricedFromServer.subtotal : priceTotal;
+                const amountForFreeShipping = shippingConfig.freeShippingMin - baseSubtotal;
                 return (
               <div className="space-y-3 text-sm">
-                <div className="flex justify-between text-text-secondary">
-                  <span>Price ({itemCount} {itemCount === 1 ? "item" : "items"})</span>
-                  <span>{formatCurrency(compareTotal)}</span>
-                </div>
-                {savings > 0 && (
+                {!pricedFromServer ? (
+                  <>
+                    <div className="flex justify-between text-text-secondary">
+                      <span>Price ({itemCount} {itemCount === 1 ? "item" : "items"})</span>
+                      <span>{formatCurrency(compareTotal)}</span>
+                    </div>
+                    {savings > 0 && (
+                      <div className="flex justify-between text-success-600">
+                        <span>Product savings</span>
+                        <span>-{formatCurrency(savings)}</span>
+                      </div>
+                    )}
+                    {appliedItemCouponsTotal > 0 && (
+                      <div className="flex justify-between text-emerald-600">
+                        <span className="flex items-center gap-1">
+                          <Tag size={14} />
+                          Coupon Discount
+                        </span>
+                        <span>-{formatCurrency(appliedItemCouponsTotal)}</span>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="flex justify-between text-text-secondary">
+                    <span>Items ({itemCount})</span>
+                    <span>{formatCurrency(pricedFromServer.subtotal)}</span>
+                  </div>
+                )}
+                {pricedFromServer && discountApplied > 0 && (
                   <div className="flex justify-between text-success-600">
-                    <span>Discount</span>
-                    <span>-{formatCurrency(savings)}</span>
+                    <span className="flex items-center gap-1">
+                      <Tag size={14} />
+                      Promo Code ({appliedCouponCode})
+                    </span>
+                    <span>-{formatCurrency(discountApplied)}</span>
                   </div>
                 )}
                 <div className="flex justify-between text-text-secondary">
@@ -1054,20 +1331,20 @@ export default function CheckoutPage() {
                     <span>{formatCurrency(shippingCharge)}</span>
                   )}
                 </div>
-                {shippingCharge > 0 && amountForFreeShipping > 0 && (
+                {!pricedFromServer && shippingCharge > 0 && amountForFreeShipping > 0 && (
                   <p className="text-xs text-text-muted">
                     Add {formatCurrency(amountForFreeShipping)} more for free delivery
                   </p>
                 )}
                 <hr className="border-border" />
                 <div className="flex justify-between text-lg font-bold text-text-primary">
-                  <span>Total Amount</span>
+                  <span>Total</span>
                   <span>{formatCurrency(grandTotal)}</span>
                 </div>
                 <p className="text-xs text-text-muted">Inclusive of all taxes</p>
-                {savings > 0 && (
+                {!pricedFromServer && (savings > 0 || appliedItemCouponsTotal > 0) && (
                   <p className="rounded-xl bg-success-50 border border-success-200 p-2.5 text-center text-sm font-medium text-success-700">
-                    You will save {formatCurrency(savings)}
+                    You save {formatCurrency(savings + appliedItemCouponsTotal)} on this order
                   </p>
                 )}
               </div>

@@ -43,6 +43,7 @@ export * as paymentApi from './payment';
 export * as returnsApi from './returns';
 export * as walletApi from './wallet';
 export * as ticketsApi from './tickets';
+export * from './ticket-relay';
 export * as notificationsApi from './notifications';
 export * as wishlistApi from './wishlist';
 export * as verificationApi from './verification';

@@ -11,10 +11,11 @@ import { XpressBeesProvider } from './providers/xpressbees.provider';
 import { EkartProvider } from './providers/ekart.provider';
 import { XelnovaCourierProvider } from './providers/xelnova-courier.provider';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { WalletModule } from '../wallet/wallet.module';
 import { InvoiceService } from '../orders/invoice.service';
 
 @Module({
-  imports: [ConfigModule, NotificationsModule],
+  imports: [ConfigModule, NotificationsModule, WalletModule],
   controllers: [ShippingController, ShippingRateController, ShippingWebhookController],
   providers: [
     ShippingService,

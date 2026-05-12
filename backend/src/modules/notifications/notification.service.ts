@@ -1606,6 +1606,56 @@ export class NotificationService {
     }
   }
 
+  /**
+   * Notify seller(s) when an order containing their products is cancelled.
+   */
+  async notifySellerOrderCancelled(
+    sellerId: string,
+    orderNumber: string,
+    amount: number,
+    cancelledBy: string,
+  ) {
+    const seller = await this.prisma.sellerProfile.findUnique({
+      where: { id: sellerId },
+      select: { phone: true, userId: true, storeName: true },
+    });
+
+    const user = seller?.userId
+      ? await this.prisma.user.findUnique({
+          where: { id: seller.userId },
+          select: { phone: true, email: true, name: true },
+        })
+      : null;
+
+    const userId = seller?.userId || sellerId;
+
+    await this.logNotification({
+      userId,
+      channel: 'in_app',
+      type: 'ORDER_CANCELLED',
+      title: 'Order Cancelled',
+      body: `Order #${orderNumber} (₹${amount.toFixed(0)}) has been cancelled by the ${cancelledBy.toLowerCase()}.`,
+      data: { orderNumber, amount, cancelledBy },
+    });
+
+    if (user?.email) {
+      this.email
+        .sendGenericEmail(
+          user.email,
+          `Order Cancelled — #${orderNumber}`,
+          `<p>Hi ${user.name || seller?.storeName || 'Seller'},</p><p>Order <strong>#${orderNumber}</strong> worth ₹${amount.toFixed(0)} has been cancelled by the ${cancelledBy.toLowerCase()}.</p><p><a href="${this.sellerUrl}/orders">View your orders</a></p>`,
+        )
+        .catch((err) => this.logger.warn(`Seller cancel email failed: ${err.message}`));
+    }
+
+    const phone = seller?.phone || user?.phone;
+    if (phone) {
+      this.sms
+        .sendOrderCancelled(phone, orderNumber, amount.toFixed(0))
+        .catch((err) => this.logger.warn(`Seller cancel SMS failed: ${err.message}`));
+    }
+  }
+
   async notifySellerReturnRequested(
     sellerUserId: string,
     orderNumber: string,

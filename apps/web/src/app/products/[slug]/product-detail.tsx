@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
@@ -9,7 +9,7 @@ import {
   Star, Heart, Share2, ShieldCheck, Truck, RotateCcw, ChevronRight,
   Minus, Plus, ThumbsUp, Check, ShoppingCart, Package, Loader2, Ruler, X,
   RefreshCw, Lock, ChevronDown, ChevronUp, AlertTriangle, FileText, Store,
-  Play,
+  Play, Ticket,
 } from "lucide-react";
 import { cn } from "@xelnova/utils";
 import { formatCurrency, formatDate, priceInclusiveOfGst } from "@xelnova/utils";
@@ -18,6 +18,7 @@ import { reviewsApi, setAccessToken } from "@xelnova/api";
 import { useCartStore } from "@/lib/store/cart-store";
 import { useWishlistStore } from "@/lib/store/wishlist-store";
 import { ProductCard } from "@/components/marketplace/product-card";
+import { VariantCardSelector } from "@/components/marketplace/variant-card-selector";
 import type { SizeChartRow } from "@/lib/data/products";
 import { toast } from "sonner";
 
@@ -78,6 +79,7 @@ export default function ProductDetail() {
   const slug = params.slug as string;
   const { data, loading } = useProductBySlug(slug);
   const product = data?.product ?? null;
+  const availableCoupons = data?.availableCoupons ?? [];
   const { data: marketplacePolicy } = useMarketplacePolicy();
 
   const [selectedImage, setSelectedImage] = useState(0);
@@ -92,22 +94,55 @@ export default function ProductDetail() {
   const [hoverPreviewImage, setHoverPreviewImage] = useState<string | null>(null);
   const [shareCopied, setShareCopied] = useState(false);
   const [pendingQty, setPendingQty] = useState(1);
+  const [selectedCoupon, setSelectedCoupon] = useState<typeof availableCoupons[0] | null>(null);
+
+  // Augment variants with a synthetic "default" option from the main product
+  // so the base product is selectable alongside variant swatches.
+  // The default option is prepended so it appears first and gets selected by default.
+  const augmentedVariants = useMemo(() => {
+    if (!product?.variants?.length) return [];
+    
+    return product.variants.map((variant) => {
+      const hasDefault = variant.options.some((o) => o.value === "__default__");
+      if (hasDefault) return variant;
+      
+      // Only create __default__ if we have main images OR a configured defaultLabel
+      const hasMainImages = product.images && product.images.length > 0;
+      const hasDefaultLabel = !!variant.defaultLabel;
+      
+      if (!hasMainImages && !hasDefaultLabel) return variant;
+      
+      const defaultLabel = variant.defaultLabel || product.name.split("|")[0].trim().slice(0, 30);
+      const defaultOption: (typeof variant.options)[number] = {
+        value: "__default__",
+        label: defaultLabel,
+        available: true,
+        images: product.images || [],
+        price: product.price,
+        compareAtPrice: product.comparePrice > product.price ? product.comparePrice : undefined,
+        stock: product.stockCount,
+      };
+      return { ...variant, options: [defaultOption, ...variant.options] };
+    });
+  }, [product?.id, product?.variants, product?.images, product?.price, product?.comparePrice, product?.stockCount, product?.name]);
 
   /** Pre-select the first SKU per group so PDP/cart use per-option prices instead of only the base price. */
   useEffect(() => {
-    if (!product?.variants?.length) {
+    if (!augmentedVariants.length) {
       setSelectedVariants({});
       return;
     }
+
     const next: Record<string, string> = {};
     let firstImages: string[] | null = null;
     let firstVideo: string | null = null;
-    for (const v of product.variants) {
+
+    for (const v of augmentedVariants) {
       const first = v.options?.[0];
       if (first) {
         next[v.type] = first.value;
       }
-      // Search all options for images/video (first option may not have them)
+
       if (!firstImages || !firstVideo) {
         for (const opt of v.options ?? []) {
           if (!firstImages && opt.images && opt.images.length > 0) {
@@ -120,14 +155,15 @@ export default function ProductDetail() {
         }
       }
     }
+
     setSelectedVariants(next);
-    if (firstImages && (!product.images || product.images.length === 0)) {
+    if (firstImages && (!product?.images || product.images.length === 0)) {
       setVariantGallery(firstImages);
       setSelectedImage(0);
     }
     if (firstVideo) setVariantVideo(firstVideo);
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- re-run only when the product itself changes, not on every variant reference shift
-  }, [product?.id]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- re-run only when the product itself changes
+  }, [product?.id, augmentedVariants]);
 
   const setItemQuantity = useCartStore((s) => s.setItemQuantity);
   const getItemQuantity = useCartStore((s) => s.getItemQuantity);
@@ -159,27 +195,6 @@ export default function ProductDetail() {
       </div>
     );
   }
-
-  // Augment variants with a synthetic "default" option from the main product
-  // images so the base product is selectable alongside variant swatches.
-  const augmentedVariants = (() => {
-    if (!product || product.images.length === 0) return product?.variants ?? [];
-    return product.variants.map((variant) => {
-      const hasDefault = variant.options.some((o) => o.value === "__default__");
-      if (hasDefault) return variant;
-      const defaultLabel = variant.defaultLabel || product.name.split("|")[0].trim().slice(0, 30);
-      const defaultOption: (typeof variant.options)[number] = {
-        value: "__default__",
-        label: defaultLabel,
-        available: true,
-        images: product.images,
-        price: product.price,
-        compareAtPrice: product.comparePrice > product.price ? product.comparePrice : undefined,
-        stock: product.stockCount,
-      };
-      return { ...variant, options: [defaultOption, ...variant.options] };
-    });
-  })();
 
   const variantString = (() => {
     if (product?.variants?.length) {
@@ -242,6 +257,27 @@ export default function ProductDetail() {
       : 0;
   const effectiveInStock = effectiveStock > 0;
 
+  // Coupon discount calculation
+  const couponDiscount = (() => {
+    if (!selectedCoupon) return 0;
+    // Check min order amount
+    if (selectedCoupon.minOrderAmount > 0 && salePriceIncl < selectedCoupon.minOrderAmount) {
+      return 0;
+    }
+    if (selectedCoupon.discountType === 'PERCENTAGE') {
+      const discount = Math.round(salePriceIncl * selectedCoupon.discountValue / 100);
+      // Apply max discount cap if set
+      if (selectedCoupon.maxDiscount && discount > selectedCoupon.maxDiscount) {
+        return selectedCoupon.maxDiscount;
+      }
+      return discount;
+    } else {
+      // FLAT discount
+      return Math.min(selectedCoupon.discountValue, salePriceIncl);
+    }
+  })();
+  const finalPriceAfterCoupon = salePriceIncl - couponDiscount;
+
   const handleVariantSelect = (type: string, value: string, opt?: { images?: string[]; video?: string }) => {
     setSelectedVariants((prev) => ({ ...prev, [type]: value }));
     setHoverPreviewImage(null);
@@ -295,6 +331,12 @@ export default function ProductDetail() {
     variant: variantString || undefined,
     seller: product.seller.name,
     gstRate: product.gstRate ?? null,
+    appliedCoupon: selectedCoupon && couponDiscount > 0 ? {
+      code: selectedCoupon.code,
+      discountType: selectedCoupon.discountType,
+      discountValue: selectedCoupon.discountValue,
+      discountAmount: couponDiscount,
+    } : null,
   } : null;
 
   const handleAddToCart = () => {
@@ -670,6 +712,42 @@ export default function ProductDetail() {
                   <span className="text-3xl font-extrabold text-text-primary">{salePriceIncl.toLocaleString("en-IN")}</span>
                 </div>
                 <p className="mt-1 text-xs text-primary-600/90">Inclusive of all taxes</p>
+
+                {/* Amazon-style coupon badges - show directly below price */}
+                {availableCoupons.length > 0 && (
+                  <div className="mt-3 space-y-1.5">
+                    {availableCoupons.slice(0, 2).map((coupon) => {
+                      const discountText = coupon.discountType === 'PERCENTAGE'
+                        ? `${coupon.discountValue}% off`
+                        : `₹${coupon.discountValue} off`;
+                      const isSelected = selectedCoupon?.id === coupon.id;
+                      return (
+                        <div key={coupon.id} className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            id={`coupon-${coupon.id}`}
+                            checked={isSelected}
+                            onChange={() => setSelectedCoupon(isSelected ? null : coupon)}
+                            className="w-4 h-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                          />
+                          <label
+                            htmlFor={`coupon-${coupon.id}`}
+                            className="flex items-center gap-2 text-sm cursor-pointer"
+                          >
+                            <span className="text-text-primary">Apply</span>
+                            <span className="font-semibold text-emerald-700">{discountText} coupon</span>
+                            <span className="text-text-muted">({coupon.code})</span>
+                          </label>
+                        </div>
+                      );
+                    })}
+                    {availableCoupons.length > 2 && (
+                      <p className="text-xs text-primary-600 font-medium ml-6">
+                        +{availableCoupons.length - 2} more coupon{availableCoupons.length - 2 > 1 ? 's' : ''} available
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
 
               <hr className="border-border" />
@@ -788,78 +866,31 @@ export default function ProductDetail() {
                       )}
                     </div>
 
-                    {/* Color/image variant — hoverable image thumbnails */}
+                    {/* Color/image variant — Amazon-style cards */}
                     {isColor ? (
-                      <div
-                        className="flex flex-wrap gap-2.5"
-                        onMouseLeave={handleVariantHoverEnd}
-                      >
-                        {variant.options.map((opt) => {
-                          const optDisabled = !opt.available || opt.stock === 0;
-                          const isSelected = selectedVariants[variant.type] === opt.value;
-                          const hasAnyImage = opt.images && opt.images.length > 0;
-                          const thumbImg = opt.images?.[0];
-                          return (
-                            <button
-                              key={opt.value}
-                              disabled={optDisabled}
-                              onClick={() => handleVariantSelect(variant.type, opt.value, opt)}
-                              onMouseEnter={() => !optDisabled && hasAnyImage && handleVariantHover(opt)}
-                              className={cn(
-                                "group relative flex flex-col items-center rounded-xl border-2 transition-all",
-                                optDisabled && "opacity-40 cursor-not-allowed",
-                                isSelected
-                                  ? "border-primary-500 ring-2 ring-primary-500/20 bg-primary-50/50"
-                                  : "border-border hover:border-gray-300 bg-white",
-                              )}
-                            >
-                              {thumbImg ? (
-                                <div className="relative h-16 w-16 overflow-hidden rounded-t-lg">
-                                  <Image src={thumbImg} alt={opt.label} fill sizes="64px" className="object-cover" />
-                                </div>
-                              ) : opt.hex ? (
-                                <div className="flex h-16 w-16 items-center justify-center rounded-t-lg">
-                                  <span
-                                    className="h-10 w-10 rounded-full border-2 border-gray-200 shadow-inner"
-                                    style={{ background: opt.hex }}
-                                  />
-                                </div>
-                              ) : (
-                                <div className="flex h-16 w-16 items-center justify-center rounded-t-lg bg-gray-50">
-                                  <span className="text-xs text-text-muted">{opt.label.slice(0, 2)}</span>
-                                </div>
-                              )}
-                              <div className="w-full px-1.5 py-1 text-center border-t border-border/50">
-                                <p className={cn(
-                                  "text-[11px] font-medium truncate",
-                                  isSelected ? "text-primary-700" : "text-text-secondary"
-                                )}>
-                                  {opt.label}
-                                </p>
-                                {opt.price != null && (
-                                  <p className="text-[10px] text-text-muted">
-                                    ₹{displayPriceIncl(opt.price).toLocaleString("en-IN")}
-                                  </p>
-                                )}
-                                {opt.compareAtPrice != null && opt.price != null && opt.compareAtPrice > opt.price && (
-                                  <p className="text-[9px] text-text-muted line-through">
-                                    ₹{displayPriceIncl(opt.compareAtPrice).toLocaleString("en-IN")}
-                                  </p>
-                                )}
-                              </div>
-                              {opt.stock === 0 && (
-                                <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-white/60">
-                                  <span className="text-[10px] font-bold text-danger-600 bg-white/80 px-1.5 py-0.5 rounded">Sold Out</span>
-                                </div>
-                              )}
-                              {isSelected && (
-                                <div className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-primary-600 flex items-center justify-center shadow">
-                                  <Check size={10} className="text-white" strokeWidth={3} />
-                                </div>
-                              )}
-                            </button>
-                          );
-                        })}
+                      <div onMouseLeave={handleVariantHoverEnd}>
+                        <VariantCardSelector
+                          options={variant.options.map((opt) => {
+                            const hasAnyImage = opt.images && opt.images.length > 0;
+                            return {
+                              ...opt,
+                              // Attach hover handler for image preview
+                              onHover: () => {
+                                if (!opt.available || opt.stock === 0) return;
+                                if (hasAnyImage) handleVariantHover(opt);
+                              },
+                            };
+                          })}
+                          selectedValue={selectedVariants[variant.type]}
+                          onSelect={(value, opt) => {
+                            handleVariantSelect(variant.type, value, opt);
+                            // Trigger hover for image preview on select
+                            const hasAnyImage = opt.images && opt.images.length > 0;
+                            if (hasAnyImage) handleVariantHover(opt);
+                          }}
+                          gstRate={gstRate}
+                          deliveryText="FREE Delivery Tomorrow"
+                        />
                       </div>
                     ) : isSize ? (
                       /* Size variant — chip buttons */
@@ -923,12 +954,20 @@ export default function ProductDetail() {
           {/* ─── Buy Box (right sidebar) ─── */}
           <div className="lg:col-span-3 xl:col-span-3">
             <div className="rounded-2xl border border-border bg-white p-4 shadow-sm space-y-4 sm:p-5 lg:sticky lg:top-24 xl:top-28">
-              {/* Price repeat */}
+              {/* Price repeat - shows discounted price when coupon is applied */}
               <div>
                 <div className="flex items-baseline gap-1">
                   <span className="text-sm text-text-muted">₹</span>
-                  <span className="text-2xl font-extrabold text-text-primary">{salePriceIncl.toLocaleString("en-IN")}</span>
+                  <span className="text-2xl font-extrabold text-text-primary">
+                    {selectedCoupon ? finalPriceAfterCoupon.toLocaleString("en-IN") : salePriceIncl.toLocaleString("en-IN")}
+                  </span>
                 </div>
+                {selectedCoupon && couponDiscount > 0 && (
+                  <p className="text-xs text-text-muted mt-0.5">
+                    <span className="line-through">{formatCurrency(salePriceIncl)}</span>{" "}
+                    <span className="text-emerald-600 font-semibold">(-{formatCurrency(couponDiscount)} coupon)</span>
+                  </p>
+                )}
                 {effectiveDiscount > 0 && (
                   <p className="text-xs text-text-muted mt-0.5">
                     M.R.P.: <span className="line-through">{formatCurrency(mrpIncl)}</span>{" "}
@@ -936,6 +975,37 @@ export default function ProductDetail() {
                   </p>
                 )}
               </div>
+
+              {/* Amazon-style coupon in sidebar */}
+              {availableCoupons.length > 0 && (
+                <div className="space-y-1.5">
+                  {availableCoupons.slice(0, 1).map((coupon) => {
+                    const discountText = coupon.discountType === 'PERCENTAGE'
+                      ? `${coupon.discountValue}% off`
+                      : `₹${coupon.discountValue} off`;
+                    const isSelected = selectedCoupon?.id === coupon.id;
+                    return (
+                      <div key={coupon.id} className={`flex items-start gap-2 p-2 rounded-lg border ${isSelected ? 'bg-emerald-100 border-emerald-400' : 'bg-emerald-50 border-emerald-200'}`}>
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => setSelectedCoupon(isSelected ? null : coupon)}
+                          className="w-4 h-4 mt-0.5 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                        />
+                        <div className="flex-1 text-xs">
+                          <span className="text-text-primary">Apply </span>
+                          <span className="font-semibold text-emerald-700">{discountText} coupon</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {availableCoupons.length > 1 && (
+                    <p className="text-xs text-primary-600 font-medium ml-6">
+                      +{availableCoupons.length - 1} more available
+                    </p>
+                  )}
+                </div>
+              )}
 
               <div className="flex items-center gap-2 text-sm text-success-700">
                 <Truck size={14} />

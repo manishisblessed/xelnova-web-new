@@ -50,6 +50,26 @@ export function createApiClient(baseURL?: string): AxiosInstance {
       '/api/v1',
     headers: { 'Content-Type': 'application/json' },
     timeout: 15000,
+    // Avoid "Unexpected end of JSON input" when proxy/backend returns an empty body with JSON content-type.
+    transformResponse: [
+      (data: unknown, headers) => {
+        if (data === '' || data == null) return {};
+        if (typeof data !== 'string') return data;
+        const trimmed = data.trim();
+        if (trimmed === '') return {};
+        const ct = headers && (headers['content-type'] || (headers as Record<string, string>)['Content-Type']);
+        const looksJson =
+          !ct ||
+          String(ct).includes('application/json') ||
+          (trimmed.startsWith('{') || trimmed.startsWith('['));
+        if (!looksJson) return data;
+        try {
+          return JSON.parse(trimmed) as unknown;
+        } catch {
+          return data;
+        }
+      },
+    ],
   });
 
   client.interceptors.request.use((config: InternalAxiosRequestConfig) => {

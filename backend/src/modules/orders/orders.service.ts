@@ -59,7 +59,7 @@ function checkVariantStock(
   if (variantStr && Array.isArray(variants)) {
     const parts = parseVariantTokens(variantStr);
     for (const group of variants as VariantGroup[]) {
-      const opt = findMatchingOption(group, parts);
+      const opt = findMatchingOption(group, parts, variantStr);
       if (opt && typeof opt.stock === 'number') {
         available = Math.min(available, opt.stock);
       }
@@ -103,6 +103,7 @@ export class OrdersService {
                 isReplaceable: true,
                 returnWindow: true,
                 replacementWindow: true,
+                returnPolicyPreset: true,
               },
             },
           },
@@ -130,6 +131,7 @@ export class OrdersService {
                 isReplaceable: true,
                 returnWindow: true,
                 replacementWindow: true,
+                returnPolicyPreset: true,
               },
             },
           },
@@ -619,6 +621,32 @@ export class OrdersService {
     }
   }
 
+  private async notifySellersOrderCancelled(
+    order: { orderNumber: string; total: number; items: { productId: string; price: number; quantity: number }[] },
+    cancelledBy: string,
+  ) {
+    const productIds = order.items.map((item) => item.productId);
+    const products = await this.prisma.product.findMany({
+      where: { id: { in: productIds } },
+      select: { id: true, sellerId: true },
+    });
+
+    const sellerAmounts = new Map<string, number>();
+    for (const item of order.items) {
+      const product = products.find((p) => p.id === item.productId);
+      if (product?.sellerId) {
+        const current = sellerAmounts.get(product.sellerId) || 0;
+        sellerAmounts.set(product.sellerId, current + item.price * item.quantity);
+      }
+    }
+
+    for (const [sellerId, amount] of sellerAmounts) {
+      this.notificationService
+        .notifySellerOrderCancelled(sellerId, order.orderNumber, amount, cancelledBy)
+        .catch((err) => this.logger.warn(`Failed to notify seller ${sellerId} about cancellation: ${err.message}`));
+    }
+  }
+
   private static readonly CANCELLABLE_STATUSES = ['PENDING', 'PROCESSING', 'CONFIRMED'];
 
   /**
@@ -757,6 +785,11 @@ export class OrdersService {
     );
     this.notificationService.notifyOrderCancelled(userId, orderNumber, cancelNotifyParams).catch((err) =>
       this.logger.warn(`Failed to send order-cancelled notification: ${err.message}`),
+    );
+
+    // Notify sellers whose products were in this order
+    this.notifySellersOrderCancelled(order, cancelledBy).catch((err) =>
+      this.logger.warn(`Failed to notify sellers for cancelled order ${orderNumber}: ${err.message}`),
     );
 
     return { 

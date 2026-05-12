@@ -15,11 +15,11 @@ import {
   CheckCircle,
   XCircle,
   MessageSquare,
+  Store,
 } from "lucide-react";
 import { ticketsApi, setAccessToken } from "@xelnova/api";
 
 type Ticket = Awaited<ReturnType<typeof ticketsApi.getMyTicketDetail>>;
-type TicketMessage = NonNullable<Ticket["messages"]>[number];
 
 function syncToken() {
   if (typeof document === "undefined") return;
@@ -38,7 +38,8 @@ function getStatus(s: string) {
   return statusConfig[s] ?? { icon: AlertCircle, color: "text-gray-600", bg: "bg-gray-50", border: "border-gray-200", label: s };
 }
 
-function roleIcon(role: string) {
+function senderIcon(role: string) {
+  if (role === "SELLER") return <Store size={14} className="text-emerald-600" />;
   if (role === "ADMIN") return <Shield size={14} className="text-primary-600" />;
   return <User size={14} className="text-text-muted" />;
 }
@@ -145,7 +146,7 @@ export default function TicketDetailPage() {
               }`}>
                 {!isMe && (
                   <div className="flex items-center gap-1.5 mb-1">
-                    {roleIcon(msg.senderRole)}
+                    {senderIcon(msg.senderRole)}
                     <span className="text-xs font-semibold">{msg.sender?.name || "Support"}</span>
                   </div>
                 )}

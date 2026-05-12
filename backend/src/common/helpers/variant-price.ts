@@ -13,7 +13,7 @@ export function resolveVariantPrice(variants: unknown, variantStr: string | unde
   if (!variantStr || !Array.isArray(variants)) return undefined;
   const parts = parseVariantTokens(variantStr);
   for (const group of variants as VariantGroup[]) {
-    const opt = findMatchingOption(group, parts);
+    const opt = findMatchingOption(group, parts, variantStr);
     if (opt && typeof opt.price === 'number') return opt.price;
   }
   return undefined;
@@ -26,7 +26,7 @@ export function resolveVariantCompareAtPrice(
   if (!variantStr || !Array.isArray(variants)) return undefined;
   const parts = parseVariantTokens(variantStr);
   for (const group of variants as VariantGroup[]) {
-    const opt = findMatchingOption(group, parts);
+    const opt = findMatchingOption(group, parts, variantStr);
     if (opt && typeof opt.compareAtPrice === 'number') return opt.compareAtPrice;
   }
   return undefined;

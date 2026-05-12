@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Ticket, Pencil, Trash2, X, Copy, Check } from 'lucide-react';
+import { Plus, Ticket, Pencil, Trash2, X, Copy, Check, Clock, AlertTriangle, CheckCircle, Info } from 'lucide-react';
 import { DashboardHeader } from '@/components/dashboard/dashboard-header';
 import {
   apiGetSellerCoupons,
@@ -25,6 +25,8 @@ interface Coupon {
   usedCount: number;
   scope: string;
   createdAt: string;
+  moderationStatus: 'PENDING' | 'APPROVED' | 'REJECTED';
+  rejectionReason: string | null;
 }
 
 const empty = {
@@ -142,6 +144,14 @@ export default function CouponsPage() {
         subtitle="Create coupons for your products or cart-level discounts"
       />
       <div className="p-6 max-w-5xl">
+        {/* Approval info banner */}
+        <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-xl flex items-start gap-3">
+          <Info size={18} className="text-blue-600 mt-0.5 shrink-0" />
+          <div className="text-sm text-blue-800">
+            <p className="font-medium mb-1">Coupon Approval Process</p>
+            <p className="text-blue-700">All new coupons require admin approval before customers can use them. If you edit an approved coupon, it will be sent for re-approval. You&apos;ll be notified once your coupon is approved or if any changes are needed.</p>
+          </div>
+        </div>
         <div className="flex items-center justify-between mb-6">
           <p className="text-sm text-gray-500">{coupons.length} coupon(s)</p>
           <button onClick={openCreate} className="flex items-center gap-2 px-4 py-2.5 bg-violet-600 text-white rounded-xl text-sm font-medium hover:bg-violet-700 transition-colors">
@@ -159,45 +169,95 @@ export default function CouponsPage() {
           </div>
         ) : (
           <div className="grid gap-4">
-            {coupons.map((c) => (
-              <motion.div key={c.id} layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="bg-white rounded-2xl border border-gray-200 p-5">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-3 mb-2">
-                      <button onClick={() => copyCode(c.code)} className="font-mono text-lg font-bold text-violet-700 bg-violet-50 px-3 py-1 rounded-lg hover:bg-violet-100 transition-colors flex items-center gap-2">
-                        {c.code}
-                        {copied === c.code ? <Check size={14} className="text-green-600" /> : <Copy size={14} className="text-violet-400" />}
+            {coupons.map((c) => {
+              const isPending = c.moderationStatus === 'PENDING';
+              const isRejected = c.moderationStatus === 'REJECTED';
+              const isApproved = c.moderationStatus === 'APPROVED';
+              const canToggle = isApproved;
+
+              return (
+                <motion.div key={c.id} layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className={`bg-white rounded-2xl border p-5 ${isRejected ? 'border-red-200 bg-red-50/30' : isPending ? 'border-amber-200 bg-amber-50/30' : 'border-gray-200'}`}>
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-3 mb-2 flex-wrap">
+                        <button onClick={() => copyCode(c.code)} className="font-mono text-lg font-bold text-violet-700 bg-violet-50 px-3 py-1 rounded-lg hover:bg-violet-100 transition-colors flex items-center gap-2">
+                          {c.code}
+                          {copied === c.code ? <Check size={14} className="text-green-600" /> : <Copy size={14} className="text-violet-400" />}
+                        </button>
+                        {/* Moderation Status Badge */}
+                        {isPending && (
+                          <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-amber-100 text-amber-700 flex items-center gap-1">
+                            <Clock size={12} />
+                            Pending Approval
+                          </span>
+                        )}
+                        {isRejected && (
+                          <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-red-100 text-red-700 flex items-center gap-1">
+                            <AlertTriangle size={12} />
+                            Rejected
+                          </span>
+                        )}
+                        {isApproved && (
+                          <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-green-100 text-green-700 flex items-center gap-1">
+                            <CheckCircle size={12} />
+                            Approved
+                          </span>
+                        )}
+                        {/* Active/Inactive badge - only show for approved coupons */}
+                        {isApproved && (
+                          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${c.isActive ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'}`}>
+                            {c.isActive ? 'Active' : 'Inactive'}
+                          </span>
+                        )}
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${c.scope === 'global' ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>
+                          {c.scope === 'global' ? 'Cart-level' : 'Product-level'}
+                        </span>
+                      </div>
+                      {c.description && <p className="text-sm text-gray-600 mb-2">{c.description}</p>}
+                      {/* Show rejection reason if rejected */}
+                      {isRejected && c.rejectionReason && (
+                        <div className="flex items-start gap-2 mb-2 p-2 bg-red-100 rounded-lg">
+                          <AlertTriangle size={14} className="text-red-600 mt-0.5 shrink-0" />
+                          <p className="text-xs text-red-700"><strong>Rejection reason:</strong> {c.rejectionReason}</p>
+                        </div>
+                      )}
+                      {/* Show pending message */}
+                      {isPending && (
+                        <div className="flex items-start gap-2 mb-2 p-2 bg-amber-100 rounded-lg">
+                          <Info size={14} className="text-amber-600 mt-0.5 shrink-0" />
+                          <p className="text-xs text-amber-700">This coupon is awaiting admin approval. Once approved, customers will be able to use it.</p>
+                        </div>
+                      )}
+                      <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-gray-500">
+                        <span>{c.discountType === 'PERCENTAGE' ? `${c.discountValue}% off` : `₹${c.discountValue} flat`}</span>
+                        {c.minOrderAmount > 0 && <span>Min order: ₹{c.minOrderAmount}</span>}
+                        {c.maxDiscount && <span>Max: ₹{c.maxDiscount}</span>}
+                        {c.usageLimit && <span>Uses: {c.usedCount}/{c.usageLimit}</span>}
+                        {c.validUntil && <span>Expires: {new Date(c.validUntil).toLocaleDateString()}</span>}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {/* Only allow toggle for approved coupons */}
+                      {canToggle ? (
+                        <button onClick={() => handleToggle(c)} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${c.isActive ? 'bg-gray-100 hover:bg-gray-200 text-gray-600' : 'bg-green-50 hover:bg-green-100 text-green-700'}`}>
+                          {c.isActive ? 'Deactivate' : 'Activate'}
+                        </button>
+                      ) : (
+                        <span className="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-50 text-gray-400 cursor-not-allowed" title={isPending ? 'Awaiting approval' : 'Coupon was rejected'}>
+                          {isPending ? 'Awaiting Approval' : 'Rejected'}
+                        </span>
+                      )}
+                      <button onClick={() => openEdit(c)} className="p-2 rounded-lg hover:bg-gray-100 text-gray-500 transition-colors" title="Edit coupon">
+                        <Pencil size={16} />
                       </button>
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${c.isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-                        {c.isActive ? 'Active' : 'Inactive'}
-                      </span>
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${c.scope === 'global' ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>
-                        {c.scope === 'global' ? 'Cart-level' : 'Product-level'}
-                      </span>
-                    </div>
-                    {c.description && <p className="text-sm text-gray-600 mb-2">{c.description}</p>}
-                    <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-gray-500">
-                      <span>{c.discountType === 'PERCENTAGE' ? `${c.discountValue}% off` : `₹${c.discountValue} flat`}</span>
-                      {c.minOrderAmount > 0 && <span>Min order: ₹{c.minOrderAmount}</span>}
-                      {c.maxDiscount && <span>Max: ₹{c.maxDiscount}</span>}
-                      {c.usageLimit && <span>Uses: {c.usedCount}/{c.usageLimit}</span>}
-                      {c.validUntil && <span>Expires: {new Date(c.validUntil).toLocaleDateString()}</span>}
+                      <button onClick={() => handleDelete(c.id)} className="p-2 rounded-lg hover:bg-red-50 text-red-500 transition-colors" title="Delete coupon">
+                        <Trash2 size={16} />
+                      </button>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <button onClick={() => handleToggle(c)} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${c.isActive ? 'bg-gray-100 hover:bg-gray-200 text-gray-600' : 'bg-green-50 hover:bg-green-100 text-green-700'}`}>
-                      {c.isActive ? 'Deactivate' : 'Activate'}
-                    </button>
-                    <button onClick={() => openEdit(c)} className="p-2 rounded-lg hover:bg-gray-100 text-gray-500 transition-colors">
-                      <Pencil size={16} />
-                    </button>
-                    <button onClick={() => handleDelete(c.id)} className="p-2 rounded-lg hover:bg-red-50 text-red-500 transition-colors">
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
-                </div>
-              </motion.div>
-            ))}
+                </motion.div>
+              );
+            })}
           </div>
         )}
       </div>

@@ -280,7 +280,17 @@ export interface OrderItem {
   /** Seller ID who fulfilled this item */
   sellerId?: string | null;
   /** Present when API includes nested product (e.g. some list/detail responses). */
-  product?: { name?: string; slug?: string; images?: string[]; xelnovaProductId?: string | null };
+  product?: {
+    name?: string;
+    slug?: string;
+    images?: string[];
+    xelnovaProductId?: string | null;
+    isReturnable?: boolean;
+    isReplaceable?: boolean;
+    returnWindow?: number;
+    replacementWindow?: number | null;
+    returnPolicyPreset?: string | null;
+  };
 }
 
 export interface Order {

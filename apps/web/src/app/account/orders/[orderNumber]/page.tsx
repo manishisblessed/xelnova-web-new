@@ -9,10 +9,10 @@ import {
   Package, Truck, CheckCircle, Clock, ChevronLeft, MapPin, Phone,
   CreditCard, AlertCircle, Ban, RotateCcw, Banknote, Loader2,
   Copy, ShoppingBag, User, XCircle, Download, RefreshCw, Wallet,
-  Info, ShieldCheck, ExternalLink,
+  Info, ShieldCheck, ExternalLink, ChevronDown, Star,
 } from "lucide-react";
 import { formatCurrency, cn } from "@xelnova/utils";
-import { ordersApi, returnsApi, paymentApi, setAccessToken, uploadApi, type Order, type OrderItem } from "@xelnova/api";
+import { ordersApi, returnsApi, paymentApi, reviewsApi, setAccessToken, uploadApi, type Order, type OrderItem } from "@xelnova/api";
 import { useRouter } from "next/navigation";
 import { useCartStore } from "@/lib/store/cart-store";
 import { loadRazorpayScript } from "@/lib/load-razorpay";
@@ -25,20 +25,19 @@ function syncToken() {
 }
 
 type ItemRow = OrderItem & {
-  product?: {
-    name?: string;
-    slug?: string;
-    images?: string[];
-    xelnovaProductId?: string | null;
+  product?: OrderItem["product"] & {
     isReturnable?: boolean;
     isReplaceable?: boolean;
     returnWindow?: number;
     replacementWindow?: number | null;
+    returnPolicyPreset?: string | null;
   };
 };
 
 function itemName(item: ItemRow) {
-  return item.product?.name ?? item.productName;
+  const n = item.product?.name ?? item.productName;
+  const s = n != null ? String(n).trim() : "";
+  return s || "Product";
 }
 
 function itemImage(item: ItemRow) {
@@ -145,6 +144,12 @@ export default function OrderDetailPage() {
   const [downloadingInvoice, setDownloadingInvoice] = useState(false);
   const [retryPaymentBusy, setRetryPaymentBusy] = useState(false);
   const [retryPaymentHint, setRetryPaymentHint] = useState<string | null>(null);
+  const [reviewStatus, setReviewStatus] = useState<Awaited<ReturnType<typeof reviewsApi.getOrderReviewStatus>>>({});
+  const [reviewProductId, setReviewProductId] = useState<string | null>(null);
+  const [reviewRating, setReviewRating] = useState(0);
+  const [reviewHover, setReviewHover] = useState(0);
+  const [reviewComment, setReviewComment] = useState("");
+  const [reviewSubmitting, setReviewSubmitting] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -159,16 +164,58 @@ export default function OrderDetailPage() {
     return () => { cancelled = true; };
   }, [params.orderNumber]);
 
+  useEffect(() => {
+    if (!order) return;
+    const paid = (order as any).paymentStatus === "PAID";
+    const eligible = ["CONFIRMED", "SHIPPED", "DELIVERED", "RETURNED", "REFUNDED"].includes(order.status.toUpperCase());
+    if (!paid && !eligible) return;
+    syncToken();
+    reviewsApi
+      .getOrderReviewStatus(order.orderNumber)
+      .then(setReviewStatus)
+      .catch(() => {});
+  }, [order]);
+
+  const handleSubmitReview = async () => {
+    if (!reviewProductId || reviewRating < 1) return;
+    setReviewSubmitting(true);
+    try {
+      syncToken();
+      await reviewsApi.createReview({ productId: reviewProductId, rating: reviewRating, comment: reviewComment.trim() || undefined });
+      setReviewStatus((prev) => ({ ...prev, [reviewProductId]: { reviewed: true, rating: reviewRating, status: "PENDING" } }));
+      setReviewProductId(null);
+      setReviewRating(0);
+      setReviewComment("");
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to submit review");
+    } finally {
+      setReviewSubmitting(false);
+    }
+  };
+
   const returnEligibility = useMemo(() => {
     if (!order || order.status.toUpperCase() !== "DELIVERED") return null;
-    const items = order.items as ItemRow[];
+    const items = Array.isArray(order.items) ? (order.items as ItemRow[]) : [];
     if (!items.length) return null;
     const deliveredAt = order.shipment?.deliveredAt
       ? new Date(order.shipment.deliveredAt)
       : new Date(order.updatedAt || order.createdAt);
     const days = Math.floor((Date.now() - deliveredAt.getTime()) / (24 * 60 * 60 * 1000));
-    const allReturnable = items.every((i) => i.product?.isReturnable !== false);
-    const allReplaceable = items.every((i) => !!i.product?.isReplaceable);
+
+    const hasNonReturnable = items.some(
+      (i) => i.product?.returnPolicyPreset === "NON_RETURNABLE",
+    );
+    const hasReplacementOnly = items.some(
+      (i) => i.product?.returnPolicyPreset === "REPLACEMENT_ONLY",
+    );
+
+    const allReturnable =
+      !hasNonReturnable &&
+      !hasReplacementOnly &&
+      items.every((i) => i.product?.isReturnable !== false);
+    const allReplaceable =
+      !hasNonReturnable && items.every((i) => !!i.product?.isReplaceable);
+
     const returnWindows = items.map((i) => Number(i.product?.returnWindow ?? 7));
     const replWindows = items.map((i) =>
       Number(i.product?.replacementWindow ?? i.product?.returnWindow ?? 7),
@@ -181,6 +228,8 @@ export default function OrderDetailPage() {
       daysSinceDelivery: days,
       returnLimit,
       replLimit,
+      hasNonReturnable,
+      hasReplacementOnly,
     };
   }, [order]);
 
@@ -283,7 +332,8 @@ export default function OrderDetailPage() {
 
   const handleReorder = () => {
     if (!order) return;
-    for (const item of order.items as ItemRow[]) {
+    const items = Array.isArray(order.items) ? (order.items as ItemRow[]) : [];
+    for (const item of items) {
       addToCart({
         id: item.productId,
         productId: item.productId,
@@ -394,6 +444,7 @@ export default function OrderDetailPage() {
   const isCancelled = ["CANCELLED", "RETURNED", "REFUNDED"].includes(order.status.toUpperCase());
   const stepIdx = PROGRESS_STEPS.indexOf(order.status.toUpperCase());
   const addr = order.shippingAddress;
+  const lineItems = Array.isArray(order.items) ? (order.items as ItemRow[]) : [];
 
   const copyOrderNumber = () => {
     navigator.clipboard.writeText(order.orderNumber);
@@ -405,14 +456,14 @@ export default function OrderDetailPage() {
     ["PENDING", "FAILED"].includes((order.paymentStatus || "").toUpperCase());
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       {/* Back link */}
       <Link href="/account/orders" className="inline-flex items-center gap-1 text-sm text-text-muted hover:text-text-primary transition-colors">
         <ChevronLeft size={16} /> Back to My Orders
       </Link>
 
       {/* Header */}
-      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="rounded-2xl border border-border bg-white p-6 shadow-card">
+      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="rounded-2xl border border-border bg-white p-4 shadow-card sm:p-5">
         <div className="flex items-start justify-between flex-wrap gap-3">
           <div>
             <div className="flex items-center gap-2">
@@ -442,7 +493,7 @@ export default function OrderDetailPage() {
 
         {/* Progress tracker */}
         {!isCancelled && (
-          <div className="mt-6 flex items-center">
+          <div className="mt-4 flex items-center">
             {PROGRESS_STEPS.map((step, i) => {
               const done = i <= stepIdx;
               const active = i === stepIdx;
@@ -492,15 +543,24 @@ export default function OrderDetailPage() {
         )}
       </motion.div>
 
-      <div className="grid gap-5 lg:grid-cols-3">
-        {/* Items + Price breakdown */}
-        <div className="lg:col-span-2 space-y-5">
-          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} className="rounded-2xl border border-border bg-white p-5 shadow-card">
-            <h3 className="text-sm font-bold text-text-primary mb-4">
-              Items ({order.items.length})
+      <div className="grid gap-3 lg:grid-cols-2 lg:items-start xl:grid-cols-[minmax(0,1fr)_minmax(260px,360px)]">
+        {/* Line items + totals + shipment */}
+        <div className="min-w-0 space-y-3">
+          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} className="rounded-2xl border border-border bg-white p-4 shadow-card sm:p-5">
+            <h3 className="text-sm font-bold text-text-primary mb-3">
+              Items ({lineItems.length})
             </h3>
+            {lineItems.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-border bg-surface-muted/30 px-4 py-8 text-center">
+                <Package className="mx-auto h-10 w-10 text-text-muted/70" aria-hidden />
+                <p className="mt-3 text-sm font-medium text-text-primary">No products listed for this order</p>
+                <p className="mt-1.5 text-xs text-text-muted leading-relaxed max-w-sm mx-auto">
+                  Your payment and totals are still shown below. Refresh the page or contact support if this looks wrong.
+                </p>
+              </div>
+            ) : (
             <div className="space-y-3">
-              {(order.items as ItemRow[]).map((item, i) => {
+              {lineItems.map((item, i) => {
                 const img = itemImage(item);
                 const name = itemName(item);
                 const slug = itemSlug(item);
@@ -548,7 +608,7 @@ export default function OrderDetailPage() {
                             </p>
                           ) : null}
                         </div>
-                      ) : item.variant ? (
+                      ) : item.variant && item.variant !== '__default__' ? (
                         <p className="text-xs text-text-muted mt-0.5">Variant: {item.variant.replace(/-/g, ' / ')}</p>
                       ) : null}
                     </div>
@@ -559,9 +619,10 @@ export default function OrderDetailPage() {
                 );
               })}
             </div>
+            )}
 
             {/* Price breakdown */}
-            <div className="mt-5 pt-4 border-t border-border space-y-2.5 text-sm">
+            <div className="mt-4 pt-3 border-t border-border space-y-2 text-sm">
               <div className="flex justify-between text-text-muted">
                 <span>Subtotal</span>
                 <span>{formatCurrency(order.subtotal)}</span>
@@ -588,37 +649,13 @@ export default function OrderDetailPage() {
               </div>
             </div>
           </motion.div>
-        </div>
 
-        {/* Right sidebar */}
-        <div className="space-y-5">
-          {/* Shipping address */}
-          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="rounded-2xl border border-border bg-white p-5 shadow-card">
-            <h3 className="text-sm font-bold text-text-primary mb-3 flex items-center gap-1.5">
-              <MapPin size={14} /> Shipping Address
-            </h3>
-            {addr ? (
-              <div className="text-sm space-y-1">
-                <p className="font-medium text-text-primary">{addr.fullName}</p>
-                <p className="text-text-secondary">{addr.addressLine1}</p>
-                {addr.addressLine2 && <p className="text-text-secondary">{addr.addressLine2}</p>}
-                <p className="text-text-secondary">{addr.city}, {addr.state} — {addr.pincode}</p>
-                <p className="flex items-center gap-1 text-text-muted mt-1.5">
-                  <Phone size={12} /> {addr.phone}
-                </p>
-              </div>
-            ) : (
-              <p className="text-sm text-text-muted">No address on file</p>
-            )}
-          </motion.div>
-
-          {/* Shipment / tracking (when API includes `shipment`) */}
           {order.shipment && !isCancelled && (
             <motion.div
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.12 }}
-              className="rounded-2xl border border-border bg-white p-5 shadow-card"
+              className="rounded-2xl border border-border bg-white p-4 shadow-card sm:p-5"
             >
               <h3 className="text-sm font-bold text-text-primary mb-3 flex items-center gap-1.5">
                 <Truck size={14} /> Shipment &amp; tracking
@@ -704,30 +741,53 @@ export default function OrderDetailPage() {
               </div>
             </motion.div>
           )}
+        </div>
+
+        {/* Order meta: address, payment, actions */}
+        <div className="min-w-0 space-y-3">
+          {/* Shipping address */}
+          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="rounded-2xl border border-border bg-white p-3 shadow-card sm:p-4">
+            <h3 className="text-sm font-bold text-text-primary mb-2 flex items-center gap-1.5">
+              <MapPin size={14} /> Shipping Address
+            </h3>
+            {addr ? (
+              <div className="text-xs space-y-0.5">
+                <p className="font-medium text-text-primary">{addr.fullName}</p>
+                <p className="text-text-secondary">{addr.addressLine1}</p>
+                {addr.addressLine2 && <p className="text-text-secondary">{addr.addressLine2}</p>}
+                <p className="text-text-secondary">{addr.city}, {addr.state} — {addr.pincode}</p>
+                <p className="flex items-center gap-1 text-text-muted mt-1">
+                  <Phone size={11} /> {addr.phone}
+                </p>
+              </div>
+            ) : (
+              <p className="text-sm text-text-muted">No address on file</p>
+            )}
+          </motion.div>
 
           {/* Payment */}
-          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="rounded-2xl border border-border bg-white p-5 shadow-card">
-            <h3 className="text-sm font-bold text-text-primary mb-3 flex items-center gap-1.5">
+          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="rounded-2xl border border-border bg-white p-3 shadow-card sm:p-4">
+            <h3 className="text-sm font-bold text-text-primary mb-2 flex items-center gap-1.5">
               <CreditCard size={14} /> Payment
             </h3>
-            <div className="text-sm space-y-2">
+            <div className="text-xs space-y-1.5">
               {(() => {
                 const ps = (order.paymentStatus || 'PENDING').toUpperCase();
                 const cfg = paymentStatusConfig[ps] || paymentStatusConfig.PENDING;
                 return (
-                  <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${cfg.color} ${cfg.bg} ${cfg.border} border`}>
+                  <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${cfg.color} ${cfg.bg} ${cfg.border} border`}>
                     {ps === 'PAID' ? <CheckCircle size={12} /> : ps === 'FAILED' ? <XCircle size={12} /> : <Clock size={12} />}
                     {cfg.label}
                   </span>
                 );
               })()}
-              <p className="text-text-secondary mt-2">
-                <span className="text-text-muted">Method:</span>{' '}
-                <span className="font-medium text-text-primary">{prettyPaymentMethod(order.paymentMethod)}</span>
+              <p className="text-text-secondary mt-1">
+                <span className="text-text-muted text-[11px]">Method:</span>{' '}
+                <span className="font-medium text-text-primary text-xs">{prettyPaymentMethod(order.paymentMethod)}</span>
               </p>
               <p className="text-text-secondary">
-                <span className="text-text-muted">Amount:</span>{' '}
-                <span className="font-semibold text-text-primary">{formatCurrency(order.total)}</span>
+                <span className="text-text-muted text-[11px]">Amount:</span>{' '}
+                <span className="font-semibold text-text-primary text-xs">{formatCurrency(order.total)}</span>
               </p>
               {order.couponCode && (
                 <p className="text-success-600 text-xs font-medium">Coupon applied: {order.couponCode}</p>
@@ -775,7 +835,7 @@ export default function OrderDetailPage() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.18 }}
               className={cn(
-                "rounded-2xl border p-5 shadow-card",
+                "rounded-2xl border p-3 shadow-card sm:p-4",
                 (() => {
                   const ps = (order.paymentStatus || "").toUpperCase();
                   const wasCaptured = ps === "PAID" || ps === "REFUNDED";
@@ -787,7 +847,7 @@ export default function OrderDetailPage() {
             >
               <h3
                 className={cn(
-                  "text-sm font-bold mb-2 flex items-center gap-1.5",
+                  "text-xs font-bold mb-1.5 flex items-center gap-1.5",
                   (() => {
                     const ps = (order.paymentStatus || "").toUpperCase();
                     return ps === "PAID" || ps === "REFUNDED"
@@ -796,7 +856,7 @@ export default function OrderDetailPage() {
                   })(),
                 )}
               >
-                <Banknote size={14} /> Refund Status
+                <Banknote size={13} /> Refund Status
               </h3>
               {(() => {
                 const ps = (order.paymentStatus || "").toUpperCase();
@@ -807,44 +867,40 @@ export default function OrderDetailPage() {
 
                 if (!wasCaptured) {
                   return (
-                    <p className="text-sm text-text-secondary">
+                    <p className="text-xs text-text-secondary">
                       {isCod
-                        ? "This order was cancelled before cash was collected. No payment was taken."
-                        : "No payment was captured for this order, so there is nothing to refund."}
+                        ? "Order cancelled before cash collected."
+                        : "No payment captured for refund."}
                     </p>
                   );
                 }
 
                 return (
-                  <div className="text-sm space-y-2">
+                  <div className="text-xs space-y-1.5">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-text-secondary">Refund amount</span>
-                      <span className="font-bold text-text-primary tabular-nums">{formatCurrency(order.total)}</span>
+                      <span className="text-text-secondary">Amount</span>
+                      <span className="font-bold text-text-primary tabular-nums text-xs">{formatCurrency(order.total)}</span>
                     </div>
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-text-secondary">Refunded to</span>
-                      <span className="font-medium text-text-primary text-right">{destination}</span>
+                      <span className="text-text-secondary">To</span>
+                      <span className="font-medium text-text-primary text-right text-xs">{destination}</span>
                     </div>
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-text-secondary">Timeline</span>
-                      <span className="font-medium text-text-primary text-right">{timeline}</span>
+                      <span className="font-medium text-text-primary text-right text-xs">{timeline}</span>
                     </div>
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-text-secondary">Status</span>
                       <span
-                        className={`text-xs font-semibold rounded-full px-2 py-0.5 shrink-0 ${
+                        className={`text-[10px] font-semibold rounded-full px-1.5 py-0.5 shrink-0 ${
                           refunded ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"
                         }`}
                       >
-                        {refunded ? "Refund processed" : "Refund in progress"}
+                        {refunded ? "Processed" : "In progress"}
                       </span>
                     </div>
-                    <p className="text-xs text-text-muted pt-2 border-t border-emerald-200/80">
-                      You will receive email and in-app updates when the refund is settled.
-                      {(order.paymentMethod || "").toLowerCase() === "wallet" ||
-                      (order.paymentMethod || "").toLowerCase() === "cod"
-                        ? " Wallet refunds appear under Account → Wallet."
-                        : " Razorpay refunds typically appear on your bank statement within 5–7 business days."}
+                    <p className="text-[10px] text-text-muted pt-1 border-t border-emerald-200/80">
+                      You&apos;ll receive updates when the refund settles.
                     </p>
                   </div>
                 );
@@ -852,59 +908,49 @@ export default function OrderDetailPage() {
             </motion.div>
           )}
 
-          {/* How payments & refunds work — appears once on every order page */}
-          <motion.div
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.22 }}
-            className="rounded-2xl border border-border bg-white p-5 shadow-card"
-          >
-            <h3 className="text-sm font-bold text-text-primary mb-3 flex items-center gap-1.5">
-              <Info size={14} className="text-primary-600" /> How Payments &amp; Refunds Work
-            </h3>
-            <div className="space-y-3 text-xs text-text-secondary leading-relaxed">
-              <div className="flex gap-2">
-                <ShieldCheck size={14} className="text-primary-600 shrink-0 mt-0.5" />
+          {/* Collapsed by default — avoids stretching the main column with long copy */}
+          <details className="group rounded-2xl border border-border bg-white shadow-card">
+            <summary className="flex cursor-pointer list-none items-center gap-1.5 px-3 py-2.5 text-xs font-bold text-text-primary sm:px-4 [&::-webkit-details-marker]:hidden">
+              <Info size={13} className="shrink-0 text-primary-600" />
+              <span>How Payments &amp; Refunds Work</span>
+              <ChevronDown size={14} className="ml-auto shrink-0 text-text-muted transition-transform group-open:rotate-180" aria-hidden />
+            </summary>
+            <div className="space-y-2 border-t border-border px-3 pb-3 pt-2.5 text-[11px] text-text-secondary leading-relaxed sm:px-4 sm:pb-3">
+              <div className="flex gap-1.5">
+                <ShieldCheck size={12} className="text-primary-600 shrink-0 mt-0.5" />
                 <p>
-                  <strong className="text-text-primary">Online (Razorpay):</strong> Payment is captured instantly through
-                  Razorpay using Card / UPI / Net Banking. Funds are held by our acquiring bank (Axis Bank) and released
-                  to the seller after the order is delivered.
+                  <strong className="text-text-primary text-xs">Online (Razorpay):</strong> Payment is captured instantly through Razorpay using Card / UPI / Net Banking.
                 </p>
               </div>
-              <div className="flex gap-2">
-                <Wallet size={14} className="text-primary-600 shrink-0 mt-0.5" />
+              <div className="flex gap-1.5">
+                <Wallet size={12} className="text-primary-600 shrink-0 mt-0.5" />
                 <p>
-                  <strong className="text-text-primary">Xelnova Wallet:</strong> Wallet balance is debited at order
-                  confirmation. The same balance can be used for any future order. Money you add to the wallet is held
-                  in an Axis Bank settlement account, fully protected by Razorpay&apos;s PCI-DSS infrastructure.
+                  <strong className="text-text-primary text-xs">Xelnova Wallet:</strong> Wallet balance is debited at confirmation. Fully protected by Razorpay&apos;s PCI-DSS.
                 </p>
               </div>
-              <div className="flex gap-2">
-                <Banknote size={14} className="text-primary-600 shrink-0 mt-0.5" />
+              <div className="flex gap-1.5">
+                <Banknote size={12} className="text-primary-600 shrink-0 mt-0.5" />
                 <p>
-                  <strong className="text-text-primary">Cancellations &amp; refunds:</strong> When you cancel a paid
-                  order, you can choose where the refund lands — your <strong>Xelnova Wallet (instant)</strong> or your
-                  <strong> original payment method (5–7 business days via Razorpay)</strong>. COD orders are always
-                  refunded to your wallet.
+                  <strong className="text-text-primary text-xs">Refunds:</strong> Choose refund destination. COD orders refund to wallet instantly.
                 </p>
               </div>
             </div>
-          </motion.div>
+          </details>
 
           {/* Actions */}
-          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="rounded-2xl border border-border bg-white p-5 shadow-card space-y-2.5">
-            <h3 className="text-sm font-bold text-text-primary mb-3">Actions</h3>
+          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="rounded-2xl border border-border bg-white p-3 shadow-card sm:p-4 space-y-2">
+            <h3 className="text-sm font-bold text-text-primary mb-2">Actions</h3>
             <button
               onClick={handleDownloadInvoice}
               disabled={downloadingInvoice}
-              className="w-full flex items-center gap-2 rounded-xl border border-border px-4 py-2.5 text-sm font-medium text-text-primary hover:bg-gray-50 transition-colors disabled:opacity-50"
+              className="w-full flex items-center gap-2 rounded-xl border border-border px-3 py-2 text-xs font-medium text-text-primary hover:bg-gray-50 transition-colors disabled:opacity-50"
             >
               {downloadingInvoice ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
               Download Invoice
             </button>
             <button
               onClick={handleReorder}
-              className="w-full flex items-center gap-2 rounded-xl border border-border px-4 py-2.5 text-sm font-medium text-primary-600 hover:bg-primary-50 transition-colors"
+              className="w-full flex items-center gap-2 rounded-xl border border-border px-3 py-2 text-xs font-medium text-primary-600 hover:bg-primary-50 transition-colors"
             >
               <RefreshCw size={15} /> Buy Again
             </button>
@@ -926,18 +972,111 @@ export default function OrderDetailPage() {
             )}
             {order?.status.toUpperCase() === "DELIVERED" && returnEligibility && !returnEligibility.canReturn && !returnEligibility.canReplace && (
               <p className="text-xs text-text-muted text-center px-1">
-                Return or replacement window has ended for this order.
+                {returnEligibility.hasNonReturnable
+                  ? "This order contains a non-returnable product."
+                  : returnEligibility.hasReplacementOnly && !returnEligibility.canReplace
+                    ? "Replacement window has ended for this order."
+                    : "Return or replacement window has ended for this order."}
               </p>
             )}
           </motion.div>
 
+          {/* Rate & Review */}
+          {order && ((order as any).paymentStatus === "PAID" || ["CONFIRMED", "SHIPPED", "DELIVERED", "RETURNED", "REFUNDED"].includes(order.status.toUpperCase())) && order.items?.length > 0 && (
+            <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.22 }} className="rounded-2xl border border-border bg-white p-3 shadow-card sm:p-4 space-y-3">
+              <h3 className="text-sm font-bold text-text-primary flex items-center gap-1.5">
+                <Star size={15} className="text-amber-500" /> Rate &amp; Review
+              </h3>
+              <div className="space-y-2">
+                {(order.items as ItemRow[]).map((item) => {
+                  const reviewed = reviewStatus[item.productId];
+                  const isOpen = reviewProductId === item.productId;
+                  return (
+                    <div key={item.productId} className="rounded-xl border border-border p-2.5 space-y-2">
+                      <div className="flex items-center gap-2">
+                        {itemImage(item) && (
+                          <Image src={itemImage(item)!} alt={itemName(item)} width={36} height={36} className="rounded-lg object-cover" />
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-medium text-text-primary truncate">{itemName(item)}</p>
+                          {reviewed ? (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded-full">
+                              <CheckCircle size={10} /> Reviewed ({reviewed.rating}★)
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setReviewProductId(isOpen ? null : item.productId);
+                                setReviewRating(0);
+                                setReviewComment("");
+                              }}
+                              className="text-[10px] font-semibold text-primary-600 hover:text-primary-700"
+                            >
+                              {isOpen ? "Cancel" : "Write a Review"}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      {isOpen && !reviewed && (
+                        <div className="space-y-2 pt-1 border-t border-border">
+                          <div className="flex items-center gap-0.5">
+                            {[1, 2, 3, 4, 5].map((star) => (
+                              <button
+                                key={star}
+                                type="button"
+                                onMouseEnter={() => setReviewHover(star)}
+                                onMouseLeave={() => setReviewHover(0)}
+                                onClick={() => setReviewRating(star)}
+                                className="p-0.5"
+                              >
+                                <Star
+                                  size={20}
+                                  className={cn(
+                                    "transition-colors",
+                                    (reviewHover || reviewRating) >= star
+                                      ? "text-amber-400 fill-amber-400"
+                                      : "text-gray-300",
+                                  )}
+                                />
+                              </button>
+                            ))}
+                            {reviewRating > 0 && (
+                              <span className="text-xs text-text-muted ml-1">{reviewRating}/5</span>
+                            )}
+                          </div>
+                          <textarea
+                            value={reviewComment}
+                            onChange={(e) => setReviewComment(e.target.value)}
+                            placeholder="Share your experience (optional)"
+                            rows={2}
+                            className="w-full rounded-lg border border-border px-2.5 py-1.5 text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => void handleSubmitReview()}
+                            disabled={reviewSubmitting || reviewRating < 1}
+                            className="w-full rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
+                          >
+                            {reviewSubmitting ? <Loader2 size={12} className="animate-spin" /> : <Star size={12} />}
+                            Submit Review
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </motion.div>
+          )}
+
           {/* Need help */}
-          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }} className="rounded-2xl border border-border bg-gradient-to-br from-primary-50 to-blue-50 p-5">
-            <h3 className="text-sm font-bold text-text-primary mb-1">Need Help?</h3>
-            <p className="text-xs text-text-secondary mb-3">
-              Have a question about this order? Our support team is here to help.
+          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }} className="rounded-2xl border border-border bg-gradient-to-br from-primary-50 to-blue-50 p-3 sm:p-4">
+            <h3 className="text-xs font-bold text-text-primary mb-1">Need Help?</h3>
+            <p className="text-[11px] text-text-secondary mb-2">
+              Have a question about this order?
             </p>
-            <Link href="/support" className="inline-flex items-center gap-1 text-sm font-medium text-primary-600 hover:text-primary-700 transition-colors">
+            <Link href="/support" className="inline-flex items-center gap-1 text-xs font-medium text-primary-600 hover:text-primary-700 transition-colors">
               Contact Support
             </Link>
           </motion.div>

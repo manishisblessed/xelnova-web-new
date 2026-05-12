@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Package, Truck, CheckCircle, ArrowRight, Calendar, Loader2, ChevronLeft,
-  ExternalLink, Download, Navigation, Weight, Ruler, PackageCheck, Phone, ArrowLeft,
+  ExternalLink, Download, Navigation, Weight, Ruler, PackageCheck, Phone, ArrowLeft, Eye,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { DashboardHeader } from '@/components/dashboard/dashboard-header';
@@ -490,10 +490,19 @@ export default function SellerShipOrderPage() {
         title="Ship Order"
         subtitle={`Order #${order.orderNumber}`}
         actions={
-          <Button variant="outline" onClick={() => router.push('/orders')}>
-            <ArrowLeft size={14} />
-            Back to Orders
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => router.push('/orders')}>
+              <ArrowLeft size={14} />
+              Back to Orders
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => {
+              sessionStorage.setItem('xelnova_seller_view_order_id', orderId);
+              router.push('/orders');
+            }}>
+              <Eye size={14} />
+              Order Details
+            </Button>
+          </div>
         }
       />
 

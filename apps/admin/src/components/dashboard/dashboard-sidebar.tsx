@@ -34,6 +34,8 @@ import {
   ShieldAlert,
   Flag,
   Star,
+  RotateCcw,
+  Truck,
 } from 'lucide-react';
 import { cn } from '@xelnova/utils';
 import { useDashboardAuth } from '@/lib/auth-context';
@@ -70,6 +72,8 @@ const NAV_SECTIONS: NavSection[] = [
     title: 'Orders & users',
     items: [
       { href: '/orders', label: 'Orders', icon: ShoppingCart },
+      { href: '/courier-summary', label: 'Courier Summary', icon: Truck },
+      { href: '/returns', label: 'Returns', icon: RotateCcw },
       { href: '/tickets', label: 'Support Tickets', icon: MessageSquare },
       { href: '/customers', label: 'Customers', icon: Users },
       { href: '/sellers', label: 'Sellers', icon: Store },

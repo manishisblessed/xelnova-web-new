@@ -59,3 +59,21 @@ export async function getReturns(): Promise<ReturnRequest[]> {
   }
   return data.data;
 }
+
+export interface SellerReturnRequest extends ReturnRequest {
+  reverseCourierCharge?: number | null;
+  reverseCourier?: string | null;
+  reverseAwb?: string | null;
+  reverseTrackingUrl?: string | null;
+  reversePickupScheduled?: string | null;
+  reversePickedUpAt?: string | null;
+  user?: { name: string; email: string };
+}
+
+export async function getSellerReturns(): Promise<SellerReturnRequest[]> {
+  const { data } = await api.get<ApiResponse<SellerReturnRequest[]>>('/returns/seller');
+  if (!data.success || !data.data) {
+    throw new Error(data.message || 'Failed to load seller returns');
+  }
+  return data.data;
+}

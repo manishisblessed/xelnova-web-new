@@ -1,5 +1,6 @@
 import {
   Injectable,
+  OnModuleInit,
   NotFoundException,
   ForbiddenException,
   BadRequestException,
@@ -8,6 +9,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationService } from '../notifications/notification.service';
+import { WalletService } from '../wallet/wallet.service';
 import {
   ShippingMode,
   ShipmentStatus,
@@ -33,7 +35,7 @@ const ENCRYPTION_ALGORITHM = 'aes-256-cbc';
 type PlatformCourierMode = 'DELHIVERY' | 'SHIPROCKET' | 'XPRESSBEES' | 'EKART';
 
 @Injectable()
-export class ShippingService {
+export class ShippingService implements OnModuleInit {
   private readonly logger = new Logger(ShippingService.name);
   private readonly providers: Map<ShippingMode, CourierProvider>;
   private readonly encryptionKey: Buffer;
@@ -42,6 +44,7 @@ export class ShippingService {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     private readonly notificationService: NotificationService,
+    private readonly walletService: WalletService,
     delhivery: DelhiveryProvider,
     shiprocket: ShipRocketProvider,
     xpressbees: XpressBeesProvider,
@@ -58,6 +61,41 @@ export class ShippingService {
 
     const secret = this.config.get<string>('ENCRYPTION_SECRET') || 'xelnova-default-encryption-key-32b';
     this.encryptionKey = crypto.scryptSync(secret, 'salt', 32);
+  }
+
+  async onModuleInit() {
+    await this.healStuckOrdersAfterShipmentCancel();
+  }
+
+  /**
+   * Auto-fix orders stuck in PROCESSING after a shipment was cancelled.
+   * These orders were already paid & confirmed before shipping, so they
+   * should be CONFIRMED (showing "Ship Now") not PROCESSING ("Confirm Order").
+   */
+  private async healStuckOrdersAfterShipmentCancel() {
+    try {
+      const stuck = await this.prisma.order.findMany({
+        where: {
+          status: OrderStatus.PROCESSING,
+          paymentStatus: 'PAID',
+          shipment: { shipmentStatus: ShipmentStatus.CANCELLED },
+        },
+        select: { id: true, orderNumber: true },
+      });
+
+      if (stuck.length === 0) return;
+
+      await this.prisma.order.updateMany({
+        where: { id: { in: stuck.map((o) => o.id) } },
+        data: { status: OrderStatus.CONFIRMED },
+      });
+
+      this.logger.log(
+        `Auto-healed ${stuck.length} order(s) stuck in PROCESSING after shipment cancel: ${stuck.map((o) => o.orderNumber).join(', ')}`,
+      );
+    } catch (err) {
+      this.logger.warn(`Failed to heal stuck orders on startup: ${err.message}`);
+    }
   }
 
   // ─── Encryption helpers ───
@@ -155,10 +193,14 @@ export class ShippingService {
         '';
       const envClient = this.config.get<string>('DELHIVERY_CLIENT_NAME')?.trim() || '';
       const envWh = this.config.get<string>('DELHIVERY_WAREHOUSE_NAME')?.trim() || '';
-      const apiKey = this.safeDecrypt(pl.delhivery?.apiTokenEnc) || envToken;
+      const dbToken = this.safeDecrypt(pl.delhivery?.apiTokenEnc);
+      const apiKey = dbToken || envToken;
       const clientName = pl.delhivery?.clientName?.trim() || envClient;
       const warehouseName = pl.delhivery?.warehouseName?.trim() || envWh;
       if (!apiKey || !clientName || !warehouseName) return null;
+      this.logger.debug(
+        `Delhivery config: token source=${dbToken ? 'database' : 'env'}, token hint=••••${apiKey.slice(-6)}, client="${clientName}", wh="${warehouseName}"`,
+      );
       const envDelhiveryEnv = this.config.get<string>('DELHIVERY_ENV')?.trim().toLowerCase();
       const delhiveryEnvironment =
         pl.delhivery?.environment === 'staging' || pl.delhivery?.environment === 'production'
@@ -364,7 +406,7 @@ export class ShippingService {
     const shipment = await this.prisma.shipment.findUnique({
       where: { orderId },
     });
-    if (!shipment || !shipment.awbNumber) return null;
+    if (!shipment || (!shipment.awbNumber && !shipment.courierOrderId)) return null;
 
     // Self-ship doesn't have a carrier label — caller falls back.
     if (shipment.shippingMode === ShippingMode.SELF_SHIP) return null;
@@ -421,6 +463,11 @@ export class ShippingService {
       }
     }
 
+    if (!shipment.awbNumber) {
+      this.logger.warn(`No AWB number for order ${orderId}, cannot download label`);
+      return null;
+    }
+
     if (
       shipment.shippingMode === ShippingMode.DELHIVERY ||
       (shipment.shippingMode === ShippingMode.XELNOVA_COURIER && provider instanceof DelhiveryProvider)
@@ -433,7 +480,11 @@ export class ShippingService {
     }
 
     if (provider instanceof ShipRocketProvider) {
-      const pdf = await (provider as ShipRocketProvider).downloadLabelPdf(shipment.awbNumber, config);
+      const pdf = await (provider as ShipRocketProvider).downloadLabelPdf(
+        shipment.awbNumber,
+        config,
+        shipment.courierOrderId,
+      );
       if (pdf && pdf.length) return pdf;
     }
 
@@ -885,12 +936,14 @@ export class ShippingService {
     // Helper to detect if a warehouse name looks invalid (e.g., a person's name
     // instead of a proper warehouse ID). This can happen if old buggy code cached
     // the contact person name instead of the actual registered warehouse.
-    const isLikelyInvalidWarehouseName = (name: string): boolean => {
+    const isLikelyInvalidWarehouseName = (name: string, provider?: ShippingMode): boolean => {
       if (!name) return true;
       const trimmed = name.trim().toLowerCase();
-      // Valid warehouse names typically: start with XN-, contain underscores/dashes,
-      // are mostly uppercase, or are known defaults like 'Primary', 'default', etc.
-      if (trimmed.startsWith('xn-') || trimmed.startsWith('xn_')) return false;
+      // XN- prefixed names are our internal IDs — all courier providers
+      // should use the human-friendly label instead.
+      if (trimmed.startsWith('xn-') || trimmed.startsWith('xn_')) {
+        return true;
+      }
       if (trimmed === 'primary' || trimmed === 'default' || trimmed === 'main') return false;
       if (name.includes('_') || /^[A-Z0-9\-_]+$/.test(name)) return false;
       // Looks like a person's name if it has spaces and is mostly lowercase letters
@@ -914,7 +967,7 @@ export class ShippingService {
         perCourierReg?.warehouseName &&
         perCourierReg.registeredAt &&
         perCourierReg.snapshotHash === desiredHash &&
-        !isLikelyInvalidWarehouseName(perCourierReg.warehouseName)
+        !isLikelyInvalidWarehouseName(perCourierReg.warehouseName, options.bookingBackend.mode)
       ) {
         return {
           success: true,
@@ -926,12 +979,13 @@ export class ShippingService {
     }
 
     // Fallback to generic xelgoWarehouseName (but validate it)
+    const resolvedMode = options.bookingBackend?.mode;
     if (
       !options.force &&
       location.xelgoWarehouseName &&
       location.xelgoWarehouseRegisteredAt &&
       location.xelgoWarehouseSnapshotHash === desiredHash &&
-      !isLikelyInvalidWarehouseName(location.xelgoWarehouseName)
+      !isLikelyInvalidWarehouseName(location.xelgoWarehouseName, resolvedMode)
     ) {
       return {
         success: true,
@@ -942,7 +996,7 @@ export class ShippingService {
     }
 
     // If we have a cached name that looks invalid, log it and proceed to re-register
-    if (location.xelgoWarehouseName && isLikelyInvalidWarehouseName(location.xelgoWarehouseName)) {
+    if (location.xelgoWarehouseName && isLikelyInvalidWarehouseName(location.xelgoWarehouseName, resolvedMode)) {
       this.logger.warn(
         `Pickup location ${locationId} has cached warehouse name "${location.xelgoWarehouseName}" which looks invalid. Re-registering.`,
       );
@@ -1001,15 +1055,20 @@ export class ShippingService {
 
     const opts: RegisterWarehouseOptions = {
       name: warehouseName,
+      label: location.label?.trim() || undefined,
       registeredName: location.contactPerson?.trim() || location.seller.storeName?.trim() || warehouseName,
       contactPerson: location.contactPerson?.trim() || location.seller.storeName?.trim() || warehouseName,
       email: location.email?.trim() || '',
       phone,
+      alternatePhone: (location as any).alternatePhone || undefined,
       address: location.addressLine.trim(),
+      addressLine2: (location as any).addressLine2?.trim() || undefined,
+      landmark: (location as any).landmark?.trim() || undefined,
       city: location.city.trim(),
       state: location.state.trim(),
       country: location.country || 'India',
       pincode: location.pincode.trim(),
+      gstNumber: (location as any).gstNumber?.trim() || undefined,
     };
 
     let result: RegisterWarehouseResult = { success: false, message: 'Registration not attempted' };
@@ -1140,10 +1199,14 @@ export class ShippingService {
       phone: string;
       email?: string;
       addressLine: string;
+      addressLine2?: string;
+      landmark?: string;
       city: string;
       state: string;
       country?: string;
       pincode: string;
+      alternatePhone?: string;
+      gstNumber?: string;
       makeDefault?: boolean;
     },
   ) {
@@ -1170,23 +1233,27 @@ export class ShippingService {
           phone: dto.phone.replace(/(?!^\+)\D/g, ''),
           email: dto.email?.trim() || null,
           addressLine: dto.addressLine.trim(),
+          addressLine2: dto.addressLine2?.trim() || null,
+          landmark: dto.landmark?.trim() || null,
           city: dto.city.trim(),
           state: dto.state.trim(),
           country: dto.country?.trim() || 'India',
           pincode: dto.pincode.trim(),
+          alternatePhone: dto.alternatePhone?.replace(/\D/g, '') || null,
+          gstNumber: dto.gstNumber?.trim() || null,
           isDefault: shouldBeDefault,
         },
       });
     });
 
-    // Fire-and-await registration so the seller sees the live status
-    // immediately. Any failure is recorded on the row and surfaced via
-    // the serialised response — we never throw here, because the row
-    // itself was created successfully and we don't want the UI to
-    // think the save failed.
-    await this.ensurePickupLocationWarehouse(created.id).catch((err) => {
+    // Register the new location with every available courier so the
+    // seller sees per-courier status immediately. Any per-courier
+    // failure is recorded on its own row and surfaced in the UI — we
+    // never throw here because the location itself was created
+    // successfully.
+    await this.registerPickupLocationAllCouriers(userId, created.id).catch((err) => {
       this.logger.warn(
-        `Initial register on new pickup location ${created.id} threw: ${
+        `Initial multi-courier register on new pickup location ${created.id} threw: ${
           err instanceof Error ? err.message : String(err)
         }`,
       );
@@ -1207,10 +1274,14 @@ export class ShippingService {
       phone?: string;
       email?: string | null;
       addressLine?: string;
+      addressLine2?: string | null;
+      landmark?: string | null;
       city?: string;
       state?: string;
       country?: string;
       pincode?: string;
+      alternatePhone?: string | null;
+      gstNumber?: string | null;
     },
   ) {
     const seller = await this.getSellerProfile(userId);
@@ -1227,10 +1298,14 @@ export class ShippingService {
     if (dto.phone !== undefined) data.phone = dto.phone.replace(/(?!^\+)\D/g, '');
     if (dto.email !== undefined) data.email = dto.email?.trim() || null;
     if (dto.addressLine !== undefined) data.addressLine = dto.addressLine.trim();
+    if (dto.addressLine2 !== undefined) data.addressLine2 = dto.addressLine2?.trim() || null;
+    if (dto.landmark !== undefined) data.landmark = dto.landmark?.trim() || null;
     if (dto.city !== undefined) data.city = dto.city.trim();
     if (dto.state !== undefined) data.state = dto.state.trim();
     if (dto.country !== undefined) data.country = dto.country?.trim() || 'India';
     if (dto.pincode !== undefined) data.pincode = dto.pincode.trim();
+    if (dto.alternatePhone !== undefined) data.alternatePhone = dto.alternatePhone?.replace(/\D/g, '') || null;
+    if (dto.gstNumber !== undefined) data.gstNumber = dto.gstNumber?.trim() || null;
 
     if (Object.keys(data).length === 0) {
       return this.serialisePickupLocation(existing);
@@ -1241,9 +1316,9 @@ export class ShippingService {
       data,
     });
 
-    // The address may have changed materially; let ensure detect drift
-    // via the snapshot hash and re-register if needed.
-    await this.ensurePickupLocationWarehouse(locationId).catch((err) => {
+    // The address may have changed materially; re-register with every
+    // courier so each one picks up the updated address.
+    await this.registerPickupLocationAllCouriers(userId, locationId).catch((err) => {
       this.logger.warn(
         `Re-register on updated pickup location ${locationId} threw: ${
           err instanceof Error ? err.message : String(err)
@@ -1546,10 +1621,16 @@ export class ShippingService {
     sellerId: string,
     provider: ShippingMode,
   ): Promise<SellerCourierConfig | null> {
-    // Check platform Xelgo backend first
-    const resolved = await this.resolveXelgoBackend();
-    if (resolved.mode !== 'unconfigured' && resolved.mode === provider) {
-      return resolved.config;
+    const integrated = new Set<ShippingMode>([
+      ShippingMode.DELHIVERY,
+      ShippingMode.SHIPROCKET,
+      ShippingMode.XPRESSBEES,
+      ShippingMode.EKART,
+    ]);
+
+    if (integrated.has(provider)) {
+      const built = await this.buildPlatformXelgoCourierConfig(provider as PlatformCourierMode);
+      if (built) return built.config;
     }
 
     // Check seller's own config
@@ -1570,14 +1651,19 @@ export class ShippingService {
   private async registerLocationWithCourier(
     location: {
       id: string;
+      label: string;
       contactPerson: string | null;
       phone: string;
       email: string | null;
       addressLine: string;
+      addressLine2: string | null;
+      landmark: string | null;
       city: string;
       state: string;
       country: string;
       pincode: string;
+      alternatePhone: string | null;
+      gstNumber: string | null;
       seller: { id: string; sellerCode?: string | null; storeName?: string | null };
     },
     mode: ShippingMode,
@@ -1610,6 +1696,46 @@ export class ShippingService {
       };
     }
 
+    if (mode === ShippingMode.XPRESSBEES) {
+      const storeName = location.seller.storeName || location.seller.sellerCode || 'A seller';
+      const address = `${location.addressLine}, ${location.city}, ${location.state} – ${location.pincode}`;
+
+      await this.prisma.sellerPickupLocationRegistration.upsert({
+        where: { pickupLocationId_provider: { pickupLocationId: location.id, provider: mode } },
+        create: {
+          pickupLocationId: location.id,
+          provider: mode,
+          warehouseName: null,
+          registeredAt: null,
+          registrationError: 'Pending admin registration',
+          isActive: false,
+          snapshotHash: null,
+        },
+        update: {
+          registrationError: 'Pending admin registration',
+          isActive: false,
+        },
+      });
+
+      await this.notificationService.notifyAllAdmins({
+        type: 'WAREHOUSE_REGISTRATION_REQUEST',
+        title: `XpressBees warehouse registration requested`,
+        body: `${storeName} has requested warehouse registration on XpressBees.\n\nLocation: "${location.label}"\nAddress: ${address}\nPhone: ${location.phone}\n\nPlease register this warehouse manually on shipment.xpressbees.com → Warehouse, then mark the registration as complete in the admin panel.`,
+        data: {
+          sellerId: location.seller.id,
+          locationId: location.id,
+          locationLabel: location.label,
+          provider: 'XPRESSBEES',
+        },
+      });
+
+      return {
+        success: true,
+        warehouseName: null,
+        message: 'Your request has been received. Our team will register this warehouse on XpressBees on your behalf. You will receive a confirmation shortly.',
+      };
+    }
+
     const phone = (location.phone || '').replace(/(?!^\+)\D/g, '');
     const warehouseName = this.buildLocationWarehouseName(location.seller, {
       id: location.id,
@@ -1619,15 +1745,20 @@ export class ShippingService {
 
     const opts: RegisterWarehouseOptions = {
       name: warehouseName,
+      label: location.label?.trim() || undefined,
       registeredName: location.contactPerson?.trim() || location.seller.storeName?.trim() || warehouseName,
       contactPerson: location.contactPerson?.trim() || location.seller.storeName?.trim() || warehouseName,
       email: location.email?.trim() || '',
       phone,
+      alternatePhone: location.alternatePhone || undefined,
       address: location.addressLine.trim(),
+      addressLine2: location.addressLine2?.trim() || undefined,
+      landmark: location.landmark?.trim() || undefined,
       city: location.city.trim(),
       state: location.state.trim(),
       country: location.country || 'India',
       pincode: location.pincode.trim(),
+      gstNumber: location.gstNumber?.trim() || undefined,
     };
 
     const result = await provider.registerWarehouse(config, opts);
@@ -1751,10 +1882,14 @@ export class ShippingService {
     phone: string;
     email: string | null;
     addressLine: string;
+    addressLine2: string | null;
+    landmark: string | null;
     city: string;
     state: string;
     country: string;
     pincode: string;
+    alternatePhone: string | null;
+    gstNumber: string | null;
     isDefault: boolean;
     xelgoWarehouseName: string | null;
     xelgoWarehouseRegisteredAt: Date | null;
@@ -1781,10 +1916,14 @@ export class ShippingService {
       phone: row.phone,
       email: row.email,
       addressLine: row.addressLine,
+      addressLine2: row.addressLine2,
+      landmark: row.landmark,
       city: row.city,
       state: row.state,
       country: row.country,
       pincode: row.pincode,
+      alternatePhone: row.alternatePhone,
+      gstNumber: row.gstNumber,
       isDefault: row.isDefault,
       warehouseName: row.xelgoWarehouseName,
       registered,
@@ -2465,57 +2604,116 @@ export class ShippingService {
     } else if (pickupSchedulingNote) {
       bookRemark += `. Pickup NOT scheduled with carrier: ${pickupSchedulingNote}. Use "Schedule Pickup" from the order details to retry.`;
     } else if (!sellerWantsPickupNow && provider !== this.xelnovaCourier) {
-      bookRemark += `. Pickup not scheduled yet — use "Schedule Pickup" from the order details to send a rider.`;
+      if (provider?.schedulePickup) {
+        bookRemark += `. Pickup not scheduled yet — use "Schedule Pickup" from the order details to send a rider.`;
+      } else {
+        bookRemark += `. Pickup is handled automatically by ${provider?.providerName || 'the carrier'} at booking time.`;
+      }
     }
 
     // Create shipment record
-    const shipment = await this.prisma.shipment.create({
-      data: {
-        orderId: order.id,
-        sellerId: seller.id,
-        shippingMode,
-        courierProvider: carrierLine,
-        awbNumber: result.awbNumber,
-        trackingUrl: result.trackingUrl,
-        shipmentStatus: pickupAt ? ShipmentStatus.PICKUP_SCHEDULED : ShipmentStatus.BOOKED,
-        courierOrderId: result.courierOrderId,
-        labelUrl: result.labelUrl,
-        pickupDate: pickupAt ?? null,
-        weight: dto.weight,
-        dimensions: dto.dimensions,
-        courierCharges: result.charges,
-        pickupLocationId: pickupLocation.id,
-        statusHistory: pickupAt
-          ? [
-              { status: 'BOOKED', timestamp: bookedAtIso, remark: bookRemark },
-              {
-                status: 'PICKUP_SCHEDULED',
-                timestamp: bookedAtIso,
-                remark:
-                  `Pickup scheduled for ${pickupAt.toISOString()}` +
-                  (scheduledPickupRef ? ` (ref ${scheduledPickupRef})` : ''),
-              },
-            ]
-          : pickupSchedulingNote
+    let shipment;
+    try {
+      shipment = await this.prisma.shipment.create({
+        data: {
+          orderId: order.id,
+          sellerId: seller.id,
+          shippingMode,
+          courierProvider: carrierLine,
+          awbNumber: result.awbNumber,
+          trackingUrl: result.trackingUrl,
+          shipmentStatus: pickupAt ? ShipmentStatus.PICKUP_SCHEDULED : ShipmentStatus.BOOKED,
+          courierOrderId: result.courierOrderId,
+          labelUrl: result.labelUrl,
+          pickupDate: pickupAt ?? null,
+          weight: dto.weight,
+          dimensions: dto.dimensions,
+          courierCharges: result.charges,
+          pickupLocationId: pickupLocation.id,
+          statusHistory: pickupAt
             ? [
                 { status: 'BOOKED', timestamp: bookedAtIso, remark: bookRemark },
                 {
-                  status: 'BOOKED',
+                  status: 'PICKUP_SCHEDULED',
                   timestamp: bookedAtIso,
-                  remark: `Carrier rejected pickup request — please retry from "Schedule Pickup": ${pickupSchedulingNote}`,
+                  remark:
+                    `Pickup scheduled for ${pickupAt.toISOString()}` +
+                    (scheduledPickupRef ? ` (ref ${scheduledPickupRef})` : ''),
                 },
               ]
-            : [
-                { status: 'BOOKED', timestamp: bookedAtIso, remark: bookRemark },
-              ],
-      },
-    });
+            : pickupSchedulingNote
+              ? [
+                  { status: 'BOOKED', timestamp: bookedAtIso, remark: bookRemark },
+                  {
+                    status: 'BOOKED',
+                    timestamp: bookedAtIso,
+                    remark: `Carrier rejected pickup request — please retry from "Schedule Pickup": ${pickupSchedulingNote}`,
+                  },
+                ]
+              : [
+                  { status: 'BOOKED', timestamp: bookedAtIso, remark: bookRemark },
+                ],
+        },
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.error(`Failed to create shipment record for order ${order.orderNumber}: ${msg}`);
+      throw new BadRequestException(
+        `Shipment was booked with the courier (AWB: ${result.awbNumber || 'N/A'}) but failed to save locally. ` +
+        `Please contact support with the AWB number. Error: ${msg}`,
+      );
+    }
+
+    // Deduct courier charges from seller wallet when shipped via Xelgo
+    if (
+      shippingMode === ShippingMode.XELNOVA_COURIER &&
+      result.charges != null &&
+      result.charges > 0
+    ) {
+      try {
+        const sellerWallet = await this.walletService.getOrCreateWallet(
+          seller.userId ?? seller.id,
+          'SELLER',
+        );
+        await this.walletService.debit(
+          sellerWallet.id,
+          result.charges,
+          `Xelgo shipping charge for order ${order.orderNumber} (AWB: ${result.awbNumber || 'N/A'})`,
+          undefined,
+          'SHIPPING_PAYMENT',
+          shipment.id,
+        );
+        this.logger.log(
+          `Deducted ₹${result.charges} from seller ${seller.storeName} wallet for Xelgo shipment ${shipment.id}`,
+        );
+      } catch (err: any) {
+        this.logger.error(
+          `Failed to deduct Xelgo shipping charges for shipment ${shipment.id}: ${err.message}`,
+        );
+        if (err.status === 400 && err.message?.includes('Insufficient balance')) {
+          await this.prisma.shipment.delete({ where: { id: shipment.id } }).catch(() => {});
+          throw new BadRequestException(
+            `Insufficient wallet balance to cover ₹${result.charges} Xelgo shipping charges. ` +
+            `Please top up your wallet before shipping via Xelgo.`,
+          );
+        }
+        this.logger.warn(
+          `Shipment ${shipment.id} created but wallet debit failed (non-balance issue). Shipment kept; billing to be resolved manually.`,
+        );
+      }
+    }
 
     // Update order status
-    await this.prisma.order.update({
-      where: { id: order.id },
-      data: { status: OrderStatus.SHIPPED },
-    });
+    try {
+      await this.prisma.order.update({
+        where: { id: order.id },
+        data: { status: OrderStatus.SHIPPED },
+      });
+    } catch (err) {
+      this.logger.error(
+        `Failed to update order ${order.id} status to SHIPPED: ${err instanceof Error ? err.message : err}`,
+      );
+    }
 
     // Send shipped notification to customer
     this.notificationService
@@ -2654,7 +2852,6 @@ export class ShippingService {
     const shipment = await this.prisma.shipment.findUnique({
       where: { orderId },
     });
-    if (!shipment) throw new NotFoundException('Shipment not found for this order');
 
     return shipment;
   }
@@ -2780,8 +2977,8 @@ export class ShippingService {
 
     const shipment = await this.prisma.shipment.findUnique({ where: { orderId } });
     if (!shipment) throw new NotFoundException('Shipment not found');
-    if (!shipment.awbNumber) {
-      throw new BadRequestException('Shipment must be booked (AWB issued) before scheduling a pickup');
+    if (!shipment.awbNumber && !shipment.courierOrderId) {
+      throw new BadRequestException('Shipment must be booked (AWB or courier order ID issued) before scheduling a pickup');
     }
 
     if (shipment.shippingMode === ShippingMode.SELF_SHIP) {
@@ -2985,9 +3182,10 @@ export class ShippingService {
       },
     });
 
-    // Revert order to PROCESSING so the seller can re-ship with the
-    // correct option. Only revert if the order was SHIPPED — if it's
-    // already in a terminal state (DELIVERED, CANCELLED) leave it.
+    // Revert order to CONFIRMED so the seller can re-ship. The order was
+    // already confirmed before shipping, so CONFIRMED is the correct state
+    // (shows "Ship Now" instead of "Confirm Order"). Only revert if the
+    // order was SHIPPED — if it's already in a terminal state leave it.
     const order = await this.prisma.order.findUnique({
       where: { id: shipment.orderId },
       select: { status: true },
@@ -2995,7 +3193,7 @@ export class ShippingService {
     if (order && order.status === OrderStatus.SHIPPED) {
       await this.prisma.order.update({
         where: { id: shipment.orderId },
-        data: { status: OrderStatus.PROCESSING },
+        data: { status: OrderStatus.CONFIRMED },
       });
     }
 
@@ -3167,6 +3365,32 @@ export class ShippingService {
             warehouseId: pickupLocation,
           }),
         });
+      }
+    }
+
+    // Filter out XpressBees from platform candidates — manual admin
+    // registration is required and we should not show rates until it's done.
+    {
+      const defaultLoc = await this.prisma.sellerPickupLocation.findFirst({
+        where: { sellerId: seller.id },
+        orderBy: { isDefault: 'desc' },
+        select: { id: true },
+      });
+      if (defaultLoc) {
+        const xbReg = await this.prisma.sellerPickupLocationRegistration.findUnique({
+          where: {
+            pickupLocationId_provider: {
+              pickupLocationId: defaultLoc.id,
+              provider: ShippingMode.XPRESSBEES,
+            },
+          },
+          select: { isActive: true, registeredAt: true, registrationError: true },
+        });
+        const xbReady = xbReg?.isActive && xbReg.registeredAt && !xbReg.registrationError;
+        if (!xbReady) {
+          const idx = platformCandidates.findIndex((c) => c.mode === ShippingMode.XPRESSBEES);
+          if (idx !== -1) platformCandidates.splice(idx, 1);
+        }
       }
     }
 
@@ -3478,7 +3702,7 @@ export class ShippingService {
       [ShipmentStatus.IN_TRANSIT]: OrderStatus.SHIPPED,
       [ShipmentStatus.OUT_FOR_DELIVERY]: OrderStatus.SHIPPED,
       [ShipmentStatus.DELIVERED]: OrderStatus.DELIVERED,
-      [ShipmentStatus.CANCELLED]: OrderStatus.CANCELLED,
+      [ShipmentStatus.CANCELLED]: OrderStatus.CONFIRMED,
       [ShipmentStatus.RTO_INITIATED]: OrderStatus.RETURNED,
       [ShipmentStatus.RTO_DELIVERED]: OrderStatus.RETURNED,
     };

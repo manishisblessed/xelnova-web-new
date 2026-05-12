@@ -47,6 +47,9 @@ const statLabels: Record<string, string> = {
   orders: 'Delivery over ₹499',
 };
 
+/** Horizontal category icon strip under the hero. Set `true` when you want it visible. */
+const SHOW_HOME_CATEGORY_STRIP = false;
+
 export default function HomePage() {
   const { data: categories } = useCategories();
   const [trendingSearches, setTrendingSearches] = useState(fallbackSearches);
@@ -167,24 +170,26 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* ─── 4. CATEGORIES ─── */}
-      <section className="py-5">
-        <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
-          <div className="relative panel-glass py-7 px-4 sm:px-6 transition-all duration-500 hover:shadow-[0_24px_56px_-14px_rgba(124,58,237,0.22)]">
-            {/* Decorative background shapes */}
-            <div className="absolute inset-0 overflow-hidden rounded-[1.25rem] pointer-events-none">
-              <div className="absolute -top-10 -left-10 w-40 h-40 bg-gradient-to-br from-primary-200/30 to-transparent rounded-full blur-2xl" />
-              <div className="absolute -bottom-10 -right-10 w-32 h-32 bg-gradient-to-tl from-accent-200/25 to-transparent rounded-full blur-2xl" />
-            </div>
-            
-            <div className="relative flex items-center justify-between sm:justify-center gap-5 sm:gap-7 lg:gap-10 overflow-x-auto scrollbar-hide pb-1">
-              {(categories || []).map((cat, i) => (
-                <CategoryCard key={cat.id} category={cat} index={i} />
-              ))}
+      {/* ─── 4. CATEGORIES (toggle SHOW_HOME_CATEGORY_STRIP) ─── */}
+      {SHOW_HOME_CATEGORY_STRIP && (
+        <section className="py-5">
+          <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
+            <div className="relative panel-glass py-7 px-4 sm:px-6 transition-all duration-500 hover:shadow-[0_24px_56px_-14px_rgba(124,58,237,0.22)]">
+              {/* Decorative background shapes */}
+              <div className="absolute inset-0 overflow-hidden rounded-[1.25rem] pointer-events-none">
+                <div className="absolute -top-10 -left-10 w-40 h-40 bg-gradient-to-br from-primary-200/30 to-transparent rounded-full blur-2xl" />
+                <div className="absolute -bottom-10 -right-10 w-32 h-32 bg-gradient-to-tl from-accent-200/25 to-transparent rounded-full blur-2xl" />
+              </div>
+
+              <div className="relative flex items-center justify-between sm:justify-center gap-5 sm:gap-7 lg:gap-10 overflow-x-auto scrollbar-hide pb-1">
+                {(categories || []).map((cat, i) => (
+                  <CategoryCard key={cat.id} category={cat} index={i} />
+                ))}
+              </div>
             </div>
           </div>
-        </div>
-      </section>
+        </section>
+      )}
 
       {/* ─── Below-the-fold content (lazy loaded) ─── */}
       <HomeBelowFold />

@@ -1,15 +1,15 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Badge } from '@xelnova/ui';
 import { AdminListPage } from '@/components/dashboard/admin-list-page';
 import { ActionModal } from '@/components/dashboard/action-modal';
 import { ConfirmDialog } from '@/components/dashboard/confirm-dialog';
 import { FormField, FormInput, FormSelect } from '@/components/dashboard/form-field';
-import { Pencil, Trash2, Copy, CheckCircle, XCircle } from 'lucide-react';
+import { Pencil, Trash2, Copy, CheckCircle, XCircle, Clock, AlertCircle, Ticket } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Column } from '@/components/dashboard/data-table';
-import { apiCreate, apiUpdate, apiDelete, apiApproveSellerCoupon, apiRejectSellerCoupon } from '@/lib/api';
+import { apiCreate, apiUpdate, apiDelete, apiApproveSellerCoupon, apiRejectSellerCoupon, apiGet } from '@/lib/api';
 
 interface Coupon {
   id: string;
@@ -40,6 +40,21 @@ export default function CouponsPage() {
   const [editing, setEditing] = useState<Coupon | null>(null);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [pendingCoupons, setPendingCoupons] = useState<Coupon[]>([]);
+
+  const loadPendingCoupons = useCallback(async () => {
+    try {
+      const all = await apiGet<Coupon[]>('coupons');
+      const pending = all.filter((c) => c.moderationStatus === 'PENDING' && c.sellerId);
+      setPendingCoupons(pending);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    loadPendingCoupons();
+  }, [loadPendingCoupons, refreshTrigger]);
   const [form, setForm] = useState({
     code: '',
     description: '',
@@ -233,6 +248,44 @@ export default function CouponsPage() {
 
   return (
     <>
+      {/* Pending Coupons Alert Banner */}
+      {pendingCoupons.length > 0 && (
+        <div className="mx-6 mt-4 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-lg bg-amber-500 flex items-center justify-center shrink-0">
+              <Clock size={20} className="text-white" />
+            </div>
+            <div className="flex-1">
+              <h3 className="font-semibold text-amber-800 mb-1">
+                {pendingCoupons.length} coupon{pendingCoupons.length > 1 ? 's' : ''} pending approval
+              </h3>
+              <p className="text-sm text-amber-700 mb-2">
+                Seller-submitted coupons require your review before customers can use them.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {pendingCoupons.slice(0, 5).map((c) => (
+                  <span
+                    key={c.id}
+                    className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-white border border-amber-200 text-xs"
+                  >
+                    <Ticket size={12} className="text-amber-600" />
+                    <span className="font-mono font-semibold text-amber-800">{c.code}</span>
+                    {c.sellerName && (
+                      <span className="text-amber-600">by {c.sellerName}</span>
+                    )}
+                  </span>
+                ))}
+                {pendingCoupons.length > 5 && (
+                  <span className="text-xs text-amber-600 font-medium self-center">
+                    +{pendingCoupons.length - 5} more
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <AdminListPage<Coupon>
         title="Coupons"
         section="coupons"

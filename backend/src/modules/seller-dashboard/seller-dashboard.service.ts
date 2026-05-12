@@ -1126,10 +1126,16 @@ export class SellerDashboardService {
         },
       },
       include: {
-        order: { select: { createdAt: true, status: true } },
-        // Per-product commission is the source of truth (set at admin
-        // approval). Falls back to the seller's stored rate for legacy
-        // products, then to 10% so commission can never silently vanish.
+        order: {
+          select: {
+            id: true,
+            createdAt: true,
+            status: true,
+            shipment: {
+              select: { shippingMode: true, courierCharges: true, sellerId: true },
+            },
+          },
+        },
         product: { select: { commissionRate: true } },
       },
     });
@@ -1143,6 +1149,25 @@ export class SellerDashboardService {
       return s + oi.price * oi.quantity * (rate / 100);
     }, 0);
 
+    // Aggregate Xelgo courier charges across unique orders for this seller.
+    // Each shipment's courierCharges is allocated to the seller who booked it.
+    const seenOrders = new Set<string>();
+    let totalCourierDeduction = 0;
+    for (const oi of orderItems) {
+      if (seenOrders.has(oi.orderId)) continue;
+      seenOrders.add(oi.orderId);
+      const shipment = oi.order.shipment;
+      if (
+        shipment &&
+        shipment.shippingMode === 'XELNOVA_COURIER' &&
+        shipment.sellerId === seller.id &&
+        shipment.courierCharges != null &&
+        shipment.courierCharges > 0
+      ) {
+        totalCourierDeduction += shipment.courierCharges;
+      }
+    }
+
     const dailyMap = new Map<string, number>();
     orderItems.forEach((oi) => {
       const day = oi.order.createdAt.toISOString().split('T')[0];
@@ -1152,10 +1177,7 @@ export class SellerDashboardService {
       .map(([date, amount]) => ({ date, amount }))
       .sort((a, b) => a.date.localeCompare(b.date));
 
-    const netRevenue = totalRevenue - commission;
-    // Commission % varies per product, so this is the gross-weighted
-    // effective rate across the requested window; old clients that show
-    // a single "commission rate" still get a sensible number.
+    const netRevenue = totalRevenue - commission - totalCourierDeduction;
     const effectiveCommissionRate =
       totalRevenue > 0 ? Number(((commission / totalRevenue) * 100).toFixed(2)) : 0;
 
@@ -1164,6 +1186,7 @@ export class SellerDashboardService {
       netRevenue,
       commission,
       commissionRate: effectiveCommissionRate,
+      courierDeduction: totalCourierDeduction,
       totalOrders,
       totalUnits,
       dailyRevenue,
@@ -1629,21 +1652,19 @@ export class SellerDashboardService {
     });
   }
 
-  /** Get all brands available to a seller: their own proposed brands + global approved brands + default brands. */
+  /** Get brands available to a seller: their own registered brands + default brands (e.g. Generic). */
   async getAvailableBrandsForSeller(userId: string) {
     const seller = await this.getSellerProfile(userId);
     return this.prisma.brand.findMany({
       where: {
         OR: [
-          { proposedBy: seller.id }, // Seller's own brands
-          { approved: true }, // Admin-approved global brands
-          { isDefault: true }, // Default brands like Generic
+          { proposedBy: seller.id },
+          { isDefault: true },
         ],
         isActive: true,
       },
       orderBy: [
-        { isDefault: 'desc' }, // Default brands first
-        { approved: 'desc' }, // Then approved brands
+        { isDefault: 'desc' },
         { createdAt: 'desc' },
       ],
     });
@@ -1678,29 +1699,62 @@ export class SellerDashboardService {
             status: true,
             paymentMethod: true,
             total: true,
-            returnRequests: { select: { status: true } },
+            returnRequests: { select: { status: true, reverseCourierCharge: true } },
+            shipment: {
+              select: { shippingMode: true, courierCharges: true, sellerId: true },
+            },
           },
         },
-        // Per-product commission is the source of truth — set by admin
-        // when the product is approved. The seller's stored
-        // `commissionRate` is only a legacy fallback for products
-        // approved before per-product commissions existed.
         product: { select: { name: true, sku: true, commissionRate: true } },
       },
       orderBy: { order: { createdAt: 'desc' } },
     });
 
+    // Pre-compute per-order gross so courier charges can be allocated
+    // proportionally when multiple items share the same order.
+    const orderGrossMap = new Map<string, number>();
+    for (const oi of orderItems) {
+      const prev = orderGrossMap.get(oi.orderId) ?? 0;
+      orderGrossMap.set(oi.orderId, prev + oi.price * oi.quantity);
+    }
+
     const rows = orderItems.map((oi) => {
       const gross = oi.price * oi.quantity;
-      // Per testing observation #24: if any return on this order has reached
-      // REFUNDED, the platform waives its commission for that order. We zero
-      // out commission (and net reflects the full refund — gross is returned
-      // to the customer) and surface the "REFUNDED" status so the seller can
-      // see why the commission line is zero.
       const refunded = (oi.order.returnRequests || []).some((r) => r.status === 'REFUNDED');
       const lineRate = oi.product?.commissionRate ?? seller.commissionRate ?? 10;
       const commission = refunded ? 0 : gross * (lineRate / 100);
-      const net = refunded ? 0 : gross - commission;
+
+      // Courier deduction: only for Xelgo shipments belonging to this seller
+      let courierDeduction = 0;
+      const shipment = oi.order.shipment;
+      if (
+        !refunded &&
+        shipment &&
+        shipment.shippingMode === 'XELNOVA_COURIER' &&
+        shipment.sellerId === seller.id &&
+        shipment.courierCharges != null &&
+        shipment.courierCharges > 0
+      ) {
+        const orderGross = orderGrossMap.get(oi.orderId) ?? gross;
+        courierDeduction = orderGross > 0
+          ? Math.round((gross / orderGross) * shipment.courierCharges * 100) / 100
+          : 0;
+      }
+
+      // Reverse courier charge: ₹100 flat deducted from seller per approved return
+      const returnReqs = oi.order.returnRequests || [];
+      const totalReverseCourier = returnReqs.reduce(
+        (sum, r) => sum + (r.reverseCourierCharge ?? 0),
+        0,
+      );
+      const orderGrossForReverse = orderGrossMap.get(oi.orderId) ?? gross;
+      const reverseCourierDeduction =
+        !refunded && totalReverseCourier > 0 && orderGrossForReverse > 0
+          ? Math.round((gross / orderGrossForReverse) * totalReverseCourier * 100) / 100
+          : 0;
+
+      const shippingMode = shipment?.shippingMode ?? 'SELF_SHIP';
+      const net = refunded ? 0 : gross - commission - courierDeduction - reverseCourierDeduction;
       return {
         orderNumber: oi.order.orderNumber,
         date: oi.order.createdAt.toISOString().split('T')[0],
@@ -1711,6 +1765,9 @@ export class SellerDashboardService {
         gross: refunded ? 0 : gross,
         commissionPercent: refunded ? 0 : Number(lineRate.toFixed(2)),
         commission,
+        courierDeduction,
+        reverseCourierDeduction,
+        shippingMode,
         net,
         orderStatus: refunded ? 'REFUNDED' : oi.order.status,
         paymentMethod: oi.order.paymentMethod || '',
@@ -1722,13 +1779,13 @@ export class SellerDashboardService {
       (acc, r) => ({
         gross: acc.gross + r.gross,
         commission: acc.commission + r.commission,
+        courierDeduction: acc.courierDeduction + r.courierDeduction,
+        reverseCourierDeduction: acc.reverseCourierDeduction + r.reverseCourierDeduction,
         net: acc.net + r.net,
       }),
-      { gross: 0, commission: 0, net: 0 },
+      { gross: 0, commission: 0, courierDeduction: 0, reverseCourierDeduction: 0, net: 0 },
     );
 
-    // Commission varies per product, so the report-level rate is the
-    // gross-weighted effective rate across the requested window.
     const effectiveCommissionRate =
       totals.gross > 0 ? Number(((totals.commission / totals.gross) * 100).toFixed(2)) : 0;
 
@@ -1737,16 +1794,18 @@ export class SellerDashboardService {
 
   async getSettlementCsv(userId: string, query: SettlementQueryDto): Promise<string> {
     const report = await this.getSettlementReport(userId, query);
-    const header = 'Order Number,Date,Product,SKU,Qty,Unit Price,Gross,Commission %,Commission,Net,Status,Payment Method';
+    const header = 'Order Number,Date,Product,SKU,Qty,Unit Price,Gross,Commission %,Commission,Shipping Mode,Courier Charge,Return Courier,Net,Status,Payment Method';
     const lines = report.rows.map((r) =>
       [
         r.orderNumber, r.date, `"${r.productName}"`, r.sku, r.quantity,
         r.unitPrice.toFixed(2), r.gross.toFixed(2), r.commissionPercent,
-        r.commission.toFixed(2), r.net.toFixed(2), r.orderStatus, r.paymentMethod,
+        r.commission.toFixed(2), r.shippingMode, r.courierDeduction.toFixed(2),
+        r.reverseCourierDeduction.toFixed(2),
+        r.net.toFixed(2), r.orderStatus, r.paymentMethod,
       ].join(','),
     );
     lines.push('');
-    lines.push(`,,,,,Total,${report.totals.gross.toFixed(2)},,${report.totals.commission.toFixed(2)},${report.totals.net.toFixed(2)},,`);
+    lines.push(`,,,,,Total,${report.totals.gross.toFixed(2)},,${report.totals.commission.toFixed(2)},,${report.totals.courierDeduction.toFixed(2)},${report.totals.reverseCourierDeduction.toFixed(2)},${report.totals.net.toFixed(2)},,`);
     return [header, ...lines].join('\n');
   }
 
@@ -1810,7 +1869,86 @@ export class SellerDashboardService {
     if (dto.scope === 'cart') { data.scope = 'global'; }
     else if (dto.scope === 'seller') { data.scope = 'seller'; }
 
-    return this.prisma.coupon.update({ where: { id: couponId }, data });
+    // Fields that trigger re-approval when changed on an approved coupon
+    const REAPPROVAL_TRIGGER_FIELDS = [
+      'code',
+      'discountType',
+      'discountValue',
+      'minOrderAmount',
+      'maxDiscount',
+      'validUntil',
+      'usageLimit',
+      'scope',
+      'description',
+    ] as const;
+
+    // Check if any re-approval fields are being changed
+    const hasReapprovalTrigger = REAPPROVAL_TRIGGER_FIELDS.some((field) => {
+      if (dto[field as keyof typeof dto] === undefined) return false;
+      const oldVal = coupon[field as keyof typeof coupon];
+      let newVal = dto[field as keyof typeof dto];
+      // Handle scope mapping
+      if (field === 'scope') {
+        newVal = newVal === 'cart' ? 'global' : newVal === 'seller' ? 'seller' : newVal;
+      }
+      // Handle code uppercasing
+      if (field === 'code' && typeof newVal === 'string') {
+        newVal = newVal.toUpperCase().replace(/\s+/g, '');
+      }
+      // Handle validUntil date comparison
+      if (field === 'validUntil') {
+        const oldDate = oldVal ? new Date(oldVal as any).toISOString() : null;
+        const newDate = newVal ? new Date(newVal as any).toISOString() : null;
+        return oldDate !== newDate;
+      }
+      return String(oldVal ?? '') !== String(newVal ?? '');
+    });
+
+    // If coupon was approved and seller is changing significant fields, reset to pending
+    const triggerReapproval =
+      coupon.moderationStatus === 'APPROVED' &&
+      hasReapprovalTrigger &&
+      dto.isActive === undefined; // Allow pure isActive toggle without re-approval
+
+    if (triggerReapproval) {
+      data.moderationStatus = 'PENDING';
+      data.isActive = false;
+      data.moderatedAt = null;
+      data.moderatedById = null;
+      data.rejectionReason = null;
+      this.logger.log(
+        `Coupon ${couponId} (${coupon.code}) sent for re-approval after seller edit (sellerId=${seller.id}).`,
+      );
+    }
+
+    const updated = await this.prisma.coupon.update({ where: { id: couponId }, data });
+
+    // Send notifications if re-approval is triggered
+    if (triggerReapproval) {
+      // Notify admin about pending re-approval
+      this.notificationService
+        .notifyAllAdmins({
+          type: 'COUPON_PENDING',
+          title: 'Coupon re-approval required',
+          body: `${seller.storeName} edited coupon ${updated.code}. Review and approve in Coupons.`,
+          data: { couponId: updated.id, code: updated.code, sellerId: seller.id, reapproval: true },
+        })
+        .catch(() => {});
+
+      // Notify seller that coupon was sent for re-approval
+      this.notificationService
+        .logNotification({
+          userId,
+          channel: 'in_app',
+          type: 'COUPON_PENDING_REAPPROVAL',
+          title: 'Coupon sent for re-approval',
+          body: `Your coupon ${updated.code} has been sent for admin re-approval due to your recent changes. It will be temporarily inactive until approved.`,
+          data: { couponId: updated.id, code: updated.code },
+        })
+        .catch(() => {});
+    }
+
+    return updated;
   }
 
   async deleteSellerCoupon(userId: string, couponId: string) {

@@ -391,10 +391,11 @@ export class AdminController {
 
   // ─── Payouts ───
   @Get('payouts')
-  @ApiOperation({ summary: 'List payouts' })
+  @ApiOperation({ summary: 'List payouts with financial summary' })
   async getPayouts(@Query() query: AdminPayoutQueryDto) {
-    const { items, total, page, limit } = await this.service.getPayouts(query);
-    return paginatedResponse(items, total, page, limit, 'Payouts fetched');
+    const { items, total, page, limit, summary } = await this.service.getPayouts(query);
+    const paginated = paginatedResponse(items, total, page, limit, 'Payouts fetched');
+    return { ...paginated, summary };
   }
 
   @Patch('payouts/:id')

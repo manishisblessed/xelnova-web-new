@@ -61,6 +61,7 @@ function roleIcon(role: string) {
   return <User size={14} className="text-text-muted" />;
 }
 
+
 export default function SellerTicketsPage() {
   const router = useRouter();
   const pathname = usePathname();
@@ -158,7 +159,7 @@ export default function SellerTicketsPage() {
                 })()}
               </div>
               <p className="text-xs text-text-muted mt-1">
-                Your replies go to the admin team, who will forward them to the customer.
+                Your messages are visible to the customer on this ticket.
               </p>
             </div>
 
@@ -207,7 +208,7 @@ export default function SellerTicketsPage() {
                   value={reply}
                   onChange={(e) => setReply(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void handleSend(); } }}
-                  placeholder="Reply to admin…"
+                  placeholder="Message the customer…"
                   className="flex-1 rounded-xl border border-border px-4 py-3 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-primary-500"
                 />
                 <button
@@ -234,7 +235,7 @@ export default function SellerTicketsPage() {
             <MessageSquare size={40} className="text-gray-300 mb-3" />
             <h3 className="text-lg font-semibold text-text-primary">No tickets assigned</h3>
             <p className="text-sm text-text-secondary mt-1">
-              When admin forwards a customer ticket to you, it will appear here.
+              Customer tickets about your store appear here.
             </p>
           </div>
         ) : (

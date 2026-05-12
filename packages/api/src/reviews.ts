@@ -21,3 +21,10 @@ export async function markReviewHelpful(reviewId: string): Promise<Review> {
 export async function deleteReview(reviewId: string): Promise<void> {
   await api.delete(`/reviews/${reviewId}`);
 }
+
+export type OrderReviewStatus = Record<string, { reviewed: true; rating: number; status: string }>;
+
+export async function getOrderReviewStatus(orderNumber: string): Promise<OrderReviewStatus> {
+  const { data } = await api.get<ApiResponse<OrderReviewStatus>>(`/reviews/order/${orderNumber}/status`);
+  return data.data ?? {};
+}

@@ -192,12 +192,24 @@ export function useProducts(params?: {
   }, [JSON.stringify(params)]);
 }
 
+export interface AvailableCoupon {
+  id: string;
+  code: string;
+  description: string | null;
+  discountType: 'PERCENTAGE' | 'FLAT';
+  discountValue: number;
+  minOrderAmount: number;
+  maxDiscount: number | null;
+  validUntil: string | null;
+}
+
 export function useProductBySlug(slug: string) {
   return useFetch(async () => {
     const p = await productsApi.getProductBySlug(slug);
     const product = mapProduct(p);
     const relatedProducts = (p.relatedProducts || []).map(mapProduct);
-    return { product, relatedProducts };
+    const availableCoupons = (p.availableCoupons || []) as AvailableCoupon[];
+    return { product, relatedProducts, availableCoupons };
   }, [slug]);
 }
 

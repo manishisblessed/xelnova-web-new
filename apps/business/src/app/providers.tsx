@@ -1,17 +1,20 @@
 'use client';
 
-import { AuthProvider, setAppRole } from '@xelnova/api';
+import { useCallback } from 'react';
+import { AuthProvider, setAppRole, ticketsApi } from '@xelnova/api';
 import { SupportWidget } from '@xelnova/ui';
 
-// Tag every API request from the business buyer app with X-App-Role:BUSINESS
-// so the backend resolves auth lookups against the BUSINESS row only.
 setAppRole('BUSINESS');
 
 export function Providers({ children }: { children: React.ReactNode }) {
+  const handleChat = useCallback(async (message: string, orderNumber?: string) => {
+    return ticketsApi.chatWithBot(message, orderNumber);
+  }, []);
+
   return (
     <AuthProvider authStoragePrefix="business" variant="business">
       {children}
-      <SupportWidget audience="customer" />
+      <SupportWidget audience="customer" onChat={handleChat} />
     </AuthProvider>
   );
 }

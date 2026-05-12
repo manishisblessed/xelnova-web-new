@@ -8,6 +8,18 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
 import { NotificationService } from '../notifications/notification.service';
+import {
+  detectIntent,
+  buildOrderStatusReply,
+  buildShippingReply,
+  buildReturnReply,
+  buildRefundReply,
+  buildPaymentIssuesReply,
+  buildAccountHelpReply,
+  ESCALATION_PROMPT,
+  NEEDS_ORDER_PROMPT,
+  type OrderContext,
+} from './chatbot-intents';
 
 const TICKET_INCLUDE = {
   customer: { select: { id: true, name: true, email: true, avatar: true } },
@@ -63,7 +75,7 @@ export class TicketsService {
             senderRole: 'CUSTOMER',
             message,
             customerVisible: true,
-            sellerVisible: true,
+            sellerVisible: false,
           },
         },
       },
@@ -110,6 +122,8 @@ export class TicketsService {
     };
   }
 
+  private static RE_SELLER_PREFIX = /^\[Seller\]\s*/i;
+
   async getCustomerTicketDetail(ticketId: string, customerId: string) {
     const ticket = await this.prisma.ticket.findUnique({
       where: { id: ticketId },
@@ -127,7 +141,36 @@ export class TicketsService {
     if (!ticket || ticket.customerId !== customerId) {
       throw new NotFoundException('Ticket not found');
     }
-    return ticket;
+
+    let assignedSellerStoreName: string | null = null;
+    if (ticket.assignedSellerId) {
+      const sp = await this.prisma.sellerProfile.findFirst({
+        where: { userId: ticket.assignedSellerId },
+        select: { storeName: true },
+      });
+      assignedSellerStoreName = sp?.storeName ?? null;
+    }
+
+    const messages = (ticket.messages || []).map((msg) => {
+      const isRelay =
+        msg.senderRole === 'ADMIN' &&
+        (msg.isForwarded ||
+          TicketsService.RE_SELLER_PREFIX.test(msg.message));
+      if (!isRelay) return msg;
+      return {
+        ...msg,
+        message: msg.message
+          .replace(TicketsService.RE_SELLER_PREFIX, '')
+          .trim(),
+        senderRole: 'SELLER',
+        sender: {
+          ...(msg.sender ?? { id: '', avatar: null, role: 'SELLER' }),
+          name: assignedSellerStoreName || 'Seller',
+        },
+      };
+    });
+
+    return { ...ticket, messages, assignedSellerStoreName };
   }
 
   async customerReply(ticketId: string, customerId: string, message: string) {
@@ -144,7 +187,7 @@ export class TicketsService {
 
     const [msg] = await this.prisma.$transaction([
       this.prisma.ticketMessage.create({
-        data: { ticketId, senderId: customerId, senderRole: 'CUSTOMER', message, customerVisible: true, sellerVisible: true },
+        data: { ticketId, senderId: customerId, senderRole: 'CUSTOMER', message, customerVisible: true, sellerVisible: false },
         include: {
           sender: { select: { id: true, name: true, avatar: true, role: true } },
         },
@@ -345,6 +388,125 @@ export class TicketsService {
     return this.getTicketDetail(ticketId);
   }
 
+  async forwardSellerReplyToCustomer(
+    ticketId: string,
+    adminId: string,
+    sellerMessageId: string,
+    note?: string,
+  ) {
+    const ticket = await this.prisma.ticket.findUnique({
+      where: { id: ticketId },
+      select: { id: true, customerId: true, status: true, ticketNumber: true },
+    });
+    if (!ticket) throw new NotFoundException('Ticket not found');
+    if (ticket.status === 'CLOSED') {
+      throw new BadRequestException('Cannot forward on a closed ticket');
+    }
+
+    const sellerMsg = await this.prisma.ticketMessage.findFirst({
+      where: { id: sellerMessageId, ticketId },
+    });
+    if (!sellerMsg) throw new NotFoundException('Message not found');
+    if (sellerMsg.senderRole !== 'SELLER') {
+      throw new BadRequestException('Only a seller reply can be forwarded to the customer');
+    }
+    if (sellerMsg.isInternal) {
+      throw new BadRequestException('Cannot forward an internal message');
+    }
+
+    const detail = sellerMsg.message.trim();
+    const relayBody = note?.trim() ? `${note.trim()}\n\n${detail}` : detail;
+    const fullMessage = `[Seller]\n${relayBody}`;
+
+    await this.prisma.$transaction([
+      this.prisma.ticketMessage.create({
+        data: {
+          ticketId,
+          senderId: adminId,
+          senderRole: 'ADMIN',
+          message: fullMessage,
+          isInternal: false,
+          isForwarded: true,
+          customerVisible: true,
+          sellerVisible: false,
+        },
+      }),
+      this.prisma.ticket.update({
+        where: { id: ticketId },
+        data: { status: 'IN_PROGRESS', updatedAt: new Date() },
+      }),
+    ]);
+
+    this.notifyCustomerReply(ticket.customerId, ticketId).catch((e) =>
+      this.logger.warn(`Failed to notify customer: ${e.message}`),
+    );
+    const admin = await this.prisma.user.findUnique({
+      where: { id: adminId },
+      select: { name: true },
+    });
+    this.notificationService
+      .notifyTicketReply(ticket.customerId, ticket.ticketNumber, admin?.name || 'Support', ticketId)
+      .catch((err) => this.logger.warn(`Failed to notify ticket reply: ${err.message}`));
+
+    return this.getTicketDetail(ticketId);
+  }
+
+  async forwardCustomerMessageToSeller(
+    ticketId: string,
+    adminId: string,
+    customerMessageId: string,
+    note?: string,
+  ) {
+    const ticket = await this.prisma.ticket.findUnique({
+      where: { id: ticketId },
+      select: { id: true, assignedSellerId: true, status: true, ticketNumber: true },
+    });
+    if (!ticket) throw new NotFoundException('Ticket not found');
+    if (!ticket.assignedSellerId) {
+      throw new BadRequestException('Ticket is not assigned to a seller. Forward the ticket first.');
+    }
+    if (ticket.status === 'CLOSED') {
+      throw new BadRequestException('Cannot forward on a closed ticket');
+    }
+
+    const customerMsg = await this.prisma.ticketMessage.findFirst({
+      where: { id: customerMessageId, ticketId },
+    });
+    if (!customerMsg) throw new NotFoundException('Message not found');
+    if (customerMsg.senderRole !== 'CUSTOMER') {
+      throw new BadRequestException('Only a customer message can be forwarded to the seller');
+    }
+
+    const detail = customerMsg.message.trim();
+    const relayBody = note?.trim() ? `${note.trim()}\n\n${detail}` : detail;
+    const fullMessage = `[Customer]\n${relayBody}`;
+
+    await this.prisma.$transaction([
+      this.prisma.ticketMessage.create({
+        data: {
+          ticketId,
+          senderId: adminId,
+          senderRole: 'ADMIN',
+          message: fullMessage,
+          isInternal: false,
+          isForwarded: true,
+          customerVisible: false,
+          sellerVisible: true,
+        },
+      }),
+      this.prisma.ticket.update({
+        where: { id: ticketId },
+        data: { status: 'FORWARDED', updatedAt: new Date() },
+      }),
+    ]);
+
+    this.notificationService
+      .notifyTicketForwarded(ticket.assignedSellerId, ticket.ticketNumber, ticketId)
+      .catch((err) => this.logger.warn(`Failed to notify seller of forwarded message: ${err.message}`));
+
+    return this.getTicketDetail(ticketId);
+  }
+
   async updateStatus(ticketId: string, status: string, priority?: string) {
     const data: Record<string, unknown> = { status, updatedAt: new Date() };
     if (priority) data.priority = priority;
@@ -380,6 +542,8 @@ export class TicketsService {
     });
   }
 
+  private static RE_CUSTOMER_PREFIX = /^\[Customer\]\s*/i;
+
   async getSellerTicketDetail(ticketId: string, sellerId: string) {
     const ticket = await this.prisma.ticket.findUnique({
       where: { id: ticketId },
@@ -397,7 +561,28 @@ export class TicketsService {
     if (!ticket || ticket.assignedSellerId !== sellerId) {
       throw new ForbiddenException('Ticket not assigned to you');
     }
-    return ticket;
+
+    const customerName = ticket.customer?.name || 'Customer';
+    const messages = (ticket.messages || []).map((msg) => {
+      const isRelay =
+        msg.senderRole === 'ADMIN' &&
+        (msg.isForwarded ||
+          TicketsService.RE_CUSTOMER_PREFIX.test(msg.message));
+      if (!isRelay) return msg;
+      return {
+        ...msg,
+        message: msg.message
+          .replace(TicketsService.RE_CUSTOMER_PREFIX, '')
+          .trim(),
+        senderRole: 'CUSTOMER',
+        sender: {
+          ...(msg.sender ?? { id: '', avatar: null, role: 'CUSTOMER' }),
+          name: customerName,
+        },
+      };
+    });
+
+    return { ...ticket, messages };
   }
 
   async sellerReply(ticketId: string, sellerId: string, message: string) {
@@ -493,5 +678,99 @@ export class TicketsService {
         </div>
       `,
     });
+  }
+
+  // ─── Chatbot ───
+
+  /**
+   * Resolve a customer message via the chatbot. Returns the bot reply
+   * and, when it can't resolve, auto-creates a ticket for human follow-up.
+   */
+  async chatMessage(
+    customerId: string,
+    message: string,
+    orderNumber?: string,
+  ): Promise<{ resolved: boolean; reply: string; ticketId?: string; suggestedSubject?: string }> {
+    const { intent, needsOrder } = detectIntent(message);
+
+    if (intent === 'PAYMENT_ISSUES') {
+      return { resolved: true, reply: buildPaymentIssuesReply() };
+    }
+    if (intent === 'ACCOUNT_HELP') {
+      return { resolved: true, reply: buildAccountHelpReply() };
+    }
+
+    if (needsOrder && !orderNumber) {
+      return { resolved: false, reply: NEEDS_ORDER_PROMPT, suggestedSubject: message.slice(0, 80) };
+    }
+
+    if (needsOrder && orderNumber) {
+      const order = await this.prisma.order.findFirst({
+        where: { orderNumber, userId: customerId },
+        include: {
+          shipment: {
+            select: {
+              shipmentStatus: true,
+              courierProvider: true,
+              awbNumber: true,
+              trackingUrl: true,
+              pickupDate: true,
+              deliveredAt: true,
+            },
+          },
+          returnRequests: {
+            select: {
+              status: true,
+              kind: true,
+              refundAmount: true,
+              reverseAwb: true,
+              reverseTrackingUrl: true,
+            },
+          },
+        },
+      });
+
+      if (!order) {
+        return {
+          resolved: false,
+          reply: `I couldn't find order #${orderNumber} linked to your account. Please double-check the order number and try again, or type **"talk to support"** for help.`,
+          suggestedSubject: `Order inquiry: ${orderNumber}`,
+        };
+      }
+
+      const ctx: OrderContext = {
+        orderNumber: order.orderNumber,
+        status: order.status,
+        paymentStatus: order.paymentStatus,
+        total: order.total,
+        createdAt: order.createdAt,
+        shipment: order.shipment,
+        returnRequests: order.returnRequests,
+      };
+
+      switch (intent) {
+        case 'ORDER_STATUS':
+          return { resolved: true, reply: buildOrderStatusReply(ctx) };
+        case 'SHIPPING_DETAILS':
+          return { resolved: true, reply: buildShippingReply(ctx) };
+        case 'RETURN_REPLACEMENT':
+          return { resolved: true, reply: buildReturnReply(ctx) };
+        case 'REFUND_STATUS':
+          return { resolved: true, reply: buildRefundReply(ctx) };
+        default:
+          break;
+      }
+    }
+
+    // UNKNOWN intent or unresolved — escalate to a support ticket
+    const subject = message.length > 60 ? message.slice(0, 57) + '...' : message;
+    const ticket = await this.createTicket(customerId, subject, message, orderNumber);
+
+    return {
+      resolved: false,
+      reply: ESCALATION_PROMPT,
+      ticketId: ticket.id,
+      suggestedSubject: subject,
+    };
   }
 }

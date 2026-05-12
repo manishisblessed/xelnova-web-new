@@ -101,9 +101,25 @@ export class LabelGeneratorService {
   ) {}
 
   async generateShippingLabel(orderId: string, sellerUserId: string): Promise<Buffer> {
-    // Always serve the carrier's official label — never brand it.
-    // The rider scans the carrier's barcode at pickup, so the bytes
-    // the seller prints MUST be exactly what the carrier issued.
+    const shipment = await this.prisma.shipment.findUnique({
+      where: { orderId },
+      select: { shippingMode: true, awbNumber: true, courierOrderId: true, courierProvider: true },
+    });
+
+    const isSelfShip = !shipment || shipment.shippingMode === 'SELF_SHIP';
+    const hasCarrierRef = Boolean(shipment?.awbNumber || shipment?.courierOrderId);
+
+    // Self-ship or no shipment at all → use the Xelnova fallback label.
+    if (isSelfShip || !hasCarrierRef) {
+      return this.generateXelnovaFallbackLabel(orderId, sellerUserId);
+    }
+
+    // Integrated carrier shipment — always serve the carrier's official
+    // label. The rider scans the carrier's barcode at pickup, so the
+    // bytes the seller prints MUST be exactly what the carrier issued.
+    // If getCarrierIssuedLabel throws (e.g. 503 "not ready"), let that
+    // error propagate — never fall back to a branded label for
+    // integrated shipments.
     const official = await this.shippingService.getCarrierIssuedLabel(orderId, sellerUserId);
     if (official && official.length > 0) {
       this.logger.log(
@@ -112,22 +128,11 @@ export class LabelGeneratorService {
       return official;
     }
 
-    // If getCarrierIssuedLabel returned null, the shipment is either
-    // SELF_SHIP or has no AWB yet — only those use the fallback.
-    const shipment = await this.prisma.shipment.findUnique({
-      where: { orderId },
-      select: { shippingMode: true, awbNumber: true },
-    });
-
-    const isSelfShip = !shipment || shipment.shippingMode === 'SELF_SHIP';
-    if (isSelfShip || !shipment.awbNumber) {
-      return this.generateXelnovaFallbackLabel(orderId, sellerUserId);
-    }
-
-    // Carrier IS integrated but label fetch returned null — don't
-    // serve our own branded label, throw so seller retries.
+    // Carrier IS integrated but label fetch returned null (no provider
+    // configured, or carrier returned empty) — throw so the seller can
+    // retry or fix the carrier config.
     this.logger.warn(
-      `Carrier label unavailable for order ${orderId} (mode=${shipment.shippingMode}, awb=${shipment.awbNumber}). Returning 503 for retry.`,
+      `Carrier label unavailable for order ${orderId} (mode=${shipment.shippingMode}, awb=${shipment.awbNumber}, courierOrderId=${shipment.courierOrderId}). Returning 503 for retry.`,
     );
     const err = new Error(
       'Shipping label is not ready yet. The courier usually generates it within 1-2 minutes after booking. Please try again shortly.',
@@ -298,19 +303,20 @@ export class LabelGeneratorService {
     y = Math.min(ty, y - qrSize) - 8;
 
     // Sold by strip
-    drawRect(M, y - 36, PAGE_W - 2 * M, 36);
+    const soldStripH = 40;
+    drawRect(M, y - soldStripH, PAGE_W - 2 * M, soldStripH);
     drawText('Sold By:', M + 4, y - 10, { size: 7, font: fontBold });
     const soldLine1 = seller.storeName.toUpperCase();
-    const soldLine2 = [
-      [seller.businessAddress, seller.businessCity].filter(Boolean).join(', '),
-      [seller.businessState, seller.businessPincode].filter(Boolean).join(' - '),
-      seller.gstNumber ? `GSTIN: ${seller.gstNumber}` : '',
-    ]
-      .filter(Boolean)
-      .join(' | ');
-    drawText(soldLine1, M + 52, y - 10, { size: 7, font: fontBold, maxWidth: PAGE_W - 120 });
-    drawText(soldLine2 || seller.location || '', M + 52, y - 22, { size: 6.5, color: MUTED, maxWidth: PAGE_W - 120 });
-    y -= 42;
+    const soldAddrPart = [seller.businessAddress, seller.businessCity, seller.businessState, seller.businessPincode]
+      .filter(Boolean).join(', ');
+    const soldGstin = seller.gstNumber ? `GSTIN: ${seller.gstNumber}` : '';
+    const maxSoldW = PAGE_W - 2 * M - 60;
+    drawText(soldLine1, M + 52, y - 10, { size: 7, font: fontBold, maxWidth: maxSoldW });
+    drawText(soldAddrPart || seller.location || '', M + 52, y - 20, { size: 6, color: MUTED, maxWidth: maxSoldW });
+    if (soldGstin) {
+      drawText(soldGstin, M + 52, y - 29, { size: 6, color: MUTED, maxWidth: maxSoldW });
+    }
+    y -= soldStripH + 6;
 
     // Items table (label): # | SKU | Description | Qty
     drawText('# | SKU | Description | Qty', M, y, { size: 7, font: fontBold });
@@ -409,45 +415,48 @@ export class LabelGeneratorService {
     y -= headerH + 10;
 
     // ── Invoice meta strip (light tinted band) ─────────────────────────
-    const metaH = 36;
+    const metaH = 52;
     drawFilledRect(M, y - metaH, PAGE_W - 2 * M, metaH, ACCENT_SOFT, ACCENT);
 
     const metaPadX = 12;
+    const qrSizeInv = 30;
+    const metaContentW = PAGE_W - 2 * M - qrSizeInv - 20;
     const metaCol1 = M + metaPadX;
-    const metaCol2 = M + (PAGE_W - 2 * M) * 0.34;
-    const metaCol3 = M + (PAGE_W - 2 * M) * 0.66;
+    const metaCol2 = M + metaContentW * 0.36;
+    const metaCol3 = M + metaContentW * 0.66;
 
     const drawMeta = (
       x: number,
       label: string,
       value: string,
       yTop: number,
+      maxW?: number,
     ) => {
       drawText(label.toUpperCase(), x, yTop, { size: 6, color: MUTED, font: fontBold });
-      drawText(value, x, yTop - 11, { size: 8.5, font: fontBold });
+      drawText(value, x, yTop - 10, { size: 7.5, font: fontBold, maxWidth: maxW });
     };
 
-    drawMeta(metaCol1, 'Order ID', order.orderNumber, y - 12);
-    drawMeta(metaCol2, 'Order Date', this.fmtOrderDate(order.createdAt), y - 12);
-    drawMeta(metaCol3, 'Payment', prepaid ? 'Prepaid' : 'Cash on Delivery', y - 12);
+    const metaColW = metaContentW * 0.30;
+    drawMeta(metaCol1, 'Order ID', order.orderNumber, y - 8, metaColW);
+    drawMeta(metaCol2, 'Order Date', this.fmtOrderDate(order.createdAt), y - 8, metaColW);
+    drawMeta(metaCol3, 'Payment', prepaid ? 'Prepaid' : 'COD', y - 8, metaColW);
 
-    drawMeta(metaCol1, 'Seller GSTIN', seller.gstNumber || 'N/A', y - 30 + 12);
-    drawMeta(metaCol2, 'Seller PAN', seller.panNumber || 'N/A', y - 30 + 12);
+    drawMeta(metaCol1, 'Seller GSTIN', seller.gstNumber || 'N/A', y - 28, metaColW);
+    drawMeta(metaCol2, 'Seller PAN', seller.panNumber || 'N/A', y - 28, metaColW);
     drawMeta(
       metaCol3,
       'Place of Supply',
       addr ? `${addr.state} (${this.stateCode(addr.state)})` : '—',
-      y - 30 + 12,
+      y - 28,
+      metaColW,
     );
 
-    // Optional invoice QR code on the far right of the meta strip
     try {
       const qrInv = await QRCode.toBuffer(
         JSON.stringify({ order: order.orderNumber, invoice: invNo, total: order.total }),
         { type: 'png', width: 110, margin: 0 },
       );
       const qri = await pdf.embedPng(qrInv);
-      const qrSizeInv = 30;
       page.drawImage(qri, {
         x: PAGE_W - M - qrSizeInv - 6,
         y: y - metaH + (metaH - qrSizeInv) / 2,
@@ -458,11 +467,11 @@ export class LabelGeneratorService {
       /* optional */
     }
 
-    y -= metaH + 10;
+    y -= metaH + 8;
 
     // ── Party blocks: Sold By / Bill To / Ship To ─────────────────────
     const partyW = (PAGE_W - 2 * M - 8) / 3;
-    const partyH = 70;
+    const partyH = 78;
     const partyHeaderH = 14;
     const partyGap = 4;
     const partyCols = [M, M + partyW + partyGap, M + (partyW + partyGap) * 2];
@@ -483,20 +492,21 @@ export class LabelGeneratorService {
     const soldStartY = y - partyHeaderH - 10;
     let psy = soldStartY;
     drawText(seller.storeName.toUpperCase(), partyCols[0] + 8, psy, {
-      size: 8,
+      size: 7.5,
       font: fontBold,
       maxWidth: partyW - 16,
     });
     psy -= 10;
     const sellerAddrLines = [
-      [seller.businessAddress, seller.businessCity].filter(Boolean).join(', '),
+      seller.businessAddress,
+      seller.businessCity,
       [seller.businessState, seller.businessPincode].filter(Boolean).join(' - '),
-      seller.gstNumber ? `GSTIN ${seller.gstNumber}` : '',
+      seller.gstNumber ? `GSTIN: ${seller.gstNumber}` : '',
     ].filter(Boolean);
     for (const line of sellerAddrLines) {
-      for (const wl of wrapText(line, font, 6.5, partyW - 16)) {
-        drawText(wl, partyCols[0] + 8, psy, { size: 6.5, color: MUTED, maxWidth: partyW - 16 });
-        psy -= 8;
+      for (const wl of wrapText(safeStr(line), font, 6, partyW - 16)) {
+        drawText(wl, partyCols[0] + 8, psy, { size: 6, color: MUTED, maxWidth: partyW - 16 });
+        psy -= 7.5;
         if (psy < y - partyH + 4) break;
       }
       if (psy < y - partyH + 4) break;
@@ -507,7 +517,7 @@ export class LabelGeneratorService {
     let pby = billToStartY;
     const billName = addr?.fullName || order.user?.name || 'Customer';
     drawText(billName, partyCols[1] + 8, pby, {
-      size: 8,
+      size: 7.5,
       font: fontBold,
       maxWidth: partyW - 16,
     });
@@ -516,14 +526,15 @@ export class LabelGeneratorService {
       ? [
           addr.addressLine1,
           addr.addressLine2,
-          `${addr.city}, ${addr.state} - ${addr.pincode}`,
+          addr.city,
+          `${addr.state} - ${addr.pincode}`,
           addr.phone ? `Ph: ${addr.phone}` : '',
         ].filter(Boolean)
       : ['Address on file'];
     for (const line of billLines) {
-      for (const wl of wrapText(safeStr(line), font, 6.5, partyW - 16)) {
-        drawText(wl, partyCols[1] + 8, pby, { size: 6.5, color: MUTED, maxWidth: partyW - 16 });
-        pby -= 8;
+      for (const wl of wrapText(safeStr(line), font, 6, partyW - 16)) {
+        drawText(wl, partyCols[1] + 8, pby, { size: 6, color: MUTED, maxWidth: partyW - 16 });
+        pby -= 7.5;
         if (pby < y - partyH + 4) break;
       }
       if (pby < y - partyH + 4) break;
@@ -534,21 +545,22 @@ export class LabelGeneratorService {
     let pshy = shipToStartY;
     if (addr) {
       drawText(addr.fullName, partyCols[2] + 8, pshy, {
-        size: 8,
+        size: 7.5,
         font: fontBold,
         maxWidth: partyW - 16,
       });
       pshy -= 10;
-      const shipLines = [
+      const shipToLines = [
         addr.addressLine1,
         addr.addressLine2,
-        `${addr.city}, ${addr.state} - ${addr.pincode}`,
+        addr.city,
+        `${addr.state} - ${addr.pincode}`,
         addr.phone ? `Ph: ${addr.phone}` : '',
       ].filter(Boolean);
-      for (const line of shipLines) {
-        for (const wl of wrapText(safeStr(line), font, 6.5, partyW - 16)) {
-          drawText(wl, partyCols[2] + 8, pshy, { size: 6.5, color: MUTED, maxWidth: partyW - 16 });
-          pshy -= 8;
+      for (const line of shipToLines) {
+        for (const wl of wrapText(safeStr(line), font, 6, partyW - 16)) {
+          drawText(wl, partyCols[2] + 8, pshy, { size: 6, color: MUTED, maxWidth: partyW - 16 });
+          pshy -= 7.5;
           if (pshy < y - partyH + 4) break;
         }
         if (pshy < y - partyH + 4) break;

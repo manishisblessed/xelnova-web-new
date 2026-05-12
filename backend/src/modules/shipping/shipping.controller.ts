@@ -402,6 +402,9 @@ export class ShippingController {
       res.set({
         'Content-Type': 'application/pdf',
         'Content-Disposition': `attachment; filename="shipping-label-${orderId}.pdf"`,
+        'Content-Length': String(pdfBuffer.length),
+        'Cache-Control': 'no-store, no-cache, must-revalidate',
+        'Pragma': 'no-cache',
       });
       return new StreamableFile(pdfBuffer);
     } catch (err) {

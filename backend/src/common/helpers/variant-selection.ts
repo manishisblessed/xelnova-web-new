@@ -53,8 +53,19 @@ export function parseVariantTokens(variantStr: string | undefined): Set<string> 
 export function findMatchingOption(
   group: VariantGroup,
   parts: Set<string>,
+  fullVariantStr?: string,
 ): VariantOption | null {
   if (!Array.isArray(group.options)) return null;
+  // Try matching the full (un-split) variant string first — handles option
+  // values that themselves contain the '-' separator character.
+  if (fullVariantStr) {
+    for (const opt of group.options) {
+      if (optionMatchesVariantToken(opt, fullVariantStr)) {
+        return opt;
+      }
+    }
+  }
+  // Fall back to token-by-token matching (multi-group selections like "red-large").
   for (const opt of group.options) {
     for (const part of parts) {
       if (optionMatchesVariantToken(opt, part)) {
@@ -97,7 +108,7 @@ export function buildVariantLineSnapshot(
   let productImage: string | null = null;
 
   for (const group of groups) {
-    const opt = findMatchingOption(group, parts);
+    const opt = findMatchingOption(group, parts, variantStr);
     if (!opt) continue;
     const attrKey = String(group.label || group.type || 'Option').trim();
     const display = String(opt.label || opt.value || '').trim();

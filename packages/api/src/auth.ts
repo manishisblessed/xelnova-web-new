@@ -147,7 +147,8 @@ export function getStoredUser(): AuthUser | null {
   if (typeof window === 'undefined') return null;
   try {
     const stored = localStorage.getItem(AUTH_STORAGE_KEYS.user());
-    return stored ? JSON.parse(stored) : null;
+    if (!stored || !stored.trim()) return null;
+    return JSON.parse(stored) as AuthUser;
   } catch {
     return null;
   }

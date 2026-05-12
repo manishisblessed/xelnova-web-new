@@ -340,8 +340,11 @@ export class ReturnsService {
     return updated;
   }
 
+  private static readonly REVERSE_COURIER_CHARGE = 100;
+
   /**
-   * Books a placeholder reverse pickup slot — couriers assign AWB via ops / admin when integrated.
+   * Schedules a reverse pickup using the same courier that delivered the order.
+   * Debits a flat ₹100 reverse-courier service charge from the seller.
    */
   private async autoScheduleReversePickup(
     returnId: string,
@@ -349,14 +352,22 @@ export class ReturnsService {
     orderNumber: string,
     kind: string,
   ) {
+    const order = await this.prisma.order.findUnique({
+      where: { orderNumber },
+      include: { shipment: true, items: true },
+    });
+
+    const originalCourier = order?.shipment?.courierProvider || 'Xelnova Reverse Logistics';
+
     const pickupAt = new Date();
     pickupAt.setDate(pickupAt.getDate() + 1);
 
     await this.prisma.returnRequest.update({
       where: { id: returnId },
       data: {
-        reverseCourier: 'Xelnova Reverse Logistics',
+        reverseCourier: originalCourier,
         reversePickupScheduled: pickupAt,
+        reverseCourierCharge: ReturnsService.REVERSE_COURIER_CHARGE,
       },
     });
 
@@ -365,10 +376,6 @@ export class ReturnsService {
       .notifyReturnPickupScheduled(userId, orderNumber, dateLabel)
       .catch(() => {});
 
-    const order = await this.prisma.order.findUnique({
-      where: { orderNumber },
-      include: { shipment: true, items: true },
-    });
     if (order?.shipment) {
       const history = [...((order.shipment.statusHistory as object[]) || [])];
       history.push({
@@ -376,8 +383,8 @@ export class ReturnsService {
         timestamp: new Date().toISOString(),
         remark:
           kind === 'REPLACEMENT'
-            ? `Reverse pickup scheduled (replacement) — ${dateLabel}`
-            : `Reverse pickup scheduled (return) — ${dateLabel}`,
+            ? `Reverse pickup scheduled via ${originalCourier} (replacement) — ${dateLabel}`
+            : `Reverse pickup scheduled via ${originalCourier} (return) — ${dateLabel}`,
         source: 'auto_pickup',
       });
       await this.prisma.shipment.update({
@@ -402,6 +409,44 @@ export class ReturnsService {
           .catch(() => {});
       }
     }
+  }
+
+  async findAllForSeller(userId: string) {
+    const sellerProfile = await this.prisma.sellerProfile.findUnique({
+      where: { userId },
+    });
+    if (!sellerProfile) return [];
+
+    const productIds = (
+      await this.prisma.product.findMany({
+        where: { sellerId: sellerProfile.id },
+        select: { id: true },
+      })
+    ).map((p) => p.id);
+
+    if (productIds.length === 0) return [];
+
+    return this.prisma.returnRequest.findMany({
+      where: {
+        order: {
+          items: { some: { productId: { in: productIds } } },
+        },
+      },
+      include: {
+        order: {
+          select: {
+            orderNumber: true,
+            total: true,
+            status: true,
+            items: {
+              include: { product: { select: { name: true, images: true } } },
+            },
+          },
+        },
+        user: { select: { name: true, email: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
   }
 
   async scheduleReversePickup(

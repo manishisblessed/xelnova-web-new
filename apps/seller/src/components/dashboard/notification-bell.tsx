@@ -30,7 +30,9 @@ function getToken(): string | null {
 
 function authHeaders(): Record<string, string> {
   const token = getToken();
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  return token
+    ? { Authorization: `Bearer ${token}`, 'X-App-Role': 'SELLER' }
+    : { 'X-App-Role': 'SELLER' };
 }
 
 function inventoryHref(data: Record<string, unknown> | null): string {
@@ -64,10 +66,11 @@ function getNotificationHref(n: Notification): string | null {
     case 'LOW_STOCK_ALERT':
       return inventoryHref(data);
     case 'NEW_ORDER':
-    case 'SELLER_RETURN_REQUESTED':
-    case 'SELLER_REVERSE_PICKUP':
     case 'SELLER_SHIPMENT_STATUS':
       return orderNumber ? `/orders?orderNumber=${encodeURIComponent(orderNumber)}` : '/orders';
+    case 'SELLER_RETURN_REQUESTED':
+    case 'SELLER_REVERSE_PICKUP':
+      return orderNumber ? `/returns?orderNumber=${encodeURIComponent(orderNumber)}` : '/returns';
     case 'PAYOUT_PROCESSED':
     case 'PAYOUT_REJECTED':
       return '/payouts';

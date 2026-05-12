@@ -91,6 +91,13 @@ export class SplitPaymentService {
             },
           },
         },
+        shipment: {
+          select: {
+            shippingMode: true,
+            courierCharges: true,
+            sellerId: true,
+          },
+        },
       },
     });
     if (!order) throw new NotFoundException('Order not found');
@@ -111,8 +118,19 @@ export class SplitPaymentService {
       sellerMap.set(sid, existing);
     }
 
+    const isXelgoCourier = order.shipment?.shippingMode === 'XELNOVA_COURIER';
+    const orderCourierCharge = isXelgoCourier
+      ? (order.shipment?.courierCharges ?? 0)
+      : 0;
+    const totalGross = Array.from(sellerMap.values()).reduce((s, d) => s + d.gross, 0);
+
     const shares = Array.from(sellerMap.entries()).map(([sellerId, data]) => {
-      const net = data.gross - data.commission;
+      // Allocate courier charge proportionally when multiple sellers share an order
+      const courierDeduction =
+        orderCourierCharge > 0 && totalGross > 0
+          ? Math.round((data.gross / totalGross) * orderCourierCharge * 100) / 100
+          : 0;
+      const net = data.gross - data.commission - courierDeduction;
       const effectiveRate = data.gross > 0 ? (data.commission / data.gross) * 100 : 0;
       return {
         sellerId,
@@ -120,6 +138,7 @@ export class SplitPaymentService {
         gross: data.gross,
         commissionRate: Number(effectiveRate.toFixed(2)),
         commission: data.commission,
+        courierDeduction,
         net,
       };
     });
@@ -144,13 +163,16 @@ export class SplitPaymentService {
       });
       if (existing) continue;
 
+      const courierNote = share.courierDeduction > 0
+        ? `, courier: ₹${share.courierDeduction.toFixed(2)}`
+        : '';
       const payout = await this.prisma.payout.create({
         data: {
           sellerId: share.sellerId,
           amount: share.net,
           status: 'PENDING',
           method: 'bank_transfer',
-          note: `Settlement for order ${orderNumber} (gross: ₹${share.gross.toFixed(2)}, commission: ₹${share.commission.toFixed(2)})`,
+          note: `Settlement for order ${orderNumber} (gross: ₹${share.gross.toFixed(2)}, commission: ₹${share.commission.toFixed(2)}${courierNote})`,
           orderId,
           isAdvance: false,
         },

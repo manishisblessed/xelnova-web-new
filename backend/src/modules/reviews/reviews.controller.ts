@@ -67,4 +67,17 @@ export class ReviewsController {
       'Review deleted',
     );
   }
+
+  @Get('order/:orderNumber/status')
+  @Auth()
+  @ApiOperation({ summary: 'Get review status for products in an order' })
+  async getOrderReviewStatus(
+    @CurrentUser('id') userId: string,
+    @Param('orderNumber') orderNumber: string,
+  ) {
+    return successResponse(
+      await this.reviewsService.getReviewStatusForOrder(userId, orderNumber),
+      'Review status fetched',
+    );
+  }
 }

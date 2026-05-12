@@ -206,6 +206,20 @@ export async function apiGet<T = unknown>(section: string, params?: Record<strin
   return handleResponse<T>(res);
 }
 
+/**
+ * Same as apiGet but returns the full JSON body (including `summary`, `meta`, etc.)
+ * instead of just `data`. Useful for endpoints that attach extra fields.
+ */
+export async function apiGetFull<T = unknown>(section: string, params?: Record<string, string>): Promise<T> {
+  const query = new URLSearchParams({ limit: '100', ...params });
+  const res = await fetchWithRefresh(`${API_URL}/admin/${section}?${query}`, { headers: authHeaders() });
+  if (!res.ok) {
+    const json = await res.json().catch(() => ({}));
+    throw new Error((json as any)?.message || 'Request failed');
+  }
+  return res.json() as Promise<T>;
+}
+
 export async function apiCreate<T = unknown>(section: string, body: Record<string, unknown>): Promise<T> {
   const res = await fetchWithRefresh(`${API_URL}/admin/${section}`, {
     method: 'POST',
@@ -309,6 +323,30 @@ export async function apiForwardTicket(
   body: { sellerId?: string; note?: string },
 ) {
   const res = await fetchWithRefresh(`${API_URL}/tickets/admin/${id}/forward`, {
+    method: 'POST',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return handleResponse(res);
+}
+
+export async function apiForwardSellerReplyToCustomer(
+  id: string,
+  body: { messageId: string; note?: string },
+) {
+  const res = await fetchWithRefresh(`${API_URL}/tickets/admin/${id}/forward-to-customer`, {
+    method: 'POST',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return handleResponse(res);
+}
+
+export async function apiForwardCustomerMessageToSeller(
+  id: string,
+  body: { messageId: string; note?: string },
+) {
+  const res = await fetchWithRefresh(`${API_URL}/tickets/admin/${id}/forward-to-seller`, {
     method: 'POST',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -514,7 +552,24 @@ export async function apiSettleOrder(orderId: string) {
   return handleResponse(res);
 }
 
-// ─── Reverse Pickup ───
+// ─── Returns / Replacements (admin) ───
+
+export async function apiGetReturns<T = unknown>(page = 1, limit = 50): Promise<T> {
+  const res = await fetchWithRefresh(`${API_URL}/returns/admin?page=${page}&limit=${limit}`, { headers: authHeaders() });
+  return handleResponse<T>(res);
+}
+
+export async function apiUpdateReturnStatus(
+  returnId: string,
+  body: { status: string; adminNote?: string; refundAmount?: number },
+) {
+  const res = await fetchWithRefresh(`${API_URL}/returns/${returnId}/status`, {
+    method: 'PATCH',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return handleResponse(res);
+}
 
 export async function apiScheduleReversePickup(returnId: string, body: { courier: string; awb?: string; trackingUrl?: string; pickupDate?: string }) {
   const res = await fetchWithRefresh(`${API_URL}/returns/${returnId}/reverse-pickup`, {

@@ -1,10 +1,12 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ProductQueryDto } from './dto/product.dto';
 import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class ProductsService {
+  private readonly logger = new Logger(ProductsService.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
   async getStats() {
@@ -169,7 +171,10 @@ export class ProductsService {
       take: 6,
     });
 
-    return { ...product, relatedProducts };
+    // Get available coupons for this product
+    const availableCoupons = await this.getProductCoupons(product.id);
+
+    return { ...product, relatedProducts, availableCoupons };
   }
 
   async findFeatured() {
@@ -224,6 +229,186 @@ export class ProductsService {
     const row = await this.prisma.siteSettings.findUnique({ where: { id: 1 } });
     const payload = row?.payload && typeof row.payload === 'object' ? (row.payload as Record<string, unknown>) : {};
     return { ...this.defaultShippingRates, ...(payload.shippingRates as Record<string, unknown>) };
+  }
+
+  /**
+   * Get available coupons for a specific product that customers can apply.
+   * Returns only APPROVED, active, non-expired coupons that apply to:
+   * - Global scope (all products)
+   * - Category scope (product's category)
+   * - Seller scope (product's seller)
+   */
+  async getProductCoupons(productId: string) {
+    const product = await this.prisma.product.findUnique({
+      where: { id: productId },
+      select: { categoryId: true, sellerId: true },
+    });
+    if (!product) {
+      this.logger.debug(`getProductCoupons: Product ${productId} not found`);
+      return [];
+    }
+
+    this.logger.debug(`getProductCoupons: Product ${productId} has sellerId=${product.sellerId}, categoryId=${product.categoryId}`);
+
+    const now = new Date();
+    const coupons = await this.prisma.coupon.findMany({
+      where: {
+        moderationStatus: 'APPROVED',
+        isActive: true,
+        OR: [
+          { validUntil: null },
+          { validUntil: { gte: now } },
+        ],
+      },
+      select: {
+        id: true,
+        code: true,
+        description: true,
+        discountType: true,
+        discountValue: true,
+        minOrderAmount: true,
+        maxDiscount: true,
+        validUntil: true,
+        usageLimit: true,
+        usedCount: true,
+        scope: true,
+        categoryId: true,
+        sellerId: true,
+      },
+      orderBy: [{ discountValue: 'desc' }],
+    });
+
+    this.logger.debug(`getProductCoupons: Found ${coupons.length} approved active coupons total`);
+    coupons.forEach((c) => {
+      this.logger.debug(`  Coupon ${c.code}: scope=${c.scope}, sellerId=${c.sellerId}, categoryId=${c.categoryId}`);
+    });
+
+    // Filter coupons that apply to this product
+    const filtered = coupons.filter((coupon) => {
+      // Check usage limit - if limit is set, ensure used count is below it
+      if (coupon.usageLimit != null && coupon.usedCount >= coupon.usageLimit) {
+        this.logger.debug(`  Coupon ${coupon.code} excluded: usage limit reached (${coupon.usedCount}/${coupon.usageLimit})`);
+        return false;
+      }
+      // Check scope
+      if (coupon.scope === 'global') {
+        this.logger.debug(`  Coupon ${coupon.code} included: global scope`);
+        return true;
+      }
+      if (coupon.scope === 'category' && coupon.categoryId === product.categoryId) {
+        this.logger.debug(`  Coupon ${coupon.code} included: category match`);
+        return true;
+      }
+      if (coupon.scope === 'seller' && coupon.sellerId === product.sellerId) {
+        this.logger.debug(`  Coupon ${coupon.code} included: seller match (${coupon.sellerId} === ${product.sellerId})`);
+        return true;
+      }
+      this.logger.debug(`  Coupon ${coupon.code} excluded: scope=${coupon.scope}, coupon.sellerId=${coupon.sellerId}, product.sellerId=${product.sellerId}, categoryId match=${coupon.categoryId === product.categoryId}`);
+      return false;
+    });
+
+    this.logger.debug(`getProductCoupons: ${filtered.length} coupons match product ${productId} (sellerId: ${product.sellerId})`);
+
+    // Check if seller has their own coupons for this product
+    const sellerCoupons = filtered.filter(
+      (c) => c.scope === 'seller' && c.sellerId === product.sellerId,
+    );
+    const categoryCoupons = filtered.filter(
+      (c) => c.scope === 'category' && c.categoryId === product.categoryId,
+    );
+    const globalCoupons = filtered.filter((c) => c.scope === 'global');
+
+    // If seller has their own coupons, hide global coupons and only show seller + category coupons
+    // If seller has NO coupons, show global coupons
+    let finalCoupons: typeof filtered;
+    if (sellerCoupons.length > 0) {
+      // Seller has coupons - show seller coupons first, then category coupons, hide global
+      finalCoupons = [...sellerCoupons, ...categoryCoupons];
+      this.logger.debug(`getProductCoupons: Seller has ${sellerCoupons.length} coupons, hiding ${globalCoupons.length} global coupons`);
+    } else {
+      // No seller coupons - show category first, then global
+      finalCoupons = [...categoryCoupons, ...globalCoupons];
+      this.logger.debug(`getProductCoupons: No seller coupons, showing ${categoryCoupons.length} category + ${globalCoupons.length} global coupons`);
+    }
+
+    return finalCoupons.map((c) => ({
+      id: c.id,
+      code: c.code,
+      description: c.description,
+      discountType: c.discountType,
+      discountValue: c.discountValue,
+      minOrderAmount: c.minOrderAmount,
+      maxDiscount: c.maxDiscount,
+      validUntil: c.validUntil,
+    }));
+  }
+
+  /**
+   * Get available coupons by product slug (for PDP)
+   */
+  async getCouponsBySlug(slug: string) {
+    const product = await this.prisma.product.findUnique({
+      where: { slug },
+      select: { id: true, categoryId: true, sellerId: true },
+    });
+    if (!product) return [];
+    return this.getProductCoupons(product.id);
+  }
+
+  /**
+   * Debug method to see all coupons in database
+   */
+  async debugGetAllCoupons() {
+    const coupons = await this.prisma.coupon.findMany({
+      select: {
+        id: true,
+        code: true,
+        scope: true,
+        sellerId: true,
+        categoryId: true,
+        moderationStatus: true,
+        isActive: true,
+        discountType: true,
+        discountValue: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    return coupons;
+  }
+
+  /**
+   * Debug method to see product details
+   */
+  async debugGetProductInfo(slug: string) {
+    const product = await this.prisma.product.findUnique({
+      where: { slug },
+      select: {
+        id: true,
+        name: true,
+        sellerId: true,
+        categoryId: true,
+        seller: {
+          select: {
+            id: true,
+            storeName: true,
+            userId: true,
+          },
+        },
+      },
+    });
+    
+    if (!product) return { error: 'Product not found' };
+    
+    const availableCoupons = await this.getProductCoupons(product.id);
+    
+    return {
+      product,
+      availableCoupons,
+      debug: {
+        productSellerId: product.sellerId,
+        sellerStoreName: product.seller?.storeName,
+      },
+    };
   }
 
   /**

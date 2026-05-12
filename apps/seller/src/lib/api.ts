@@ -455,10 +455,14 @@ export type SellerPickupLocation = {
   phone: string;
   email: string | null;
   addressLine: string;
+  addressLine2: string | null;
+  landmark: string | null;
   city: string;
   state: string;
   country: string;
   pincode: string;
+  alternatePhone: string | null;
+  gstNumber: string | null;
   isDefault: boolean;
   warehouseName: string | null;
   registered: boolean;
@@ -475,10 +479,14 @@ export type CreatePickupLocationPayload = {
   phone: string;
   email?: string;
   addressLine: string;
+  addressLine2?: string;
+  landmark?: string;
   city: string;
   state: string;
   country?: string;
   pincode: string;
+  alternatePhone?: string;
+  gstNumber?: string;
   makeDefault?: boolean;
 };
 
@@ -602,7 +610,7 @@ export async function apiCheckServiceability(orderId: string) {
 // ─── Shipping Label ───
 
 async function downloadPdfBlob(url: string, filename: string, fallbackMessage: string) {
-  const res = await fetch(url, { headers: authHeaders() });
+  const res = await fetchWithRefresh(url, { headers: authHeaders() });
   if (!res.ok) {
     const text = await res.text();
     let msg = fallbackMessage;
@@ -928,6 +936,11 @@ export async function apiGetSellerBrands() {
   return handleResponse(res);
 }
 
+export async function apiGetAvailableBrands() {
+  const res = await fetchWithRefresh(`${API_URL}/seller/brands/available`, { headers: authHeaders() });
+  return handleResponse(res);
+}
+
 // ─── Seller Coupons ───
 
 export async function apiGetSellerCoupons() {
@@ -1133,4 +1146,46 @@ export async function apiReorderStoreBanners(bannerIds: string[]): Promise<Selle
     body: JSON.stringify({ bannerIds }),
   });
   return handleResponse<SellerStoreBanner[]>(res);
+}
+
+// ─── Seller Returns ───
+
+export interface SellerReturnRequest {
+  id: string;
+  kind: 'RETURN' | 'REPLACEMENT';
+  reasonCode: string | null;
+  reason: string;
+  description: string | null;
+  imageUrls: string[];
+  status: string;
+  adminNote: string | null;
+  refundAmount: number | null;
+  reverseCourier: string | null;
+  reverseAwb: string | null;
+  reverseTrackingUrl: string | null;
+  reversePickupScheduled: string | null;
+  reversePickedUpAt: string | null;
+  reverseCourierCharge: number | null;
+  createdAt: string;
+  updatedAt: string;
+  order: {
+    orderNumber: string;
+    total: number;
+    status: string;
+    items?: {
+      productName: string;
+      productImage: string | null;
+      quantity: number;
+      price: number;
+      product?: { name: string; images: string[] };
+    }[];
+  };
+  user?: { name: string; email: string };
+}
+
+export async function apiGetSellerReturns(): Promise<SellerReturnRequest[]> {
+  const res = await fetchWithRefresh(`${API_URL}/returns/seller`, {
+    headers: authHeaders(),
+  });
+  return handleResponse<SellerReturnRequest[]>(res);
 }

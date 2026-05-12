@@ -27,7 +27,7 @@ export class ContactService {
 
   /** Newsletter subscriptions go to a dedicated inbox so the marketing team can pick them up. */
   private get newsletterInbox(): string {
-    return this.config.get<string>('NEWSLETTER_INBOX') || 'info@xelnova.in';
+    return this.config.get<string>('NEWSLETTER_INBOX') || 'marketing@xelnova.in';
   }
 
   private get fromAddress(): string {

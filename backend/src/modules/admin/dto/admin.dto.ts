@@ -232,6 +232,12 @@ export class UpdateCommissionDto extends CreateCommissionDto {
 export class AdminPayoutQueryDto extends PaginationDto {
   @ApiPropertyOptional() @IsOptional() @IsString() status?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() seller?: string;
+  @ApiPropertyOptional({ description: 'Preset: today | monthly | custom' })
+  @IsOptional() @IsString() period?: string;
+  @ApiPropertyOptional({ description: 'ISO date (for custom period)' })
+  @IsOptional() @IsString() dateFrom?: string;
+  @ApiPropertyOptional({ description: 'ISO date (for custom period)' })
+  @IsOptional() @IsString() dateTo?: string;
 }
 
 export class UpdatePayoutDto {

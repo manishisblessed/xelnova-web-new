@@ -75,36 +75,47 @@ function ProductsContent() {
   const [deliveryFilter, setDeliveryFilter] = useState(searchParams.get("delivery") || "");
   const [dealsFilter, setDealsFilter] = useState(searchParams.get("deals") || "");
 
-  const { data: productsData, loading } = useProducts({ limit: 100 });
+  const { data: productsData, loading, error: productsError } = useProducts({ limit: 100 });
   const allProducts = useMemo(() => productsData?.products || [], [productsData]);
 
   const brands = useMemo(() => [...new Set(allProducts.map((p) => p.brand).filter(Boolean))].sort(), [allProducts]);
 
+  const searchParamsKey = searchParams.toString();
+
   useEffect(() => {
-    const cat = searchParams.get("category");
-    if (cat) setSelectedCategories(cat.split(","));
-    const brand = searchParams.get("brand");
-    if (brand) setSelectedBrands(brand.split(","));
-    const minPrice = searchParams.get("minPrice");
-    const maxPrice = searchParams.get("maxPrice");
-    if (minPrice || maxPrice) setPriceRange({ min: minPrice || "", max: maxPrice || "" });
-    const rating = searchParams.get("minRating");
-    if (rating) setMinRating(parseInt(rating, 10));
-    const discount = searchParams.get("discount");
-    if (discount) setMinDiscount(discount === "all" ? 1 : parseInt(discount, 10));
-    const availability = searchParams.get("availability");
-    if (availability) setInStockOnly(availability === "in-stock");
-    const s = searchParams.get("sort");
-    if (s) setSort(s);
-    const delivery = searchParams.get("delivery");
-    if (delivery) setDeliveryFilter(delivery);
-    const deals = searchParams.get("deals");
-    if (deals) setDealsFilter(deals);
-  }, [searchParams]);
+    const params = new URLSearchParams(searchParamsKey);
+    const cat = params.get("category");
+    setSelectedCategories(cat ? cat.split(",").map((c) => c.trim()).filter(Boolean) : []);
+    const brand = params.get("brand");
+    setSelectedBrands(brand ? brand.split(",").map((b) => b.trim()).filter(Boolean) : []);
+    const minPrice = params.get("minPrice");
+    const maxPrice = params.get("maxPrice");
+    setPriceRange({ min: minPrice || "", max: maxPrice || "" });
+    const rating = params.get("minRating");
+    setMinRating(rating ? parseInt(rating, 10) : 0);
+    const discount = params.get("discount");
+    setMinDiscount(discount === "all" ? 1 : discount ? parseInt(discount, 10) : 0);
+    const availability = params.get("availability");
+    setInStockOnly(availability === "in-stock");
+    const s = params.get("sort");
+    setSort(s || "relevance");
+    const delivery = params.get("delivery");
+    setDeliveryFilter(delivery || "");
+    const deals = params.get("deals");
+    setDealsFilter(deals || "");
+  }, [searchParamsKey]);
 
   const filteredProducts = useMemo(() => {
     let result = [...allProducts];
-    if (selectedCategories.length > 0) result = result.filter((p) => selectedCategories.includes(p.category));
+    
+    if (selectedCategories.length > 0) {
+      result = result.filter((p) => {
+        const productCat = p.category;
+        if (selectedCategories.includes(productCat)) return true;
+        const cat = categories.find((c) => c.id === productCat);
+        return cat && selectedCategories.includes(cat.slug);
+      });
+    }
     if (selectedBrands.length > 0) result = result.filter((p) => selectedBrands.includes(p.brand) || selectedBrands.some(b => p.brand?.toLowerCase().replace(/\s+/g, '-') === b));
     if (priceRange.min) result = result.filter((p) => p.price >= Number(priceRange.min));
     if (priceRange.max) result = result.filter((p) => p.price <= Number(priceRange.max));
@@ -124,8 +135,33 @@ function ProductsContent() {
     return result;
   }, [allProducts, selectedCategories, selectedBrands, priceRange, minRating, minDiscount, inStockOnly, sort, dealsFilter]);
 
-  const toggleCategory = (slug: string) => setSelectedCategories((prev) => prev.includes(slug) ? prev.filter((c) => c !== slug) : [...prev, slug]);
-  const toggleBrand = (brand: string) => setSelectedBrands((prev) => prev.includes(brand) ? prev.filter((b) => b !== brand) : [...prev, brand]);
+  const toggleCategory = (slug: string) => {
+    const updated = selectedCategories.includes(slug)
+      ? selectedCategories.filter((c) => c !== slug)
+      : [...selectedCategories, slug];
+    setSelectedCategories(updated);
+    const params = new URLSearchParams(searchParamsKey);
+    if (updated.length > 0) {
+      params.set("category", updated.join(","));
+    } else {
+      params.delete("category");
+    }
+    router.push(`/products?${params.toString()}`);
+  };
+
+  const toggleBrand = (brand: string) => {
+    const updated = selectedBrands.includes(brand)
+      ? selectedBrands.filter((b) => b !== brand)
+      : [...selectedBrands, brand];
+    setSelectedBrands(updated);
+    const params = new URLSearchParams(searchParamsKey);
+    if (updated.length > 0) {
+      params.set("brand", updated.join(","));
+    } else {
+      params.delete("brand");
+    }
+    router.push(`/products?${params.toString()}`);
+  };
 
   const clearAllFilters = () => {
     setSelectedCategories([]);
@@ -143,33 +179,35 @@ function ProductsContent() {
   const hasActiveFilters = selectedCategories.length > 0 || selectedBrands.length > 0 || priceRange.min || priceRange.max || minRating > 0 || minDiscount > 0 || inStockOnly || deliveryFilter || dealsFilter;
 
   return (
-    <div className="min-h-screen bg-surface-950">
-      <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-        <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+    <div className="min-h-screen bg-surface-raised">
+      <div className="mx-auto max-w-[1440px] px-4 py-6 sm:px-6 lg:px-8">
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-white font-display">All Products</h1>
-            <p className="mt-1 text-sm text-surface-100">
-              {loading ? 'Loading...' : `Showing ${filteredProducts.length} of ${allProducts.length} results`}
+            <h1 className="text-2xl font-bold text-text-primary font-display">All Products</h1>
+            <p className="mt-1 text-sm text-text-muted">
+              {loading ? 'Loading...' : productsError ? (
+                <span className="text-danger-600">{productsError} If you are developing locally, ensure the backend is running.</span>
+              ) : `Showing ${filteredProducts.length} of ${allProducts.length} results`}
             </p>
           </div>
           <div className="flex items-center gap-3">
             <button
               onClick={() => setMobileFiltersOpen(true)}
-              className="flex items-center gap-2 rounded-xl border border-surface-300 bg-surface-800 px-4 py-2.5 text-sm font-medium text-surface-50 hover:border-gold-400/50 lg:hidden"
+              className="flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-medium text-text-secondary hover:border-primary-300 hover:bg-primary-50/50 transition-all lg:hidden"
             >
               <SlidersHorizontal size={16} />
               Filters
-              {hasActiveFilters && <span className="flex h-5 w-5 items-center justify-center rounded-full bg-gold-400 text-xs text-surface-950">!</span>}
+              {hasActiveFilters && <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary-600 text-[10px] font-bold text-white">!</span>}
             </button>
             <div className="relative">
               <select
                 value={sort}
                 onChange={(e) => setSort(e.target.value)}
-                className="appearance-none rounded-xl border border-surface-300 bg-surface-800 px-4 py-2.5 pr-10 text-sm font-medium text-surface-50 outline-none focus:border-gold-400"
+                className="appearance-none rounded-xl border border-gray-200 bg-white px-4 py-2.5 pr-10 text-sm font-medium text-text-primary outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-500/20 transition-all"
               >
                 {SORT_OPTIONS.map((opt) => (<option key={opt.value} value={opt.value}>Sort by: {opt.label}</option>))}
               </select>
-              <ChevronDown size={16} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-surface-200" />
+              <ChevronDown size={16} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-text-muted" />
             </div>
           </div>
         </div>
@@ -187,36 +225,36 @@ function ProductsContent() {
             {inStockOnly && (<FilterChip onRemove={() => setInStockOnly(false)}>In Stock</FilterChip>)}
             {deliveryFilter && (<FilterChip onRemove={() => setDeliveryFilter("")}>{deliveryFilter === 'tomorrow' ? 'Get It by Tomorrow' : deliveryFilter === '2days' ? 'Get It in 2 Days' : 'Express Delivery'}</FilterChip>)}
             {dealsFilter && (<FilterChip onRemove={() => setDealsFilter("")}>{dealsFilter === 'today' ? "Today's Deals" : "Flash Deals"}</FilterChip>)}
-            <button onClick={clearAllFilters} className="text-sm font-medium text-gold-400 hover:text-gold-300">Clear All</button>
+            <button onClick={clearAllFilters} className="text-sm font-medium text-primary-600 hover:text-primary-700 transition-colors">Clear All</button>
           </div>
         )}
 
-        <div className="flex gap-8">
-          <aside className="hidden w-64 shrink-0 lg:block">
-            <div className="sticky top-28 rounded-2xl border border-surface-300/50 bg-surface-800 p-5">
+        <div className="flex gap-6 lg:gap-8">
+          <aside className="hidden w-60 shrink-0 lg:block">
+            <div className="sticky top-20 rounded-2xl border border-border bg-white p-5 shadow-card">
               <div className="mb-4 flex items-center justify-between">
-                <h2 className="text-base font-bold text-white">Filters</h2>
-                {hasActiveFilters && (<button onClick={clearAllFilters} className="text-xs font-medium text-gold-400 hover:text-gold-300">Clear All</button>)}
+                <h2 className="text-base font-bold text-text-primary">Filters</h2>
+                {hasActiveFilters && (<button onClick={clearAllFilters} className="text-xs font-medium text-primary-600 hover:text-primary-700 transition-colors">Clear All</button>)}
               </div>
               <FilterSidebar categories={categories} brands={brands} selectedCategories={selectedCategories} selectedBrands={selectedBrands} priceRange={priceRange} minRating={minRating} minDiscount={minDiscount} inStockOnly={inStockOnly} toggleCategory={toggleCategory} toggleBrand={toggleBrand} setPriceRange={setPriceRange} setMinRating={setMinRating} setMinDiscount={setMinDiscount} setInStockOnly={setInStockOnly} />
             </div>
           </aside>
 
-          <main className="flex-1">
+          <main className="flex-1 min-w-0">
             {loading ? (
               <div className="flex items-center justify-center py-20">
-                <div className="h-8 w-8 animate-spin rounded-full border-4 border-gold-400 border-t-transparent" />
+                <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary-500 border-t-transparent" />
               </div>
             ) : filteredProducts.length > 0 ? (
-              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
+              <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
                 {filteredProducts.map((product, i) => (<ProductCard key={product.id} product={product} index={i} />))}
               </div>
             ) : (
               <div className="flex flex-col items-center justify-center py-20 text-center">
-                <div className="mb-4 rounded-full bg-surface-700 p-6"><SlidersHorizontal size={32} className="text-surface-200" /></div>
-                <h3 className="text-lg font-semibold text-white">No products found</h3>
-                <p className="mt-1 text-sm text-surface-100">Try adjusting your filters to find what you&apos;re looking for.</p>
-                <button onClick={clearAllFilters} className="mt-4 rounded-xl bg-gold-400 px-6 py-2.5 text-sm font-semibold text-surface-950 hover:bg-gold-300">Clear All Filters</button>
+                <div className="mb-4 rounded-full bg-surface-muted p-6"><SlidersHorizontal size={32} className="text-text-muted" /></div>
+                <h3 className="text-lg font-semibold text-text-primary">No products found</h3>
+                <p className="mt-1 text-sm text-text-muted">Try adjusting your filters to find what you&apos;re looking for.</p>
+                <button onClick={clearAllFilters} className="mt-4 rounded-xl bg-primary-600 px-6 py-2.5 text-sm font-semibold text-white hover:bg-primary-700 transition-colors shadow-primary">Clear All Filters</button>
               </div>
             )}
           </main>
@@ -227,21 +265,21 @@ function ProductsContent() {
       <AnimatePresence>
         {mobileFiltersOpen && (
           <>
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm" onClick={() => setMobileFiltersOpen(false)} />
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm" onClick={() => setMobileFiltersOpen(false)} />
             <motion.div
               initial={{ x: "-100%" }}
               animate={{ x: 0 }}
               exit={{ x: "-100%" }}
               transition={{ type: "spring", damping: 25, stiffness: 200 }}
-              className="fixed inset-y-0 left-0 z-50 w-80 max-w-[85vw] overflow-y-auto bg-surface-900"
+              className="fixed inset-y-0 left-0 z-50 w-80 max-w-[85vw] overflow-y-auto bg-white shadow-2xl"
             >
-              <div className="sticky top-0 z-10 flex items-center justify-between border-b border-surface-300/50 bg-surface-900 p-4">
-                <h2 className="text-lg font-bold text-white">Filters</h2>
-                <button onClick={() => setMobileFiltersOpen(false)} className="rounded-lg p-2 hover:bg-surface-700"><X size={20} className="text-surface-100" /></button>
+              <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-white p-4">
+                <h2 className="text-lg font-bold text-text-primary">Filters</h2>
+                <button onClick={() => setMobileFiltersOpen(false)} className="rounded-lg p-2 hover:bg-surface-muted transition-colors"><X size={20} className="text-text-secondary" /></button>
               </div>
               <div className="p-4"><FilterSidebar mobile categories={categories} brands={brands} selectedCategories={selectedCategories} selectedBrands={selectedBrands} priceRange={priceRange} minRating={minRating} minDiscount={minDiscount} inStockOnly={inStockOnly} toggleCategory={toggleCategory} toggleBrand={toggleBrand} setPriceRange={setPriceRange} setMinRating={setMinRating} setMinDiscount={setMinDiscount} setInStockOnly={setInStockOnly} /></div>
-              <div className="sticky bottom-0 border-t border-surface-300/50 bg-surface-900 p-4">
-                <button onClick={() => setMobileFiltersOpen(false)} className="w-full rounded-xl bg-gold-400 py-3 text-sm font-semibold text-surface-950 hover:bg-gold-300">
+              <div className="sticky bottom-0 border-t border-border bg-white p-4">
+                <button onClick={() => setMobileFiltersOpen(false)} className="w-full rounded-xl bg-primary-600 py-3 text-sm font-semibold text-white hover:bg-primary-700 transition-colors shadow-primary">
                   Show {filteredProducts.length} Results
                 </button>
               </div>
@@ -277,7 +315,7 @@ function FilterSidebar({
   toggleCategory, toggleBrand, setPriceRange, setMinRating, setMinDiscount, setInStockOnly,
 }: FilterSidebarProps) {
   return (
-    <div className={cn("space-y-6", mobile && "px-1")}>
+    <div className={cn("space-y-5", mobile && "px-1")}>
       <FilterSection title="Category">
         {categories.map((cat) => (
           <label key={cat.slug} className="flex cursor-pointer items-center gap-2.5 py-1.5">
@@ -285,10 +323,10 @@ function FilterSidebar({
               type="checkbox"
               checked={selectedCategories.includes(cat.slug)}
               onChange={() => toggleCategory(cat.slug)}
-              className="h-4 w-4 rounded border-surface-300 bg-surface-700 text-gold-400 accent-gold-400"
+              className="h-4 w-4 rounded border-gray-300 bg-white text-primary-600 accent-primary-600"
             />
-            <span className="text-sm text-surface-50">{cat.name}</span>
-            <span className="ml-auto text-xs text-surface-200">{cat.productCount}</span>
+            <span className="text-sm text-text-secondary">{cat.name}</span>
+            <span className="ml-auto text-xs text-text-muted">{cat.productCount}</span>
           </label>
         ))}
       </FilterSection>
@@ -300,7 +338,7 @@ function FilterSidebar({
             onClick={() => setPriceRange({ min: String(range.min), max: range.max === Infinity ? "" : String(range.max) })}
             className={cn(
               "block w-full py-1.5 text-left text-sm transition-colors",
-              priceRange.min === String(range.min) ? "text-gold-400 font-medium" : "text-surface-100 hover:text-gold-400"
+              priceRange.min === String(range.min) ? "text-primary-700 font-medium" : "text-text-secondary hover:text-primary-600"
             )}
           >
             {range.label}
@@ -312,15 +350,15 @@ function FilterSidebar({
             placeholder="₹ Min"
             value={priceRange.min}
             onChange={(e) => setPriceRange((p) => ({ ...p, min: e.target.value }))}
-            className="w-full rounded-lg border border-surface-300 bg-surface-700 px-2.5 py-1.5 text-sm text-white outline-none focus:border-gold-400"
+            className="w-full rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-sm text-text-primary outline-none focus:border-primary-400 focus:ring-1 focus:ring-primary-500/20 transition-all"
           />
-          <span className="text-surface-200">-</span>
+          <span className="text-text-muted">-</span>
           <input
             type="number"
             placeholder="₹ Max"
             value={priceRange.max}
             onChange={(e) => setPriceRange((p) => ({ ...p, max: e.target.value }))}
-            className="w-full rounded-lg border border-surface-300 bg-surface-700 px-2.5 py-1.5 text-sm text-white outline-none focus:border-gold-400"
+            className="w-full rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-sm text-text-primary outline-none focus:border-primary-400 focus:ring-1 focus:ring-primary-500/20 transition-all"
           />
         </div>
       </FilterSection>
@@ -332,9 +370,9 @@ function FilterSidebar({
               type="checkbox"
               checked={selectedBrands.includes(brand)}
               onChange={() => toggleBrand(brand)}
-              className="h-4 w-4 rounded border-surface-300 bg-surface-700 text-gold-400 accent-gold-400"
+              className="h-4 w-4 rounded border-gray-300 bg-white text-primary-600 accent-primary-600"
             />
-            <span className="text-sm text-surface-50">{brand}</span>
+            <span className="text-sm text-text-secondary">{brand}</span>
           </label>
         ))}
       </FilterSection>
@@ -346,16 +384,16 @@ function FilterSidebar({
             onClick={() => setMinRating((prev) => prev === r ? 0 : r)}
             className={cn(
               "flex w-full items-center gap-2 py-1.5 text-sm transition-colors",
-              minRating === r ? "text-gold-400 font-medium" : "text-surface-100 hover:text-gold-400"
+              minRating === r ? "text-primary-700 font-medium" : "text-text-secondary hover:text-primary-600"
             )}
           >
             <div className="flex items-center gap-0.5">
               {Array.from({ length: 5 }).map((_, i) => (
-                <Star key={i} size={14} className={i < r ? "fill-gold-400 text-gold-400" : "text-surface-300"} />
+                <Star key={i} size={14} className={i < r ? "fill-amber-400 text-amber-400" : "text-gray-300"} />
               ))}
             </div>
             <span>& Up</span>
-            {minRating === r && <Check size={14} className="ml-auto" />}
+            {minRating === r && <Check size={14} className="ml-auto text-primary-600" />}
           </button>
         ))}
       </FilterSection>
@@ -367,7 +405,7 @@ function FilterSidebar({
             onClick={() => setMinDiscount((prev) => prev === d.value ? 0 : d.value)}
             className={cn(
               "block w-full py-1.5 text-left text-sm transition-colors",
-              minDiscount === d.value ? "text-gold-400 font-medium" : "text-surface-100 hover:text-gold-400"
+              minDiscount === d.value ? "text-primary-700 font-medium" : "text-text-secondary hover:text-primary-600"
             )}
           >
             {d.label}
@@ -379,11 +417,11 @@ function FilterSidebar({
         <label className="flex cursor-pointer items-center gap-2.5 py-1.5">
           <div
             onClick={() => setInStockOnly(!inStockOnly)}
-            className={cn("relative h-5 w-9 rounded-full transition-colors cursor-pointer", inStockOnly ? "bg-gold-400" : "bg-surface-300")}
+            className={cn("relative h-5 w-9 rounded-full transition-colors cursor-pointer", inStockOnly ? "bg-primary-500" : "bg-gray-300")}
           >
             <div className={cn("absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform", inStockOnly ? "translate-x-4" : "translate-x-0.5")} />
           </div>
-          <span className="text-sm text-surface-50">In Stock Only</span>
+          <span className="text-sm text-text-secondary">In Stock Only</span>
         </label>
       </FilterSection>
     </div>
@@ -393,10 +431,10 @@ function FilterSidebar({
 function FilterSection({ title, children }: { title: string; children: React.ReactNode }) {
   const [open, setOpen] = useState(true);
   return (
-    <div className="border-b border-surface-300/30 pb-4">
+    <div className="border-b border-border pb-4">
       <button onClick={() => setOpen(!open)} className="flex w-full items-center justify-between py-1">
-        <h3 className="text-sm font-semibold text-white">{title}</h3>
-        <ChevronDown size={16} className={cn("text-surface-200 transition-transform", open && "rotate-180")} />
+        <h3 className="text-sm font-semibold text-text-primary">{title}</h3>
+        <ChevronDown size={16} className={cn("text-text-muted transition-transform", open && "rotate-180")} />
       </button>
       <AnimatePresence initial={false}>
         {open && (
@@ -411,16 +449,16 @@ function FilterSection({ title, children }: { title: string; children: React.Rea
 
 function FilterChip({ children, onRemove }: { children: React.ReactNode; onRemove: () => void }) {
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-full border border-gold-400/30 bg-gold-400/10 px-3 py-1 text-xs font-medium text-gold-400">
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-primary-200 bg-primary-50 px-3 py-1 text-xs font-medium text-primary-700">
       {children}
-      <button onClick={onRemove} className="hover:text-gold-300"><X size={12} /></button>
+      <button onClick={onRemove} className="hover:text-primary-900 transition-colors"><X size={12} /></button>
     </span>
   );
 }
 
 export default function ProductsPage() {
   return (
-    <Suspense fallback={<div className="flex min-h-screen items-center justify-center bg-surface-950"><div className="h-8 w-8 animate-spin rounded-full border-4 border-gold-400 border-t-transparent" /></div>}>
+    <Suspense fallback={<div className="flex min-h-screen items-center justify-center bg-surface-raised"><div className="h-8 w-8 animate-spin rounded-full border-4 border-primary-500 border-t-transparent" /></div>}>
       <ProductsContent />
     </Suspense>
   );

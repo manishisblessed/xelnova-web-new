@@ -922,8 +922,6 @@ export default function ProductsPage() {
   const [approveReturnPolicyPreset, setApproveReturnPolicyPreset] =
     useState<(typeof RETURN_POLICY_PRESETS)[number]['value']>('EASY_RETURN_7_DAYS');
   const [approveReturnPlusDays, setApproveReturnPlusDays] = useState<string>('7');
-  const [approveWarrantyValue, setApproveWarrantyValue] = useState('');
-  const [approveWarrantyUnit, setApproveWarrantyUnit] = useState<'DAYS' | 'MONTHS' | 'YEARS' | ''>('');
   const [viewOpen, setViewOpen] = useState(false);
   const [viewing, setViewing] = useState<AdminProductDetail | null>(null);
   const [viewLoading, setViewLoading] = useState(false);
@@ -986,8 +984,6 @@ export default function ProductsPage() {
     setApproveBestSellersRank('');
     setApproveReturnPolicyPreset('EASY_RETURN_7_DAYS');
     setApproveReturnPlusDays('7');
-    setApproveWarrantyValue('');
-    setApproveWarrantyUnit('');
     // Pre-fill replacement policy from the list row so the admin keeps the
     // existing choice when re-opening an already-approved product (the full
     // detail we fetch next will refine it if it differs).
@@ -1009,8 +1005,6 @@ export default function ProductsPage() {
       if (detail.returnPolicyPreset) {
         setApproveReturnPolicyPreset(detail.returnPolicyPreset as (typeof RETURN_POLICY_PRESETS)[number]['value']);
       }
-      if (detail.warrantyDurationValue != null) setApproveWarrantyValue(String(detail.warrantyDurationValue));
-      if (detail.warrantyDurationUnit) setApproveWarrantyUnit(detail.warrantyDurationUnit as 'DAYS' | 'MONTHS' | 'YEARS');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to load product');
       setViewOpen(false);
@@ -1073,22 +1067,6 @@ export default function ProductsPage() {
 
     setApproving(product.id);
     try {
-      const warrantyPayload: Record<string, unknown> = {};
-      const wvRaw = approveWarrantyValue.trim();
-      if (wvRaw || approveWarrantyUnit) {
-        if (!approveWarrantyUnit || !wvRaw) {
-          toast.error('Set both warranty value and unit, or leave warranty blank');
-          return;
-        }
-        const n = Number(wvRaw);
-        if (!Number.isFinite(n) || n < 1 || !Number.isInteger(n)) {
-          toast.error('Warranty value must be a positive whole number');
-          return;
-        }
-        warrantyPayload.warrantyDurationValue = n;
-        warrantyPayload.warrantyDurationUnit = approveWarrantyUnit;
-      }
-
       await apiPost(`products/${product.id}/approve`, {
         commissionRate: rate,
         ...(rank !== null ? { bestSellersRank: rank } : {}),
@@ -1099,7 +1077,6 @@ export default function ProductsPage() {
             ? Number(approveReturnPlusDays.trim()) || 7
             : undefined,
         isReplaceable: presetNeedsReplacement ? true : approveReplaceable,
-        ...warrantyPayload,
       });
       toast.success(
         rank !== null
@@ -2113,49 +2090,20 @@ export default function ProductsPage() {
                       />
                     </div>
                   )}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                    {viewing?.warrantyDurationValue && viewing?.warrantyDurationUnit && (
-                      <div className="sm:col-span-3 rounded-lg border-2 border-info-200 bg-info-50 p-3 mb-2">
-                        <p className="text-xs font-semibold text-info-900 mb-1">
-                          Seller-provided warranty
-                        </p>
-                        <p className="text-sm text-info-800">
-                          {viewing.warrantyDurationValue} {viewing.warrantyDurationUnit.toLowerCase()} — {viewing.warrantyInfo}
-                        </p>
-                        <p className="mt-1.5 text-[11px] text-info-700">
-                          You can modify this above or leave it as-is to approve.
-                        </p>
-                      </div>
-                    )}
-                    <div className="sm:col-span-1">
-                      <label className="block text-[11px] font-medium uppercase tracking-wide text-text-muted">
-                        Warranty (optional)
-                      </label>
-                      <input
-                        type="number"
-                        min={1}
-                        placeholder="e.g. 6"
-                        value={approveWarrantyValue}
-                        onChange={(e) => setApproveWarrantyValue(e.target.value)}
-                        className="mt-1 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-primary-500"
-                      />
-                    </div>
-                    <div className="sm:col-span-2">
-                      <label className="block text-[11px] font-medium uppercase tracking-wide text-text-muted">
-                        Warranty unit
-                      </label>
-                      <select
-                        value={approveWarrantyUnit}
-                        onChange={(e) => setApproveWarrantyUnit(e.target.value as '' | 'DAYS' | 'MONTHS' | 'YEARS')}
-                        className="mt-1 w-full max-w-xs rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-primary-500"
-                      >
-                        <option value="">— none —</option>
-                        <option value="DAYS">Days</option>
-                        <option value="MONTHS">Months</option>
-                        <option value="YEARS">Years</option>
-                      </select>
-                    </div>
-                  </div>
+                  {(viewing?.warrantyDurationValue != null && viewing?.warrantyDurationUnit) ||
+                  viewing?.warrantyInfo?.trim() ? (
+                    <p className="text-xs text-text-secondary border-t border-border/60 pt-2">
+                      <span className="font-semibold text-text-muted">Warranty (from seller): </span>
+                      {viewing?.warrantyDurationValue != null && viewing?.warrantyDurationUnit ? (
+                        <>
+                          {viewing.warrantyDurationValue} {viewing.warrantyDurationUnit.toLowerCase()}
+                          {viewing.warrantyInfo?.trim() ? ` — ${viewing.warrantyInfo}` : ''}
+                        </>
+                      ) : (
+                        viewing?.warrantyInfo
+                      )}
+                    </p>
+                  ) : null}
                 </div>
 
                 <div className="rounded-xl border border-border bg-surface-muted/50 px-3 py-3">

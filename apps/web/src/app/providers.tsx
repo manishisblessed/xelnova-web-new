@@ -1,19 +1,20 @@
 'use client';
 
-import { AuthProvider, setAppRole } from '@xelnova/api';
+import { useCallback } from 'react';
+import { AuthProvider, setAppRole, ticketsApi } from '@xelnova/api';
 import { SupportWidget } from '@xelnova/ui';
 
-// Tag every API request from the customer storefront with X-App-Role:CUSTOMER
-// so the backend resolves auth/login, OTP, register, etc. against the
-// customer row only. A user who also has a separate SELLER row with the same
-// email is a different account and must not be silently logged in here.
 setAppRole('CUSTOMER');
 
 export function Providers({ children }: { children: React.ReactNode }) {
+  const handleChat = useCallback(async (message: string, orderNumber?: string) => {
+    return ticketsApi.chatWithBot(message, orderNumber);
+  }, []);
+
   return (
     <AuthProvider>
       {children}
-      <SupportWidget audience="customer" />
+      <SupportWidget audience="customer" onChat={handleChat} />
     </AuthProvider>
   );
 }

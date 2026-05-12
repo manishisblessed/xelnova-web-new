@@ -12,11 +12,11 @@ import { Badge, Button, Input, Modal } from '@xelnova/ui';
 import {
   apiCreateProduct,
   apiDeleteProduct,
+  apiGetAvailableBrands,
   apiGetBrandListingHint,
   apiGetProduct,
   apiGetProductAttributePresets,
   apiGetProducts,
-  apiGetSellerBrands,
   apiUpdateProduct,
   apiUploadImage,
   apiUploadImages,
@@ -55,7 +55,7 @@ import {
   type AttributePreset,
   type ProductAttributePresetsBundle,
 } from '@/lib/product-attribute-presets';
-import { DEFAULT_GST_PERCENT } from '@xelnova/utils';
+import { DEFAULT_GST_PERCENT, GST_SLAB_PERCENTS } from '@xelnova/utils';
 
 const API_URL = publicApiBase();
 
@@ -176,13 +176,14 @@ interface SellerProduct {
 /**
  * Minimal brand shape the Add/Edit product form needs — enough to render the
  * picker and reuse the authorization certificate already on file. Mirrors the
- * payload from `GET /seller/brands`.
+ * payload from `GET /seller/brands/available`.
  */
 interface SellerBrandSummary {
   id: string;
   name: string;
   slug: string;
   approved: boolean;
+  isDefault?: boolean;
   authorizationCertificate?: string | null;
 }
 
@@ -2016,7 +2017,7 @@ export default function SellerInventoryPage() {
   const [metaKeywordInput, setMetaKeywordInput] = useState('');
   const [formMetaDesc, setFormMetaDesc] = useState('');
   const [formHsnCode, setFormHsnCode] = useState('');
-  const [formGstRate, setFormGstRate] = useState('');
+  const [formGstRate, setFormGstRate] = useState(String(DEFAULT_GST_PERCENT));
   const [formBrandCertificate, setFormBrandCertificate] = useState('');
   const [uploadingBrandCertificate, setUploadingBrandCertificate] = useState(false);
   /** Extra document URLs when listing under another seller's brand (admin must approve). */
@@ -2096,13 +2097,13 @@ export default function SellerInventoryPage() {
     };
   }, [formBrand, createOpen, editProduct]);
 
-  // Load the seller's registered brands whenever the Add/Edit modal opens so
-  // they can pick an existing brand (and reuse its certificate) instead of
-  // retyping the name and re-uploading the same document every time.
+  // Load all brands available to this seller (own + approved + default like
+  // Generic) whenever the Add/Edit modal opens so they can pick an existing
+  // brand and reuse its certificate instead of re-uploading every time.
   useEffect(() => {
     if (!createOpen && !editProduct) return;
     let cancelled = false;
-    apiGetSellerBrands()
+    apiGetAvailableBrands()
       .then((data) => {
         if (cancelled) return;
         if (Array.isArray(data)) {
@@ -2245,7 +2246,12 @@ export default function SellerInventoryPage() {
       setFormMetaKeywords(get<string[]>('formMetaKeywords', []));
       setFormMetaDesc(get('formMetaDesc', ''));
       setFormHsnCode(get('formHsnCode', ''));
-      setFormGstRate(get('formGstRate', ''));
+      const draftGstRaw = get<string | number>('formGstRate', '');
+      setFormGstRate(
+        draftGstRaw !== '' && draftGstRaw != null
+          ? String(draftGstRaw)
+          : String(DEFAULT_GST_PERCENT),
+      );
       setFormBrandCertificate(get('formBrandCertificate', ''));
       const extraDraft = get<unknown>('formBrandAuthExtraUrls', null);
       if (Array.isArray(extraDraft) && extraDraft.length) {
@@ -2372,7 +2378,7 @@ export default function SellerInventoryPage() {
     setMetaKeywordInput('');
     setFormMetaDesc('');
     setFormHsnCode('');
-    setFormGstRate('');
+    setFormGstRate(String(DEFAULT_GST_PERCENT));
     setFormBrandCertificate('');
     setShowBrandCertUrlField(false);
     setBrandCertLinkDraft('');
@@ -2430,7 +2436,9 @@ export default function SellerInventoryPage() {
       .then((fullUnknown) => {
         const full = fullUnknown as Record<string, unknown>;
         setFormName(String(full.name ?? p.name));
-        setFormGstRate(full.gstRate != null ? String(full.gstRate) : '');
+        setFormGstRate(
+          full.gstRate != null ? String(full.gstRate) : String(DEFAULT_GST_PERCENT),
+        );
         const basePrice = Number(full.price ?? p.price);
         const baseCompare = full.compareAtPrice != null ? Number(full.compareAtPrice) : null;
         setFormPrice(String(basePrice));
@@ -2854,7 +2862,9 @@ export default function SellerInventoryPage() {
       toast.error('Brand name is required');
       return;
     }
-    if (!formBrandCertificate.trim()) {
+    const pickedBrand = selectedSellerBrandId ? sellerBrands.find((b) => b.id === selectedSellerBrandId) : null;
+    const isDefaultBrand = pickedBrand?.isDefault === true;
+    if (!isDefaultBrand && !formBrandCertificate.trim()) {
       toast.error('Brand authorization certificate is required');
       return;
     }
@@ -2974,7 +2984,9 @@ export default function SellerInventoryPage() {
       toast.error('Brand name is required');
       return;
     }
-    if (!formBrandCertificate.trim()) {
+    const pickedBrandEdit = selectedSellerBrandId ? sellerBrands.find((b) => b.id === selectedSellerBrandId) : null;
+    const isDefaultBrandEdit = pickedBrandEdit?.isDefault === true;
+    if (!isDefaultBrandEdit && !formBrandCertificate.trim()) {
       toast.error('Brand authorization certificate is required');
       return;
     }
@@ -3380,6 +3392,15 @@ export default function SellerInventoryPage() {
     setBrandCertImageError(false);
   };
 
+  const gstRateSelectOptions = useMemo(() => {
+    const slabs = [...GST_SLAB_PERCENTS] as number[];
+    const cur = formGstRate.trim() !== '' ? Number(formGstRate) : NaN;
+    if (!Number.isNaN(cur) && cur >= 0 && !slabs.includes(cur)) {
+      return [...slabs, cur].sort((a, b) => a - b);
+    }
+    return slabs;
+  }, [formGstRate]);
+
   const formFields = (
     <div className="space-y-5 relative">
       {editProduct && editLoading && (
@@ -3409,7 +3430,7 @@ export default function SellerInventoryPage() {
             >
               <option value="">+ Add a new brand…</option>
               {sellerBrands.map((b) => {
-                const statusLabel = b.approved ? 'approved' : 'pending';
+                const statusLabel = b.isDefault ? 'generic' : b.approved ? 'approved' : 'pending';
                 const certLabel = b.authorizationCertificate ? ' • certificate on file' : '';
                 return (
                   <option key={b.id} value={b.id}>
@@ -3419,7 +3440,7 @@ export default function SellerInventoryPage() {
               })}
             </select>
             <p className="mt-1 text-[11px] text-text-muted">
-              Pick one of your registered brands to auto-fill the brand name and reuse the authorization certificate on file — no need to upload it again.
+              Pick an existing brand to auto-fill the name. For generic/unbranded products, choose the Generic brand — no certificate needed.
             </p>
           </div>
         ) : null}
@@ -3428,13 +3449,15 @@ export default function SellerInventoryPage() {
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="font-medium">
-                  Listing under your brand: <span className="font-semibold">{selectedSellerBrand.name}</span>
+                  Listing under: <span className="font-semibold">{selectedSellerBrand.name}</span>
                 </p>
                 <p className="mt-0.5 text-xs text-emerald-800/80">
-                  {selectedSellerBrand.approved
-                    ? 'This brand is approved on Xelnova.'
-                    : 'This brand is pending admin review.'}
-                  {selectedSellerBrand.authorizationCertificate ? ' Certificate on file will be reused.' : ''}
+                  {selectedSellerBrand.isDefault
+                    ? 'No authorization certificate required for this brand.'
+                    : selectedSellerBrand.approved
+                      ? 'This brand is approved on Xelnova.'
+                      : 'This brand is pending admin review.'}
+                  {!selectedSellerBrand.isDefault && selectedSellerBrand.authorizationCertificate ? ' Certificate on file will be reused.' : ''}
                 </p>
               </div>
               <button
@@ -3469,22 +3492,37 @@ export default function SellerInventoryPage() {
           </p>
         ) : null}
       </div>
-      <Input
-        stackedLabel
-        label="GST rate (%)"
-        required
-        type="number"
-        min={0}
-        value={formGstRate}
-        onChange={(e) => setFormGstRate(e.target.value)}
-        hint={
-          <>
-            Default {DEFAULT_GST_PERCENT}%. Enter prices below{' '}
-            <span className="font-medium text-text-primary">inclusive of GST</span>; we store the
-            pre-tax amount for records.
-          </>
-        }
-      />
+      <div>
+        <label
+          htmlFor="product-gst-rate"
+          className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-text-secondary"
+        >
+          GST rate (%)
+          <span className="ml-0.5 text-danger-500">*</span>
+        </label>
+        <select
+          id="product-gst-rate"
+          value={formGstRate}
+          onChange={(e) => setFormGstRate(e.target.value)}
+          className="w-full rounded-xl border border-border bg-surface px-4 py-2.5 text-sm text-text-primary outline-none transition-all duration-200 focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30"
+        >
+          {gstRateSelectOptions.map((pct) => (
+            <option key={pct} value={String(pct)}>
+              {pct}%
+            </option>
+          ))}
+        </select>
+        <p className="mt-1 text-[11px] text-text-muted">
+          New listings default to {DEFAULT_GST_PERCENT}%. Enter prices below{' '}
+          <span className="font-medium text-text-primary">inclusive of GST</span>; we store the
+          pre-tax amount for records.
+        </p>
+      </div>
+      {selectedSellerBrand?.isDefault ? (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 px-3 py-2.5 text-xs text-emerald-800">
+          <span className="font-medium">{selectedSellerBrand.name}</span> is a default brand — no authorization certificate is needed.
+        </div>
+      ) : (
       <div className="rounded-xl border border-border bg-surface-muted/30 p-4">
         <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-text-secondary">
           Brand authorization certificate
@@ -3664,6 +3702,7 @@ export default function SellerInventoryPage() {
           </div>
         )}
       </div>
+      )}
       {dealerAuthorizationRequired && (
         <div className="rounded-xl border border-border bg-surface-muted/30 p-4">
           <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-text-secondary">

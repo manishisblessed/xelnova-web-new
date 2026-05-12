@@ -112,7 +112,7 @@ export class EkartProvider implements CourierProvider {
       invoice_number: details.orderNumber,
       invoice_date: new Date().toISOString().split('T')[0],
       consignee_name: details.deliveryAddress.fullName,
-      consignee_alternate_phone: details.deliveryAddress.phone || '',
+      consignee_phone: details.deliveryAddress.phone?.replace(/\D/g, '').slice(-10) || '',
       payment_mode: isCod ? 'COD' : 'Prepaid',
       category_of_goods: 'General',
       products_desc: details.items.map((i) => i.name).join(', ').slice(0, 200) || 'Products',
@@ -306,8 +306,13 @@ export class EkartProvider implements CourierProvider {
   }
 
   /**
-   * Official Ekart label PDF (same bytes as their portal / Print Label).
-   * Response may be raw PDF, or JSON with a download URL / base64 payload.
+   * Official Ekart label PDF via POST /api/v1/package/label.
+   *
+   * Pass `json_only=false` so the API returns the raw PDF binary
+   * (`application/octet-stream`) instead of JSON metadata.
+   * Falls back to JSON parsing (URL / base64) when the response
+   * isn't a direct PDF — some Ekart account tiers may ignore the
+   * query flag.
    */
   async downloadLabelPdf(
     awbNumber: string,
@@ -315,53 +320,77 @@ export class EkartProvider implements CourierProvider {
   ): Promise<Buffer | null> {
     const headers = await this.authHeaders(config);
 
-    const tryPdfBytes = (buf: Buffer): Buffer | null => {
-      if (buf.length > 8 && buf.slice(0, 4).toString('ascii') === '%PDF') return buf;
-      return null;
+    const isPdfBuffer = (buf: Buffer): boolean => {
+      if (buf.length < 8) return false;
+      const start = buf.indexOf(0x25); // '%'
+      if (start >= 0 && start <= 4) {
+        const sig = buf.slice(start, start + 4).toString('ascii');
+        if (sig === '%PDF') return true;
+      }
+      return false;
     };
 
     const fetchUrlAsPdf = async (url: string): Promise<Buffer | null> => {
       try {
         const r = await fetch(url, { redirect: 'follow' });
         if (!r.ok) return null;
-        return tryPdfBytes(Buffer.from(await r.arrayBuffer()));
+        const b = Buffer.from(await r.arrayBuffer());
+        if (isPdfBuffer(b)) return b;
+        return null;
       } catch {
         return null;
       }
     };
 
-    const res = await fetch(`${this.BASE}/api/v1/package/label`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ ids: [awbNumber] }),
-    });
+    const res = await fetch(
+      `${this.BASE}/api/v1/package/label?json_only=false`,
+      {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ ids: [awbNumber] }),
+      },
+    );
 
     if (!res.ok) {
       const t = await res.text();
-      this.logger.warn(`Ekart label API failed (${res.status}): ${t.slice(0, 180)}`);
+      this.logger.warn(`Ekart label API failed (${res.status}): ${t.slice(0, 300)}`);
       return null;
     }
 
     const ct = (res.headers.get('content-type') || '').toLowerCase();
     const buf = Buffer.from(await res.arrayBuffer());
-    const direct = tryPdfBytes(buf);
-    if (direct) {
-      this.logger.log(`Ekart label PDF for ${awbNumber}, ${direct.length} bytes.`);
-      return direct;
+
+    if (isPdfBuffer(buf)) {
+      this.logger.log(`Ekart label PDF for ${awbNumber}, ${buf.length} bytes.`);
+      return buf;
     }
 
+    // octet-stream that isn't obviously JSON — trust the carrier.
+    if (
+      ct.includes('application/octet-stream') &&
+      buf.length > 128 &&
+      buf[0] !== 0x7b // not '{'
+    ) {
+      this.logger.log(
+        `Ekart label octet-stream for ${awbNumber}, ${buf.length} bytes (non-JSON binary, trusting carrier).`,
+      );
+      return buf;
+    }
+
+    // JSON fallback: extract download URL or base64-encoded PDF.
     if (ct.includes('application/json') || (buf.length > 0 && buf[0] === 0x7b)) {
       try {
         const j = JSON.parse(buf.toString('utf8')) as Record<string, unknown>;
+        const dataObj =
+          typeof j.data === 'object' && j.data !== null
+            ? (j.data as Record<string, unknown>)
+            : {};
+
         const url =
           (j.label_url as string) ||
           (j.url as string) ||
           (j.pdf_url as string) ||
-          (typeof j.data === 'object' && j.data !== null
-            ? String((j.data as Record<string, unknown>).label_url ||
-                (j.data as Record<string, unknown>).url ||
-                '')
-            : '');
+          String(dataObj.label_url || dataObj.url || '');
         if (url && /^https?:\/\//i.test(url)) {
           const pdf = await fetchUrlAsPdf(url);
           if (pdf) {
@@ -369,26 +398,26 @@ export class EkartProvider implements CourierProvider {
             return pdf;
           }
         }
+
         const b64 =
           (j.pdf_base64 as string) ||
           (j.label_pdf_base64 as string) ||
-          (typeof j.data === 'object' && j.data !== null
-            ? String((j.data as Record<string, unknown>).pdf_base64 || '')
-            : '');
+          String(dataObj.pdf_base64 || dataObj.label_pdf_base64 || '');
         if (typeof b64 === 'string' && b64.length > 64) {
           const raw = Buffer.from(b64, 'base64');
-          const pdf = tryPdfBytes(raw);
-          if (pdf) {
-            this.logger.log(`Ekart label from base64 for ${awbNumber}, ${pdf.length} bytes.`);
-            return pdf;
+          if (isPdfBuffer(raw)) {
+            this.logger.log(`Ekart label from base64 for ${awbNumber}, ${raw.length} bytes.`);
+            return raw;
           }
         }
       } catch {
-        /* not JSON */
+        /* not parseable JSON */
       }
     }
 
-    this.logger.warn(`Ekart label response for ${awbNumber} was not a usable PDF.`);
+    this.logger.warn(
+      `Ekart label response for ${awbNumber} was not a usable PDF (ct=${ct}, len=${buf.length}).`,
+    );
     return null;
   }
 
@@ -409,69 +438,34 @@ export class EkartProvider implements CourierProvider {
   }
 
   /**
-   * Extract the location name/code from an Ekart location object.
-   * Different API versions return the identifier under different keys.
+   * List all registered addresses from the Ekart account.
+   * Official V2 endpoint: GET /api/v2/addresses → array of { alias, phone, address_line1, ... }
    */
-  private extractLocationName(loc: any): string {
-    return (
-      loc.location_code ||
-      loc.locationCode ||
-      loc.name ||
-      loc.location_name ||
-      loc.pickup_location ||
-      loc.alias ||
-      ''
-    );
-  }
-
-  /**
-   * Fetch all existing pickup locations from the Ekart account.
-   * Tries multiple endpoints since the API has evolved across versions.
-   */
-  private async fetchExistingLocations(headers: Record<string, string>): Promise<any[]> {
-    const locationEndpoints = [
-      '/api/v1/pickup-addresses',
-      '/api/v1/locations',
-      '/api/v1/location',
-      '/api/v1/pickup/list',
-      '/integrations/v2/pickup-locations',
-    ];
-
-    for (const endpoint of locationEndpoints) {
-      try {
-        const listRes = await fetch(`${this.BASE}${endpoint}`, { headers });
-
-        if (listRes.ok) {
-          const listData = await listRes.json();
-          const locations = Array.isArray(listData?.data)
-            ? listData.data
-            : Array.isArray(listData?.locations)
-              ? listData.locations
-              : Array.isArray(listData?.pickup_addresses)
-                ? listData.pickup_addresses
-                : Array.isArray(listData)
-                  ? listData
-                  : [];
-
-          if (locations.length > 0) {
-            this.logger.log(`Ekart: Found ${locations.length} pickup location(s) via ${endpoint}.`);
-            return locations;
-          }
-        }
-      } catch (err) {
-        this.logger.debug(`Ekart: Endpoint ${endpoint} failed: ${err}`);
+  private async fetchExistingAddresses(headers: Record<string, string>): Promise<any[]> {
+    try {
+      const res = await fetch(`${this.BASE}/api/v2/addresses`, { headers });
+      if (!res.ok) {
+        this.logger.warn(`Ekart: GET /api/v2/addresses returned ${res.status}`);
+        return [];
       }
+      const data = await res.json();
+      const list = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : [];
+      this.logger.log(`Ekart: Found ${list.length} registered address(es).`);
+      return list;
+    } catch (err) {
+      this.logger.warn(`Ekart: Failed to fetch addresses: ${err}`);
+      return [];
     }
-    return [];
   }
 
   /**
-   * Ekart requires pickup locations to be pre-registered in their system.
-   * This method:
-   * 1. Fetches existing pickup locations from the Ekart account
-   * 2. Finds the best match by pincode → address → first available
-   * 3. Returns the Ekart-side location code (not our internal name)
-   * 4. If no locations exist, attempts to create one
+   * Register a pickup/RTO address with Ekart using the official V2 API.
+   *
+   * Flow:
+   * 1. GET /api/v2/addresses — list existing addresses
+   * 2. Match by alias (exact) → pincode → first available
+   * 3. If no match, POST /api/v2/address to create a new one
+   * 4. The `alias` field is the identifier used when booking shipments
    */
   async registerWarehouse(
     config: SellerCourierConfig,
@@ -489,127 +483,108 @@ export class EkartProvider implements CourierProvider {
       headers = await this.authHeaders(config);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      this.logger.error(`Ekart registerWarehouse auth check failed: ${msg}`);
+      this.logger.error(`Ekart registerWarehouse auth failed: ${msg}`);
       return {
         success: false,
-        message: `Ekart authentication failed — cannot register warehouse: ${msg}`,
+        message: `Ekart authentication failed — cannot register address: ${msg}`,
       };
     }
 
-    const existingLocations = await this.fetchExistingLocations(headers);
+    const phone = parseInt(options.phone.replace(/\D/g, '').slice(-10), 10);
+    const pincode = parseInt(options.pincode, 10);
+    const displayName = options.label || options.name;
 
-    if (existingLocations.length > 0) {
-      const matchByPincode = existingLocations.find(
-        (loc: any) => String(loc.pincode || loc.pin || loc.postal_code) === options.pincode,
+    // 1. Check existing addresses — only match by exact alias
+    const existing = await this.fetchExistingAddresses(headers);
+
+    if (existing.length > 0) {
+      const byAlias = existing.find(
+        (a: any) =>
+          (a.alias || '').toLowerCase() === displayName.toLowerCase() ||
+          (a.alias || '').toLowerCase() === options.name.toLowerCase(),
       );
-
-      const optAddr = (options.address || '').toLowerCase().trim();
-      const matchByAddress = !matchByPincode
-        ? existingLocations.find((loc: any) => {
-            const locAddr = (loc.address || loc.full_address || '').toLowerCase().trim();
-            return locAddr && optAddr && (locAddr.includes(optAddr) || optAddr.includes(locAddr));
-          })
-        : null;
-
-      const bestMatch = matchByPincode || matchByAddress || existingLocations[0];
-      const locationName = this.extractLocationName(bestMatch);
-
-      if (!locationName) {
-        this.logger.warn(
-          `Ekart: Found ${existingLocations.length} location(s) but none had a usable name/code. Raw keys: ${Object.keys(bestMatch).join(', ')}`,
-        );
+      if (byAlias?.alias) {
+        this.logger.log(`Ekart: Found existing address by alias "${byAlias.alias}".`);
         return {
-          success: false,
-          message:
-            'Ekart returned pickup locations but none had a recognizable location code. ' +
-            'Please check your Ekart Elite portal → Address menu and ensure at least one pickup location is active.',
+          success: true,
+          registeredName: byAlias.alias,
+          alreadyExisted: true,
+          message: `Using existing Ekart address "${byAlias.alias}".`,
         };
       }
-
-      this.logger.log(
-        `Ekart: Using existing location "${locationName}" (pincode match: ${!!matchByPincode}, address match: ${!!matchByAddress}).`,
-      );
-
-      return {
-        success: true,
-        registeredName: locationName,
-        alreadyExisted: true,
-        message: `Using existing Ekart pickup location "${locationName}".`,
-      };
     }
 
-    // No existing locations found — try to create one
-    const locationPayload = {
-      name: options.name,
-      address: options.address,
+    // 2. Create a new address via POST /api/v2/address
+    const addressLine2Parts = [options.addressLine2, options.landmark].filter(Boolean);
+
+    const createPayload = {
+      alias: displayName,
+      phone,
+      address_line1: options.address,
+      address_line2: addressLine2Parts.join(', ') || '',
+      pincode,
       city: options.city,
       state: options.state,
-      country: options.country || 'India',
-      pincode: options.pincode,
-      phone: options.phone.replace(/\D/g, '').slice(-10),
-      email: options.email || '',
-      contact_person: options.contactPerson || options.name,
+      country: 'India',
     };
 
     try {
-      const createRes = await fetch(`${this.BASE}/api/v1/locations`, {
+      const createRes = await fetch(`${this.BASE}/api/v2/address`, {
         method: 'POST',
         headers,
-        body: JSON.stringify(locationPayload),
+        body: JSON.stringify(createPayload),
       });
 
-      if (createRes.ok) {
-        const createData = await createRes.json();
-        const createdName =
-          createData?.location_code ||
-          createData?.locationCode ||
-          createData?.data?.location_code ||
-          createData?.name ||
-          createData?.data?.name ||
-          options.name;
+      const resText = await createRes.text();
+      let resData: any = {};
+      try { resData = JSON.parse(resText); } catch { /* not JSON */ }
 
-        this.logger.log(`Ekart: Successfully created pickup location "${createdName}".`);
-
+      if (createRes.ok && resData.status === true) {
+        const createdAlias = resData.alias || options.name;
+        this.logger.log(
+          `Ekart: Created address "${createdAlias}". Remark: ${resData.remark || 'none'}`,
+        );
         return {
           success: true,
-          registeredName: createdName,
-          message: `Pickup location "${createdName}" registered with Ekart.`,
+          registeredName: createdAlias,
+          message: `Address "${createdAlias}" registered with Ekart.`,
         };
       }
 
-      const errText = await createRes.text();
-      this.logger.warn(`Ekart location creation failed (${createRes.status}): ${errText.slice(0, 300)}`);
+      this.logger.warn(
+        `Ekart: POST /api/v2/address failed (${createRes.status}): ${resText.slice(0, 400)}`,
+      );
 
-      if (errText.toLowerCase().includes('already') || errText.toLowerCase().includes('exists')) {
-        // Location exists but we couldn't list it — re-fetch to get the real name
-        const refetchedLocations = await this.fetchExistingLocations(headers);
-        if (refetchedLocations.length > 0) {
-          const best = refetchedLocations.find(
-            (loc: any) => String(loc.pincode || loc.pin || loc.postal_code) === options.pincode,
-          ) || refetchedLocations[0];
-          const name = this.extractLocationName(best);
-          if (name) {
-            return {
-              success: true,
-              registeredName: name,
-              alreadyExisted: true,
-              message: `Using existing Ekart pickup location "${name}".`,
-            };
-          }
+      // If alias already exists, re-fetch and find by exact name only
+      if (
+        resText.toLowerCase().includes('already') ||
+        resText.toLowerCase().includes('exists') ||
+        resText.toLowerCase().includes('duplicate')
+      ) {
+        const refetched = await this.fetchExistingAddresses(headers);
+        const match = refetched.find(
+          (a: any) =>
+            (a.alias || '').toLowerCase() === displayName.toLowerCase() ||
+            (a.alias || '').toLowerCase() === options.name.toLowerCase(),
+        );
+        if (match?.alias) {
+          return {
+            success: true,
+            registeredName: match.alias,
+            alreadyExisted: true,
+            message: `Using existing Ekart address "${match.alias}".`,
+          };
         }
       }
     } catch (err) {
-      this.logger.warn(`Ekart: Location creation threw: ${err}`);
+      this.logger.warn(`Ekart: Address creation threw: ${err}`);
     }
 
-    // Hard fail — don't return our internal warehouse ID as a fallback
-    // since Ekart will always reject names it doesn't recognize.
     return {
       success: false,
       message:
-        'Could not find or create a pickup location in Ekart. ' +
-        'Please register a pickup address in your Ekart Elite portal → Address menu in Settings, ' +
-        'then try shipping again.',
+        'Could not create an address in Ekart. ' +
+        'Check your Ekart Elite credentials and ensure the API is accessible.',
     };
   }
 }

@@ -40,6 +40,16 @@ export class ReturnsController {
     );
   }
 
+  @Get('seller')
+  @Auth()
+  @ApiOperation({ summary: 'List return requests for seller products' })
+  async findAllForSeller(@CurrentUser('id') userId: string) {
+    return successResponse(
+      await this.returnsService.findAllForSeller(userId),
+      'Seller return requests fetched',
+    );
+  }
+
   @Get('admin')
   @Auth('ADMIN')
   @ApiOperation({ summary: 'List all return requests (admin)' })

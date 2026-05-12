@@ -17,16 +17,22 @@ const EMPTY_NOTIFICATIONS = (page: number, limit: number) => ({
   pagination: { page, limit, total: 0, totalPages: 0 },
 });
 
+/** True when the request never reached a JSON error body (offline, API down, CORS, timeout). */
+function isUnreachableOrUnauthenticated(error: unknown): boolean {
+  if (!(error instanceof AxiosError)) return false;
+  if (error.response?.status === 401) return true;
+  // No `response` → browser/network layer failure (Axios message is often "Network Error").
+  return error.response == null;
+}
+
 export async function getNotifications(page = 1, limit = 20) {
   try {
     const { data } = await api.get('/notifications', { params: { page, limit } });
     return data.data;
   } catch (error) {
-    // 401 just means we're not signed in (or the session lapsed). The header
-    // polls this endpoint every 30s, so logging it would flood the console
-    // with `[getNotifications] Invalid or expired token`. Stay quiet for that
-    // case — louder errors (network, 5xx, etc.) still surface.
-    if (error instanceof AxiosError && error.response?.status === 401) {
+    // Header polls every 30s — avoid console noise and Next.js dev overlays for cases where
+    // we already degrade gracefully (empty notifications).
+    if (isUnreachableOrUnauthenticated(error)) {
       return EMPTY_NOTIFICATIONS(page, limit);
     }
     console.error('[getNotifications]', extractErrorMessage(error, 'Failed to fetch notifications'));

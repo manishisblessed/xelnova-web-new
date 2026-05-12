@@ -30,6 +30,8 @@ export interface Ticket {
   messages?: TicketMessage[];
   /** Admin: sellers derived from linked order line items (forward target). */
   forwardSellers?: { userId: string; storeName: string }[];
+  /** Customer detail: store display name when ticket is assigned to a seller. */
+  assignedSellerStoreName?: string | null;
 }
 
 // ─── Customer ───
@@ -63,5 +65,26 @@ export async function getMyTicketDetail(id: string): Promise<Ticket> {
 export async function replyToMyTicket(id: string, message: string): Promise<TicketMessage> {
   const { data } = await api.post<ApiResponse<TicketMessage>>(`/tickets/my/${id}/reply`, { message });
   if (!data.success || !data.data) throw new Error(data.message || 'Failed to send reply');
+  return data.data;
+}
+
+// ─── Chatbot ───
+
+export interface ChatBotResponse {
+  resolved: boolean;
+  reply: string;
+  ticketId?: string;
+  suggestedSubject?: string;
+}
+
+export async function chatWithBot(
+  message: string,
+  orderNumber?: string,
+): Promise<ChatBotResponse> {
+  const { data } = await api.post<ApiResponse<ChatBotResponse>>('/tickets/chat', {
+    message,
+    orderNumber,
+  });
+  if (!data.success || !data.data) throw new Error(data.message || 'Chat request failed');
   return data.data;
 }

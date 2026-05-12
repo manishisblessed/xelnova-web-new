@@ -26,6 +26,7 @@ type NavItem = { label: string; href: string };
 const NAV_ITEMS: NavItem[] = [
   { label: 'Dashboard', href: '/dashboard' },
   { label: 'Orders', href: '/orders' },
+  { label: 'Returns', href: '/returns' },
   { label: 'Inventory', href: '/inventory' },
   { label: 'Brand Store', href: '/store' },
   { label: 'Bulk Upload', href: '/bulk-upload' },

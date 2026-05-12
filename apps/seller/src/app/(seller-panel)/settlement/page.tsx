@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { FileText, Download, Calendar, IndianRupee, FileDown } from 'lucide-react';
+import { FileText, Download, Calendar, IndianRupee, FileDown, Truck } from 'lucide-react';
 import { toast } from 'sonner';
 import { DashboardHeader } from '@/components/dashboard/dashboard-header';
 import {
@@ -22,6 +22,8 @@ type SettlementRow = {
   gross: number;
   commissionPercent: number;
   commission: number;
+  courierDeduction: number;
+  shippingMode: string;
   net: number;
   orderStatus: string;
   paymentMethod: string;
@@ -30,7 +32,7 @@ type SettlementRow = {
 
 type SettlementReport = {
   rows: SettlementRow[];
-  totals: { gross: number; commission: number; net: number };
+  totals: { gross: number; commission: number; courierDeduction: number; net: number };
   commissionRate: number;
 };
 
@@ -177,7 +179,7 @@ export default function SettlementPage() {
 
         {report && (
           <>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
               <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="bg-white rounded-2xl border border-gray-200 p-5">
                 <div className="flex items-center gap-2 text-gray-500 text-sm mb-1"><IndianRupee size={16} />Gross Revenue</div>
                 <div className="text-2xl font-bold text-gray-900">₹{report.totals.gross.toFixed(2)}</div>
@@ -192,9 +194,22 @@ export default function SettlementPage() {
                   Commission % is set per product on approval. Refunded orders are commission-free.
                 </div>
               </motion.div>
+              <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 }} className="bg-white rounded-2xl border border-gray-200 p-5">
+                <div className="flex items-center gap-2 text-gray-500 text-sm mb-1">
+                  <Truck size={16} />
+                  Courier Charges (Xelgo)
+                </div>
+                <div className="text-2xl font-bold text-orange-600">-₹{report.totals.courierDeduction.toFixed(2)}</div>
+                <div className="text-[11px] text-gray-400 mt-1">
+                  Deducted for orders shipped via Xelgo platform courier.
+                </div>
+              </motion.div>
               <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="bg-violet-50 rounded-2xl border border-violet-200 p-5">
                 <div className="flex items-center gap-2 text-violet-600 text-sm mb-1"><IndianRupee size={16} />Net Earnings</div>
                 <div className="text-2xl font-bold text-violet-700">₹{report.totals.net.toFixed(2)}</div>
+                <div className="text-[11px] text-violet-400 mt-1">
+                  Gross − Commission − Courier Charges
+                </div>
               </motion.div>
             </div>
 
@@ -212,6 +227,7 @@ export default function SettlementPage() {
                         <th className="px-3 py-2.5 text-right font-medium text-gray-600">Qty</th>
                         <th className="px-3 py-2.5 text-right font-medium text-gray-600">Gross</th>
                         <th className="px-3 py-2.5 text-right font-medium text-gray-600">Commission</th>
+                        <th className="px-3 py-2.5 text-right font-medium text-gray-600">Courier</th>
                         <th className="px-3 py-2.5 text-right font-medium text-gray-600">Net</th>
                         <th className="px-3 py-2.5 text-center font-medium text-gray-600">Status</th>
                         <th className="px-3 py-2.5 text-center font-medium text-gray-600">Bill</th>
@@ -233,6 +249,15 @@ export default function SettlementPage() {
                                 -₹{r.commission.toFixed(2)}
                                 <span className="text-[10px] text-gray-400 ml-1">({r.commissionPercent}%)</span>
                               </span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2 text-right">
+                            {r.courierDeduction > 0 ? (
+                              <span className="text-orange-600" title={`Shipped via ${r.shippingMode === 'XELNOVA_COURIER' ? 'Xelgo' : 'Self Ship'}`}>
+                                -₹{r.courierDeduction.toFixed(2)}
+                              </span>
+                            ) : (
+                              <span className="text-gray-400">—</span>
                             )}
                           </td>
                           <td className="px-3 py-2 text-right font-medium">₹{r.net.toFixed(2)}</td>

@@ -11,6 +11,10 @@ export async function POST(request: NextRequest, ctx: Ctx) {
   return proxyToBackend(request, 'reviews', (await ctx.params).path);
 }
 
+export async function DELETE(request: NextRequest, ctx: Ctx) {
+  return proxyToBackend(request, 'reviews', (await ctx.params).path);
+}
+
 export async function OPTIONS() {
   return new NextResponse(null, { status: 204 });
 }

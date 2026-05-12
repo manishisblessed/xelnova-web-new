@@ -71,8 +71,32 @@ export default function SearchBar({ className }: { className?: string }) {
     setRecentSearches((prev) => { const updated = [trimmed, ...prev.filter((s) => s !== trimmed)].slice(0, 8); try { localStorage.setItem(STORAGE_KEY, JSON.stringify(updated)); } catch {} return updated; });
   }, []);
 
-  const handleSubmit = (e: React.FormEvent) => { e.preventDefault(); if (!query.trim()) return; saveSearch(query); setOpen(false); const params = new URLSearchParams({ q: query.trim() }); if (selectedCategory !== "all") params.set("category", selectedCategory); router.push(`/search?${params.toString()}`); };
-  const handleSuggestionClick = (text: string) => { setQuery(text); saveSearch(text); setOpen(false); const params = new URLSearchParams({ q: text }); if (selectedCategory !== "all") params.set("category", selectedCategory); router.push(`/search?${params.toString()}`); };
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = query.trim();
+    const hasCategory = selectedCategory !== "all";
+    if (!trimmed && !hasCategory) return;
+    setOpen(false);
+    if (hasCategory && !trimmed) {
+      router.push(`/products?category=${encodeURIComponent(selectedCategory)}`);
+      return;
+    }
+    saveSearch(trimmed);
+    const params = new URLSearchParams({ q: trimmed });
+    if (hasCategory) params.set("category", selectedCategory);
+    router.push(`/search?${params.toString()}`);
+  };
+
+  const handleSuggestionClick = (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    setQuery(text);
+    saveSearch(trimmed);
+    setOpen(false);
+    const params = new URLSearchParams({ q: trimmed });
+    if (selectedCategory !== "all") params.set("category", selectedCategory);
+    router.push(`/search?${params.toString()}`);
+  };
   const clearRecent = () => { setRecentSearches([]); try { localStorage.removeItem(STORAGE_KEY); } catch {} };
 
   const currentCategoryLabel = selectedCategory === "all" ? "All" : categoriesList.find((c) => c.slug === selectedCategory)?.name ?? "All";

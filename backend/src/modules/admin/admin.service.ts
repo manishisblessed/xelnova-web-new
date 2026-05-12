@@ -1684,16 +1684,99 @@ export class AdminService {
     if (query.status) where.status = query.status as any;
     if (query.seller) where.sellerId = query.seller;
 
+    // Date range filtering
+    const dateRange = this.resolveDateRange(query.period, query.dateFrom, query.dateTo);
+    if (dateRange) {
+      where.requestedAt = { gte: dateRange.from, lte: dateRange.to };
+    }
+
     const [items, total] = await Promise.all([
       this.prisma.payout.findMany({
         where, skip: (page - 1) * limit, take: limit,
         orderBy: { requestedAt: 'desc' },
-        include: { seller: { select: { storeName: true, user: { select: { name: true, email: true } } } } },
+        include: {
+          seller: { select: { storeName: true, user: { select: { name: true, email: true } } } },
+          order: {
+            select: {
+              orderNumber: true,
+              total: true,
+              shipment: { select: { courierCharges: true, shippingMode: true } },
+            },
+          },
+        },
       }),
       this.prisma.payout.count({ where }),
     ]);
 
-    return { items, total, page, limit };
+    // Compute financial summary for the filtered set
+    const summary = await this.computePayoutSummary(where);
+
+    return { items, total, page, limit, summary };
+  }
+
+  private resolveDateRange(period?: string, dateFrom?: string, dateTo?: string) {
+    if (period === 'today') {
+      const start = new Date();
+      start.setHours(0, 0, 0, 0);
+      const end = new Date();
+      end.setHours(23, 59, 59, 999);
+      return { from: start, to: end };
+    }
+    if (period === 'monthly') {
+      const start = new Date();
+      start.setDate(1);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date();
+      end.setHours(23, 59, 59, 999);
+      return { from: start, to: end };
+    }
+    if (dateFrom || dateTo) {
+      const from = dateFrom ? new Date(dateFrom) : new Date(0);
+      const to = dateTo ? new Date(dateTo) : new Date();
+      to.setHours(23, 59, 59, 999);
+      return { from, to };
+    }
+    return null;
+  }
+
+  private async computePayoutSummary(where: Prisma.PayoutWhereInput) {
+    const payouts = await this.prisma.payout.findMany({
+      where,
+      include: {
+        order: {
+          select: {
+            total: true,
+            shipment: { select: { courierCharges: true, shippingMode: true } },
+          },
+        },
+      },
+    });
+
+    let totalGross = 0;
+    let totalShippingCharges = 0;
+    let totalCommission = 0;
+    let totalNetPayout = 0;
+
+    for (const payout of payouts) {
+      totalGross += payout.amount;
+      totalNetPayout += payout.amount;
+
+      if (payout.order?.shipment?.shippingMode === 'XELNOVA_COURIER') {
+        const charges = payout.order.shipment.courierCharges ?? 0;
+        totalShippingCharges += charges;
+      }
+      const deduction = (payout as any).courierDeduction ?? 0;
+      totalCommission += deduction;
+    }
+
+    return {
+      totalGross,
+      totalShippingCharges,
+      totalCommission,
+      commissionAdjustment: totalShippingCharges,
+      totalNetPayout,
+      count: payouts.length,
+    };
   }
 
   async updatePayout(id: string, dto: UpdatePayoutDto) {

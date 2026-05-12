@@ -47,7 +47,7 @@ export async function getProducts(query?: ProductQuery) {
 }
 
 export async function getProductBySlug(slug: string) {
-  const { data } = await api.get<ApiResponse<Product & { relatedProducts: Product[] }>>(`/products/${slug}`);
+  const { data } = await api.get<ApiResponse<Product & { relatedProducts: Product[]; availableCoupons?: { id: string; code: string; description: string | null; discountType: 'PERCENTAGE' | 'FLAT'; discountValue: number; minOrderAmount: number; maxDiscount: number | null; validUntil: string | null }[] }>>(`/products/${slug}`);
   return data.data;
 }
 

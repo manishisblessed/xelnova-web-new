@@ -67,24 +67,35 @@ export default function SupportPage() {
       </section>
 
       {/* Quick Actions */}
-      <section className="py-6 -mt-8">
-        <div className="mx-auto max-w-[1440px] px-6">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
+      <section className="relative z-10 -mt-10 md:-mt-12 pb-2">
+        <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
+          <motion.ul
+            initial={{ opacity: 0, y: 24 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.2 }}
-            className="flex flex-wrap justify-center gap-3"
+            transition={{ duration: 0.5, delay: 0.15 }}
+            className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4"
           >
-            {quickActions.map((action) => (
-              <Link
+            {quickActions.map((action, idx) => (
+              <motion.li
                 key={action.label}
-                href={action.href}
-                className="inline-flex items-center gap-2 bg-white border border-border/60 rounded-full px-5 py-2.5 text-sm font-medium text-text-secondary hover:border-primary-300 hover:text-primary-600 hover:bg-primary-50 shadow-card transition-all"
+                initial={{ opacity: 0, y: 16 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.4, delay: 0.2 + idx * 0.06 }}
               >
-                <action.icon size={14} /> {action.label}
-              </Link>
+                <Link
+                  href={action.href}
+                  className="group flex h-full min-h-[118px] flex-col items-center justify-center gap-3 rounded-2xl border border-border/70 bg-white px-4 py-5 text-center shadow-card transition-all duration-300 hover:-translate-y-1 hover:border-primary-200 hover:shadow-card-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400 focus-visible:ring-offset-2"
+                >
+                  <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-primary-50 text-primary-600 ring-1 ring-primary-100/90 transition-colors group-hover:bg-primary-100 group-hover:text-primary-700">
+                    <action.icon className="h-6 w-6" strokeWidth={2} aria-hidden />
+                  </span>
+                  <span className="font-display text-sm font-semibold leading-snug text-text-primary transition-colors group-hover:text-primary-600 sm:text-[0.9375rem]">
+                    {action.label}
+                  </span>
+                </Link>
+              </motion.li>
             ))}
-          </motion.div>
+          </motion.ul>
         </div>
       </section>
 

@@ -825,174 +825,193 @@ export class DelhiveryProvider implements CourierProvider {
   /**
    * Fetch the OFFICIAL Delhivery shipping label as a PDF buffer.
    *
-   * Delhivery exposes the packing slip / label through several API
-   * shapes that vary by account vintage:
+   * Per the Delhivery Generate Shipping Label API:
+   *   GET /api/p/packing_slip?wbns={awb}&pdf=true
+   *   → JSON with `packages[*].pdf_download_link` (presigned S3 URL)
    *
-   *   1. Some accounts return a PDF directly when you pass `pdf=true`
-   *      to `/api/p/packing_slip/`.
-   *   2. Most accounts return JSON containing one of:
-   *        - `pdf_download_link`
-   *        - `pdf_links: ["https://…"]`
-   *        - `packages[*].pdf_download_link`
-   *        - `data.url`
-   *      …which is a presigned CDN URL we can then GET to retrieve
-   *      the PDF bytes.
-   *
-   * We try the PDF response first and fall back to the JSON +
-   * download-link path. Returning a buffer (rather than parsed JSON)
-   * lets the caller stream the carrier's exact label to the seller —
-   * matching what they'd download from Delhivery One byte-for-byte.
+   * We download the S3 URL to get the exact same PDF the seller would
+   * get from the Delhivery One panel — barcodes, layout, everything
+   * identical so the rider scans correctly at pickup.
    */
   async downloadLabel(
     awbNumber: string,
     config: SellerCourierConfig,
   ): Promise<Buffer> {
-    const base = this.getBaseUrl(config);
+    const resolvedBase = this.getBaseUrl(config);
     const token = config.apiKey;
 
-    const isPdf = (buf: Buffer): boolean =>
-      buf.length > 8 &&
-      (buf.slice(0, 4).toString('ascii') === '%PDF' ||
-        (buf[0] === 0x25 && buf[1] === 0x50 && buf[2] === 0x44 && buf[3] === 0x46));
+    const isPdf = (buf: Buffer): boolean => {
+      if (buf.length < 8) return false;
+      const start = buf.indexOf(0x25);
+      if (start >= 0 && start <= 4) {
+        return buf.slice(start, start + 4).toString('ascii') === '%PDF';
+      }
+      return false;
+    };
 
-    const fetchAsPdf = async (url: string, hdrs: Record<string, string>): Promise<Buffer | null> => {
+    const fetchPdfFromUrl = async (
+      url: string,
+      hdrs?: Record<string, string>,
+    ): Promise<Buffer | null> => {
       try {
-        const r = await fetch(url, { headers: hdrs, redirect: 'follow' });
+        const r = await fetch(url, {
+          headers: hdrs || {},
+          redirect: 'follow',
+        });
         if (!r.ok) {
-          this.logger.debug(`Delhivery label fetch ${r.status} for: ${url.replace(token, '***')}`);
+          this.logger.debug(
+            `Delhivery label fetch ${r.status}: ${url.replace(token, '***').slice(0, 120)}`,
+          );
           return null;
         }
         const buf = Buffer.from(await r.arrayBuffer());
         if (isPdf(buf)) return buf;
-        this.logger.debug(
-          `Delhivery response (${buf.length}B) not PDF — ct: ${r.headers.get('content-type')}, head: ${buf.slice(0, 30).toString('ascii').replace(/[^\x20-\x7E]/g, '.')}`,
-        );
+        if (
+          (r.headers.get('content-type') || '').includes('application/octet-stream') &&
+          buf.length > 128 &&
+          buf[0] !== 0x7b
+        ) {
+          return buf;
+        }
         return null;
       } catch (e) {
-        this.logger.debug(`Delhivery fetch error: ${e instanceof Error ? e.message : String(e)}`);
+        this.logger.debug(
+          `Delhivery fetch error: ${e instanceof Error ? e.message : String(e)}`,
+        );
         return null;
-      }
-    };
-
-    const collectUrls = (obj: unknown, out: string[], depth = 0): void => {
-      if (obj == null || depth > 10) return;
-      if (typeof obj === 'string') {
-        if (/^https?:\/\//i.test(obj.trim())) out.push(obj.trim());
-        return;
-      }
-      if (Array.isArray(obj)) { obj.forEach((v) => collectUrls(v, out, depth + 1)); return; }
-      if (typeof obj === 'object') {
-        for (const v of Object.values(obj as Record<string, unknown>)) {
-          collectUrls(v, out, depth + 1);
-        }
       }
     };
 
     const wbns = encodeURIComponent(awbNumber);
-    const authHdr = { Authorization: `Token ${token}` };
-    const acceptPdf = { ...authHdr, Accept: 'application/pdf, application/octet-stream, */*' };
+    const authHdr: Record<string, string> = {
+      Authorization: `Token ${token}`,
+      'Content-Type': 'application/json',
+    };
 
-    // ── Strategy 1 & 2 combined: Fetch packing_slip (pdf=true first), handle both
-    //    direct-PDF and JSON-with-download-link responses. ──
-    const packingSlipUrls = [
-      `${base}/api/p/packing_slip/?wbns=${wbns}&pdf=true&token=${encodeURIComponent(token)}`,
-      `${base}/api/p/packing_slip/?wbns=${wbns}&pdf=true`,
-      `${base}/api/p/packing_slip/?wbns=${wbns}&token=${encodeURIComponent(token)}`,
-    ];
-    let jsonBody: string | null = null;
-    for (const url of packingSlipUrls) {
+    // Try both the resolved base and an explicit production fallback
+    // (handles dev environments where NODE_ENV isn't production but the
+    // waybill was created on the production Delhivery account).
+    const bases = [resolvedBase];
+    if (resolvedBase !== this.prodBase) bases.push(this.prodBase);
+
+    for (const base of bases) {
+      // ── Strategy 1: pdf=true → JSON with S3 download link ──
+      const labelUrl = `${base}/api/p/packing_slip?wbns=${wbns}&pdf=true`;
       try {
-        const r = await fetch(url, { headers: acceptPdf, redirect: 'follow' });
-        if (!r.ok) {
-          this.logger.debug(`Delhivery packing_slip ${r.status} for: ${url.replace(token, '***')}`);
-          continue;
-        }
-        const buf = Buffer.from(await r.arrayBuffer());
-        if (isPdf(buf)) {
-          this.logger.log(`Delhivery label (direct PDF) for ${awbNumber}, ${buf.length}B.`);
-          return buf;
-        }
-        // Not PDF — save as JSON candidate for link extraction
-        if (!jsonBody && buf.length > 50) {
-          jsonBody = buf.toString('utf8');
+        const r = await fetch(labelUrl, { headers: authHdr, redirect: 'follow' });
+        if (r.ok) {
+          const buf = Buffer.from(await r.arrayBuffer());
+
+          if (isPdf(buf)) {
+            this.logger.log(
+              `Delhivery label (direct PDF) for ${awbNumber}, ${buf.length}B.`,
+            );
+            return buf;
+          }
+
+          const text = buf.toString('utf8');
+          let parsed: any = null;
+          try { parsed = JSON.parse(text); } catch { /* not JSON */ }
+
+          if (parsed) {
+            this.logger.debug(
+              `Delhivery packing_slip JSON: packages_found=${parsed.packages_found}, keys=${JSON.stringify(Object.keys(parsed))}`,
+            );
+
+            // Primary: packages[*].pdf_download_link (documented field)
+            const packages = Array.isArray(parsed.packages) ? parsed.packages : [];
+            for (const pkg of packages) {
+              const link =
+                pkg.pdf_download_link ||
+                pkg.pdfDownloadLink ||
+                pkg.pdf_link ||
+                pkg.label_url ||
+                '';
+              if (link && /^https?:\/\//i.test(link)) {
+                const pdf = await fetchPdfFromUrl(link);
+                if (pdf) {
+                  this.logger.log(
+                    `Delhivery label via S3 link for ${awbNumber}, ${pdf.length}B.`,
+                  );
+                  return pdf;
+                }
+              }
+            }
+
+            // Fallback: top-level link fields
+            const topLink =
+              parsed.pdf_download_link ||
+              parsed.pdf_link ||
+              parsed.label_url ||
+              (parsed.data && typeof parsed.data === 'object'
+                ? parsed.data.url || parsed.data.pdf_download_link || ''
+                : '');
+            if (topLink && /^https?:\/\//i.test(topLink)) {
+              const pdf = await fetchPdfFromUrl(topLink);
+              if (pdf) {
+                this.logger.log(
+                  `Delhivery label via top-level link for ${awbNumber}, ${pdf.length}B.`,
+                );
+                return pdf;
+              }
+            }
+
+            // Fallback: base64-encoded PDF
+            const b64 =
+              parsed.pdf_base64 ||
+              parsed.label_base64 ||
+              parsed.data?.pdf_base64 ||
+              '';
+            if (typeof b64 === 'string' && b64.length > 100) {
+              const decoded = Buffer.from(b64, 'base64');
+              if (isPdf(decoded)) {
+                this.logger.log(
+                  `Delhivery label (base64) for ${awbNumber}, ${decoded.length}B.`,
+                );
+                return decoded;
+              }
+            }
+
+            if (parsed.packages_found === 0) {
+              this.logger.debug(
+                `Delhivery packing_slip returned packages_found=0 on ${base} for AWB ${awbNumber} — trying next base.`,
+              );
+              continue;
+            }
+
+            this.logger.warn(
+              `Delhivery packing_slip JSON for ${awbNumber} — no usable PDF link. Body: ${text.slice(0, 500)}`,
+            );
+          }
+        } else {
+          this.logger.debug(
+            `Delhivery packing_slip ${r.status} on ${base} for AWB ${awbNumber}.`,
+          );
         }
       } catch (e) {
-        this.logger.debug(`Delhivery fetch error: ${e instanceof Error ? e.message : String(e)}`);
-      }
-    }
-
-    if (jsonBody) {
-      // Response might be raw PDF bytes (some accounts)
-      const rawBuf = Buffer.from(jsonBody, 'binary');
-      if (isPdf(rawBuf)) {
-        this.logger.log(`Delhivery label (binary in JSON response) for ${awbNumber}, ${rawBuf.length}B.`);
-        return rawBuf;
+        this.logger.debug(
+          `Delhivery packing_slip fetch error: ${e instanceof Error ? e.message : String(e)}`,
+        );
       }
 
-      let parsed: any = null;
-      try { parsed = JSON.parse(jsonBody); } catch { /* not JSON */ }
-
-      if (parsed) {
-        this.logger.debug(`Delhivery packing_slip JSON keys: ${JSON.stringify(Object.keys(parsed))}`);
-        const allFoundUrls: string[] = [];
-        collectUrls(parsed, allFoundUrls);
-
-        // Prioritize URLs that look like label/packing-slip PDFs
-        const labelUrls = allFoundUrls.filter(
-          (u) => /packing.?slip|label|\.pdf/i.test(u),
-        );
-        const otherUrls = allFoundUrls.filter(
-          (u) => !labelUrls.includes(u),
-        );
-        const allUrls = [...new Set([...labelUrls, ...otherUrls])];
-
-        this.logger.debug(`Delhivery label candidate URLs (${allUrls.length}): ${JSON.stringify(allUrls.slice(0, 3).map(u => u.slice(0, 80)))}`);
-
-        for (const u of allUrls) {
-          const pdf = await fetchAsPdf(u, {});
-          if (pdf) {
-            this.logger.log(`Delhivery label via download URL for ${awbNumber}, ${pdf.length}B.`);
-            return pdf;
-          }
+      // ── Strategy 2: Alternate label endpoints ──
+      const altPaths = [
+        `${base}/api/p/download_packing_slip?wbns=${wbns}`,
+        `${base}/api/p/label?wbns=${wbns}`,
+      ];
+      for (const url of altPaths) {
+        const pdf = await fetchPdfFromUrl(url, authHdr);
+        if (pdf) {
+          this.logger.log(
+            `Delhivery label (alt endpoint) for ${awbNumber}, ${pdf.length}B.`,
+          );
+          return pdf;
         }
-
-        // Some responses have base64-encoded PDF
-        const b64 = parsed?.pdf_base64 || parsed?.data?.pdf_base64 || parsed?.label_base64 || '';
-        if (typeof b64 === 'string' && b64.length > 100) {
-          const decoded = Buffer.from(b64, 'base64');
-          if (isPdf(decoded)) {
-            this.logger.log(`Delhivery label (base64) for ${awbNumber}, ${decoded.length}B.`);
-            return decoded;
-          }
-        }
-
-        // Log for debugging if we got here with a valid JSON but no PDF
-        this.logger.warn(
-          `Delhivery packing_slip JSON for ${awbNumber} — no PDF found. Body: ${jsonBody.slice(0, 500)}`,
-        );
-      } else {
-        this.logger.warn(
-          `Delhivery packing_slip response for ${awbNumber} was not JSON/PDF. Head: ${jsonBody.slice(0, 200)}`,
-        );
-      }
-    }
-
-    // ── Strategy 3: Alternate label endpoints (varies by account vintage) ──
-    const altPaths = [
-      `${base}/api/p/download_packing_slip/?wbns=${wbns}&token=${encodeURIComponent(token)}`,
-      `${base}/api/p/label/?wbns=${wbns}&token=${encodeURIComponent(token)}`,
-      `${base}/api/p/download_packing_slip/?wbns=${wbns}`,
-    ];
-    for (const url of altPaths) {
-      const pdf = await fetchAsPdf(url, acceptPdf);
-      if (pdf) {
-        this.logger.log(`Delhivery label (alt endpoint) for ${awbNumber}, ${pdf.length}B.`);
-        return pdf;
       }
     }
 
     this.logger.error(
-      `Delhivery label fetch FAILED for AWB ${awbNumber} on base ${base}. All strategies exhausted.`,
+      `Delhivery label fetch FAILED for AWB ${awbNumber}. Tried bases: ${bases.join(', ')}`,
     );
     const err = new Error(
       `Delhivery label not available yet for AWB ${awbNumber}. Please try again in 1-2 minutes after manifestation.`,
@@ -1028,7 +1047,9 @@ export class DelhiveryProvider implements CourierProvider {
     const returnCountry = options.returnCountry?.trim() || options.country || 'India';
     const returnPin = options.returnPincode?.trim() || options.pincode;
 
-    if (!options.name || !options.address || !options.city || !options.state || !options.pincode || !phone) {
+    const displayName = options.label || options.name;
+
+    if (!displayName || !options.address || !options.city || !options.state || !options.pincode || !phone) {
       return {
         success: false,
         message:
@@ -1036,15 +1057,14 @@ export class DelhiveryProvider implements CourierProvider {
       };
     }
 
-    // Include city, state, pincode in the address field so Delhivery
-    // displays the complete pickup address on their shipping labels.
     const fullAddress = `${options.address}, ${options.city}, ${options.state} - ${options.pincode}`;
     const fullReturnAddress = `${returnAddress}, ${returnCity}, ${returnState} - ${returnPin}`;
 
     const body: Record<string, unknown> = {
-      name: options.name,
+      name: displayName,
       email: options.email || '',
       phone,
+      alternate_phone: options.alternatePhone || '',
       address: fullAddress,
       city: options.city,
       state: options.state,
@@ -1098,8 +1118,8 @@ export class DelhiveryProvider implements CourierProvider {
     if (res.ok && parsed?.success === true) {
       return {
         success: true,
-        registeredName: parsed?.data?.name || options.name,
-        message: `Warehouse "${options.name}" registered with Delhivery.`,
+        registeredName: parsed?.data?.name || displayName,
+        message: `Warehouse "${displayName}" registered with Delhivery.`,
         raw: parsed,
       };
     }
@@ -1108,7 +1128,7 @@ export class DelhiveryProvider implements CourierProvider {
     // explicitly says "has been created" (or "successfully created").
     // Treat as success even though the HTTP status is 400.
     if (xml && /\b(has been created|successfully created|created successfully)\b/i.test(xml.message)) {
-      const finalName = xml.name || options.name;
+      const finalName = xml.name || displayName;
       return {
         success: true,
         registeredName: finalName,
@@ -1117,9 +1137,6 @@ export class DelhiveryProvider implements CourierProvider {
       };
     }
 
-    // Already exists — Delhivery returns 400 with a message containing
-    // "already exists" / "duplicate". For our purposes that's fine —
-    // the warehouse is live and we can use it for pickups.
     const errMsg = (
       parsed?.error ||
       parsed?.message ||
@@ -1130,6 +1147,8 @@ export class DelhiveryProvider implements CourierProvider {
       `HTTP ${res.status}`
     ).toString();
     const lower = errMsg.toLowerCase();
+
+    // Already exists — try to update with new address details
     if (
       lower.includes('already exist') ||
       lower.includes('duplicate') ||
@@ -1137,28 +1156,38 @@ export class DelhiveryProvider implements CourierProvider {
       lower.includes('warehouse name already') ||
       lower.includes('client warehouse with this name')
     ) {
+      this.logger.log(
+        `Delhivery warehouse "${displayName}" already exists — updating address via edit endpoint.`,
+      );
+      const editResult = await this.editWarehouse(config, { ...options, name: displayName });
+      if (editResult.success) {
+        return {
+          success: true,
+          alreadyExisted: true,
+          registeredName: displayName,
+          message: `Warehouse "${displayName}" updated on Delhivery with new address.`,
+          raw: editResult.raw,
+        };
+      }
       return {
         success: true,
         alreadyExisted: true,
-        registeredName: xml?.name || options.name,
-        message: `Warehouse "${options.name}" was already registered with Delhivery — reusing it.`,
+        registeredName: xml?.name || displayName,
+        message: `Warehouse "${displayName}" already registered with Delhivery.`,
         raw: parsed ?? xml ?? text,
       };
     }
 
-    // Delhivery sometimes returns "some error while creating/updating warehouse"
-    // when the warehouse name already exists but with different details. If the
-    // response includes the warehouse name we requested, try to UPDATE the
-    // existing warehouse with the new address details via the edit endpoint.
+    // Error while creating — warehouse likely exists with different details
     if (
       lower.includes('error while creating/updating warehouse') &&
       xml?.name &&
-      xml.name.toLowerCase() === options.name.toLowerCase()
+      xml.name.toLowerCase() === displayName.toLowerCase()
     ) {
       this.logger.log(
-        `Delhivery warehouse "${options.name}" already exists — attempting to update address via edit endpoint.`,
+        `Delhivery warehouse "${displayName}" already exists — attempting to update address via edit endpoint.`,
       );
-      const editResult = await this.editWarehouse(config, options);
+      const editResult = await this.editWarehouse(config, { ...options, name: displayName });
       if (editResult.success) {
         return {
           success: true,
@@ -1168,7 +1197,6 @@ export class DelhiveryProvider implements CourierProvider {
           raw: editResult.raw,
         };
       }
-      // Edit failed — log but still treat as usable since warehouse exists
       this.logger.warn(
         `Delhivery warehouse edit failed: ${editResult.message} — warehouse exists but address may be outdated.`,
       );
@@ -1314,8 +1342,9 @@ export class DelhiveryProvider implements CourierProvider {
   ): { message: string; name: string } | null {
     if (!text || !/<\?xml|<root[\s>]/i.test(text)) return null;
     const messageMatch = text.match(/<message>([\s\S]*?)<\/message>/i);
+    const detailMatch = text.match(/<detail>([\s\S]*?)<\/detail>/i);
     const nameMatch = text.match(/<name>([\s\S]*?)<\/name>/i);
-    if (!messageMatch && !nameMatch) return null;
+    if (!messageMatch && !detailMatch && !nameMatch) return null;
     const decode = (s: string) =>
       s
         .replace(/&lt;/g, '<')
@@ -1325,13 +1354,16 @@ export class DelhiveryProvider implements CourierProvider {
         .replace(/&apos;/g, "'")
         .trim();
     return {
-      message: messageMatch ? decode(messageMatch[1]) : '',
+      message: messageMatch ? decode(messageMatch[1]) : detailMatch ? decode(detailMatch[1]) : '',
       name: nameMatch ? decode(nameMatch[1]) : '',
     };
   }
 
   private humaniseWarehouseError(rawMsg: string): string {
     const msg = rawMsg.toLowerCase();
+    if (msg.includes('invalid token') || msg.includes('invalid api') || msg.includes('unauthorized') || msg.includes('authentication')) {
+      return `Delhivery API token is invalid or expired. Please go to Shipping Settings → Delhivery → Edit and paste a fresh API token from your Delhivery One dashboard (Settings → API Setup).`;
+    }
     if (msg.includes('non serviceable') || msg.includes('not serviceable') || msg.includes('unserviceable')) {
       return `Delhivery doesn't service pickups from this pincode. Please ask the seller to check their business pincode (or use a nearby serviceable warehouse).`;
     }

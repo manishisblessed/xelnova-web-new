@@ -75,11 +75,11 @@ export const FlashDealCard = memo(function FlashDealCard({ product }: { product:
   const pad = (n: number) => String(n).padStart(2, '0');
 
   return (
-    <Link href={`/products/${product.slug}`}>
+    <Link href={`/products/${product.slug}`} className="block min-w-0">
       <motion.div
         whileHover={{ y: -4 }}
         transition={{ type: 'spring', stiffness: 300, damping: 20 }}
-        className="group card-3d shine-effect flex w-[200px] flex-shrink-0 flex-col overflow-hidden rounded-2xl border border-white/80 bg-white ring-1 ring-danger-100/50 sm:w-[220px]"
+        className="group card-3d shine-effect flex w-[200px] flex-shrink-0 flex-col overflow-hidden rounded-2xl border border-white/80 bg-white ring-1 ring-danger-100/50 sm:w-[220px] xl:w-full xl:min-w-0"
       >
         {/* Deal Badge */}
         <div className="relative flex items-center justify-center gap-1.5 bg-gradient-to-r from-danger-600 via-danger-500 to-accent-500 px-3 py-2 overflow-hidden">
@@ -100,7 +100,7 @@ export const FlashDealCard = memo(function FlashDealCard({ product }: { product:
               src={product.images[0]}
               alt={product.name}
               fill
-              sizes="220px"
+              sizes="(max-width: 1279px) 220px, (max-width: 1535px) 18vw, 200px"
               className={`object-cover transition-transform duration-500 group-hover:scale-110 ${
                 imgLoaded ? 'opacity-100' : 'opacity-0'
               }`}

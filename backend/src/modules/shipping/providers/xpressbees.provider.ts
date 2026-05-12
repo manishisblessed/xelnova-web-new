@@ -460,11 +460,63 @@ export class XpressBeesProvider implements CourierProvider {
   }
 
   /**
-   * XpressBees does not have a dedicated warehouse registration API.
-   * The pickup warehouse_name + address are passed inline with each
-   * shipment. This method validates credentials and stores the warehouse
-   * name so the platform can track registration status consistently
-   * across all couriers.
+   * Fetch existing warehouses from the XpressBees account and find the
+   * best match by name, pincode, or city.
+   */
+  private async findExistingWarehouse(
+    headers: Record<string, string>,
+    options: RegisterWarehouseOptions,
+  ): Promise<{ found: boolean; name?: string; warehouses?: any[] }> {
+    const displayName = options.label || options.name;
+    const endpoints = ['/warehouse', '/warehouses', '/warehouse/list'];
+    for (const ep of endpoints) {
+      try {
+        const res = await fetch(`${this.baseUrl}${ep}`, { headers });
+        if (!res.ok) {
+          this.logger.debug(`XpressBees: GET ${ep} returned ${res.status}`);
+          continue;
+        }
+
+        const data = await res.json();
+        const list: any[] =
+          Array.isArray(data?.data) ? data.data
+          : Array.isArray(data?.warehouses) ? data.warehouses
+          : Array.isArray(data) ? data
+          : [];
+
+        if (list.length === 0) continue;
+
+        // Only match by exact name — never by pincode/city
+        const byName = list.find(
+          (w: any) =>
+            (w.warehouse_name || w.name || '').toLowerCase() === displayName.toLowerCase() ||
+            (w.warehouse_name || w.name || '').toLowerCase() === options.name.toLowerCase(),
+        );
+        if (byName) {
+          const name = byName.warehouse_name || byName.name;
+          this.logger.log(`XpressBees: Found existing warehouse "${name}" by name.`);
+          return { found: true, name, warehouses: list };
+        }
+
+        this.logger.debug(
+          `XpressBees: ${list.length} warehouse(s) found via ${ep}, none match "${displayName}".`,
+        );
+        return { found: false, warehouses: list };
+      } catch (err) {
+        this.logger.debug(`XpressBees: Warehouse endpoint ${ep} failed: ${err}`);
+      }
+    }
+    return { found: false };
+  }
+
+  /**
+   * Register a pickup warehouse with XpressBees.
+   *
+   * Flow:
+   * 1. Fetch existing warehouses — if a match is found, reuse it.
+   * 2. If none match, attempt to create via POST /warehouse.
+   * 3. If API creation is unsupported, fall back to config.warehouseId
+   *    (the name already registered on XpressBees by the seller/admin).
    */
   async registerWarehouse(
     config: SellerCourierConfig,
@@ -477,8 +529,9 @@ export class XpressBeesProvider implements CourierProvider {
       };
     }
 
+    let headers: Record<string, string>;
     try {
-      await this.authHeaders(config);
+      headers = await this.authHeaders(config);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this.logger.error(`XpressBees registerWarehouse auth check failed: ${msg}`);
@@ -488,14 +541,91 @@ export class XpressBeesProvider implements CourierProvider {
       };
     }
 
-    this.logger.log(
-      `XpressBees warehouse "${options.name}" validated (no external API — name stored for shipment payloads).`,
-    );
+    // 1. Check for existing warehouses
+    const existing = await this.findExistingWarehouse(headers, options);
+    if (existing.found && existing.name) {
+      return {
+        success: true,
+        registeredName: existing.name,
+        alreadyExisted: true,
+        message: `Using existing XpressBees warehouse "${existing.name}".`,
+      };
+    }
+
+    // 2. Try to create a warehouse via API
+    const phone = options.phone.replace(/\D/g, '').slice(-10);
+    const displayName = options.label || options.name;
+    const addressLine2Parts = [options.addressLine2, options.landmark].filter(Boolean);
+
+    const createPayload = {
+      warehouse_name: displayName,
+      name: options.contactPerson || options.registeredName || displayName,
+      phone,
+      alternate_phone: options.alternatePhone || '',
+      address: options.address,
+      address_2: addressLine2Parts.join(', ') || '',
+      city: options.city,
+      state: options.state,
+      pincode: options.pincode,
+      country: options.country || 'India',
+      gst_number: options.gstNumber || '',
+      support_email: options.email || '',
+      support_phone: options.alternatePhone || options.phone || '',
+      return_address: options.address,
+      return_city: options.city,
+      return_state: options.state,
+      return_pincode: options.pincode,
+    };
+
+    const createEndpoints = ['/warehouse', '/warehouses', '/warehouse/create'];
+    for (const ep of createEndpoints) {
+      try {
+        const res = await fetch(`${this.baseUrl}${ep}`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(createPayload),
+        });
+
+        const resText = await res.text();
+        this.logger.debug(`XpressBees: POST ${ep} → ${res.status}: ${resText.slice(0, 300)}`);
+
+        if (res.ok) {
+          let data: any = {};
+          try { data = JSON.parse(resText); } catch { /* not JSON */ }
+          if (data.status !== 0 && data.error === undefined) {
+            const createdName =
+              data.data?.warehouse_name || data.warehouse_name || data.name || displayName;
+            this.logger.log(`XpressBees: Created warehouse "${createdName}" via ${ep}.`);
+            return {
+              success: true,
+              registeredName: createdName,
+              message: `Warehouse "${createdName}" created on XpressBees.`,
+            };
+          }
+        }
+
+        const errText = resText;
+        if (errText.toLowerCase().includes('already') || errText.toLowerCase().includes('exists')) {
+          const retry = await this.findExistingWarehouse(headers, options);
+          if (retry.found && retry.name) {
+            return {
+              success: true,
+              registeredName: retry.name,
+              alreadyExisted: true,
+              message: `Using existing XpressBees warehouse "${retry.name}".`,
+            };
+          }
+        }
+      } catch (err) {
+        this.logger.debug(`XpressBees: Warehouse create via ${ep} failed: ${err}`);
+      }
+    }
 
     return {
-      success: true,
-      registeredName: options.name,
-      message: `Warehouse "${options.name}" registered with XpressBees (address will be sent with each shipment).`,
+      success: false,
+      message:
+        'Could not create a warehouse on XpressBees via API. ' +
+        'Please add a warehouse manually in your XpressBees dashboard (shipment.xpressbees.com → Warehouse).',
     };
   }
 }

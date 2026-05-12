@@ -25,6 +25,8 @@ import {
   apiGetTicketDetail,
   apiReplyTicket,
   apiForwardTicket,
+  apiForwardSellerReplyToCustomer,
+  apiForwardCustomerMessageToSeller,
   apiUpdateTicketStatus,
 } from '@/lib/api';
 
@@ -164,6 +166,18 @@ export default function AdminTicketsPage() {
   const [forwardNote, setForwardNote] = useState('');
   const [forwarding, setForwarding] = useState(false);
 
+  const [showForwardToCustomer, setShowForwardToCustomer] = useState(false);
+  const [forwardToCustomerMessageId, setForwardToCustomerMessageId] = useState<string | null>(null);
+  const [forwardToCustomerPreview, setForwardToCustomerPreview] = useState('');
+  const [forwardToCustomerNote, setForwardToCustomerNote] = useState('');
+  const [forwardingToCustomer, setForwardingToCustomer] = useState(false);
+
+  const [showForwardMsgToSeller, setShowForwardMsgToSeller] = useState(false);
+  const [forwardMsgToSellerMessageId, setForwardMsgToSellerMessageId] = useState<string | null>(null);
+  const [forwardMsgToSellerPreview, setForwardMsgToSellerPreview] = useState('');
+  const [forwardMsgToSellerNote, setForwardMsgToSellerNote] = useState('');
+  const [forwardingMsgToSeller, setForwardingMsgToSeller] = useState(false);
+
   const bottomRef = useRef<HTMLDivElement>(null);
   /** Guard so re-renders don't re-open the deep-linked ticket. */
   const handledDeepLinkRef = useRef(false);
@@ -245,6 +259,62 @@ export default function AdminTicketsPage() {
       alert(e.message || 'Failed to forward ticket');
     } finally {
       setForwarding(false);
+    }
+  };
+
+  const openForwardToCustomer = (msgId: string, sellerText: string) => {
+    setForwardToCustomerMessageId(msgId);
+    setForwardToCustomerPreview(sellerText);
+    setForwardToCustomerNote('');
+    setShowForwardToCustomer(true);
+  };
+
+  const handleForwardToCustomer = async () => {
+    if (!selected || !forwardToCustomerMessageId) return;
+    setForwardingToCustomer(true);
+    try {
+      const updated: any = await apiForwardSellerReplyToCustomer(selected.id, {
+        messageId: forwardToCustomerMessageId,
+        note: forwardToCustomerNote.trim() || undefined,
+      });
+      setSelected(updated);
+      setShowForwardToCustomer(false);
+      setForwardToCustomerMessageId(null);
+      setForwardToCustomerPreview('');
+      setForwardToCustomerNote('');
+      loadTickets(filterStatus);
+    } catch (e: any) {
+      alert(e.message || 'Failed to forward to customer');
+    } finally {
+      setForwardingToCustomer(false);
+    }
+  };
+
+  const openForwardMsgToSeller = (msgId: string, customerText: string) => {
+    setForwardMsgToSellerMessageId(msgId);
+    setForwardMsgToSellerPreview(customerText);
+    setForwardMsgToSellerNote('');
+    setShowForwardMsgToSeller(true);
+  };
+
+  const handleForwardMsgToSeller = async () => {
+    if (!selected || !forwardMsgToSellerMessageId) return;
+    setForwardingMsgToSeller(true);
+    try {
+      const updated: any = await apiForwardCustomerMessageToSeller(selected.id, {
+        messageId: forwardMsgToSellerMessageId,
+        note: forwardMsgToSellerNote.trim() || undefined,
+      });
+      setSelected(updated);
+      setShowForwardMsgToSeller(false);
+      setForwardMsgToSellerMessageId(null);
+      setForwardMsgToSellerPreview('');
+      setForwardMsgToSellerNote('');
+      loadTickets(filterStatus);
+    } catch (e: any) {
+      alert(e.message || 'Failed to forward to seller');
+    } finally {
+      setForwardingMsgToSeller(false);
     }
   };
 
@@ -371,6 +441,24 @@ export default function AdminTicketsPage() {
                       {' · '}
                       {new Date(msg.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
                     </p>
+                    {msg.senderRole === 'SELLER' && !msg.isInternal && selected.status !== 'CLOSED' && (
+                      <button
+                        type="button"
+                        onClick={() => openForwardToCustomer(msg.id, msg.message)}
+                        className="mt-2 text-[11px] font-semibold text-emerald-700 hover:text-emerald-900 underline-offset-2 hover:underline"
+                      >
+                        Forward to customer
+                      </button>
+                    )}
+                    {msg.senderRole === 'CUSTOMER' && !msg.isInternal && selected.status !== 'CLOSED' && selected.assignedSellerId && (
+                      <button
+                        type="button"
+                        onClick={() => openForwardMsgToSeller(msg.id, msg.message)}
+                        className="mt-2 text-[11px] font-semibold text-blue-700 hover:text-blue-900 underline-offset-2 hover:underline"
+                      >
+                        Forward to seller
+                      </button>
+                    )}
                   </div>
                 </motion.div>
               );
@@ -517,6 +605,111 @@ export default function AdminTicketsPage() {
                   className="flex-1 rounded-xl bg-primary-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-primary-700 disabled:opacity-50 flex items-center justify-center gap-2"
                 >
                   {forwarding ? <Loader2 size={14} className="animate-spin" /> : null}
+                  Forward
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {/* Forward seller reply → customer */}
+        {showForwardToCustomer && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 space-y-4"
+            >
+              <h3 className="text-lg font-bold text-text-primary flex items-center gap-2">
+                <User size={18} /> Forward to customer
+              </h3>
+              <p className="text-sm text-text-secondary">
+                This posts a relay message on the ticket so the buyer sees it in their support view. The seller’s
+                reply is quoted below; you can add an optional note above it.
+              </p>
+              <div className="rounded-xl border border-border bg-gray-50 px-3 py-2.5 text-sm max-h-32 overflow-y-auto whitespace-pre-wrap">
+                {forwardToCustomerPreview}
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-text-primary mb-1">Note (optional)</label>
+                <textarea
+                  value={forwardToCustomerNote}
+                  onChange={(e) => setForwardToCustomerNote(e.target.value)}
+                  placeholder="Short intro for the customer, e.g. “Here is an update from the store.”"
+                  rows={2}
+                  className="w-full rounded-xl border border-border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none"
+                />
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowForwardToCustomer(false);
+                    setForwardToCustomerMessageId(null);
+                  }}
+                  className="flex-1 rounded-xl border border-border px-4 py-2.5 text-sm font-semibold hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleForwardToCustomer()}
+                  disabled={forwardingToCustomer}
+                  className="flex-1 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {forwardingToCustomer ? <Loader2 size={14} className="animate-spin" /> : null}
+                  Forward
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {/* Forward customer message → seller */}
+        {showForwardMsgToSeller && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 space-y-4"
+            >
+              <h3 className="text-lg font-bold text-text-primary flex items-center gap-2">
+                <Store size={18} /> Forward to seller
+              </h3>
+              <p className="text-sm text-text-secondary">
+                This sends the customer&apos;s message to the seller on this ticket. The message is quoted below; you can add an optional note above it.
+              </p>
+              <div className="rounded-xl border border-border bg-gray-50 px-3 py-2.5 text-sm max-h-32 overflow-y-auto whitespace-pre-wrap">
+                {forwardMsgToSellerPreview}
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-text-primary mb-1">Note (optional)</label>
+                <textarea
+                  value={forwardMsgToSellerNote}
+                  onChange={(e) => setForwardMsgToSellerNote(e.target.value)}
+                  placeholder="Short intro for the seller, e.g. 'Customer has a follow-up question.'"
+                  rows={2}
+                  className="w-full rounded-xl border border-border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none"
+                />
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowForwardMsgToSeller(false);
+                    setForwardMsgToSellerMessageId(null);
+                  }}
+                  className="flex-1 rounded-xl border border-border px-4 py-2.5 text-sm font-semibold hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleForwardMsgToSeller()}
+                  disabled={forwardingMsgToSeller}
+                  className="flex-1 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {forwardingMsgToSeller ? <Loader2 size={14} className="animate-spin" /> : null}
                   Forward
                 </button>
               </div>

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Truck, Plus, Trash2, Edit2, Check, Eye, EyeOff,
+  Plus, Trash2, Edit2, Check, Eye, EyeOff,
   ExternalLink, Loader2, AlertCircle, AlertTriangle, CheckCircle2, Settings,
   Shield, Link2, MapPin, Star,
 } from 'lucide-react';
@@ -20,9 +20,7 @@ import {
   apiUpdatePickupLocation,
   apiDeletePickupLocation,
   apiSetDefaultPickupLocation,
-  apiRegisterPickupLocation,
   apiGetPickupLocationRegistrations,
-  apiRegisterPickupLocationAllCouriers,
   apiRegisterPickupLocationWithCourier,
   apiUnregisterPickupLocationFromCourier,
   type ShippingRates,
@@ -72,6 +70,13 @@ interface ProviderDef {
  *   accountId   → SellerCourierConfig.accountId
  *   warehouseId → SellerCourierConfig.warehouseId
  */
+const COURIER_META: Record<string, { logo: string; name: string }> = {
+  DELHIVERY: { logo: '📦', name: 'Delhivery' },
+  SHIPROCKET: { logo: '🚀', name: 'ShipRocket' },
+  XPRESSBEES: { logo: '🐝', name: 'XpressBees' },
+  EKART: { logo: '📬', name: 'Ekart' },
+};
+
 const PROVIDERS: ProviderDef[] = [
   {
     id: 'DELHIVERY',
@@ -293,29 +298,6 @@ export default function ShippingSettingsPage() {
     }
   };
 
-  const handleReregisterLocation = async (location: SellerPickupLocation) => {
-    setLocationActionId(location.id);
-    try {
-      const result = await apiRegisterPickupLocationAllCouriers(location.id);
-      const failed = result.results.filter((r) => !r.success);
-      if (failed.length === 0) {
-        toast.success(`"${location.label}" registered with all couriers.`);
-      } else if (failed.length < result.results.length) {
-        toast.success(
-          `"${location.label}" registered with ${result.results.length - failed.length} courier(s). ${failed.length} failed.`,
-        );
-      } else {
-        toast.error(`Registration failed for all couriers.`);
-      }
-      setCourierRegs((prev) => ({ ...prev, [location.id]: result.registrations }));
-      await loadLocations();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to register location');
-    } finally {
-      setLocationActionId(null);
-    }
-  };
-
   const handleToggleCourierRegistration = async (
     locationId: string,
     provider: string,
@@ -330,7 +312,7 @@ export default function ShippingSettingsPage() {
       } else {
         const result = await apiRegisterPickupLocationWithCourier(locationId, provider);
         if (result.success) {
-          toast.success(`Registered with ${provider}`);
+          toast.success(result.message || `Registered with ${provider}`);
         } else {
           toast.error(result.message);
         }
@@ -528,8 +510,6 @@ export default function ShippingSettingsPage() {
               {locations.map((loc) => {
                 const busy = locationActionId === loc.id;
                 const regs = courierRegs[loc.id] || [];
-                const activeRegs = regs.filter((r) => r.registered && r.isActive);
-                const failedRegs = regs.filter((r) => !r.registered && r.lastError);
                 return (
                   <div
                     key={loc.id}
@@ -554,60 +534,100 @@ export default function ShippingSettingsPage() {
                           {loc.phone && <span className="ml-1">· 📞 {loc.phone}</span>}
                         </p>
 
-                        {/* Per-courier registration status */}
+                        {/* Per-courier registration — individual rows */}
                         {regs.length > 0 && (
-                          <div className="mt-2 flex flex-wrap gap-1.5">
+                          <div className="mt-3 space-y-1.5">
                             {regs.map((reg) => {
                               const isToggling = courierRegLoading === `${loc.id}-${reg.provider}`;
+                              const isRegistered = reg.isActive && reg.registered;
+                              const isPendingAdmin = reg.lastError === 'Pending admin registration';
+                              const meta = COURIER_META[reg.provider];
+                              const logo = meta?.logo || '📦';
+                              const displayName = meta?.name || reg.provider.replace('_', ' ');
                               return (
-                                <button
+                                <div
                                   key={reg.provider}
-                                  onClick={() =>
-                                    handleToggleCourierRegistration(
-                                      loc.id,
-                                      reg.provider,
-                                      reg.isActive && reg.registered,
-                                    )
-                                  }
-                                  disabled={isToggling || busy}
-                                  className="group flex items-center gap-1 disabled:opacity-60"
-                                  title={
-                                    reg.isActive && reg.registered
-                                      ? `${reg.provider}: Registered — click to unregister`
-                                      : reg.lastError
-                                        ? `${reg.provider}: Failed — ${reg.lastError} — click to retry`
-                                        : `${reg.provider}: Inactive — click to register`
-                                  }
+                                  className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2 ${
+                                    isRegistered
+                                      ? 'border-green-200 bg-green-50/40'
+                                      : isPendingAdmin
+                                        ? 'border-blue-200 bg-blue-50/40'
+                                        : reg.lastError
+                                          ? 'border-amber-200 bg-amber-50/40'
+                                          : 'border-border bg-gray-50/40'
+                                  }`}
                                 >
-                                  {isToggling ? (
-                                    <Badge variant="default" className="text-[10px] px-1.5 py-0">
-                                      <Loader2 size={9} className="mr-0.5 animate-spin" />
-                                      {reg.provider.replace('_', ' ')}
-                                    </Badge>
-                                  ) : reg.isActive && reg.registered ? (
-                                    <Badge variant="success" className="text-[10px] px-1.5 py-0 group-hover:opacity-80">
-                                      <CheckCircle2 size={9} className="mr-0.5" />
-                                      {reg.provider.replace('_', ' ')}
-                                    </Badge>
-                                  ) : reg.lastError ? (
-                                    <Badge variant="warning" className="text-[10px] px-1.5 py-0 group-hover:opacity-80">
-                                      <AlertCircle size={9} className="mr-0.5" />
-                                      {reg.provider.replace('_', ' ')}
-                                    </Badge>
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <span className="text-base shrink-0">{logo}</span>
+                                    <div className="min-w-0">
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="text-xs font-semibold text-text-primary">{displayName}</span>
+                                        {isRegistered ? (
+                                          <Badge variant="success" className="text-[10px] px-1.5 py-0">
+                                            <CheckCircle2 size={9} className="mr-0.5" /> Registered
+                                          </Badge>
+                                        ) : isPendingAdmin ? (
+                                          <Badge variant="default" className="text-[10px] px-1.5 py-0 !bg-blue-100 !text-blue-700">
+                                            <Loader2 size={9} className="mr-0.5 animate-spin" /> Pending
+                                          </Badge>
+                                        ) : reg.lastError ? (
+                                          <Badge variant="warning" className="text-[10px] px-1.5 py-0">
+                                            <AlertCircle size={9} className="mr-0.5" /> Failed
+                                          </Badge>
+                                        ) : (
+                                          <Badge variant="default" className="text-[10px] px-1.5 py-0">Not registered</Badge>
+                                        )}
+                                      </div>
+                                      {isPendingAdmin ? (
+                                        <p className="text-[10px] text-blue-600 mt-0.5 leading-snug">
+                                          Your request has been received. You will receive a confirmation shortly.
+                                        </p>
+                                      ) : reg.lastError ? (
+                                        <p
+                                          className="text-[10px] text-amber-700 mt-0.5 leading-snug truncate max-w-xs"
+                                          title={reg.lastError}
+                                        >
+                                          {reg.lastError}
+                                        </p>
+                                      ) : null}
+                                    </div>
+                                  </div>
+                                  {isPendingAdmin ? (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() =>
+                                        handleToggleCourierRegistration(loc.id, reg.provider, false)
+                                      }
+                                      loading={isToggling}
+                                      disabled={busy}
+                                      className="text-xs shrink-0"
+                                    >
+                                      Request Again
+                                    </Button>
                                   ) : (
-                                    <Badge variant="default" className="text-[10px] px-1.5 py-0 group-hover:opacity-80">
-                                      {reg.provider.replace('_', ' ')}
-                                    </Badge>
+                                    <Button
+                                      size="sm"
+                                      variant={isRegistered ? 'outline' : 'primary'}
+                                      onClick={() =>
+                                        handleToggleCourierRegistration(loc.id, reg.provider, isRegistered)
+                                      }
+                                      loading={isToggling}
+                                      disabled={busy}
+                                      className="text-xs shrink-0"
+                                    >
+                                      {isRegistered ? 'Unregister' : reg.lastError ? 'Retry' : 'Register'}
+                                    </Button>
                                   )}
-                                </button>
+                                </div>
                               );
                             })}
                           </div>
                         )}
 
                         {regs.length === 0 && !loc.registered && (
-                          <p className="text-[11px] text-text-muted mt-1.5 italic">
-                            Not registered with any courier yet
+                          <p className="text-[11px] text-text-muted mt-2 italic">
+                            Not registered with any courier yet. Save or edit the location to trigger registration.
                           </p>
                         )}
 
@@ -615,17 +635,8 @@ export default function ShippingSettingsPage() {
                           <div className="flex items-start gap-2 mt-2 rounded-lg bg-amber-50 border border-amber-200 p-2 text-[11px] text-amber-800">
                             <AlertCircle size={12} className="shrink-0 mt-0.5" />
                             <span>
-                              The address changed after registration — click <strong>Re-register all</strong>{' '}
-                              so couriers pick from the new address.
-                            </span>
-                          </div>
-                        )}
-                        {failedRegs.length > 0 && (
-                          <div className="flex items-start gap-2 mt-2 rounded-lg bg-red-50 border border-red-200 p-2 text-[11px] text-red-800">
-                            <AlertCircle size={12} className="shrink-0 mt-0.5" />
-                            <span>
-                              {failedRegs.map((r) => r.provider.replace('_', ' ')).join(', ')} failed to register.
-                              Click the badge to retry.
+                              The address changed after registration — re-register each courier
+                              so they pick from the updated address.
                             </span>
                           </div>
                         )}
@@ -649,8 +660,8 @@ export default function ShippingSettingsPage() {
                         </button>
                       </div>
                     </div>
-                    <div className="mt-3 flex flex-wrap items-center gap-2">
-                      {!loc.isDefault && (
+                    {!loc.isDefault && (
+                      <div className="mt-3">
                         <Button
                           size="sm"
                           variant="outline"
@@ -659,17 +670,8 @@ export default function ShippingSettingsPage() {
                         >
                           <Star size={12} /> Make default
                         </Button>
-                      )}
-                      <Button
-                        size="sm"
-                        variant={loc.addressDriftedSinceRegistration || activeRegs.length === 0 ? 'primary' : 'outline'}
-                        onClick={() => handleReregisterLocation(loc)}
-                        loading={busy}
-                      >
-                        <Truck size={12} />
-                        {activeRegs.length > 0 ? 'Re-register all' : 'Register with all couriers'}
-                      </Button>
-                    </div>
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -1209,22 +1211,28 @@ function PickupLocationFormModal({
   onSaved: () => Promise<void> | void;
 }) {
   const isEdit = state?.mode === 'edit';
+  const [step, setStep] = useState(1);
   const [form, setForm] = useState<CreatePickupLocationPayload>({
     label: '',
     contactPerson: '',
     phone: '',
     email: '',
     addressLine: '',
+    addressLine2: '',
+    landmark: '',
     city: '',
     state: '',
     country: 'India',
     pincode: '',
+    alternatePhone: '',
+    gstNumber: '',
     makeDefault: false,
   });
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!state) return;
+    setStep(1);
     if (state.mode === 'edit') {
       const l = state.location;
       setForm({
@@ -1233,10 +1241,14 @@ function PickupLocationFormModal({
         phone: l.phone,
         email: l.email || '',
         addressLine: l.addressLine,
+        addressLine2: l.addressLine2 || '',
+        landmark: l.landmark || '',
         city: l.city,
         state: l.state,
         country: l.country || 'India',
         pincode: l.pincode,
+        alternatePhone: l.alternatePhone || '',
+        gstNumber: l.gstNumber || '',
         makeDefault: l.isDefault,
       });
     } else {
@@ -1246,22 +1258,35 @@ function PickupLocationFormModal({
         phone: '',
         email: '',
         addressLine: '',
+        addressLine2: '',
+        landmark: '',
         city: '',
         state: '',
         country: 'India',
         pincode: '',
+        alternatePhone: '',
+        gstNumber: '',
         makeDefault: false,
       });
     }
   }, [state]);
 
+  const validateStep1 = () => {
+    if (!form.label.trim()) { toast.error('Give this location a label'); return false; }
+    if (!form.addressLine.trim()) { toast.error('Address line 1 is required'); return false; }
+    if (!/\d/.test(form.addressLine)) { toast.error('Address line 1 must include a house/flat/plot number (required by courier partners)'); return false; }
+    if (!form.city.trim()) { toast.error('City is required'); return false; }
+    if (!form.state.trim()) { toast.error('State is required'); return false; }
+    if (!/^\d{6}$/.test(form.pincode.trim())) { toast.error('Pincode must be 6 digits'); return false; }
+    return true;
+  };
+
+  const handleNext = () => {
+    if (validateStep1()) setStep(2);
+  };
+
   const handleSubmit = async () => {
     const phoneDigits = form.phone.replace(/\D/g, '');
-    if (!form.label.trim()) return toast.error('Give this location a label');
-    if (!form.addressLine.trim()) return toast.error('Address line is required');
-    if (!form.city.trim()) return toast.error('City is required');
-    if (!form.state.trim()) return toast.error('State is required');
-    if (!/^\d{6}$/.test(form.pincode.trim())) return toast.error('Pincode must be 6 digits');
     if (phoneDigits.length < 10) return toast.error('Enter a 10-digit pickup phone');
 
     setSaving(true);
@@ -1273,10 +1298,14 @@ function PickupLocationFormModal({
           phone: phoneDigits,
           email: form.email?.trim(),
           addressLine: form.addressLine.trim(),
+          addressLine2: form.addressLine2?.trim() || undefined,
+          landmark: form.landmark?.trim() || undefined,
           city: form.city.trim(),
           state: form.state.trim(),
           country: form.country?.trim() || 'India',
           pincode: form.pincode.trim(),
+          alternatePhone: form.alternatePhone?.replace(/\D/g, '') || undefined,
+          gstNumber: form.gstNumber?.trim() || undefined,
         });
         toast.success(`"${form.label}" updated. Re-registering with the carrier…`);
       } else {
@@ -1307,96 +1336,172 @@ function PickupLocationFormModal({
       size="lg"
     >
       <div className="space-y-4">
-        <Input
-          stackedLabel
-          required
-          label="Label"
-          placeholder="e.g. Main warehouse, Festival overflow"
-          value={form.label}
-          onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))}
-        />
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Input
-            stackedLabel
-            label="Contact person"
-            placeholder="Name of the person at this address"
-            value={form.contactPerson || ''}
-            onChange={(e) => setForm((f) => ({ ...f, contactPerson: e.target.value }))}
-          />
-          <Input
-            stackedLabel
-            required
-            label="Pickup phone"
-            placeholder="10-digit mobile"
-            value={form.phone}
-            onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
-          />
+        {/* Step indicator */}
+        <div className="flex items-center gap-2 text-xs">
+          <button
+            type="button"
+            onClick={() => setStep(1)}
+            className={`flex items-center gap-1.5 rounded-full px-3 py-1 font-medium transition-colors ${
+              step === 1
+                ? 'bg-primary-100 text-primary-700'
+                : 'bg-gray-100 text-text-muted hover:bg-gray-200'
+            }`}
+          >
+            <span className="flex h-4 w-4 items-center justify-center rounded-full bg-current/10 text-[10px] font-bold">1</span>
+            Address
+          </button>
+          <div className="h-px w-4 bg-gray-300" />
+          <button
+            type="button"
+            onClick={() => { if (validateStep1()) setStep(2); }}
+            className={`flex items-center gap-1.5 rounded-full px-3 py-1 font-medium transition-colors ${
+              step === 2
+                ? 'bg-primary-100 text-primary-700'
+                : 'bg-gray-100 text-text-muted hover:bg-gray-200'
+            }`}
+          >
+            <span className="flex h-4 w-4 items-center justify-center rounded-full bg-current/10 text-[10px] font-bold">2</span>
+            Contact &amp; Details
+          </button>
         </div>
-        <Input
-          stackedLabel
-          label="Email (optional)"
-          placeholder="Pickup point email"
-          value={form.email || ''}
-          onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
-        />
-        <Input
-          stackedLabel
-          required
-          label="Address line"
-          placeholder="Building / street / area"
-          value={form.addressLine}
-          onChange={(e) => setForm((f) => ({ ...f, addressLine: e.target.value }))}
-        />
-        <div className="grid gap-3 sm:grid-cols-3">
-          <Input
-            stackedLabel
-            required
-            label="City"
-            placeholder="e.g. Mumbai"
-            value={form.city}
-            onChange={(e) => setForm((f) => ({ ...f, city: e.target.value }))}
-          />
-          <Input
-            stackedLabel
-            required
-            label="State"
-            placeholder="e.g. Maharashtra"
-            value={form.state}
-            onChange={(e) => setForm((f) => ({ ...f, state: e.target.value }))}
-          />
-          <Input
-            stackedLabel
-            required
-            label="Pincode"
-            placeholder="6-digit"
-            value={form.pincode}
-            onChange={(e) => setForm((f) => ({ ...f, pincode: e.target.value }))}
-          />
-        </div>
-        {!isEdit && (
-          <label className="flex items-center gap-2 text-xs text-text-secondary">
-            <input
-              type="checkbox"
-              checked={!!form.makeDefault}
-              onChange={(e) => setForm((f) => ({ ...f, makeDefault: e.target.checked }))}
-              className="rounded border-gray-300"
+
+        {step === 1 && (
+          <>
+            <Input
+              stackedLabel
+              required
+              label="Location name"
+              placeholder="e.g. Main warehouse, Festival overflow"
+              value={form.label}
+              onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))}
             />
-            Make this my default pickup location
-          </label>
+            <Input
+              stackedLabel
+              required
+              label="Address line 1"
+              placeholder="House No. / Flat No., Building Name, Street, Area"
+              value={form.addressLine}
+              onChange={(e) => setForm((f) => ({ ...f, addressLine: e.target.value }))}
+            />
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Input
+                stackedLabel
+                label="Address line 2"
+                placeholder="Floor, wing, etc."
+                value={form.addressLine2 || ''}
+                onChange={(e) => setForm((f) => ({ ...f, addressLine2: e.target.value }))}
+              />
+              <Input
+                stackedLabel
+                label="Landmark"
+                placeholder="Nearby post office, market"
+                value={form.landmark || ''}
+                onChange={(e) => setForm((f) => ({ ...f, landmark: e.target.value }))}
+              />
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <Input
+                stackedLabel
+                required
+                label="City"
+                placeholder="e.g. New Delhi"
+                value={form.city}
+                onChange={(e) => setForm((f) => ({ ...f, city: e.target.value }))}
+              />
+              <Input
+                stackedLabel
+                required
+                label="State"
+                placeholder="e.g. Delhi"
+                value={form.state}
+                onChange={(e) => setForm((f) => ({ ...f, state: e.target.value }))}
+              />
+              <Input
+                stackedLabel
+                required
+                label="Pincode"
+                placeholder="6-digit"
+                value={form.pincode}
+                onChange={(e) => setForm((f) => ({ ...f, pincode: e.target.value }))}
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-1 border-t border-border">
+              <Button variant="outline" onClick={onClose} size="sm">Cancel</Button>
+              <Button onClick={handleNext} size="sm">Next &rarr;</Button>
+            </div>
+          </>
         )}
-        <div className="rounded-lg bg-blue-50 border border-blue-100 p-3 text-[11px] text-blue-700">
-          We&apos;ll register this address with our courier partner (Delhivery) automatically. You
-          can come back here to re-register if the address changes later.
-        </div>
-        <div className="flex justify-end gap-2 pt-1 border-t border-border">
-          <Button variant="outline" onClick={onClose} size="sm">
-            Cancel
-          </Button>
-          <Button onClick={handleSubmit} loading={saving} size="sm">
-            <Check size={13} />
-            {isEdit ? 'Save changes' : 'Add location'}
-          </Button>
-        </div>
+
+        {step === 2 && (
+          <>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Input
+                stackedLabel
+                label="Contact person"
+                placeholder="Name of the person at this address"
+                value={form.contactPerson || ''}
+                onChange={(e) => setForm((f) => ({ ...f, contactPerson: e.target.value }))}
+              />
+              <Input
+                stackedLabel
+                required
+                label="Pickup phone"
+                placeholder="10-digit mobile"
+                value={form.phone}
+                onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
+              />
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Input
+                stackedLabel
+                label="Email"
+                placeholder="Pickup point email"
+                value={form.email || ''}
+                onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
+              />
+              <Input
+                stackedLabel
+                label="Alternate phone"
+                placeholder="Alternate 10-digit mobile"
+                value={form.alternatePhone || ''}
+                onChange={(e) => setForm((f) => ({ ...f, alternatePhone: e.target.value }))}
+              />
+            </div>
+            <Input
+              stackedLabel
+              label="GST number"
+              placeholder="e.g. 22AAAAA0000A1Z5"
+              value={form.gstNumber || ''}
+              onChange={(e) => setForm((f) => ({ ...f, gstNumber: e.target.value }))}
+            />
+            {!isEdit && (
+              <label className="flex items-center gap-2 text-xs text-text-secondary">
+                <input
+                  type="checkbox"
+                  checked={!!form.makeDefault}
+                  onChange={(e) => setForm((f) => ({ ...f, makeDefault: e.target.checked }))}
+                  className="rounded border-gray-300"
+                />
+                Make this my default pickup location
+              </label>
+            )}
+            <div className="rounded-lg bg-blue-50 border border-blue-100 p-3 text-[11px] text-blue-700">
+              We&apos;ll register this address with all available courier partners (Delhivery,
+              ShipRocket, Ekart, XpressBees) automatically. Include a <strong>house/flat/plot
+              number</strong> in Address Line 1 to avoid rejections.
+            </div>
+            <div className="flex justify-between pt-1 border-t border-border">
+              <Button variant="outline" onClick={() => setStep(1)} size="sm">&larr; Back</Button>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={onClose} size="sm">Cancel</Button>
+                <Button onClick={handleSubmit} loading={saving} size="sm">
+                  <Check size={13} />
+                  {isEdit ? 'Save changes' : 'Add location'}
+                </Button>
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </Modal>
   );

@@ -5,13 +5,14 @@ import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { LayoutDashboard, Package, Store, CreditCard, LogOut, User, Truck, Wallet, MessageSquare, Upload, AlertTriangle, Tag, FileText, BarChart3, Palette, Ticket, Menu, X } from 'lucide-react';
+import { LayoutDashboard, Package, Store, CreditCard, LogOut, User, Truck, Wallet, MessageSquare, Upload, AlertTriangle, Tag, FileText, BarChart3, Palette, Ticket, Menu, X, RotateCcw } from 'lucide-react';
 import { cn } from '@xelnova/utils';
 import { useDashboardAuth } from '@/lib/auth-context';
 
 const NAV = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/orders', label: 'Orders', icon: Package },
+  { href: '/returns', label: 'Returns', icon: RotateCcw },
   { href: '/inventory', label: 'Inventory', icon: Store },
   { href: '/store', label: 'Brand Store', icon: Palette },
   { href: '/bulk-upload', label: 'Bulk Upload', icon: Upload },

@@ -64,6 +64,9 @@ export function calculateDiscount(
 /** Default GST % when product has no rate (used by invoice/report tax derivation). */
 export const DEFAULT_GST_PERCENT = 18;
 
+/** Standard GST slabs (India) — use for listing UI so sellers pick a rate instead of typing. */
+export const GST_SLAB_PERCENTS = [0, 5, 12, 18, 28] as const;
+
 /**
  * Pricing contract (changed Apr 2026):
  *   `Product.price` and `OrderItem.price` are stored as the **GST-inclusive

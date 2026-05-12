@@ -291,4 +291,28 @@ export class ReviewsService {
   async getPendingCount(): Promise<number> {
     return this.prisma.review.count({ where: { moderationStatus: 'PENDING' } });
   }
+
+  async getReviewStatusForOrder(userId: string, orderNumber: string) {
+    const order = await this.prisma.order.findUnique({
+      where: { orderNumber },
+      include: { items: { select: { productId: true } } },
+    });
+    if (!order || order.userId !== userId) return {};
+
+    const productIds = order.items.map((i) => i.productId);
+    const reviews = await this.prisma.review.findMany({
+      where: {
+        userId,
+        productId: { in: productIds },
+        moderationStatus: { in: ['PENDING', 'APPROVED'] },
+      },
+      select: { productId: true, rating: true, moderationStatus: true },
+    });
+
+    const map: Record<string, { reviewed: true; rating: number; status: string }> = {};
+    for (const r of reviews) {
+      map[r.productId] = { reviewed: true, rating: r.rating, status: r.moderationStatus };
+    }
+    return map;
+  }
 }

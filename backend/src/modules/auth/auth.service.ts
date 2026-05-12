@@ -893,8 +893,10 @@ export class AuthService {
     const ttlMs = AuthService.parseDurationToMs(ttl);
     const expiresAt = new Date(Date.now() + ttlMs);
 
-    await this.prisma.refreshToken.create({
-      data: { token, userId, expiresAt },
+    await this.prisma.refreshToken.upsert({
+      where: { token },
+      update: { userId, expiresAt, revoked: false },
+      create: { token, userId, expiresAt },
     });
   }
 

@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, Suspense } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
+import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search, ShoppingCart, Menu, X, Heart, Package, User, LogIn, LogOut,
-  Sparkles, Phone, MapPin, ChevronDown, Flame, Download, TrendingUp, Bell,
+  Sparkles, Phone, MapPin, ChevronDown, Flame, Download, TrendingUp, Bell, HelpCircle,
 } from 'lucide-react';
 
 function WhatsAppIcon({ size = 12, className }: { size?: number; className?: string }) {
@@ -75,9 +76,32 @@ const categoryIcons: Record<string, string> = {
   'baby-kids': '👶',
 };
 
+/** Keeps `useSearchParams` out of the main header tree (avoids SSR / CSR markup gaps). */
+function ProductsCategoryFromUrl({
+  pathname,
+  onSlug,
+}: {
+  pathname: string;
+  onSlug: (slug: string) => void;
+}) {
+  const searchParams = useSearchParams();
+  useEffect(() => {
+    if (pathname !== '/products') {
+      onSlug('');
+      return;
+    }
+    onSlug(searchParams.get('category')?.split(',')[0]?.trim() ?? '');
+  }, [pathname, searchParams, onSlug]);
+  return null;
+}
+
 export function Header() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchCategory, setSearchCategory] = useState('All Categories');
+  /** Empty string = all categories; otherwise API category slug. */
+  const [searchCategorySlug, setSearchCategorySlug] = useState('');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
   const [isAccountOpen, setIsAccountOpen] = useState(false);
@@ -91,6 +115,7 @@ export function Header() {
 
   const [mounted, setMounted] = useState(false);
   const rawCartCount = useCartStore((s) => s.totalItems());
+  const clearCart = useCartStore((s) => s.clearCart);
   const rawWishlistCount = useWishlistStore((s) => s.items.length);
   const cartItemCount = mounted ? rawCartCount : 0;
   const wishlistCount = mounted ? rawWishlistCount : 0;
@@ -102,6 +127,14 @@ export function Header() {
   const { user, isAuthenticated, logout, loading: authLoading } = useAuth();
 
   useEffect(() => setMounted(true), []);
+
+  // Clear cart when user is confirmed to be logged out (handles stale localStorage data)
+  useEffect(() => {
+    if (authLoading) return;
+    if (!isAuthenticated && rawCartCount > 0) {
+      clearCart();
+    }
+  }, [authLoading, isAuthenticated, rawCartCount, clearCart]);
 
   useEffect(() => {
     if (!isAuthenticated || authLoading) return;
@@ -176,13 +209,28 @@ export function Header() {
     return () => { document.body.style.overflow = ''; };
   }, [isMobileMenuOpen]);
 
+  const authReady = mounted && !authLoading;
+
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    if (searchQuery.trim()) {
-      setSearchFocused(false);
-      clearAutocomplete();
-      const cat = searchCategory !== 'All Categories' ? `&category=${searchCategory.toLowerCase().replace(/ & /g, '-')}` : '';
-      window.location.href = `/products?search=${encodeURIComponent(searchQuery.trim())}${cat}`;
+    const q = searchQuery.trim();
+    const hasCategory = searchCategorySlug !== '';
+    setSearchFocused(false);
+    clearAutocomplete();
+
+    if (!q && !hasCategory) {
+      router.push('/products');
+      return;
+    }
+
+    if (hasCategory && !q) {
+      router.push(`/products?category=${encodeURIComponent(searchCategorySlug)}`);
+      return;
+    }
+    if (q) {
+      const params = new URLSearchParams({ q });
+      if (hasCategory) params.set('category', searchCategorySlug);
+      router.push(`/search?${params.toString()}`);
     }
   };
 
@@ -248,6 +296,9 @@ export function Header() {
 
   return (
     <header className={`sticky top-0 z-50 bg-white transition-all duration-500 ${isScrolled ? 'shadow-elevated' : ''}`}>
+      <Suspense fallback={null}>
+        <ProductsCategoryFromUrl pathname={pathname} onSlug={setSearchCategorySlug} />
+      </Suspense>
       {/* Top Bar */}
       <div className="bg-gradient-to-r from-primary-600 via-purple-600 to-primary-600 text-[11px]">
         <div className="mx-auto max-w-[1440px] flex items-center justify-between px-4 py-1.5 sm:px-6">
@@ -322,14 +373,14 @@ export function Header() {
           <form onSubmit={handleSearch} className="hidden md:flex flex-1 max-w-2xl mx-auto">
             <div ref={searchContainerRef} className="relative flex w-full items-center overflow-visible rounded-xl border border-white/80 bg-white/85 shadow-sm backdrop-blur-md transition-all duration-300 focus-within:border-primary-400 focus-within:bg-white focus-within:shadow-md focus-within:shadow-primary-500/10 focus-within:ring-2 focus-within:ring-primary-500/20">
               <select
-                value={searchCategory}
-                onChange={(e) => setSearchCategory(e.target.value)}
+                value={searchCategorySlug}
+                onChange={(e) => setSearchCategorySlug(e.target.value)}
                 className="h-11 bg-gray-50 border-r border-gray-200 px-3 pr-7 text-xs font-medium text-text-secondary outline-none cursor-pointer hover:bg-gray-100 transition-colors appearance-none rounded-l-xl"
                 style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 8px center' }}
               >
-                <option value="All Categories">All Categories</option>
+                <option value="">All Categories</option>
                 {(categories || []).map((cat) => (
-                  <option key={cat.slug} value={cat.name}>{cat.name}</option>
+                  <option key={cat.slug} value={cat.slug}>{cat.name}</option>
                 ))}
               </select>
               <input
@@ -352,7 +403,13 @@ export function Header() {
 
           {/* Right Actions */}
           <div className="flex items-center gap-0.5 lg:gap-1 ml-auto">
-            {isAuthenticated && user ? (
+            {!authReady ? (
+              <div
+                className="relative hidden min-h-[2.75rem] min-w-[10rem] shrink-0 lg:block"
+                aria-busy="true"
+                aria-label="Loading account"
+              />
+            ) : isAuthenticated && user ? (
               <div ref={accountRef} className="relative hidden lg:block">
                 <button
                   type="button"
@@ -431,6 +488,7 @@ export function Header() {
                           onClick={async () => {
                             setIsAccountOpen(false);
                             await logout();
+                            clearCart();
                             document.cookie = 'xelnova-token=; path=/; max-age=0';
                             document.cookie = 'xelnova-refresh-token=; path=/; max-age=0';
                             localStorage.removeItem('xelnova-auth-provider');
@@ -460,7 +518,7 @@ export function Header() {
               </Link>
             )}
 
-            {isAuthenticated && (
+            {authReady && isAuthenticated && (
               <Link
                 href="/account/notifications"
                 className="relative rounded-xl p-2.5 text-text-secondary hover:text-primary-600 hover:bg-primary-50 transition-all"
@@ -705,6 +763,7 @@ export function Header() {
                     onClick={async () => {
                       setIsMobileMenuOpen(false);
                       await logout();
+                      clearCart();
                       document.cookie = 'xelnova-token=; path=/; max-age=0';
                       document.cookie = 'xelnova-refresh-token=; path=/; max-age=0';
                       localStorage.removeItem('xelnova-auth-provider');
@@ -716,6 +775,27 @@ export function Header() {
                     Sign Out
                   </button>
                 )}
+
+                <div className="my-3 mx-5 border-t border-border" />
+
+                <div className="px-4 pb-1.5">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-text-muted">Help & Support</p>
+                </div>
+                {[
+                  { href: '/support', icon: HelpCircle, label: 'Help Centre' },
+                  { href: '/faq', icon: HelpCircle, label: 'FAQs' },
+                  { href: '/contact', icon: Phone, label: 'Contact Us' },
+                ].map((item) => (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className="flex items-center gap-3 px-5 py-3 text-sm text-text-secondary hover:bg-primary-50 hover:text-primary-700 transition-colors"
+                  >
+                    <item.icon size={16} />
+                    {item.label}
+                  </Link>
+                ))}
               </nav>
 
               <div className="border-t border-border p-4">

@@ -45,6 +45,9 @@ const statLabels: Record<string, string> = {
   orders: 'Delivery over ₹499',
 };
 
+/** Horizontal category icon strip under the hero. Set `true` when you want it visible. */
+const SHOW_HOME_CATEGORY_STRIP = false;
+
 export default function HomePage() {
   const { data: categories } = useCategories();
   const [stats, setStats] = useState<{ icon: typeof Package; value: string; label: string }[]>([
@@ -158,29 +161,31 @@ export default function HomePage() {
         </div>
       </section> */}
 
-      {/* ─── 3. CATEGORIES ─── */}
-      <section className="py-5">
-        <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
-          <div className="relative panel-glass py-6 px-3 sm:py-7 sm:px-6 transition-all duration-500 hover:shadow-[0_24px_56px_-14px_rgba(12,131,31,0.22)]">
-            {/* Decorative background shapes */}
-            <div className="absolute inset-0 overflow-hidden rounded-[1.25rem] pointer-events-none">
-              <div className="absolute -top-10 -left-10 w-40 h-40 bg-gradient-to-br from-primary-200/30 to-transparent rounded-full blur-2xl" />
-              <div className="absolute -bottom-10 -right-10 w-32 h-32 bg-gradient-to-tl from-accent-200/25 to-transparent rounded-full blur-2xl" />
-            </div>
+      {/* ─── 3. CATEGORIES (toggle SHOW_HOME_CATEGORY_STRIP) ─── */}
+      {SHOW_HOME_CATEGORY_STRIP && (
+        <section className="py-5">
+          <div className="mx-auto max-w-[1440px] px-4 sm:px-6">
+            <div className="relative panel-glass py-6 px-3 sm:py-7 sm:px-6 transition-all duration-500 hover:shadow-[0_24px_56px_-14px_rgba(12,131,31,0.22)]">
+              {/* Decorative background shapes */}
+              <div className="absolute inset-0 overflow-hidden rounded-[1.25rem] pointer-events-none">
+                <div className="absolute -top-10 -left-10 w-40 h-40 bg-gradient-to-br from-primary-200/30 to-transparent rounded-full blur-2xl" />
+                <div className="absolute -bottom-10 -right-10 w-32 h-32 bg-gradient-to-tl from-accent-200/25 to-transparent rounded-full blur-2xl" />
+              </div>
 
-            <div
-              className="relative flex gap-4 overflow-x-auto overscroll-x-contain scroll-smooth scrollbar-hide pb-2 pt-1 snap-x snap-mandatory sm:gap-6 md:gap-8"
-              style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-x' }}
-            >
-              {(categories || []).map((cat, i) => (
-                <div key={cat.id} className="snap-start shrink-0 min-w-[4.75rem] sm:min-w-[5.5rem] md:min-w-0 md:shrink">
-                  <CategoryCard category={cat} index={i} />
-                </div>
-              ))}
+              <div
+                className="relative flex gap-4 overflow-x-auto overscroll-x-contain scroll-smooth scrollbar-hide pb-2 pt-1 snap-x snap-mandatory sm:gap-6 md:gap-8"
+                style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-x' }}
+              >
+                {(categories || []).map((cat, i) => (
+                  <div key={cat.id} className="snap-start shrink-0 min-w-[4.75rem] sm:min-w-[5.5rem] md:min-w-0 md:shrink">
+                    <CategoryCard category={cat} index={i} />
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
-        </div>
-      </section>
+        </section>
+      )}
 
       {/* ─── Below-the-fold content (lazy loaded) ─── */}
       <HomeBelowFold />

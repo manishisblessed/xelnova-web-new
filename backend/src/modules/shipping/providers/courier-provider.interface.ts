@@ -101,16 +101,22 @@ export interface SchedulePickupResult {
 export interface RegisterWarehouseOptions {
   /** Unique, carrier-safe warehouse identifier (no spaces, ≤ 30 chars). */
   name: string;
+  /** Human-friendly label for the pickup location (e.g. "Vegas Mall Third Floor"). */
+  label?: string;
   /** Legal/registered business name to record on the warehouse. */
   registeredName: string;
   contactPerson?: string;
   email?: string;
   phone: string;
+  alternatePhone?: string;
   address: string;
+  addressLine2?: string;
+  landmark?: string;
   city: string;
   state: string;
   country?: string;
   pincode: string;
+  gstNumber?: string;
   /** Where RTO parcels should be sent — defaults to pickup address. */
   returnAddress?: string;
   returnCity?: string;

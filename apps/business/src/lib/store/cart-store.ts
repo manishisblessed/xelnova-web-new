@@ -13,6 +13,12 @@ export interface CartItem {
   variant?: string;
   seller: string;
   gstRate?: number | null;
+  appliedCoupon?: {
+    code: string;
+    discountType: 'PERCENTAGE' | 'FLAT';
+    discountValue: number;
+    discountAmount: number;
+  } | null;
 }
 
 type NewCartItem = Omit<CartItem, "quantity">;
@@ -32,6 +38,7 @@ interface CartState {
   totalItems: () => number;
   totalPrice: () => number;
   totalSavings: () => number;
+  totalCouponDiscount: () => number;
 }
 
 export const useCartStore = create<CartState>()(
@@ -45,7 +52,7 @@ export const useCartStore = create<CartState>()(
           const idx = state.items.findIndex((i) => sameProduct(i, item));
           if (idx > -1) {
             const updated = [...state.items];
-            updated[idx] = { ...updated[idx], quantity: updated[idx].quantity + qty };
+            updated[idx] = { ...item, quantity: updated[idx].quantity + qty };
             return { items: updated };
           }
           return { items: [...state.items, { ...item, quantity: qty }] };
@@ -59,9 +66,9 @@ export const useCartStore = create<CartState>()(
               ? { items: state.items.filter((_, j) => j !== idx) }
               : state;
           }
-          if (idx > -1) {
+          if (idx >-1) {
             const updated = [...state.items];
-            updated[idx] = { ...updated[idx], quantity };
+            updated[idx] = { ...item, quantity };
             return { items: updated };
           }
           return { items: [...state.items, { ...item, quantity }] };
@@ -95,6 +102,13 @@ export const useCartStore = create<CartState>()(
         get().items.reduce(
           (sum, item) =>
             sum + Math.max(0, item.comparePrice - item.price) * item.quantity,
+          0
+        ),
+
+      totalCouponDiscount: () =>
+        get().items.reduce(
+          (sum, item) =>
+            sum + (item.appliedCoupon?.discountAmount ?? 0) * item.quantity,
           0
         ),
     }),

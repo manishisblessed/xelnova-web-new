@@ -106,9 +106,19 @@ export class CreatePickupLocationDto {
   @IsOptional()
   email?: string;
 
-  @ApiProperty()
+  @ApiProperty({ description: 'House/Flat No., Building Name, Street, Area' })
   @IsString()
   addressLine: string;
+
+  @ApiPropertyOptional({ description: 'Floor, wing, near landmark, etc.' })
+  @IsString()
+  @IsOptional()
+  addressLine2?: string;
+
+  @ApiPropertyOptional({ description: 'Nearby landmark (post office, market, hospital)' })
+  @IsString()
+  @IsOptional()
+  landmark?: string;
 
   @ApiProperty()
   @IsString()
@@ -126,6 +136,16 @@ export class CreatePickupLocationDto {
   @ApiProperty({ description: '6-digit pincode' })
   @IsString()
   pincode: string;
+
+  @ApiPropertyOptional({ description: 'Alternate 10-digit mobile for pickup coordination' })
+  @IsString()
+  @IsOptional()
+  alternatePhone?: string;
+
+  @ApiPropertyOptional({ description: 'GST number for invoicing on courier labels' })
+  @IsString()
+  @IsOptional()
+  gstNumber?: string;
 
   @ApiPropertyOptional({
     description:
@@ -165,6 +185,16 @@ export class UpdatePickupLocationDto {
   @ApiPropertyOptional()
   @IsString()
   @IsOptional()
+  addressLine2?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  landmark?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
   city?: string;
 
   @ApiPropertyOptional()
@@ -181,6 +211,16 @@ export class UpdatePickupLocationDto {
   @IsString()
   @IsOptional()
   pincode?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  alternatePhone?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  gstNumber?: string;
 }
 
 export class UpdateAwbDto {

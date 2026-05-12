@@ -13,7 +13,10 @@ import {
   CreateTicketDto,
   ReplyTicketDto,
   ForwardTicketDto,
+  ForwardToCustomerDto,
+  ForwardToSellerDto,
   UpdateTicketStatusDto,
+  ChatMessageDto,
 } from './dto/ticket.dto';
 import { successResponse } from '../../common/helpers/response.helper';
 import { Auth } from '../../common/decorators/auth.decorator';
@@ -23,6 +26,23 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 @Controller('tickets')
 export class TicketsController {
   constructor(private readonly ticketsService: TicketsService) {}
+
+  // ═══════ Chatbot ═══════
+
+  @Post('chat')
+  @Auth()
+  @ApiOperation({ summary: 'Send a message to the support chatbot' })
+  async chat(
+    @CurrentUser('id') userId: string,
+    @Body() dto: ChatMessageDto,
+  ) {
+    const result = await this.ticketsService.chatMessage(
+      userId,
+      dto.message,
+      dto.orderNumber,
+    );
+    return successResponse(result, result.resolved ? 'Query resolved' : 'Escalated to support');
+  }
 
   // ═══════ Customer endpoints ═══════
 
@@ -134,6 +154,34 @@ export class TicketsController {
     return successResponse(
       await this.ticketsService.forwardToSeller(id, adminId, dto.sellerId, dto.note),
       'Ticket forwarded to seller',
+    );
+  }
+
+  @Post('admin/:id/forward-to-customer')
+  @Auth('ADMIN')
+  @ApiOperation({ summary: 'Relay a seller reply to the customer (admin)' })
+  async forwardSellerReplyToCustomer(
+    @Param('id') id: string,
+    @CurrentUser('id') adminId: string,
+    @Body() dto: ForwardToCustomerDto,
+  ) {
+    return successResponse(
+      await this.ticketsService.forwardSellerReplyToCustomer(id, adminId, dto.messageId, dto.note),
+      'Seller reply forwarded to customer',
+    );
+  }
+
+  @Post('admin/:id/forward-to-seller')
+  @Auth('ADMIN')
+  @ApiOperation({ summary: 'Relay a customer message to the seller (admin)' })
+  async forwardCustomerMessageToSeller(
+    @Param('id') id: string,
+    @CurrentUser('id') adminId: string,
+    @Body() dto: ForwardToSellerDto,
+  ) {
+    return successResponse(
+      await this.ticketsService.forwardCustomerMessageToSeller(id, adminId, dto.messageId, dto.note),
+      'Customer message forwarded to seller',
     );
   }
 

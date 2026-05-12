@@ -415,21 +415,20 @@ export class InvoiceService {
     const headerHeight = 28;
     drawRect(tableLeft, y - headerHeight, tableWidth, headerHeight);
 
-    y -= 10;
-    drawText('Product', cols.product, y, { size: 7, bold: true });
-    drawText('Description', cols.description, y, { size: 7, bold: true });
-    drawText('Qty', cols.qty, y, { size: 7, bold: true });
-    drawText('Gross', cols.grossAmt, y, { size: 7, bold: true });
-    drawText('Discount', cols.discount, y, { size: 7, bold: true });
-    drawText('Taxable', cols.taxable, y, { size: 7, bold: true });
-    drawText(taxLabel, cols.tax, y, { size: 7, bold: true });
-    drawText('Total', cols.total, y, { size: 7, bold: true });
+    const headerTextY = y - 10;
+    drawText('Product', cols.product, headerTextY, { size: 7, bold: true });
+    drawText('Description', cols.description, headerTextY, { size: 7, bold: true });
+    drawText('Qty', cols.qty, headerTextY, { size: 7, bold: true });
+    drawText('Gross', cols.grossAmt, headerTextY, { size: 7, bold: true });
+    drawText('Discount', cols.discount, headerTextY, { size: 7, bold: true });
+    drawText('Taxable', cols.taxable, headerTextY, { size: 7, bold: true });
+    drawText(taxLabel, cols.tax, headerTextY, { size: 7, bold: true });
+    drawText('Total', cols.total, headerTextY, { size: 7, bold: true });
 
-    y -= 9;
-    drawText('(incl. GST)', cols.grossAmt, y, { size: 6, color: gray });
-    drawText('Value', cols.taxable, y, { size: 6, color: gray });
+    drawText('(incl. GST)', cols.grossAmt, headerTextY - 9, { size: 6, color: gray });
+    drawText('Value', cols.taxable, headerTextY - 9, { size: 6, color: gray });
 
-    y -= 12;
+    y -= headerHeight;
 
     // Subtotal here is GST-EXCLUSIVE (the value stored in the order record). All discount/tax
     // math is consistent with the storefront — see OrdersService.create.
@@ -467,38 +466,36 @@ export class InvoiceService {
       summaryTaxable += taxableValue;
       summaryTax += taxAmount;
 
-      const rowHeight = 38;
-      drawRect(tableLeft, y - rowHeight + 10, tableWidth, rowHeight);
+      const rowHeight = 34;
+      drawRect(tableLeft, y - rowHeight, tableWidth, rowHeight);
 
-      // Wrap product name to a max of 2 lines. `cols.description` starts at +175 from
-      // tableLeft so we cap the product name at 165px to keep a clean gutter.
+      const rowTextY = y - 10;
+
       const productName = safeStr(item.productName);
       const productLines = this.wrapText(productName, font, 7, 165);
-      let productY = y;
+      let productY = rowTextY;
       for (const line of productLines.slice(0, 2)) {
         drawText(line, cols.product, productY, { size: 7 });
         productY -= 9;
       }
 
-      // Description column also stays inside its band (90px wide).
       const hsnCode = item.hsnCode || 'N/A';
       const taxBreakdown = isIntraState
         ? `CGST: ${(gstRate / 2).toFixed(1)}% | SGST: ${(gstRate / 2).toFixed(1)}%`
         : `IGST: ${gstRate.toFixed(0)}%`;
-      drawText(`HSN: ${hsnCode}`, cols.description, y, { size: 6, color: gray });
-      drawText(taxBreakdown, cols.description, y - 9, { size: 6, color: gray });
+      drawText(`HSN: ${hsnCode}`, cols.description, rowTextY, { size: 6, color: gray });
+      drawText(taxBreakdown, cols.description, rowTextY - 9, { size: 6, color: gray });
 
       if (item.imeiSerialNo) {
-        drawText(`SrNo: ${item.imeiSerialNo}`, cols.description, y - 18, { size: 6, color: gray });
+        drawText(`SrNo: ${item.imeiSerialNo}`, cols.description, rowTextY - 18, { size: 6, color: gray });
       }
 
-      // Numbers — slight x-offset for cleaner right-alignment.
-      drawText(String(itemQty), cols.qty, y - 6, { size: 7 });
-      drawText(grossAmount.toFixed(2), cols.grossAmt, y - 6, { size: 7 });
-      drawText(itemDiscount > 0 ? `-${itemDiscount.toFixed(2)}` : '0.00', cols.discount, y - 6, { size: 7 });
-      drawText(taxableValue.toFixed(2), cols.taxable, y - 6, { size: 7 });
-      drawText(taxAmount.toFixed(2), cols.tax, y - 6, { size: 7 });
-      drawText(itemTotal.toFixed(2), cols.total, y - 6, { size: 7, bold: true });
+      drawText(String(itemQty), cols.qty, rowTextY - 3, { size: 7 });
+      drawText(grossAmount.toFixed(2), cols.grossAmt, rowTextY - 3, { size: 7 });
+      drawText(itemDiscount > 0 ? `-${itemDiscount.toFixed(2)}` : '0.00', cols.discount, rowTextY - 3, { size: 7 });
+      drawText(taxableValue.toFixed(2), cols.taxable, rowTextY - 3, { size: 7 });
+      drawText(taxAmount.toFixed(2), cols.tax, rowTextY - 3, { size: 7 });
+      drawText(itemTotal.toFixed(2), cols.total, rowTextY - 3, { size: 7, bold: true });
 
       y -= rowHeight;
     }
@@ -507,14 +504,14 @@ export class InvoiceService {
     const shippingCost = toNum(order.shipping);
     if (shippingCost > 0) {
       const rowHeight = 20;
-      drawRect(tableLeft, y - rowHeight + 10, tableWidth, rowHeight);
-      drawText('Handling Fee', cols.product, y - 4, { size: 7 });
-      drawText('1', cols.qty, y - 6, { size: 7 });
-      drawText(shippingCost.toFixed(2), cols.grossAmt, y - 6, { size: 7 });
-      drawText('0.00', cols.discount, y - 6, { size: 7 });
-      drawText(shippingCost.toFixed(2), cols.taxable, y - 6, { size: 7 });
-      drawText('0.00', cols.tax, y - 6, { size: 7 });
-      drawText(shippingCost.toFixed(2), cols.total, y - 6, { size: 7 });
+      drawRect(tableLeft, y - rowHeight, tableWidth, rowHeight);
+      drawText('Handling Fee', cols.product, y - 13, { size: 7 });
+      drawText('1', cols.qty, y - 13, { size: 7 });
+      drawText(shippingCost.toFixed(2), cols.grossAmt, y - 13, { size: 7 });
+      drawText('0.00', cols.discount, y - 13, { size: 7 });
+      drawText(shippingCost.toFixed(2), cols.taxable, y - 13, { size: 7 });
+      drawText('0.00', cols.tax, y - 13, { size: 7 });
+      drawText(shippingCost.toFixed(2), cols.total, y - 13, { size: 7 });
       y -= rowHeight;
       grandTotal += shippingCost;
       summaryGross += shippingCost;
