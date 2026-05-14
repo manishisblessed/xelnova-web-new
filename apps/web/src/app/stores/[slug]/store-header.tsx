@@ -58,19 +58,19 @@ function TrustBadge({ icon: Icon, label, color }: { icon: React.ElementType; lab
 function StatCard({ icon: Icon, value, label, delay }: { icon: React.ElementType; value: string | number; label: string; delay: number }) {
   return (
     <motion.div
-      className="group relative flex flex-col items-center p-4 rounded-2xl bg-white/5 backdrop-blur-sm border border-white/10 hover:border-white/20 hover:bg-white/10 transition-all duration-300 min-w-[100px]"
+      className="group relative flex flex-col items-center p-4 rounded-2xl bg-surface-muted border border-border hover:border-border hover:bg-surface-muted transition-all duration-300 min-w-[100px]"
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay, duration: 0.5 }}
       whileHover={{ y: -4 }}
     >
-      <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-gold-400/20 to-gold-600/20 flex items-center justify-center mb-2 group-hover:scale-110 transition-transform">
-        <Icon className="w-5 h-5 text-gold-400" />
+      <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-50 to-primary-100 flex items-center justify-center mb-2 group-hover:scale-110 transition-transform">
+        <Icon className="w-5 h-5 text-primary-600" />
       </div>
-      <span className="text-xl font-bold text-white">
+      <span className="text-xl font-bold text-text-primary">
         {typeof value === 'number' ? <AnimatedCounter value={value} /> : value}
       </span>
-      <span className="text-xs text-surface-200 mt-0.5">{label}</span>
+      <span className="text-xs text-text-muted mt-0.5">{label}</span>
     </motion.div>
   );
 }
@@ -111,8 +111,8 @@ export function StoreHeader({ store }: StoreHeaderProps) {
           transition={{ duration: 0.6 }}
         >
           {/* Glassmorphism background */}
-          <div className="absolute inset-0 bg-gradient-to-br from-white/10 via-white/5 to-transparent backdrop-blur-xl" />
-          <div className="absolute inset-0 bg-gradient-to-br from-surface-900/80 to-surface-950/90" />
+          <div className="absolute inset-0 bg-gradient-to-br from-white/80 via-white/60 to-transparent backdrop-blur-xl" />
+          <div className="absolute inset-0 bg-gradient-to-br from-white/80 to-white/90" />
           <div 
             className="absolute inset-0 opacity-10"
             style={{
@@ -140,7 +140,7 @@ export function StoreHeader({ store }: StoreHeaderProps) {
                       style={{ background: `linear-gradient(135deg, ${themeColor}60, ${themeColor}20)` }}
                     />
                     
-                    <div className="relative w-28 h-28 sm:w-32 sm:h-32 rounded-2xl bg-white shadow-2xl overflow-hidden ring-4 ring-white/20">
+                    <div className="relative w-28 h-28 sm:w-32 sm:h-32 rounded-2xl bg-white shadow-2xl overflow-hidden ring-4 ring-border">
                       {store.logo ? (
                         <Image
                           src={store.logo}
@@ -161,7 +161,7 @@ export function StoreHeader({ store }: StoreHeaderProps) {
                     {/* Verified badge */}
                     {store.verified && (
                       <motion.div 
-                        className="absolute -bottom-2 -right-2 w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg shadow-blue-500/30 ring-4 ring-surface-900"
+                        className="absolute -bottom-2 -right-2 w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg shadow-blue-500/30 ring-4 ring-white"
                         initial={{ scale: 0 }}
                         animate={{ scale: 1 }}
                         transition={{ delay: 0.5, type: 'spring' }}
@@ -180,7 +180,7 @@ export function StoreHeader({ store }: StoreHeaderProps) {
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ delay: 0.3 }}
                   >
-                    <h1 className="text-3xl sm:text-4xl font-black text-white tracking-tight">
+                    <h1 className="text-3xl sm:text-4xl font-black text-text-primary tracking-tight">
                       {store.storeName}
                     </h1>
                     
@@ -197,7 +197,7 @@ export function StoreHeader({ store }: StoreHeaderProps) {
                         <TrustBadge 
                           icon={Award} 
                           label="Top Rated" 
-                          color="from-gold-400/20 to-gold-600/20 border-gold-400/30 text-gold-400"
+                          color="from-primary-50 to-primary-100 border-primary-200 text-primary-600"
                         />
                       )}
                       {(store.totalSales || 0) >= 100 && (
@@ -212,7 +212,7 @@ export function StoreHeader({ store }: StoreHeaderProps) {
 
                   {store.description && (
                     <motion.p 
-                      className="mt-3 text-surface-200 max-w-xl leading-relaxed line-clamp-2"
+                      className="mt-3 text-text-muted max-w-xl leading-relaxed line-clamp-2"
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
                       transition={{ delay: 0.4 }}
@@ -229,12 +229,12 @@ export function StoreHeader({ store }: StoreHeaderProps) {
                     transition={{ delay: 0.5 }}
                   >
                     <div className="flex items-center gap-2">
-                      <div className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-gradient-to-r from-gold-400/20 to-gold-500/10 border border-gold-400/30">
-                        <Star className="w-5 h-5 fill-gold-400 text-gold-400" />
-                        <span className="text-lg font-bold text-gold-400">{store.rating.toFixed(1)}</span>
+                      <div className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-gradient-to-r from-primary-50 to-primary-100 border border-primary-200">
+                        <Star className="w-5 h-5 fill-amber-400 text-amber-400" />
+                        <span className="text-lg font-bold text-primary-600">{store.rating.toFixed(1)}</span>
                       </div>
                       <div className="flex flex-col">
-                        <span className="text-xs text-surface-300">Seller Rating</span>
+                        <span className="text-xs text-text-muted">Seller Rating</span>
                         <div className="flex gap-0.5 mt-0.5">
                           {[1, 2, 3, 4, 5].map((i) => (
                             <Star 
@@ -242,8 +242,8 @@ export function StoreHeader({ store }: StoreHeaderProps) {
                               className={cn(
                                 "w-3 h-3",
                                 i <= Math.round(store.rating) 
-                                  ? "fill-gold-400 text-gold-400" 
-                                  : "text-surface-500"
+                                  ? "fill-amber-400 text-amber-400" 
+                                  : "text-text-muted"
                               )} 
                             />
                           ))}
@@ -252,7 +252,7 @@ export function StoreHeader({ store }: StoreHeaderProps) {
                     </div>
 
                     {store.location && (
-                      <div className="flex items-center gap-1.5 text-surface-300">
+                      <div className="flex items-center gap-1.5 text-text-muted">
                         <MapPin className="w-4 h-4" />
                         <span className="text-sm">{store.location}</span>
                       </div>
@@ -275,8 +275,8 @@ export function StoreHeader({ store }: StoreHeaderProps) {
                     className={cn(
                       "group relative flex items-center gap-2 px-6 py-3 rounded-xl font-semibold text-sm overflow-hidden transition-all duration-300",
                       isFollowing 
-                        ? "bg-surface-700 text-white border border-surface-600" 
-                        : "bg-gradient-to-r from-gold-400 to-gold-500 text-surface-950 shadow-lg shadow-gold-400/25 hover:shadow-gold-400/40"
+                        ? "bg-surface-muted text-text-primary border border-border" 
+                        : "bg-gradient-to-r from-primary-500 to-primary-600 text-white shadow-lg shadow-primary-400/25 hover:shadow-primary-400/40"
                     )}
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
@@ -294,7 +294,7 @@ export function StoreHeader({ store }: StoreHeaderProps) {
                     {followers > 0 && (
                       <span className={cn(
                         "ml-1 px-2 py-0.5 rounded-full text-xs",
-                        isFollowing ? "bg-surface-600" : "bg-black/10"
+                        isFollowing ? "bg-surface-muted" : "bg-black/10"
                       )}>
                         {followers.toLocaleString()}
                       </span>
@@ -303,7 +303,7 @@ export function StoreHeader({ store }: StoreHeaderProps) {
 
                   <motion.button
                     onClick={handleShare}
-                    className="relative flex items-center gap-2 px-5 py-3 rounded-xl border border-surface-600 text-surface-100 font-medium text-sm hover:border-gold-400/50 hover:text-gold-400 transition-all duration-300"
+                    className="relative flex items-center gap-2 px-5 py-3 rounded-xl border border-border text-text-muted font-medium text-sm hover:border-primary-300 hover:text-primary-600 transition-all duration-300"
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
                   >
@@ -323,7 +323,7 @@ export function StoreHeader({ store }: StoreHeaderProps) {
 
                 {/* Quick stats */}
                 <motion.div 
-                  className="flex items-center gap-4 text-sm text-surface-300"
+                  className="flex items-center gap-4 text-sm text-text-muted"
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={{ delay: 0.6 }}
@@ -346,7 +346,7 @@ export function StoreHeader({ store }: StoreHeaderProps) {
 
             {/* Stats Row */}
             <motion.div 
-              className="mt-8 pt-6 border-t border-white/10"
+              className="mt-8 pt-6 border-t border-border"
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.5 }}

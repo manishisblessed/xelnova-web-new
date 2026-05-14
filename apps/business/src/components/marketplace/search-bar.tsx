@@ -105,63 +105,63 @@ export default function SearchBar({ className }: { className?: string }) {
     <div ref={containerRef} className={cn("relative w-full max-w-3xl", className)}>
       <form onSubmit={handleSubmit} className="flex">
         <div className="relative">
-          <button type="button" onClick={() => setCategoryOpen(!categoryOpen)} className="flex h-full items-center gap-1 rounded-l-xl border border-r-0 border-surface-300 bg-surface-700 px-3 py-2.5 text-sm text-surface-50 hover:bg-surface-600 transition-colors">
+          <button type="button" onClick={() => setCategoryOpen(!categoryOpen)} className="flex h-full items-center gap-1 rounded-l-xl border border-r-0 border-border bg-surface-muted px-3 py-2.5 text-sm text-text-primary hover:bg-gray-200 transition-colors">
             <span className="hidden sm:inline max-w-[100px] truncate">{currentCategoryLabel}</span>
             <span className="sm:hidden">All</span>
             <ChevronDown size={14} />
           </button>
           <AnimatePresence>
             {categoryOpen && (
-              <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} className="absolute left-0 top-full z-50 mt-1 w-56 rounded-xl border border-surface-300/50 bg-surface-800 py-1 shadow-lg">
-                <button type="button" onClick={() => { setSelectedCategory("all"); setCategoryOpen(false); }} className={cn("w-full px-4 py-2 text-left text-sm hover:bg-surface-700 transition-colors", selectedCategory === "all" && "bg-gold-400/10 text-gold-400 font-medium")}>All Categories</button>
-                {categoriesList.map((cat) => (<button key={cat.slug} type="button" onClick={() => { setSelectedCategory(cat.slug); setCategoryOpen(false); }} className={cn("w-full px-4 py-2 text-left text-sm hover:bg-surface-700 transition-colors text-surface-50", selectedCategory === cat.slug && "bg-gold-400/10 text-gold-400 font-medium")}>{cat.name}</button>))}
+              <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} className="absolute left-0 top-full z-50 mt-1 w-56 rounded-xl border border-border bg-white py-1 shadow-lg">
+                <button type="button" onClick={() => { setSelectedCategory("all"); setCategoryOpen(false); }} className={cn("w-full px-4 py-2 text-left text-sm hover:bg-surface-muted transition-colors", selectedCategory === "all" && "bg-primary-50 text-primary-600 font-medium")}>All Categories</button>
+                {categoriesList.map((cat) => (<button key={cat.slug} type="button" onClick={() => { setSelectedCategory(cat.slug); setCategoryOpen(false); }} className={cn("w-full px-4 py-2 text-left text-sm hover:bg-surface-muted transition-colors text-text-primary", selectedCategory === cat.slug && "bg-primary-50 text-primary-600 font-medium")}>{cat.name}</button>))}
               </motion.div>
             )}
           </AnimatePresence>
         </div>
         <div className="relative flex-1">
-          <input ref={inputRef} type="text" value={query} onChange={(e) => { setQuery(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)} placeholder="Search for products, brands and more..." className="h-full w-full border border-surface-300 bg-surface-800 px-4 py-2.5 text-sm text-white placeholder:text-surface-100 outline-none focus:border-gold-400 transition-all" />
-          {query && (<button type="button" onClick={() => { setQuery(""); inputRef.current?.focus(); }} className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-1 text-surface-100 hover:text-white"><X size={16} /></button>)}
+          <input ref={inputRef} type="text" value={query} onChange={(e) => { setQuery(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)} placeholder="Search for products, brands and more..." className="h-full w-full border border-border bg-white px-4 py-2.5 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-primary-400 transition-all" />
+          {query && (<button type="button" onClick={() => { setQuery(""); inputRef.current?.focus(); }} className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-1 text-text-muted hover:text-text-primary"><X size={16} /></button>)}
         </div>
-        <button type="submit" className="rounded-r-xl bg-gold-400 px-5 text-surface-950 hover:bg-gold-300 active:bg-gold-500 transition-colors"><Search size={20} /></button>
+        <button type="submit" className="rounded-r-xl bg-primary-500 px-5 text-white hover:bg-primary-400 active:bg-primary-600 transition-colors"><Search size={20} /></button>
       </form>
 
       <AnimatePresence>
         {open && (query.length > 0 || recentSearches.length > 0) && (
-          <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} className="absolute left-0 right-0 top-full z-50 mt-1 max-h-[400px] overflow-y-auto rounded-xl border border-surface-300/50 bg-surface-800 shadow-xl">
+          <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} className="absolute left-0 right-0 top-full z-50 mt-1 max-h-[400px] overflow-y-auto rounded-xl border border-border bg-white shadow-xl">
             {suggestions.length > 0 ? (
               <div className="p-2">
                 {suggestions.map((item, idx) => (
                   <button key={`${item.type}-${item.slug}-${idx}`} type="button" onClick={() => {
                     if (item.type === "product") { router.push(`/products/${item.slug}`); setOpen(false); saveSearch(item.text); }
                     else { router.push(`/categories/${item.slug}`); setOpen(false); saveSearch(item.text); }
-                  }} className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left hover:bg-surface-700 transition-colors">
+                  }} className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left hover:bg-surface-muted transition-colors">
                     {item.type === "product" && item.image ? (
                       <Image src={item.image} alt="" width={32} height={32} className="h-8 w-8 rounded-md object-cover shrink-0" />
                     ) : item.type === "category" ? (
-                      <Tag size={14} className="shrink-0 text-gold-400" />
+                      <Tag size={14} className="shrink-0 text-primary-600" />
                     ) : (
-                      <Search size={14} className="shrink-0 text-surface-100" />
+                      <Search size={14} className="shrink-0 text-text-muted" />
                     )}
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm text-white">{item.text}</p>
-                      <p className="text-xs text-surface-100">{item.type === "category" ? "Category" : item.price ? `₹${item.price}` : ""}</p>
+                      <p className="truncate text-sm text-text-primary">{item.text}</p>
+                      <p className="text-xs text-text-muted">{item.type === "category" ? "Category" : item.price ? `₹${item.price}` : ""}</p>
                     </div>
                   </button>
                 ))}
               </div>
-            ) : query.length >= 2 && !loadingSuggestions ? (<div className="p-4 text-center text-sm text-surface-100">No suggestions found</div>) : query.length >= 2 && loadingSuggestions ? (<div className="p-4 text-center text-sm text-surface-100">Searching...</div>) : null}
+            ) : query.length >= 2 && !loadingSuggestions ? (<div className="p-4 text-center text-sm text-text-muted">No suggestions found</div>) : query.length >= 2 && loadingSuggestions ? (<div className="p-4 text-center text-sm text-text-muted">Searching...</div>) : null}
             {recentSearches.length > 0 && !query && (
-              <div className="border-t border-surface-300/30 p-2">
-                <div className="flex items-center justify-between px-3 py-1.5"><span className="text-xs font-semibold text-surface-100 uppercase tracking-wide">Recent Searches</span><button type="button" onClick={clearRecent} className="text-xs text-gold-400 hover:text-gold-300">Clear All</button></div>
-                {recentSearches.map((term) => (<button key={term} type="button" onClick={() => handleSuggestionClick(term)} className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left hover:bg-surface-700 transition-colors"><Clock size={14} className="text-surface-100" /><span className="text-sm text-surface-50">{term}</span></button>))}
+              <div className="border-t border-border p-2">
+                <div className="flex items-center justify-between px-3 py-1.5"><span className="text-xs font-semibold text-text-muted uppercase tracking-wide">Recent Searches</span><button type="button" onClick={clearRecent} className="text-xs text-primary-600 hover:text-primary-700">Clear All</button></div>
+                {recentSearches.map((term) => (<button key={term} type="button" onClick={() => handleSuggestionClick(term)} className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left hover:bg-surface-muted transition-colors"><Clock size={14} className="text-text-muted" /><span className="text-sm text-text-primary">{term}</span></button>))}
               </div>
             )}
             {!query && (
-              <div className="border-t border-surface-300/30 p-2">
-                <p className="px-3 py-1.5 text-xs font-semibold text-surface-100 uppercase tracking-wide">Popular Searches</p>
+              <div className="border-t border-border p-2">
+                <p className="px-3 py-1.5 text-xs font-semibold text-text-muted uppercase tracking-wide">Popular Searches</p>
                 <div className="flex flex-wrap gap-2 px-3 py-2">
-                  {popularSearches.map((term) => (<button key={term} type="button" onClick={() => handleSuggestionClick(term)} className="inline-flex items-center gap-1.5 rounded-full border border-surface-300 px-3 py-1.5 text-xs text-surface-50 hover:border-gold-400/50 hover:bg-gold-400/5 hover:text-gold-400 transition-colors"><TrendingUp size={12} />{term}</button>))}
+                  {popularSearches.map((term) => (<button key={term} type="button" onClick={() => handleSuggestionClick(term)} className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs text-text-secondary hover:border-primary-300 hover:bg-primary-50 hover:text-primary-600 transition-colors"><TrendingUp size={12} />{term}</button>))}
                 </div>
               </div>
             )}

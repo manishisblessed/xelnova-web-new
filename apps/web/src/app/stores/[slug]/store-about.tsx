@@ -40,14 +40,14 @@ export function StoreAbout({ store }: StoreAboutProps) {
     >
       {/* Header */}
       <motion.div variants={itemVariants} className="mb-10 text-center">
-        <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/5 border border-white/10 mb-4">
-          <Info className="w-4 h-4 text-gold-400" />
-          <span className="text-sm text-surface-200">About the Seller</span>
+        <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-surface-muted border border-border mb-4">
+          <Info className="w-4 h-4 text-primary-600" />
+          <span className="text-sm text-text-muted">About the Seller</span>
         </div>
-        <h2 className="text-3xl sm:text-4xl font-bold text-white mb-2">
+        <h2 className="text-3xl sm:text-4xl font-bold text-text-primary mb-2">
           {store.storeName}
         </h2>
-        <p className="text-surface-300">
+        <p className="text-text-muted">
           Quality products, exceptional service, happy customers
         </p>
       </motion.div>
@@ -60,31 +60,31 @@ export function StoreAbout({ store }: StoreAboutProps) {
             variants={itemVariants}
             className="relative rounded-3xl overflow-hidden"
           >
-            {/* Glassmorphism background */}
-            <div className="absolute inset-0 bg-gradient-to-br from-white/10 via-white/5 to-transparent backdrop-blur-xl" />
-            <div className="absolute inset-0 bg-gradient-to-br from-surface-800/90 to-surface-900/90" />
+            {/* Card background */}
+            <div className="absolute inset-0 bg-gradient-to-br from-white/80 via-white/60 to-transparent backdrop-blur-xl" />
+            <div className="absolute inset-0 bg-gradient-to-br from-white/90 to-white/90" />
             
             <div className="relative p-6 sm:p-8">
               <div className="flex items-center gap-3 mb-6">
                 <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500/20 to-purple-600/20 flex items-center justify-center">
                   <Heart className="w-5 h-5 text-purple-400" />
                 </div>
-                <h3 className="text-xl font-bold text-white">
+                <h3 className="text-xl font-bold text-text-primary">
                   {store.aboutTitle || 'Our Story'}
                 </h3>
               </div>
 
               {store.aboutDescription ? (
                 <div 
-                  className="prose prose-invert prose-sm max-w-none text-surface-100 leading-relaxed"
+                  className="prose prose-sm max-w-none text-text-muted leading-relaxed"
                   dangerouslySetInnerHTML={{ __html: store.aboutDescription }}
                 />
               ) : store.description ? (
-                <p className="text-surface-200 leading-relaxed text-lg">{store.description}</p>
+                <p className="text-text-muted leading-relaxed text-lg">{store.description}</p>
               ) : (
-                <div className="space-y-4 text-surface-200 leading-relaxed">
+                <div className="space-y-4 text-text-muted leading-relaxed">
                   <p>
-                    Welcome to <span className="text-white font-medium">{store.storeName}</span>! 
+                    Welcome to <span className="text-text-primary font-medium">{store.storeName}</span>! 
                     We&apos;re passionate about delivering quality products that exceed your expectations.
                   </p>
                   <p>
@@ -167,13 +167,13 @@ export function StoreAbout({ store }: StoreAboutProps) {
         <motion.div variants={itemVariants} className="space-y-6">
           {/* Store Card */}
           <div className="relative rounded-3xl overflow-hidden">
-            <div className="absolute inset-0 bg-gradient-to-br from-white/10 via-white/5 to-transparent backdrop-blur-xl" />
-            <div className="absolute inset-0 bg-gradient-to-br from-surface-800/90 to-surface-900/90" />
+            <div className="absolute inset-0 bg-gradient-to-br from-white/80 via-white/60 to-transparent backdrop-blur-xl" />
+            <div className="absolute inset-0 bg-gradient-to-br from-white/90 to-white/90" />
             
             <div className="relative p-6">
               <div className="flex items-center gap-4 mb-6">
                 <motion.div 
-                  className="relative w-20 h-20 rounded-2xl overflow-hidden shrink-0 ring-4 ring-white/10"
+                  className="relative w-20 h-20 rounded-2xl overflow-hidden shrink-0 ring-4 ring-border"
                   whileHover={{ scale: 1.05 }}
                 >
                   {store.logo ? (
@@ -193,7 +193,7 @@ export function StoreAbout({ store }: StoreAboutProps) {
                   )}
                 </motion.div>
                 <div>
-                  <h4 className="text-lg font-bold text-white">{store.storeName}</h4>
+                  <h4 className="text-lg font-bold text-text-primary">{store.storeName}</h4>
                   {store.verified && (
                     <span className="inline-flex items-center gap-1.5 text-sm text-blue-400 mt-1">
                       <BadgeCheck className="w-4 h-4" />
@@ -214,11 +214,11 @@ export function StoreAbout({ store }: StoreAboutProps) {
                         {[1,2,3,4,5].map(i => (
                           <Star 
                             key={i} 
-                            className={`w-3.5 h-3.5 ${i <= Math.round(store.rating) ? 'fill-gold-400 text-gold-400' : 'text-surface-600'}`} 
+                            className={`w-3.5 h-3.5 ${i <= Math.round(store.rating) ? 'fill-amber-400 text-amber-400' : 'text-text-muted'}`} 
                           />
                         ))}
                       </div>
-                      <span className="font-bold text-white">{store.rating.toFixed(1)}</span>
+                      <span className="font-bold text-text-primary">{store.rating.toFixed(1)}</span>
                     </div>
                   }
                 />
@@ -227,7 +227,7 @@ export function StoreAbout({ store }: StoreAboutProps) {
                 <InfoRow 
                   icon={Package}
                   label="Products"
-                  value={<span className="font-semibold text-white">{store.productCount}</span>}
+                  value={<span className="font-semibold text-text-primary">{store.productCount}</span>}
                 />
 
                 {/* Total Sales */}
@@ -235,7 +235,7 @@ export function StoreAbout({ store }: StoreAboutProps) {
                   <InfoRow 
                     icon={Users}
                     label="Orders Fulfilled"
-                    value={<span className="font-semibold text-white">{store.totalSales.toLocaleString()}</span>}
+                    value={<span className="font-semibold text-text-primary">{store.totalSales.toLocaleString()}</span>}
                   />
                 )}
 
@@ -244,7 +244,7 @@ export function StoreAbout({ store }: StoreAboutProps) {
                   <InfoRow 
                     icon={MapPin}
                     label="Location"
-                    value={<span className="text-white">{store.location}</span>}
+                    value={<span className="text-text-primary">{store.location}</span>}
                   />
                 )}
 
@@ -252,7 +252,7 @@ export function StoreAbout({ store }: StoreAboutProps) {
                 <InfoRow 
                   icon={Calendar}
                   label="Selling Since"
-                  value={<span className="text-white">{memberSince}</span>}
+                  value={<span className="text-text-primary">{memberSince}</span>}
                 />
               </div>
             </div>
@@ -261,12 +261,12 @@ export function StoreAbout({ store }: StoreAboutProps) {
           {/* Categories */}
           {store.categories.length > 0 && (
             <div className="relative rounded-3xl overflow-hidden">
-              <div className="absolute inset-0 bg-gradient-to-br from-white/10 via-white/5 to-transparent backdrop-blur-xl" />
-              <div className="absolute inset-0 bg-gradient-to-br from-surface-800/90 to-surface-900/90" />
+              <div className="absolute inset-0 bg-gradient-to-br from-white/80 via-white/60 to-transparent backdrop-blur-xl" />
+              <div className="absolute inset-0 bg-gradient-to-br from-white/90 to-white/90" />
               
               <div className="relative p-6">
-                <h4 className="mb-4 font-bold text-white flex items-center gap-2">
-                  <Award className="w-5 h-5 text-gold-400" />
+                <h4 className="mb-4 font-bold text-text-primary flex items-center gap-2">
+                  <Award className="w-5 h-5 text-primary-600" />
                   Shop by Category
                 </h4>
                 <div className="flex flex-wrap gap-2">
@@ -277,7 +277,7 @@ export function StoreAbout({ store }: StoreAboutProps) {
                       animate={{ opacity: 1, scale: 1 }}
                       transition={{ delay: index * 0.05 }}
                       whileHover={{ scale: 1.05 }}
-                      className="rounded-full bg-gradient-to-r from-surface-700 to-surface-600 px-4 py-2 text-sm font-medium text-white border border-white/10 cursor-pointer hover:border-gold-400/30 transition-colors"
+                      className="rounded-full bg-surface-muted px-4 py-2 text-sm font-medium text-text-primary border border-border cursor-pointer hover:border-primary-200 transition-colors"
                     >
                       {cat.name}
                     </motion.span>
@@ -315,15 +315,15 @@ function TrustBadge({
       transition={{ delay }}
       whileHover={{ y: -4 }}
     >
-      <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent backdrop-blur-sm" />
-      <div className="absolute inset-0 bg-surface-800/80 border border-white/10 rounded-2xl group-hover:border-white/20 transition-colors" />
+      <div className="absolute inset-0 bg-gradient-to-br from-primary-50/30 to-transparent backdrop-blur-sm" />
+      <div className="absolute inset-0 bg-white/80 border border-border rounded-2xl group-hover:border-border transition-colors" />
       
       <div className="relative p-5">
         <div className={`mb-3 rounded-2xl bg-gradient-to-br ${color} p-3 group-hover:scale-110 transition-transform`}>
           <Icon className={`w-6 h-6 ${iconColor}`} />
         </div>
-        <h4 className="text-sm font-semibold text-white">{title}</h4>
-        <p className="text-xs text-surface-300 mt-0.5">{subtitle}</p>
+        <h4 className="text-sm font-semibold text-text-primary">{title}</h4>
+        <p className="text-xs text-text-muted mt-0.5">{subtitle}</p>
       </div>
     </motion.div>
   );
@@ -335,13 +335,13 @@ function StatCard({ value, label, icon: Icon }: { value: string; label: string; 
       className="relative rounded-2xl overflow-hidden"
       whileHover={{ scale: 1.02 }}
     >
-      <div className="absolute inset-0 bg-gradient-to-br from-gold-400/10 to-gold-600/5 backdrop-blur-sm" />
-      <div className="absolute inset-0 bg-surface-800/50 border border-gold-400/20 rounded-2xl" />
+      <div className="absolute inset-0 bg-gradient-to-br from-primary-50 to-primary-50 backdrop-blur-sm" />
+      <div className="absolute inset-0 bg-white/50 border border-primary-200 rounded-2xl" />
       
       <div className="relative p-4 text-center">
-        <Icon className="w-6 h-6 text-gold-400 mx-auto mb-2" />
-        <div className="text-2xl font-bold text-white">{value}</div>
-        <div className="text-xs text-surface-300">{label}</div>
+        <Icon className="w-6 h-6 text-primary-600 mx-auto mb-2" />
+        <div className="text-2xl font-bold text-text-primary">{value}</div>
+        <div className="text-xs text-text-muted">{label}</div>
       </div>
     </motion.div>
   );
@@ -349,8 +349,8 @@ function StatCard({ value, label, icon: Icon }: { value: string; label: string; 
 
 function InfoRow({ icon: Icon, label, value }: { icon: React.ElementType; label: string; value: React.ReactNode }) {
   return (
-    <div className="flex items-center justify-between py-2 border-b border-white/5 last:border-0">
-      <span className="flex items-center gap-2 text-surface-300">
+    <div className="flex items-center justify-between py-2 border-b border-border last:border-0">
+      <span className="flex items-center gap-2 text-text-muted">
         <Icon className="w-4 h-4" />
         {label}
       </span>

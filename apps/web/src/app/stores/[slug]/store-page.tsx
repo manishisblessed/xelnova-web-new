@@ -25,7 +25,7 @@ function SectionHeader({
   icon: Icon, 
   title, 
   subtitle,
-  iconColor = 'text-gold-400'
+  iconColor = 'text-primary-600'
 }: { 
   icon: React.ElementType; 
   title: string; 
@@ -40,11 +40,11 @@ function SectionHeader({
       viewport={{ once: true }}
     >
       <div className="flex items-center gap-3">
-        <div className={`w-12 h-12 rounded-2xl bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-sm border border-white/10 flex items-center justify-center ${iconColor}`}>
+        <div className={`w-12 h-12 rounded-2xl bg-surface-muted border border-border flex items-center justify-center ${iconColor}`}>
           <Icon className="w-6 h-6" />
         </div>
         <div>
-          <h2 className="text-2xl sm:text-3xl font-bold text-white">{title}</h2>
+          <h2 className="text-2xl sm:text-3xl font-bold text-text-primary">{title}</h2>
           {subtitle && (
             <p className="text-primary-300 text-sm mt-0.5">{subtitle}</p>
           )}
@@ -93,7 +93,7 @@ export function StorePage({ store }: StorePageProps) {
   };
 
   return (
-    <div className="min-h-screen bg-surface-950">
+    <div className="min-h-screen bg-surface-raised">
       <StoreJsonLd store={store} />
       
       {/* Hero Banner */}
@@ -144,7 +144,7 @@ export function StorePage({ store }: StorePageProps) {
                     icon={Trophy} 
                     title="Best Sellers" 
                     subtitle="Our most popular products"
-                    iconColor="text-gold-400"
+                    iconColor="text-primary-600"
                   />
                   <StoreFeatured
                     products={bestsellers.map((p: any) => mapProduct(p))}
@@ -205,10 +205,10 @@ export function StorePage({ store }: StorePageProps) {
               {loadingDeals ? (
                 <div className="flex flex-col items-center justify-center py-32">
                   <div className="relative">
-                    <div className="w-16 h-16 rounded-full border-4 border-gold-400/20 border-t-gold-400 animate-spin" />
-                    <Flame className="absolute inset-0 m-auto w-6 h-6 text-gold-400" />
+                    <div className="w-16 h-16 rounded-full border-4 border-primary-200 border-t-primary-500 animate-spin" />
+                    <Flame className="absolute inset-0 m-auto w-6 h-6 text-primary-600" />
                   </div>
-                  <p className="mt-4 text-surface-300">Loading deals...</p>
+                  <p className="mt-4 text-text-muted">Loading deals...</p>
                 </div>
               ) : deals.length > 0 ? (
                 <>
@@ -233,8 +233,8 @@ export function StorePage({ store }: StorePageProps) {
                   <div className="w-24 h-24 rounded-3xl bg-gradient-to-br from-orange-500/20 to-red-500/20 flex items-center justify-center mb-6">
                     <Tag className="w-12 h-12 text-orange-400" />
                   </div>
-                  <h3 className="text-2xl font-bold text-white mb-2">No Active Deals</h3>
-                  <p className="text-surface-300 max-w-md">
+                  <h3 className="text-2xl font-bold text-text-primary mb-2">No Active Deals</h3>
+                  <p className="text-text-muted max-w-md">
                     {store.storeName} doesn&apos;t have any deals right now. Check back later for exciting offers!
                   </p>
                 </motion.div>
@@ -257,7 +257,7 @@ export function StorePage({ store }: StorePageProps) {
       </div>
 
       {/* Decorative footer gradient */}
-      <div className="h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+      <div className="h-px bg-gradient-to-r from-transparent via-border to-transparent" />
     </div>
   );
 }

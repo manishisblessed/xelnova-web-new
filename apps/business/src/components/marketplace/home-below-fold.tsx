@@ -389,14 +389,14 @@ export function HomeBelowFold() {
           <SectionHeader title="Shop by Budget" subtitle="Find products that fit your budget" accent />
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 md:gap-5">
             {[
-              { label: 'Under ₹499', range: '0-499', gradient: 'from-emerald-500 to-teal-600', lightGradient: 'from-emerald-50 to-teal-50', icon: '💰', iconBg: 'bg-emerald-100' },
-              { label: 'Under ₹999', range: '0-999', gradient: 'from-blue-500 to-indigo-600', lightGradient: 'from-blue-50 to-indigo-50', icon: '🛍️', iconBg: 'bg-blue-100' },
-              { label: 'Under ₹1,999', range: '0-1999', gradient: 'from-purple-500 to-violet-600', lightGradient: 'from-purple-50 to-violet-50', icon: '✨', iconBg: 'bg-purple-100' },
-              { label: 'Premium', range: '2000-99999', gradient: 'from-amber-500 to-orange-600', lightGradient: 'from-amber-50 to-orange-50', icon: '👑', iconBg: 'bg-amber-100' },
+              { label: 'Under ₹499', minPrice: '0', maxPrice: '499', gradient: 'from-emerald-500 to-teal-600', lightGradient: 'from-emerald-50 to-teal-50', icon: '💰', iconBg: 'bg-emerald-100' },
+              { label: 'Under ₹999', minPrice: '0', maxPrice: '999', gradient: 'from-blue-500 to-indigo-600', lightGradient: 'from-blue-50 to-indigo-50', icon: '🛍️', iconBg: 'bg-blue-100' },
+              { label: 'Under ₹1,999', minPrice: '0', maxPrice: '1999', gradient: 'from-purple-500 to-violet-600', lightGradient: 'from-purple-50 to-violet-50', icon: '✨', iconBg: 'bg-purple-100' },
+              { label: 'Premium', minPrice: '2000', maxPrice: '99999', gradient: 'from-amber-500 to-orange-600', lightGradient: 'from-amber-50 to-orange-50', icon: '👑', iconBg: 'bg-amber-100' },
             ].map((tier, i) => (
               <Link
-                key={tier.range}
-                href={`/products?priceRange=${tier.range}`}
+                key={tier.label}
+                href={`/products?minPrice=${tier.minPrice}&maxPrice=${tier.maxPrice}`}
                 className="group card-3d shine-effect relative overflow-hidden rounded-2xl p-6 text-center bg-white border border-white/80 ring-1 ring-gray-100/50"
               >
                 {/* Gradient background on hover */}
@@ -410,7 +410,7 @@ export function HomeBelowFold() {
                   <span className="text-2xl">{tier.icon}</span>
                 </div>
                 
-                <h3 className="relative z-10 text-lg font-bold text-text-primary group-hover:text-transparent group-hover:bg-clip-text group-hover:bg-gradient-to-r group-hover:${tier.gradient} transition-all duration-300">
+                <h3 className="relative z-10 text-lg font-bold text-text-primary group-hover:text-primary-700 transition-all duration-300">
                   {tier.label}
                 </h3>
                 <p className="relative z-10 text-xs text-text-muted mt-1.5">Free delivery included</p>

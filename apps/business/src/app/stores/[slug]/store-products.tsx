@@ -93,8 +93,8 @@ export function StoreProducts({ slug, initialCategory }: StoreProductsProps) {
       {/* Header */}
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-bold text-white">All Products</h2>
-          <p className="mt-1 text-sm text-surface-100">
+          <h2 className="text-xl font-bold text-text-primary">All Products</h2>
+          <p className="mt-1 text-sm text-text-muted">
             {loading ? 'Loading...' : `Showing ${products.length} of ${total} products`}
           </p>
         </div>
@@ -107,7 +107,7 @@ export function StoreProducts({ slug, initialCategory }: StoreProductsProps) {
               placeholder="Search in store..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-48 sm:w-64 rounded-xl border border-surface-300 bg-surface-800 px-4 py-2.5 text-sm text-white placeholder-surface-200 outline-none focus:border-gold-400"
+              className="w-48 sm:w-64 rounded-xl border border-border bg-surface-muted px-4 py-2.5 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-primary-400"
             />
           </div>
 
@@ -116,7 +116,7 @@ export function StoreProducts({ slug, initialCategory }: StoreProductsProps) {
             <select
               value={sort}
               onChange={(e) => setSort(e.target.value as typeof sort)}
-              className="appearance-none rounded-xl border border-surface-300 bg-surface-800 px-4 py-2.5 pr-10 text-sm font-medium text-surface-50 outline-none focus:border-gold-400"
+              className="appearance-none rounded-xl border border-border bg-surface-muted px-4 py-2.5 pr-10 text-sm font-medium text-text-primary outline-none focus:border-primary-400"
             >
               {SORT_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>
@@ -124,7 +124,7 @@ export function StoreProducts({ slug, initialCategory }: StoreProductsProps) {
                 </option>
               ))}
             </select>
-            <ChevronDown size={16} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-surface-200" />
+            <ChevronDown size={16} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-text-muted" />
           </div>
 
           {/* In Stock Filter */}
@@ -133,8 +133,8 @@ export function StoreProducts({ slug, initialCategory }: StoreProductsProps) {
             className={cn(
               'flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-medium transition-colors',
               inStockOnly
-                ? 'border-gold-400 bg-gold-400/10 text-gold-400'
-                : 'border-surface-300 bg-surface-800 text-surface-50 hover:border-gold-400/50'
+                ? 'border-primary-400 bg-primary-50 text-primary-600'
+                : 'border-border bg-surface-muted text-text-primary hover:border-primary-300'
             )}
           >
             In Stock
@@ -147,25 +147,25 @@ export function StoreProducts({ slug, initialCategory }: StoreProductsProps) {
       {(category || inStockOnly || search) && (
         <div className="mb-5 flex flex-wrap items-center gap-2">
           {category && (
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-gold-400/30 bg-gold-400/10 px-3 py-1 text-xs font-medium text-gold-400">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-primary-200 bg-primary-50 px-3 py-1 text-xs font-medium text-primary-600">
               {category}
-              <button onClick={() => setCategory(undefined)} className="hover:text-gold-300">
+              <button onClick={() => setCategory(undefined)} className="hover:text-primary-600">
                 <X size={12} />
               </button>
             </span>
           )}
           {search && (
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-gold-400/30 bg-gold-400/10 px-3 py-1 text-xs font-medium text-gold-400">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-primary-200 bg-primary-50 px-3 py-1 text-xs font-medium text-primary-600">
               &quot;{search}&quot;
-              <button onClick={() => setSearch('')} className="hover:text-gold-300">
+              <button onClick={() => setSearch('')} className="hover:text-primary-600">
                 <X size={12} />
               </button>
             </span>
           )}
           {inStockOnly && (
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-gold-400/30 bg-gold-400/10 px-3 py-1 text-xs font-medium text-gold-400">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-primary-200 bg-primary-50 px-3 py-1 text-xs font-medium text-primary-600">
               In Stock Only
-              <button onClick={() => setInStockOnly(false)} className="hover:text-gold-300">
+              <button onClick={() => setInStockOnly(false)} className="hover:text-primary-600">
                 <X size={12} />
               </button>
             </span>
@@ -176,7 +176,7 @@ export function StoreProducts({ slug, initialCategory }: StoreProductsProps) {
               setSearch('');
               setInStockOnly(false);
             }}
-            className="text-sm font-medium text-gold-400 hover:text-gold-300"
+            className="text-sm font-medium text-primary-600 hover:text-primary-600"
           >
             Clear All
           </button>
@@ -186,7 +186,7 @@ export function StoreProducts({ slug, initialCategory }: StoreProductsProps) {
       {/* Products Grid */}
       {loading ? (
         <div className="flex items-center justify-center py-20">
-          <div className="h-8 w-8 animate-spin rounded-full border-4 border-gold-400 border-t-transparent" />
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary-400 border-t-transparent" />
         </div>
       ) : products.length > 0 ? (
         <>
@@ -202,7 +202,7 @@ export function StoreProducts({ slug, initialCategory }: StoreProductsProps) {
               <button
                 onClick={loadMore}
                 disabled={loadingMore}
-                className="flex items-center gap-2 rounded-xl bg-surface-800 px-8 py-3 text-sm font-semibold text-white hover:bg-surface-700 disabled:opacity-50 transition-colors"
+                className="flex items-center gap-2 rounded-xl bg-surface-muted px-8 py-3 text-sm font-semibold text-text-primary hover:bg-surface-muted disabled:opacity-50 transition-colors"
               >
                 {loadingMore ? (
                   <>
@@ -218,11 +218,11 @@ export function StoreProducts({ slug, initialCategory }: StoreProductsProps) {
         </>
       ) : (
         <div className="flex flex-col items-center justify-center py-20 text-center">
-          <div className="mb-4 rounded-full bg-surface-700 p-6">
-            <SlidersHorizontal size={32} className="text-surface-200" />
+          <div className="mb-4 rounded-full bg-surface-muted p-6">
+            <SlidersHorizontal size={32} className="text-text-muted" />
           </div>
-          <h3 className="text-lg font-semibold text-white">No products found</h3>
-          <p className="mt-1 text-sm text-surface-100">
+          <h3 className="text-lg font-semibold text-text-primary">No products found</h3>
+          <p className="mt-1 text-sm text-text-muted">
             Try adjusting your filters or search terms.
           </p>
           <button
@@ -231,7 +231,7 @@ export function StoreProducts({ slug, initialCategory }: StoreProductsProps) {
               setSearch('');
               setInStockOnly(false);
             }}
-            className="mt-4 rounded-xl bg-gold-400 px-6 py-2.5 text-sm font-semibold text-surface-950 hover:bg-gold-300"
+            className="mt-4 rounded-xl bg-primary-500 px-6 py-2.5 text-sm font-semibold text-white hover:bg-primary-400"
           >
             Clear All Filters
           </button>

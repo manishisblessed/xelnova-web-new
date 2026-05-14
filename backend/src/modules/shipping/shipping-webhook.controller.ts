@@ -1,8 +1,21 @@
-import { Controller, Post, Body, Param, Logger } from '@nestjs/common';
+import { Controller, Post, Body, Logger } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { ShippingService } from './shipping.service';
 import { ShippingMode } from '@prisma/client';
 import { successResponse } from '../../common/helpers/response.helper';
+
+/**
+ * Delhivery's push webhook may wrap the event inside a `ShipmentData`
+ * array. Unwrap it so `processWebhook` always receives a flat object
+ * with `Waybill`, `Status`, etc. at the top level.
+ */
+function normaliseDelhiveryPayload(raw: any): any {
+  if (raw?.ShipmentData && Array.isArray(raw.ShipmentData)) {
+    const inner = raw.ShipmentData[0]?.Shipment ?? raw.ShipmentData[0];
+    if (inner) return inner;
+  }
+  return raw;
+}
 
 @ApiTags('Shipping Webhooks')
 @Controller('webhooks/shipping')
@@ -15,9 +28,10 @@ export class ShippingWebhookController {
   @ApiOperation({ summary: 'Delhivery status webhook' })
   async delhiveryWebhook(@Body() payload: any) {
     this.logger.log(`Delhivery webhook received: ${JSON.stringify(payload).substring(0, 200)}`);
+    const normalised = normaliseDelhiveryPayload(payload);
     const result = await this.service.processWebhook(
       ShippingMode.DELHIVERY,
-      payload,
+      normalised,
     );
     return successResponse(result, 'Webhook processed');
   }
@@ -57,6 +71,33 @@ export class ShippingWebhookController {
     const result = await this.service.processWebhook(
       ShippingMode.EKART,
       payload,
+    );
+    return successResponse(result, 'Webhook processed');
+  }
+}
+
+/**
+ * Alias controller that matches the exact URL Delhivery has registered:
+ * `POST /api/v1/webhooks/delhivery/shipment-status`
+ *
+ * Delegates to the same `ShippingService.processWebhook` so both
+ * customer-facing and seller-facing order statuses stay in sync.
+ */
+@ApiTags('Shipping Webhooks')
+@Controller('webhooks/delhivery')
+export class DelhiveryWebhookController {
+  private readonly logger = new Logger(DelhiveryWebhookController.name);
+
+  constructor(private readonly service: ShippingService) {}
+
+  @Post('shipment-status')
+  @ApiOperation({ summary: 'Delhivery push webhook (registered URL)' })
+  async shipmentStatus(@Body() payload: any) {
+    this.logger.log(`Delhivery shipment-status webhook: ${JSON.stringify(payload).substring(0, 200)}`);
+    const normalised = normaliseDelhiveryPayload(payload);
+    const result = await this.service.processWebhook(
+      ShippingMode.DELHIVERY,
+      normalised,
     );
     return successResponse(result, 'Webhook processed');
   }

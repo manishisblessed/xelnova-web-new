@@ -348,6 +348,10 @@ export default function SellerOrdersPage() {
             if (order) openCancelModal(order);
           }}
           onShipped={handleShipped}
+          onOrderRefresh={(updated) => {
+            setDetail(updated);
+            setOrders((prev) => prev.map((o) => o.id === updated.id ? updated : o));
+          }}
           saving={saving}
           autoOpenShipModal={autoOpenShipModal}
         />
@@ -586,6 +590,7 @@ function OrderDetail({
   onStatusUpdate,
   onCancel,
   onShipped,
+  onOrderRefresh,
   saving,
   autoOpenShipModal = false,
 }: {
@@ -594,6 +599,7 @@ function OrderDetail({
   onStatusUpdate: (orderId: string, status: string) => Promise<void>;
   onCancel: (orderId: string) => void;
   onShipped: (orderId: string) => void;
+  onOrderRefresh: (updated: SellerOrder) => void;
   saving: boolean;
   autoOpenShipModal?: boolean;
 }) {
@@ -661,11 +667,24 @@ function OrderDetail({
     }
   }, [order.id]);
 
+  const refreshOrder = useCallback(async () => {
+    try {
+      const fresh = (await apiGetSellerOrder(order.id)) as SellerOrder;
+      onOrderRefresh(fresh);
+    } catch {
+      // Silently ignore — order detail will stay with current data
+    }
+  }, [order.id, onOrderRefresh]);
+
   useEffect(() => {
     if (['CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED'].includes(order.status)) {
       loadShipment();
     }
   }, [order.id, order.status, loadShipment]);
+
+  useEffect(() => {
+    refreshOrder();
+  }, [refreshOrder]);
 
   useEffect(() => {
     if (!autoOpenShipModal) return;
@@ -678,6 +697,7 @@ function OrderDetail({
     try {
       const data = await apiTrackShipment(order.id);
       setTrackingData(data);
+      await refreshOrder();
       toast.success('Tracking data refreshed');
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Failed to fetch tracking');

@@ -16,7 +16,7 @@ export function StoreAbout({ store }: StoreAboutProps) {
 
   return (
     <div className="max-w-4xl">
-      <h2 className="mb-8 text-2xl font-bold text-white">
+      <h2 className="mb-8 text-2xl font-bold text-text-primary">
         About {store.storeName}
       </h2>
 
@@ -24,19 +24,19 @@ export function StoreAbout({ store }: StoreAboutProps) {
         {/* Main Content */}
         <div className="lg:col-span-2 space-y-8">
           {/* About Section */}
-          <div className="rounded-2xl border border-surface-300/30 bg-surface-800 p-6">
-            <h3 className="mb-4 text-lg font-semibold text-white">
+          <div className="rounded-2xl border border-border bg-surface-muted p-6">
+            <h3 className="mb-4 text-lg font-semibold text-text-primary">
               {store.aboutTitle || 'Our Story'}
             </h3>
             {store.aboutDescription ? (
               <div 
-                className="prose prose-invert prose-sm max-w-none text-surface-100"
+                className="prose prose-sm max-w-none text-text-muted"
                 dangerouslySetInnerHTML={{ __html: store.aboutDescription }}
               />
             ) : store.description ? (
-              <p className="text-surface-100 leading-relaxed">{store.description}</p>
+              <p className="text-text-muted leading-relaxed">{store.description}</p>
             ) : (
-              <p className="text-surface-200 italic">
+              <p className="text-text-muted italic">
                 Welcome to {store.storeName}! We&apos;re committed to providing quality products 
                 and excellent customer service. Browse our collection and discover amazing deals.
               </p>
@@ -71,7 +71,7 @@ export function StoreAbout({ store }: StoreAboutProps) {
         {/* Sidebar Stats */}
         <div className="space-y-6">
           {/* Store Card */}
-          <div className="rounded-2xl border border-surface-300/30 bg-surface-800 p-6">
+          <div className="rounded-2xl border border-border bg-surface-muted p-6">
             <div className="flex items-center gap-4 mb-6">
               <div className="relative w-16 h-16 rounded-xl overflow-hidden shrink-0">
                 {store.logo ? (
@@ -91,7 +91,7 @@ export function StoreAbout({ store }: StoreAboutProps) {
                 )}
               </div>
               <div>
-                <h4 className="font-semibold text-white">{store.storeName}</h4>
+                <h4 className="font-semibold text-text-primary">{store.storeName}</h4>
                 {store.verified && (
                   <span className="inline-flex items-center gap-1 text-xs text-blue-400">
                     <BadgeCheck className="w-3.5 h-3.5" />
@@ -104,34 +104,34 @@ export function StoreAbout({ store }: StoreAboutProps) {
             <div className="space-y-4">
               {/* Rating */}
               <div className="flex items-center justify-between">
-                <span className="text-surface-100">Seller Rating</span>
+                <span className="text-text-muted">Seller Rating</span>
                 <div className="flex items-center gap-1.5">
-                  <Star className="w-4 h-4 fill-gold-400 text-gold-400" />
-                  <span className="font-semibold text-white">{store.rating.toFixed(1)}</span>
-                  <span className="text-surface-200">/ 5</span>
+                  <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
+                  <span className="font-semibold text-text-primary">{store.rating.toFixed(1)}</span>
+                  <span className="text-text-muted">/ 5</span>
                 </div>
               </div>
 
               {/* Products */}
               <div className="flex items-center justify-between">
-                <span className="text-surface-100">Products</span>
-                <span className="font-semibold text-white">{store.productCount}</span>
+                <span className="text-text-muted">Products</span>
+                <span className="font-semibold text-text-primary">{store.productCount}</span>
               </div>
 
               {/* Total Sales */}
               {store.totalSales > 0 && (
                 <div className="flex items-center justify-between">
-                  <span className="text-surface-100">Orders Fulfilled</span>
-                  <span className="font-semibold text-white">{store.totalSales.toLocaleString()}</span>
+                  <span className="text-text-muted">Orders Fulfilled</span>
+                  <span className="font-semibold text-text-primary">{store.totalSales.toLocaleString()}</span>
                 </div>
               )}
 
               {/* Location */}
               {store.location && (
                 <div className="flex items-center justify-between">
-                  <span className="text-surface-100">Location</span>
-                  <span className="flex items-center gap-1 text-white">
-                    <MapPin className="w-3.5 h-3.5 text-surface-200" />
+                  <span className="text-text-muted">Location</span>
+                  <span className="flex items-center gap-1 text-text-primary">
+                    <MapPin className="w-3.5 h-3.5 text-text-muted" />
                     {store.location}
                   </span>
                 </div>
@@ -139,9 +139,9 @@ export function StoreAbout({ store }: StoreAboutProps) {
 
               {/* Member Since */}
               <div className="flex items-center justify-between">
-                <span className="text-surface-100">Selling Since</span>
-                <span className="flex items-center gap-1 text-white">
-                  <Calendar className="w-3.5 h-3.5 text-surface-200" />
+                <span className="text-text-muted">Selling Since</span>
+                <span className="flex items-center gap-1 text-text-primary">
+                  <Calendar className="w-3.5 h-3.5 text-text-muted" />
                   {memberSince}
                 </span>
               </div>
@@ -150,13 +150,13 @@ export function StoreAbout({ store }: StoreAboutProps) {
 
           {/* Categories */}
           {store.categories.length > 0 && (
-            <div className="rounded-2xl border border-surface-300/30 bg-surface-800 p-6">
-              <h4 className="mb-4 font-semibold text-white">Categories</h4>
+            <div className="rounded-2xl border border-border bg-surface-muted p-6">
+              <h4 className="mb-4 font-semibold text-text-primary">Categories</h4>
               <div className="flex flex-wrap gap-2">
                 {store.categories.map((cat) => (
                   <span
                     key={cat.id}
-                    className="rounded-full bg-surface-700 px-3 py-1.5 text-xs font-medium text-surface-50"
+                    className="rounded-full bg-surface-muted px-3 py-1.5 text-xs font-medium text-text-primary"
                   >
                     {cat.name}
                   </span>
@@ -180,12 +180,12 @@ function TrustBadge({
   subtitle: string;
 }) {
   return (
-    <div className="flex flex-col items-center text-center rounded-xl border border-surface-300/30 bg-surface-800 p-4">
-      <div className="mb-2 rounded-full bg-gold-400/10 p-3">
-        <Icon className="w-5 h-5 text-gold-400" />
+    <div className="flex flex-col items-center text-center rounded-xl border border-border bg-surface-muted p-4">
+      <div className="mb-2 rounded-full bg-primary-50 p-3">
+        <Icon className="w-5 h-5 text-primary-600" />
       </div>
-      <h4 className="text-sm font-semibold text-white">{title}</h4>
-      <p className="text-xs text-surface-200">{subtitle}</p>
+      <h4 className="text-sm font-semibold text-text-primary">{title}</h4>
+      <p className="text-xs text-text-muted">{subtitle}</p>
     </div>
   );
 }

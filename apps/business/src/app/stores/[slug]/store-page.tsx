@@ -42,7 +42,7 @@ export function StorePage({ store }: StorePageProps) {
   const hasBestsellers = bestsellers.length > 0;
 
   return (
-    <div className="min-h-screen bg-surface-950">
+    <div className="min-h-screen bg-surface-raised">
       <StoreJsonLd store={store} />
       
       {/* Hero Banner */}
@@ -99,7 +99,7 @@ export function StorePage({ store }: StorePageProps) {
           <div>
             {loadingDeals ? (
               <div className="flex items-center justify-center py-20">
-                <div className="h-8 w-8 animate-spin rounded-full border-4 border-gold-400 border-t-transparent" />
+                <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary-400 border-t-transparent" />
               </div>
             ) : deals.length > 0 ? (
               <StoreFeatured 
@@ -110,8 +110,8 @@ export function StorePage({ store }: StorePageProps) {
             ) : (
               <div className="flex flex-col items-center justify-center py-20 text-center">
                 <div className="mb-4 text-4xl">🏷️</div>
-                <h3 className="text-lg font-semibold text-white">No active deals</h3>
-                <p className="mt-1 text-sm text-surface-100">
+                <h3 className="text-lg font-semibold text-text-primary">No active deals</h3>
+                <p className="mt-1 text-sm text-text-muted">
                   Check back later for exciting offers from {store.storeName}
                 </p>
               </div>

@@ -18,9 +18,9 @@ export function StoreFeatured({ products, title, showAll = false }: StoreFeature
   return (
     <section>
       <div className="mb-6 flex items-center justify-between">
-        <h2 className="text-xl font-bold text-white">{title}</h2>
+        <h2 className="text-xl font-bold text-text-primary">{title}</h2>
         {!showAll && products.length > 10 && (
-          <span className="text-sm text-surface-100">
+          <span className="text-sm text-text-muted">
             Showing {displayProducts.length} of {products.length}
           </span>
         )}

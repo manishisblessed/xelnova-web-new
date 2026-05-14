@@ -10,6 +10,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationService } from '../notifications/notification.service';
 import { WalletService } from '../wallet/wallet.service';
+import { SplitPaymentService } from '../payment/split-payment.service';
 import {
   ShippingMode,
   ShipmentStatus,
@@ -45,6 +46,7 @@ export class ShippingService implements OnModuleInit {
     private readonly config: ConfigService,
     private readonly notificationService: NotificationService,
     private readonly walletService: WalletService,
+    private readonly splitPaymentService: SplitPaymentService,
     delhivery: DelhiveryProvider,
     shiprocket: ShipRocketProvider,
     xpressbees: XpressBeesProvider,
@@ -2827,18 +2829,19 @@ export class ShippingService implements OnModuleInit {
       remark: dto.remark || `Status updated to ${dto.status}`,
     });
 
-    const updated = await this.prisma.shipment.update({
-      where: { orderId },
-      data: {
-        shipmentStatus: dto.status,
-        deliveredAt:
-          dto.status === ShipmentStatus.DELIVERED ? new Date() : undefined,
-        statusHistory: history,
-      },
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const shipmentUpdated = await tx.shipment.update({
+        where: { orderId },
+        data: {
+          shipmentStatus: dto.status,
+          deliveredAt:
+            dto.status === ShipmentStatus.DELIVERED ? new Date() : undefined,
+          statusHistory: history,
+        },
+      });
+      await this.syncOrderStatus(orderId, dto.status, tx);
+      return shipmentUpdated;
     });
-
-    // Sync order status
-    await this.syncOrderStatus(orderId, dto.status);
 
     return updated;
   }
@@ -2890,16 +2893,18 @@ export class ShippingService implements OnModuleInit {
       if (tracking.status && tracking.status !== 'UNKNOWN') {
         const mappedStatus = tracking.status as ShipmentStatus;
         if (Object.values(ShipmentStatus).includes(mappedStatus) && mappedStatus !== shipment.shipmentStatus) {
-          await this.prisma.shipment.update({
-            where: { orderId },
-            data: {
-              shipmentStatus: mappedStatus,
-              statusHistory: tracking.statusHistory as object[],
-              deliveredAt:
-                mappedStatus === ShipmentStatus.DELIVERED ? new Date() : undefined,
-            },
+          await this.prisma.$transaction(async (tx) => {
+            await tx.shipment.update({
+              where: { orderId },
+              data: {
+                shipmentStatus: mappedStatus,
+                statusHistory: tracking.statusHistory as object[],
+                deliveredAt:
+                  mappedStatus === ShipmentStatus.DELIVERED ? new Date() : undefined,
+              },
+            });
+            await this.syncOrderStatus(orderId, mappedStatus, tx);
           });
-          await this.syncOrderStatus(orderId, mappedStatus);
         }
       }
       return tracking;
@@ -2943,16 +2948,18 @@ export class ShippingService implements OnModuleInit {
         Object.values(ShipmentStatus).includes(mappedStatus) &&
         mappedStatus !== shipment.shipmentStatus
       ) {
-        await this.prisma.shipment.update({
-          where: { orderId },
-          data: {
-            shipmentStatus: mappedStatus,
-            statusHistory: tracking.statusHistory,
-            deliveredAt:
-              mappedStatus === ShipmentStatus.DELIVERED ? new Date() : undefined,
-          },
+        await this.prisma.$transaction(async (tx) => {
+          await tx.shipment.update({
+            where: { orderId },
+            data: {
+              shipmentStatus: mappedStatus,
+              statusHistory: tracking.statusHistory,
+              deliveredAt:
+                mappedStatus === ShipmentStatus.DELIVERED ? new Date() : undefined,
+            },
+          });
+          await this.syncOrderStatus(orderId, mappedStatus, tx);
         });
-        await this.syncOrderStatus(orderId, mappedStatus);
       }
     }
 
@@ -3694,31 +3701,68 @@ export class ShippingService implements OnModuleInit {
 
   // ─── Order Status Sync ───
 
-  async syncOrderStatus(orderId: string, shipmentStatus: ShipmentStatus) {
-    const statusMap: Partial<Record<ShipmentStatus, OrderStatus>> = {
-      [ShipmentStatus.BOOKED]: OrderStatus.SHIPPED,
-      [ShipmentStatus.PICKUP_SCHEDULED]: OrderStatus.SHIPPED,
-      [ShipmentStatus.PICKED_UP]: OrderStatus.SHIPPED,
-      [ShipmentStatus.IN_TRANSIT]: OrderStatus.SHIPPED,
-      [ShipmentStatus.OUT_FOR_DELIVERY]: OrderStatus.SHIPPED,
-      [ShipmentStatus.DELIVERED]: OrderStatus.DELIVERED,
-      [ShipmentStatus.CANCELLED]: OrderStatus.CONFIRMED,
-      [ShipmentStatus.RTO_INITIATED]: OrderStatus.RETURNED,
-      [ShipmentStatus.RTO_DELIVERED]: OrderStatus.RETURNED,
-    };
+  private static readonly SHIPMENT_ORDER_STATUS_MAP: Partial<Record<ShipmentStatus, OrderStatus>> = {
+    [ShipmentStatus.BOOKED]: OrderStatus.SHIPPED,
+    [ShipmentStatus.PICKUP_SCHEDULED]: OrderStatus.SHIPPED,
+    [ShipmentStatus.PICKED_UP]: OrderStatus.SHIPPED,
+    [ShipmentStatus.IN_TRANSIT]: OrderStatus.SHIPPED,
+    [ShipmentStatus.OUT_FOR_DELIVERY]: OrderStatus.SHIPPED,
+    [ShipmentStatus.DELIVERED]: OrderStatus.DELIVERED,
+    [ShipmentStatus.CANCELLED]: OrderStatus.CONFIRMED,
+    [ShipmentStatus.RTO_INITIATED]: OrderStatus.RETURNED,
+    [ShipmentStatus.RTO_DELIVERED]: OrderStatus.RETURNED,
+  };
 
-    const orderStatus = statusMap[shipmentStatus];
+  async syncOrderStatus(orderId: string, shipmentStatus: ShipmentStatus, tx?: { order: PrismaService['order'] }) {
+    const db = tx || this.prisma;
+    const orderStatus = ShippingService.SHIPMENT_ORDER_STATUS_MAP[shipmentStatus];
     if (orderStatus) {
-      const order = await this.prisma.order.update({
+      const order = await db.order.update({
         where: { id: orderId },
         data: { status: orderStatus },
         include: { shipment: true },
       });
 
-      // Send customer notifications based on shipment status
       this.sendStatusNotification(order, shipmentStatus).catch((err) =>
         this.logger.warn(`Failed to send status notification for order ${orderId}: ${err.message}`),
       );
+
+      if (orderStatus === OrderStatus.DELIVERED) {
+        this.settleAndCreditSellers(orderId).catch((err) =>
+          this.logger.warn(`Auto-settlement failed for order ${orderId}: ${err.message}`),
+        );
+      }
+    }
+  }
+
+  private async settleAndCreditSellers(orderId: string) {
+    const { payouts } = await this.splitPaymentService.settleOrder(orderId);
+
+    for (const payout of payouts) {
+      const seller = await this.prisma.sellerProfile.findUnique({
+        where: { id: payout.sellerId },
+        select: { userId: true, storeName: true },
+      });
+      if (!seller?.userId) {
+        this.logger.warn(`Seller ${payout.sellerId} has no userId; skipping wallet credit for payout ${payout.id}`);
+        continue;
+      }
+
+      const wallet = await this.walletService.getOrCreateWallet(seller.userId, 'SELLER');
+
+      await this.walletService.credit(
+        wallet.id,
+        payout.amount,
+        `Order settlement: ${payout.note || orderId}`,
+        undefined,
+        'ORDER_SETTLEMENT',
+        payout.id,
+      );
+
+      await this.prisma.payout.update({
+        where: { id: payout.id },
+        data: { status: 'PAID' },
+      });
     }
   }
 
@@ -3849,17 +3893,19 @@ export class ShippingService implements OnModuleInit {
           (remark ? ` — ${String(remark).slice(0, 120)}` : ''),
       );
 
-      await this.prisma.shipment.update({
-        where: { id: shipment.id },
-        data: {
-          shipmentStatus: status as ShipmentStatus,
-          statusHistory: history,
-          deliveredAt:
-            status === ShipmentStatus.DELIVERED ? new Date() : undefined,
-        },
-      });
+      await this.prisma.$transaction(async (tx) => {
+        await tx.shipment.update({
+          where: { id: shipment.id },
+          data: {
+            shipmentStatus: status as ShipmentStatus,
+            statusHistory: history,
+            deliveredAt:
+              status === ShipmentStatus.DELIVERED ? new Date() : undefined,
+          },
+        });
 
-      await this.syncOrderStatus(shipment.orderId, status as ShipmentStatus);
+        await this.syncOrderStatus(shipment.orderId, status as ShipmentStatus, tx);
+      });
 
       const orderNotify = await this.prisma.order.findUnique({
         where: { id: shipment.orderId },

@@ -43,7 +43,7 @@ export function StoreHeader({ store }: StoreHeaderProps) {
           {/* Store Info */}
           <div className="flex-1 pb-2">
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-2xl sm:text-3xl font-bold text-white">
+              <h1 className="text-2xl sm:text-3xl font-bold text-text-primary">
                 {store.storeName}
               </h1>
               {store.verified && (
@@ -55,7 +55,7 @@ export function StoreHeader({ store }: StoreHeaderProps) {
             </div>
 
             {store.description && (
-              <p className="mt-2 text-sm text-surface-100 line-clamp-2 max-w-2xl">
+              <p className="mt-2 text-sm text-text-muted line-clamp-2 max-w-2xl">
                 {store.description}
               </p>
             )}
@@ -64,30 +64,30 @@ export function StoreHeader({ store }: StoreHeaderProps) {
             <div className="mt-4 flex flex-wrap items-center gap-4 sm:gap-6 text-sm">
               {/* Rating */}
               <div className="flex items-center gap-1.5">
-                <div className="flex items-center gap-1 px-2 py-1 rounded-lg bg-gold-400/20">
-                  <Star className="w-4 h-4 fill-gold-400 text-gold-400" />
-                  <span className="font-semibold text-gold-400">{store.rating.toFixed(1)}</span>
+                <div className="flex items-center gap-1 px-2 py-1 rounded-lg bg-primary-50">
+                  <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
+                  <span className="font-semibold text-primary-600">{store.rating.toFixed(1)}</span>
                 </div>
-                <span className="text-surface-100">Seller Rating</span>
+                <span className="text-text-muted">Seller Rating</span>
               </div>
 
               {/* Products */}
-              <div className="flex items-center gap-1.5 text-surface-100">
+              <div className="flex items-center gap-1.5 text-text-muted">
                 <Package className="w-4 h-4" />
-                <span><strong className="text-white">{store.productCount}</strong> Products</span>
+                <span><strong className="text-text-primary">{store.productCount}</strong> Products</span>
               </div>
 
               {/* Sales */}
               {store.totalSales > 0 && (
-                <div className="flex items-center gap-1.5 text-surface-100">
+                <div className="flex items-center gap-1.5 text-text-muted">
                   <Users className="w-4 h-4" />
-                  <span><strong className="text-white">{store.totalSales.toLocaleString()}</strong> Orders</span>
+                  <span><strong className="text-text-primary">{store.totalSales.toLocaleString()}</strong> Orders</span>
                 </div>
               )}
 
               {/* Location */}
               {store.location && (
-                <div className="flex items-center gap-1.5 text-surface-100">
+                <div className="flex items-center gap-1.5 text-text-muted">
                   <MapPin className="w-4 h-4" />
                   <span>{store.location}</span>
                 </div>
@@ -97,10 +97,10 @@ export function StoreHeader({ store }: StoreHeaderProps) {
 
           {/* Actions */}
           <div className="flex items-center gap-3 pb-2">
-            <button className="px-6 py-2.5 rounded-xl bg-gold-400 text-surface-950 font-semibold text-sm hover:bg-gold-300 transition-colors">
+            <button className="px-6 py-2.5 rounded-xl bg-primary-500 text-white font-semibold text-sm hover:bg-primary-400 transition-colors">
               Follow Store
             </button>
-            <button className="px-6 py-2.5 rounded-xl border border-surface-300 text-surface-50 font-semibold text-sm hover:border-gold-400/50 hover:text-gold-400 transition-colors">
+            <button className="px-6 py-2.5 rounded-xl border border-border text-text-primary font-semibold text-sm hover:border-primary-300 hover:text-primary-600 transition-colors">
               Share
             </button>
           </div>

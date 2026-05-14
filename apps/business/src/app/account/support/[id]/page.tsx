@@ -16,8 +16,11 @@ import {
   XCircle,
   MessageSquare,
   Store,
+  Paperclip,
+  X,
 } from "lucide-react";
-import { ticketsApi, setAccessToken } from "@xelnova/api";
+import { ticketsApi, uploadApi, setAccessToken } from "@xelnova/api";
+import { toast } from "sonner";
 
 type Ticket = Awaited<ReturnType<typeof ticketsApi.getMyTicketDetail>>;
 
@@ -51,7 +54,10 @@ export default function TicketDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [reply, setReply] = useState("");
   const [sending, setSending] = useState(false);
+  const [attachments, setAttachments] = useState<string[]>([]);
+  const [uploading, setUploading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadTicket = useCallback(() => {
     syncToken();
@@ -68,18 +74,43 @@ export default function TicketDetailPage() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [ticket?.messages?.length]);
 
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    if (attachments.length + files.length > 5) {
+      toast.error("Maximum 5 images allowed per message.");
+      return;
+    }
+    setUploading(true);
+    try {
+      syncToken();
+      const urls = await Promise.all(files.map((f) => uploadApi.uploadImage(f)));
+      setAttachments((prev) => [...prev, ...urls]);
+    } catch {
+      toast.error("Image upload failed. Please try again.");
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
   const handleSend = async () => {
-    if (!reply.trim() || !ticket) return;
+    if ((!reply.trim() && attachments.length === 0) || !ticket) return;
     setSending(true);
     try {
       syncToken();
-      const msg = await ticketsApi.replyToMyTicket(ticket.id, reply);
+      const msg = await ticketsApi.replyToMyTicket(
+        ticket.id,
+        reply,
+        attachments.length > 0 ? attachments : undefined,
+      );
       setTicket((prev) =>
         prev ? { ...prev, messages: [...(prev.messages || []), msg], status: "OPEN" } : prev,
       );
       setReply("");
-    } catch (e: any) {
-      alert(e.message || "Failed to send reply");
+      setAttachments([]);
+    } catch {
+      toast.error("Unable to send message. Please try again.");
     } finally {
       setSending(false);
     }
@@ -151,6 +182,21 @@ export default function TicketDetailPage() {
                   </div>
                 )}
                 <p className="text-sm whitespace-pre-wrap">{msg.message}</p>
+                {msg.attachments && msg.attachments.length > 0 && (
+                  <div className="flex gap-1.5 flex-wrap mt-2">
+                    {msg.attachments.map((url: string, j: number) => (
+                      <a
+                        key={j}
+                        href={url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block w-20 h-20 rounded-lg overflow-hidden border border-white/20 hover:opacity-90 transition-opacity"
+                      >
+                        <img src={url} alt="" className="w-full h-full object-cover" />
+                      </a>
+                    ))}
+                  </div>
+                )}
                 <p className={`text-[10px] mt-1.5 ${isMe ? "text-white/60" : "text-text-muted"}`}>
                   {new Date(msg.createdAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
                 </p>
@@ -163,21 +209,54 @@ export default function TicketDetailPage() {
 
       {/* Reply box */}
       {!isClosed ? (
-        <div className="shrink-0 flex gap-2">
-          <input
-            value={reply}
-            onChange={(e) => setReply(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void handleSend(); } }}
-            placeholder="Type your message…"
-            className="flex-1 rounded-xl border border-border px-4 py-3 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-          />
-          <button
-            onClick={() => void handleSend()}
-            disabled={sending || !reply.trim()}
-            className="flex items-center justify-center rounded-xl bg-primary-600 px-4 text-white hover:bg-primary-700 transition-colors disabled:opacity-50"
-          >
-            {sending ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
-          </button>
+        <div className="shrink-0 space-y-2">
+          {attachments.length > 0 && (
+            <div className="flex gap-2 flex-wrap">
+              {attachments.map((url, i) => (
+                <div key={i} className="relative group w-16 h-16 rounded-lg overflow-hidden border border-border">
+                  <img src={url} alt="" className="w-full h-full object-cover" />
+                  <button
+                    onClick={() => setAttachments((prev) => prev.filter((_, j) => j !== i))}
+                    className="absolute top-0.5 right-0.5 bg-black/60 rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    <X size={12} className="text-white" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="flex gap-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={handleFileSelect}
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading || attachments.length >= 5}
+              className="flex items-center justify-center rounded-xl border border-border px-3 text-text-muted hover:text-primary-600 hover:border-primary-300 transition-colors disabled:opacity-50"
+              title="Attach images"
+            >
+              {uploading ? <Loader2 size={18} className="animate-spin" /> : <Paperclip size={18} />}
+            </button>
+            <input
+              value={reply}
+              onChange={(e) => setReply(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void handleSend(); } }}
+              placeholder="Type your message…"
+              className="flex-1 rounded-xl border border-border px-4 py-3 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+            />
+            <button
+              onClick={() => void handleSend()}
+              disabled={sending || (!reply.trim() && attachments.length === 0)}
+              className="flex items-center justify-center rounded-xl bg-primary-600 px-4 text-white hover:bg-primary-700 transition-colors disabled:opacity-50"
+            >
+              {sending ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
+            </button>
+          </div>
         </div>
       ) : (
         <div className="shrink-0 rounded-xl bg-gray-50 border border-border px-4 py-3 text-center text-sm text-text-muted">

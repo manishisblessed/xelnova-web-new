@@ -1330,6 +1330,7 @@ enum WalletReferenceType {
   TRANSFER
   RECHARGE
   BILL_PAYMENT
+  ORDER_SETTLEMENT
 }
 
 enum BankTransferStatus {
@@ -1459,6 +1460,7 @@ model TicketMessage {
   sender      User    @relation(fields: [senderId], references: [id])
   senderRole  String
   message     String
+  attachments String[] @default([])
   isInternal  Boolean @default(false)
   isForwarded Boolean @default(false)
   /// When false, message is hidden from the customer portal (e.g. seller replies until relayed).

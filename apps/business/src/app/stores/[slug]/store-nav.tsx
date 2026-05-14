@@ -21,7 +21,7 @@ const tabs: { id: Tab; label: string; icon: React.ElementType }[] = [
 
 export function StoreNav({ activeTab, onTabChange, hasDeals }: StoreNavProps) {
   return (
-    <div className="sticky top-16 z-30 mt-6 border-b border-surface-300/30 bg-surface-950/95 backdrop-blur-md">
+    <div className="sticky top-16 z-30 mt-6 border-b border-border bg-white/95 backdrop-blur-md">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <nav className="flex items-center gap-1 overflow-x-auto scrollbar-hide -mb-px">
           {tabs.map((tab) => {
@@ -35,8 +35,8 @@ export function StoreNav({ activeTab, onTabChange, hasDeals }: StoreNavProps) {
                 className={cn(
                   'relative flex items-center gap-2 px-4 py-4 text-sm font-medium whitespace-nowrap transition-colors',
                   isActive 
-                    ? 'text-gold-400' 
-                    : 'text-surface-100 hover:text-white'
+                    ? 'text-primary-600' 
+                    : 'text-text-muted hover:text-text-primary'
                 )}
               >
                 <Icon className="w-4 h-4" />
@@ -49,7 +49,7 @@ export function StoreNav({ activeTab, onTabChange, hasDeals }: StoreNavProps) {
                 {isActive && (
                   <motion.div
                     layoutId="store-tab-indicator"
-                    className="absolute inset-x-0 bottom-0 h-0.5 bg-gold-400"
+                    className="absolute inset-x-0 bottom-0 h-0.5 bg-primary-500"
                     transition={{ type: 'spring', stiffness: 400, damping: 30 }}
                   />
                 )}

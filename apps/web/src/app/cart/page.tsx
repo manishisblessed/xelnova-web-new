@@ -51,13 +51,15 @@ function totalCouponDiscount(items: CartItem[]): number {
 function computeCouponDiscount(
   coupon: AvailableCoupon,
   itemPriceIncl: number,
+  quantity: number = 1,
 ): number {
-  if (coupon.minOrderAmount > 0 && itemPriceIncl < coupon.minOrderAmount) return 0;
+  const lineTotal = itemPriceIncl * quantity;
+  if (coupon.minOrderAmount > 0 && lineTotal < coupon.minOrderAmount) return 0;
   if (coupon.discountType === "PERCENTAGE") {
-    const disc = Math.round(itemPriceIncl * coupon.discountValue / 100);
+    const disc = Math.round(lineTotal * coupon.discountValue / 100);
     return coupon.maxDiscount && disc > coupon.maxDiscount ? coupon.maxDiscount : disc;
   }
-  return Math.min(coupon.discountValue, itemPriceIncl);
+  return Math.min(coupon.discountValue, lineTotal);
 }
 
 export default function CartPage() {
@@ -109,7 +111,7 @@ export default function CartPage() {
     (item: CartItem, coupon: AvailableCoupon) => {
       const isApplied = item.appliedCoupon?.code === coupon.code;
       const priceIncl = priceInclusiveOfGst(item.price, item.gstRate ?? null);
-      const discountAmount = isApplied ? 0 : computeCouponDiscount(coupon, priceIncl);
+      const discountAmount = isApplied ? 0 : computeCouponDiscount(coupon, priceIncl, item.quantity);
 
       const updatedItem: Omit<CartItem, "quantity"> = {
         id: item.id,
@@ -161,7 +163,7 @@ export default function CartPage() {
       if (!match) continue;
 
       const priceIncl = priceInclusiveOfGst(item.price, item.gstRate ?? null);
-      const discountAmount = computeCouponDiscount(match, priceIncl);
+      const discountAmount = computeCouponDiscount(match, priceIncl, item.quantity);
       if (discountAmount <= 0) continue;
 
       if (item.appliedCoupon?.code === match.code) {

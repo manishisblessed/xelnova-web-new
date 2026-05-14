@@ -9,10 +9,10 @@ import {
   Star, Heart, Share2, ShieldCheck, Truck, RotateCcw, ChevronRight,
   Minus, Plus, ThumbsUp, Check, ShoppingCart, Package, Loader2, Ruler, X,
   RefreshCw, Lock, ChevronDown, ChevronUp, AlertTriangle, FileText, Store,
-  Play, Ticket,
+  Play, Ticket, Gift,
 } from "lucide-react";
 import { cn } from "@xelnova/utils";
-import { formatCurrency, formatDate, priceInclusiveOfGst } from "@xelnova/utils";
+import { formatCurrency, formatDate, priceInclusiveOfGst, friendlyError } from "@xelnova/utils";
 import { useProductBySlug, useMarketplacePolicy } from "@/lib/api";
 import { reviewsApi, setAccessToken } from "@xelnova/api";
 import { useCartStore } from "@/lib/store/cart-store";
@@ -95,6 +95,8 @@ export default function ProductDetail() {
   const [shareCopied, setShareCopied] = useState(false);
   const [pendingQty, setPendingQty] = useState(1);
   const [selectedCoupon, setSelectedCoupon] = useState<typeof availableCoupons[0] | null>(null);
+  const [showAllCoupons, setShowAllCoupons] = useState(false);
+  const [showAllSidebarCoupons, setShowAllSidebarCoupons] = useState(false);
 
   // Augment variants with a synthetic "default" option from the main product
   // so the base product is selectable alongside variant swatches.
@@ -716,7 +718,7 @@ export default function ProductDetail() {
                 {/* Amazon-style coupon badges - show directly below price */}
                 {availableCoupons.length > 0 && (
                   <div className="mt-3 space-y-1.5">
-                    {availableCoupons.slice(0, 2).map((coupon) => {
+                    {(showAllCoupons ? availableCoupons : availableCoupons.slice(0, 2)).map((coupon) => {
                       const discountText = coupon.discountType === 'PERCENTAGE'
                         ? `${coupon.discountValue}% off`
                         : `₹${coupon.discountValue} off`;
@@ -741,10 +743,10 @@ export default function ProductDetail() {
                         </div>
                       );
                     })}
-                    {availableCoupons.length > 2 && (
-                      <p className="text-xs text-primary-600 font-medium ml-6">
+                    {!showAllCoupons && availableCoupons.length > 2 && (
+                      <button type="button" onClick={() => setShowAllCoupons(true)} className="text-xs text-primary-600 font-medium ml-6 hover:underline cursor-pointer">
                         +{availableCoupons.length - 2} more coupon{availableCoupons.length - 2 > 1 ? 's' : ''} available
-                      </p>
+                      </button>
                     )}
                   </div>
                 )}
@@ -754,6 +756,12 @@ export default function ProductDetail() {
 
               {/* Amazon-style service badges */}
               <div className="flex flex-wrap gap-4 text-xs text-center">
+                <div className="flex flex-col items-center gap-1.5">
+                  <div className="w-10 h-10 rounded-full bg-primary-50 border border-primary-100 flex items-center justify-center">
+                    <Gift size={18} className="text-primary-600" />
+                  </div>
+                  <span className="text-text-secondary font-medium">Free<br/>Delivery</span>
+                </div>
                 {showReplacement && (
                   <div className="flex flex-col items-center gap-1.5">
                     <div className="w-10 h-10 rounded-full bg-primary-50 border border-primary-100 flex items-center justify-center">
@@ -979,7 +987,7 @@ export default function ProductDetail() {
               {/* Amazon-style coupon in sidebar */}
               {availableCoupons.length > 0 && (
                 <div className="space-y-1.5">
-                  {availableCoupons.slice(0, 1).map((coupon) => {
+                  {(showAllSidebarCoupons ? availableCoupons : availableCoupons.slice(0, 1)).map((coupon) => {
                     const discountText = coupon.discountType === 'PERCENTAGE'
                       ? `${coupon.discountValue}% off`
                       : `₹${coupon.discountValue} off`;
@@ -999,10 +1007,10 @@ export default function ProductDetail() {
                       </div>
                     );
                   })}
-                  {availableCoupons.length > 1 && (
-                    <p className="text-xs text-primary-600 font-medium ml-6">
+                  {!showAllSidebarCoupons && availableCoupons.length > 1 && (
+                    <button type="button" onClick={() => setShowAllSidebarCoupons(true)} className="text-xs text-primary-600 font-medium ml-6 hover:underline cursor-pointer">
                       +{availableCoupons.length - 1} more available
-                    </p>
+                    </button>
                   )}
                 </div>
               )}
@@ -1491,22 +1499,41 @@ function ReviewsTab({ product }: { product: any }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [helpfulClicked, setHelpfulClicked] = useState<Set<string>>(new Set());
+  const [reviews, setReviews] = useState<any[]>([]);
+  const [reviewsLoading, setReviewsLoading] = useState(true);
+  const [reviewSummary, setReviewSummary] = useState<{ totalReviews: number; avgRating: number } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    reviewsApi.getProductReviews(product.id).then((res) => {
+      if (cancelled) return;
+      setReviews(res.reviews ?? []);
+      setReviewSummary(res.summary ?? null);
+    }).catch(() => {}).finally(() => { if (!cancelled) setReviewsLoading(false); });
+    return () => { cancelled = true; };
+  }, [product.id]);
+
+  const displayRating = reviewSummary?.avgRating ?? product.rating;
+  const displayCount = reviewSummary?.totalReviews ?? product.reviewCount;
 
   const handleSubmit = async () => {
     if (rating === 0) { setError("Please select a rating"); return; }
+    const m = typeof document !== "undefined" ? document.cookie.match(/(?:^|;\s*)xelnova-token=([^;]*)/) : null;
+    if (!m) { setError("Please sign in to submit a review."); return; }
     setSubmitting(true);
     setError("");
     try {
-      const m = typeof document !== "undefined" ? document.cookie.match(/(?:^|;\s*)xelnova-token=([^;]*)/) : null;
-      if (m) setAccessToken(decodeURIComponent(m[1]));
+      setAccessToken(decodeURIComponent(m[1]));
       await reviewsApi.createReview({ productId: product.id, rating, title: title || undefined, comment: comment || undefined });
       setShowForm(false);
       setRating(0);
       setTitle("");
       setComment("");
-      window.location.reload();
+      const res = await reviewsApi.getProductReviews(product.id);
+      setReviews(res.reviews ?? []);
+      setReviewSummary(res.summary ?? null);
     } catch (e: any) {
-      setError(e?.response?.data?.message || e?.message || "Failed to submit review");
+      setError(friendlyError(e, "Unable to submit review. Please try again."));
     } finally {
       setSubmitting(false);
     }
@@ -1527,13 +1554,13 @@ function ReviewsTab({ product }: { product: any }) {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-6 rounded-xl bg-gray-50 p-5 border border-border flex-1">
           <div className="text-center">
-            <div className="text-4xl font-extrabold text-text-primary">{product.rating.toFixed(1)}</div>
+            <div className="text-4xl font-extrabold text-text-primary">{displayRating.toFixed(1)}</div>
             <div className="mt-1.5 flex items-center gap-0.5">
               {Array.from({ length: 5 }).map((_, i) => (
-                <Star key={i} size={16} className={i < Math.floor(product.rating) ? "fill-accent-400 text-accent-400" : "text-gray-200"} />
+                <Star key={i} size={16} className={i < Math.floor(displayRating) ? "fill-accent-400 text-accent-400" : "text-gray-200"} />
               ))}
             </div>
-            <p className="mt-1 text-sm text-text-muted">{product.reviewCount.toLocaleString("en-IN")} ratings</p>
+            <p className="mt-1 text-sm text-text-muted">{displayCount.toLocaleString("en-IN")} ratings</p>
           </div>
         </div>
         <button
@@ -1580,15 +1607,19 @@ function ReviewsTab({ product }: { product: any }) {
         </div>
       )}
 
-      {product.reviews.length > 0 ? (
-        product.reviews.map((review: any) => (
+      {reviewsLoading ? (
+        <div className="flex items-center justify-center py-8">
+          <Loader2 size={20} className="animate-spin text-text-muted" />
+        </div>
+      ) : reviews.length > 0 ? (
+        reviews.map((review: any) => (
           <div key={review.id} className="border-b border-border pb-5 last:border-0">
             <div className="mb-2 flex items-center gap-3">
               <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary-100 text-xs font-bold text-primary-700">
-                {review.author.charAt(0)}
+                {(review.user?.name || "U").charAt(0)}
               </div>
               <div>
-                <p className="text-sm font-medium text-text-primary">{review.author}</p>
+                <p className="text-sm font-medium text-text-primary">{review.user?.name || "User"}</p>
                 {review.verified && (
                   <span className="flex items-center gap-1 text-xs text-success-700">
                     <Check size={10} /> Verified Purchase
@@ -1604,8 +1635,8 @@ function ReviewsTab({ product }: { product: any }) {
               </div>
               {review.title && <span className="text-sm font-semibold text-text-primary">{review.title}</span>}
             </div>
-            <p className="text-xs text-text-muted">Reviewed on {formatDate(review.date)}</p>
-            <p className="mt-2 text-sm leading-relaxed text-text-secondary">{review.content}</p>
+            <p className="text-xs text-text-muted">Reviewed on {formatDate(review.createdAt)}</p>
+            {review.comment && <p className="mt-2 text-sm leading-relaxed text-text-secondary">{review.comment}</p>}
             <button
               onClick={() => handleHelpful(review.id)}
               disabled={helpfulClicked.has(review.id)}

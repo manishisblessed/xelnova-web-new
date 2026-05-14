@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsEnum } from 'class-validator';
+import { IsString, IsOptional, IsEnum, IsArray } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateTicketDto {
@@ -24,6 +24,12 @@ export class ReplyTicketDto {
   @ApiPropertyOptional({ description: 'Mark as internal note (admin only)' })
   @IsOptional()
   isInternal?: boolean;
+
+  @ApiPropertyOptional({ description: 'Cloudinary image URLs attached to this message' })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  attachments?: string[];
 }
 
 export class ForwardTicketDto {

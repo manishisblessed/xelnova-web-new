@@ -37,6 +37,10 @@ export class ReturnsService {
       throw new BadRequestException('Please select a reason or add a short description');
     }
 
+    if (!imageUrls.length) {
+      throw new BadRequestException('Please upload at least one photo of the product');
+    }
+
     const composedReason =
       reasonDetail ||
       (description ? `${reasonCode}: ${description}` : reasonCode);

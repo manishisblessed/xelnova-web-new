@@ -33,7 +33,7 @@ export default function WishlistPage() {
     syncFromServer();
     wishlistApi.getWishlist()
       .then((data) => setProducts(data || []))
-      .catch((e) => setError(e?.message || "Failed to load wishlist"))
+      .catch(() => setError("Unable to load your wishlist. Please refresh the page."))
       .finally(() => setLoading(false));
   }, [syncFromServer]);
 

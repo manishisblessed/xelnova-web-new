@@ -128,13 +128,6 @@ export function Header() {
 
   useEffect(() => setMounted(true), []);
 
-  // Clear cart when user is confirmed to be logged out (handles stale localStorage data)
-  useEffect(() => {
-    if (authLoading) return;
-    if (!isAuthenticated && rawCartCount > 0) {
-      clearCart();
-    }
-  }, [authLoading, isAuthenticated, rawCartCount, clearCart]);
 
   useEffect(() => {
     if (!isAuthenticated || authLoading) return;

@@ -8,12 +8,13 @@ import { motion } from "framer-motion";
 import {
   Package, Truck, CheckCircle, Clock, ChevronLeft, MapPin, Phone,
   CreditCard, AlertCircle, Ban, RotateCcw, Banknote, Loader2,
-  Copy, ShoppingBag, User, XCircle, Download, RefreshCw, Star,
+  Copy, ShoppingBag, User, XCircle, Download, RefreshCw, Star, ImagePlus, X,
 } from "lucide-react";
-import { formatCurrency, cn } from "@xelnova/utils";
+import { formatCurrency, cn, friendlyError } from "@xelnova/utils";
 import { ordersApi, returnsApi, reviewsApi, uploadApi, setAccessToken, type Order, type OrderItem } from "@xelnova/api";
 import { useRouter } from "next/navigation";
 import { useCartStore } from "@/lib/store/cart-store";
+import { toast } from "sonner";
 
 function syncToken() {
   if (typeof document === "undefined") return;
@@ -115,9 +116,8 @@ export default function OrderDetailPage() {
 
   useEffect(() => {
     if (!order) return;
-    const paid = (order as any).paymentStatus === "PAID";
-    const eligible = ["CONFIRMED", "SHIPPED", "DELIVERED", "RETURNED", "REFUNDED"].includes(order.status.toUpperCase());
-    if (!paid && !eligible) return;
+    const eligible = ["DELIVERED", "RETURNED", "REFUNDED"].includes(order.status.toUpperCase());
+    if (!eligible) return;
     syncToken();
     reviewsApi
       .getOrderReviewStatus(order.orderNumber)
@@ -136,7 +136,7 @@ export default function OrderDetailPage() {
       setReviewRating(0);
       setReviewComment("");
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to submit review");
+      toast.error(friendlyError(err, "Unable to submit review. Please try again."));
     } finally {
       setReviewSubmitting(false);
     }
@@ -174,10 +174,10 @@ export default function OrderDetailPage() {
       setRefundOptions(null);
       // Show refund message if available
       if ((updated as any).refundMessage) {
-        alert((updated as any).refundMessage);
+        toast.success((updated as any).refundMessage);
       }
     } catch (e: any) {
-      alert(e.message || "Failed to cancel order");
+      toast.error(friendlyError(e, "Unable to cancel order. Please try again."));
     } finally {
       setCancelling(false);
     }
@@ -187,6 +187,9 @@ export default function OrderDetailPage() {
     if (!order || order.status.toUpperCase() !== "DELIVERED") return null;
     const items = Array.isArray(order.items) ? (order.items as ItemRow[]) : [];
     if (!items.length) return null;
+
+    const hasActiveReturn = Array.isArray((order as any).returnRequests) && (order as any).returnRequests.length > 0;
+
     const deliveredAt = order.shipment?.deliveredAt
       ? new Date(order.shipment.deliveredAt)
       : new Date(order.updatedAt || order.createdAt);
@@ -213,8 +216,9 @@ export default function OrderDetailPage() {
     const returnLimit = Math.min(...returnWindows);
     const replLimit = Math.min(...replWindows);
     return {
-      canReturn: allReturnable && days <= returnLimit,
-      canReplace: allReplaceable && days <= replLimit,
+      canReturn: !hasActiveReturn && allReturnable && days <= returnLimit,
+      canReplace: !hasActiveReturn && allReplaceable && days <= replLimit,
+      hasActiveReturn,
       daysSinceDelivery: days,
       returnLimit,
       replLimit,
@@ -235,7 +239,7 @@ export default function OrderDetailPage() {
   const handleReturnRequest = async () => {
     if (!order) return;
     if (returnReasonCode === "OTHER" && !returnDescription.trim() && !returnReason.trim()) {
-      alert("Please add a short description for your request.");
+      toast.error("Please add a short description for your request.");
       return;
     }
     setSubmittingReturn(true);
@@ -252,9 +256,9 @@ export default function OrderDetailPage() {
       setReturnReason("");
       setReturnDescription("");
       setReturnImageUrls([]);
-      alert("Request submitted successfully. The seller and our team have been notified.");
+      toast.success("Request submitted successfully. The seller and our team have been notified.");
     } catch (e: unknown) {
-      alert(e instanceof Error ? e.message : "Failed to submit request");
+      toast.error(friendlyError(e, "Unable to submit request. Please try again."));
     } finally {
       setSubmittingReturn(false);
     }
@@ -273,7 +277,7 @@ export default function OrderDetailPage() {
       a.click();
       URL.revokeObjectURL(url);
     } catch (e: any) {
-      alert(e.message || "Failed to download invoice");
+      toast.error(friendlyError(e, "Unable to download invoice. Please try again."));
     } finally {
       setDownloadingInvoice(false);
     }
@@ -525,89 +529,9 @@ export default function OrderDetailPage() {
               </div>
             </div>
           </motion.div>
-        </div>
-
-        {/* Order meta */}
-        <div className="min-w-0 space-y-3">
-          {/* Shipping address */}
-          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="rounded-2xl border border-border bg-white p-3 shadow-card sm:p-4">
-            <h3 className="text-sm font-bold text-text-primary mb-2 flex items-center gap-1.5">
-              <MapPin size={14} /> Shipping Address
-            </h3>
-            {addr ? (
-              <div className="text-xs space-y-0.5">
-                <p className="font-medium text-text-primary">{addr.fullName}</p>
-                <p className="text-text-secondary">{addr.addressLine1}</p>
-                {addr.addressLine2 && <p className="text-text-secondary">{addr.addressLine2}</p>}
-                <p className="text-text-secondary">{addr.city}, {addr.state} — {addr.pincode}</p>
-                <p className="flex items-center gap-1 text-text-muted mt-1">
-                  <Phone size={11} /> {addr.phone}
-                </p>
-              </div>
-            ) : (
-              <p className="text-sm text-text-muted">No address on file</p>
-            )}
-          </motion.div>
-
-          {/* Payment */}
-          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="rounded-2xl border border-border bg-white p-3 shadow-card sm:p-4">
-            <h3 className="text-sm font-bold text-text-primary mb-2 flex items-center gap-1.5">
-              <CreditCard size={14} /> Payment
-            </h3>
-            <div className="text-xs space-y-1.5">
-              <p className="text-text-secondary capitalize">{order.paymentMethod?.replace("_", " ") || "N/A"}</p>
-              {order.couponCode && (
-                <p className="text-success-600 text-xs font-medium">Coupon applied: {order.couponCode}</p>
-              )}
-            </div>
-          </motion.div>
-
-          {/* Actions */}
-          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="rounded-2xl border border-border bg-white p-3 shadow-card sm:p-4 space-y-2">
-            <h3 className="text-sm font-bold text-text-primary mb-2">Actions</h3>
-            <button
-              onClick={handleDownloadInvoice}
-              disabled={downloadingInvoice}
-              className="w-full flex items-center gap-2 rounded-xl border border-border px-3 py-2 text-xs font-medium text-text-primary hover:bg-gray-50 transition-colors disabled:opacity-50"
-            >
-              {downloadingInvoice ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
-              Download Invoice
-            </button>
-            <button
-              onClick={handleReorder}
-              className="w-full flex items-center gap-2 rounded-xl border border-border px-3 py-2 text-xs font-medium text-primary-600 hover:bg-primary-50 transition-colors"
-            >
-              <RefreshCw size={15} /> Buy Again
-            </button>
-            {returnEligibility?.canReturn && (
-              <button
-                onClick={() => openReturnModal("RETURN")}
-                className="w-full flex items-center gap-2 rounded-xl border border-orange-200 bg-orange-50 px-4 py-2.5 text-sm font-medium text-orange-700 hover:bg-orange-100 transition-colors"
-              >
-                <RotateCcw size={15} /> Return item
-              </button>
-            )}
-            {returnEligibility?.canReplace && (
-              <button
-                onClick={() => openReturnModal("REPLACEMENT")}
-                className="w-full flex items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm font-medium text-indigo-800 hover:bg-indigo-100 transition-colors"
-              >
-                <RefreshCw size={15} /> Request replacement
-              </button>
-            )}
-            {order?.status.toUpperCase() === "DELIVERED" && returnEligibility && !returnEligibility.canReturn && !returnEligibility.canReplace && (
-              <p className="text-xs text-text-muted text-center px-1">
-                {returnEligibility.hasNonReturnable
-                  ? "This order contains a non-returnable product."
-                  : returnEligibility.hasReplacementOnly && !returnEligibility.canReplace
-                    ? "Replacement window has ended for this order."
-                    : "Return or replacement window has ended for this order."}
-              </p>
-            )}
-          </motion.div>
 
           {/* Rate & Review */}
-          {order && ((order as any).paymentStatus === "PAID" || ["CONFIRMED", "SHIPPED", "DELIVERED", "RETURNED", "REFUNDED"].includes(order.status.toUpperCase())) && order.items?.length > 0 && (
+          {order && ["DELIVERED", "RETURNED", "REFUNDED"].includes(order.status.toUpperCase()) && order.items?.length > 0 && (
             <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.22 }} className="rounded-2xl border border-border bg-white p-3 shadow-card sm:p-4 space-y-3">
               <h3 className="text-sm font-bold text-text-primary flex items-center gap-1.5">
                 <Star size={15} className="text-amber-500" /> Rate &amp; Review
@@ -694,6 +618,88 @@ export default function OrderDetailPage() {
               </div>
             </motion.div>
           )}
+        </div>
+
+        {/* Order meta */}
+        <div className="min-w-0 space-y-3">
+          {/* Shipping address */}
+          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="rounded-2xl border border-border bg-white p-3 shadow-card sm:p-4">
+            <h3 className="text-sm font-bold text-text-primary mb-2 flex items-center gap-1.5">
+              <MapPin size={14} /> Shipping Address
+            </h3>
+            {addr ? (
+              <div className="text-xs space-y-0.5">
+                <p className="font-medium text-text-primary">{addr.fullName}</p>
+                <p className="text-text-secondary">{addr.addressLine1}</p>
+                {addr.addressLine2 && <p className="text-text-secondary">{addr.addressLine2}</p>}
+                <p className="text-text-secondary">{addr.city}, {addr.state} — {addr.pincode}</p>
+                <p className="flex items-center gap-1 text-text-muted mt-1">
+                  <Phone size={11} /> {addr.phone}
+                </p>
+              </div>
+            ) : (
+              <p className="text-sm text-text-muted">No address on file</p>
+            )}
+          </motion.div>
+
+          {/* Payment */}
+          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="rounded-2xl border border-border bg-white p-3 shadow-card sm:p-4">
+            <h3 className="text-sm font-bold text-text-primary mb-2 flex items-center gap-1.5">
+              <CreditCard size={14} /> Payment
+            </h3>
+            <div className="text-xs space-y-1.5">
+              <p className="text-text-secondary capitalize">{order.paymentMethod?.replace("_", " ") || "N/A"}</p>
+              {order.couponCode && (
+                <p className="text-success-600 text-xs font-medium">Coupon applied: {order.couponCode}</p>
+              )}
+            </div>
+          </motion.div>
+
+          {/* Actions */}
+          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="rounded-2xl border border-border bg-white p-3 shadow-card sm:p-4 space-y-2">
+            <h3 className="text-sm font-bold text-text-primary mb-2">Actions</h3>
+            <button
+              onClick={handleDownloadInvoice}
+              disabled={downloadingInvoice}
+              className="w-full flex items-center gap-2 rounded-xl border border-border px-3 py-2 text-xs font-medium text-text-primary hover:bg-gray-50 transition-colors disabled:opacity-50"
+            >
+              {downloadingInvoice ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
+              Download Invoice
+            </button>
+            <button
+              onClick={handleReorder}
+              className="w-full flex items-center gap-2 rounded-xl border border-border px-3 py-2 text-xs font-medium text-primary-600 hover:bg-primary-50 transition-colors"
+            >
+              <RefreshCw size={15} /> Buy Again
+            </button>
+            {returnEligibility?.canReturn && (
+              <button
+                onClick={() => openReturnModal("RETURN")}
+                className="w-full flex items-center gap-2 rounded-xl border border-orange-200 bg-orange-50 px-4 py-2.5 text-sm font-medium text-orange-700 hover:bg-orange-100 transition-colors"
+              >
+                <RotateCcw size={15} /> Return item
+              </button>
+            )}
+            {returnEligibility?.canReplace && (
+              <button
+                onClick={() => openReturnModal("REPLACEMENT")}
+                className="w-full flex items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm font-medium text-indigo-800 hover:bg-indigo-100 transition-colors"
+              >
+                <RefreshCw size={15} /> Request replacement
+              </button>
+            )}
+            {order?.status.toUpperCase() === "DELIVERED" && returnEligibility && !returnEligibility.canReturn && !returnEligibility.canReplace && (
+              <p className="text-xs text-text-muted text-center px-1">
+                {returnEligibility.hasActiveReturn
+                  ? "A return/replacement request is already in progress for this order."
+                  : returnEligibility.hasNonReturnable
+                  ? "This order contains a non-returnable product."
+                  : returnEligibility.hasReplacementOnly && !returnEligibility.canReplace
+                    ? "Replacement window has ended for this order."
+                    : "Return or replacement window has ended for this order."}
+              </p>
+            )}
+          </motion.div>
 
           {/* Need help */}
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }} className="rounded-2xl border border-border bg-gradient-to-br from-primary-50 to-blue-50 p-5">
@@ -893,35 +899,64 @@ export default function OrderDetailPage() {
 
             <div>
               <label className="block text-sm font-medium text-text-primary mb-1.5">
-                Photos <span className="text-text-muted font-normal">(optional, up to 3)</span>
+                Photos <span className="text-red-500">*</span> <span className="text-text-muted font-normal">(at least 1, up to 3)</span>
               </label>
-              <input
-                type="file"
-                accept="image/*"
-                multiple
-                disabled={returnUploadBusy || returnImageUrls.length >= 3}
-                className="block w-full text-xs text-text-secondary file:mr-2 file:rounded-lg file:border-0 file:bg-primary-50 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-primary-700"
-                onChange={async (e) => {
-                  const files = Array.from(e.target.files || []).slice(0, 3 - returnImageUrls.length);
-                  if (!files.length) return;
-                  setReturnUploadBusy(true);
-                  try {
-                    syncToken();
-                    const urls: string[] = [];
-                    for (const f of files) {
-                      urls.push(await uploadApi.uploadImage(f));
-                    }
-                    setReturnImageUrls((prev) => [...prev, ...urls].slice(0, 3));
-                  } catch (err) {
-                    alert(err instanceof Error ? err.message : "Upload failed");
-                  } finally {
-                    setReturnUploadBusy(false);
-                    e.target.value = "";
-                  }
-                }}
-              />
-              {returnImageUrls.length > 0 && (
-                <p className="text-xs text-text-muted mt-1">{returnImageUrls.length} image(s) attached</p>
+              <div className="flex items-center gap-2 flex-wrap">
+                {returnImageUrls.map((url, idx) => (
+                  <div key={idx} className="relative w-16 h-16 rounded-lg overflow-hidden border border-border group">
+                    <img src={url} alt={`Return photo ${idx + 1}`} className="w-full h-full object-cover" />
+                    <button
+                      type="button"
+                      onClick={() => setReturnImageUrls((prev) => prev.filter((_, i) => i !== idx))}
+                      className="absolute top-0.5 right-0.5 bg-black/60 rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <X size={12} className="text-white" />
+                    </button>
+                  </div>
+                ))}
+                {returnImageUrls.length < 3 && (
+                  <label className={cn(
+                    "flex flex-col items-center justify-center w-16 h-16 rounded-lg border-2 border-dashed cursor-pointer transition-colors",
+                    returnUploadBusy ? "border-gray-200 bg-gray-50 cursor-wait" : "border-orange-300 bg-orange-50 hover:border-orange-400 hover:bg-orange-100"
+                  )}>
+                    {returnUploadBusy ? (
+                      <Loader2 size={18} className="text-orange-400 animate-spin" />
+                    ) : (
+                      <ImagePlus size={20} className="text-orange-500" />
+                    )}
+                    <span className="text-[10px] text-orange-600 mt-0.5 font-medium">
+                      {returnUploadBusy ? "Uploading" : "Add"}
+                    </span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      disabled={returnUploadBusy || returnImageUrls.length >= 3}
+                      className="hidden"
+                      onChange={async (e) => {
+                        const files = Array.from(e.target.files || []).slice(0, 3 - returnImageUrls.length);
+                        if (!files.length) return;
+                        setReturnUploadBusy(true);
+                        try {
+                          syncToken();
+                          const urls: string[] = [];
+                          for (const f of files) {
+                            urls.push(await uploadApi.uploadImage(f));
+                          }
+                          setReturnImageUrls((prev) => [...prev, ...urls].slice(0, 3));
+                        } catch (err) {
+                          toast.error(friendlyError(err, "Image upload failed. Please try again."));
+                        } finally {
+                          setReturnUploadBusy(false);
+                          e.target.value = "";
+                        }
+                      }}
+                    />
+                  </label>
+                )}
+              </div>
+              {returnImageUrls.length === 0 && (
+                <p className="text-xs text-red-500 mt-1">Please upload at least one photo of the product</p>
               )}
             </div>
 
@@ -945,6 +980,7 @@ export default function OrderDetailPage() {
                 disabled={
                   submittingReturn ||
                   returnUploadBusy ||
+                  returnImageUrls.length === 0 ||
                   (returnReasonCode === "OTHER" && !returnDescription.trim() && !returnReason.trim())
                 }
                 className="flex-1 rounded-xl bg-orange-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-orange-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"

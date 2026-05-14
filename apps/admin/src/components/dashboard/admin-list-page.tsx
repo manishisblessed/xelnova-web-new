@@ -35,6 +35,8 @@ interface AdminListPageProps<T> {
   queryParams?: Record<string, string>;
   /** Transform API rows before search/filter (e.g. flatten a category tree). */
   normalizeItems?: (rows: T[]) => T[];
+  /** Pass custom data instead of fetching from API. */
+  customData?: T[];
 }
 
 export function AdminListPage<T extends object>({
@@ -53,13 +55,14 @@ export function AdminListPage<T extends object>({
   refreshTrigger,
   queryParams,
   normalizeItems,
+  customData,
 }: AdminListPageProps<T>) {
   const searchParams = useSearchParams();
   const initialSearch = searchParams?.get('search') ?? '';
   const initialFilter = searchParams?.get('status') ?? '';
   const hasPendingChangesFilter = searchParams?.get('hasPendingChanges') === 'true';
   const [data, setData] = useState<T[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!customData);
   const [search, setSearch] = useState(initialSearch);
   const [filter, setFilter] = useState(initialFilter);
 
@@ -83,7 +86,18 @@ export function AdminListPage<T extends object>({
     }
   }, [section, normalizeItems, queryParams]);
 
-  useEffect(() => { fetchData(); }, [fetchData, refreshTrigger]);
+  useEffect(() => {
+    if (!customData) {
+      fetchData();
+    }
+  }, [fetchData, refreshTrigger, customData]);
+  
+  useEffect(() => {
+    if (customData) {
+      setData(customData);
+      setLoading(false);
+    }
+  }, [customData]);
 
   let filtered = data;
   if (search && searchKeys?.length) {
@@ -117,7 +131,7 @@ export function AdminListPage<T extends object>({
 
   return (
     <>
-      <DashboardHeader title={title} />
+      {title && <DashboardHeader title={title} />}
       <div className="p-6 space-y-4">
         <motion.div
           initial={{ opacity: 0, y: 8 }}
@@ -152,12 +166,14 @@ export function AdminListPage<T extends object>({
               Showing products with pending changes
             </span>
           )}
-          <button
-            onClick={() => { setLoading(true); fetchData(); }}
-            className="flex items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2 text-sm text-text-primary hover:bg-surface-muted transition-colors"
-          >
-            <RefreshCw size={16} />
-          </button>
+          {!customData && (
+            <button
+              onClick={() => { setLoading(true); void fetchData(); }}
+              className="flex items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2 text-sm text-text-primary hover:bg-surface-muted transition-colors"
+            >
+              <RefreshCw size={16} />
+            </button>
+          )}
           <div className="flex-1" />
           {onAdd && (
             <Button variant="primary" size="sm" onClick={onAdd}>
@@ -171,7 +187,7 @@ export function AdminListPage<T extends object>({
             data={filtered}
             keyExtractor={keyExtractor}
             loading={loading}
-            emptyMessage={`No ${title.toLowerCase()} found`}
+            emptyMessage={title ? `No ${title.toLowerCase()} found` : 'No items found'}
           />
         </div>
         {children}

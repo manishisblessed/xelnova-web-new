@@ -155,3 +155,23 @@ export function getInitials(name: string): string {
 export function formatNumber(num: number): string {
   return num.toLocaleString("en-IN");
 }
+
+/**
+ * Maps raw API / network errors to user-friendly messages.
+ * Pass a contextual `fallback` for the specific action (e.g. "Unable to save address").
+ */
+export function friendlyError(err: unknown, fallback: string = "Something went wrong. Please try again."): string {
+  const status = (err as any)?.response?.status;
+  if (status === 401 || status === 403) {
+    const msg: string = (err as any)?.response?.data?.message ?? "";
+    if (/token|unauthorized|unauthenticated/i.test(msg) || /invalid or expired/i.test(msg)) {
+      return "Please sign in to continue.";
+    }
+  }
+  if (status === 429) return "Too many requests. Please wait a moment and try again.";
+  if (status >= 500) return "Our servers are having trouble. Please try again shortly.";
+  if ((err as any)?.code === "ERR_NETWORK" || (err as any)?.message === "Network Error") {
+    return "Network error. Please check your connection and try again.";
+  }
+  return fallback;
+}

@@ -90,7 +90,7 @@ export async function upsertEcommerceDemoData(prisma: PrismaClient) {
       description: "Discover the latest in fashion and accessories.",
       image: "https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=1200&h=400&fit=crop",
       ctaText: "Explore",
-      ctaLink: "/categories/fashion",
+      ctaLink: "/products?sort=newest",
       bgColor: "#0d9488",
       sortOrder: 1,
       position: "hero",

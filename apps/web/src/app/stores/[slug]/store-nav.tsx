@@ -23,7 +23,7 @@ export function StoreNav({ activeTab, onTabChange, hasDeals }: StoreNavProps) {
   return (
     <div className="sticky top-16 z-30 mt-6">
       {/* Glassmorphism background */}
-      <div className="absolute inset-0 bg-surface-950/80 backdrop-blur-xl border-y border-white/5" />
+      <div className="absolute inset-0 bg-white/80 backdrop-blur-xl border-y border-border" />
       
       <div className="relative mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <nav className="flex items-center justify-center sm:justify-start gap-1 overflow-x-auto scrollbar-hide py-2">
@@ -38,8 +38,8 @@ export function StoreNav({ activeTab, onTabChange, hasDeals }: StoreNavProps) {
                 className={cn(
                   'relative flex items-center gap-2 px-5 py-3 rounded-xl text-sm font-medium whitespace-nowrap transition-all duration-300',
                   isActive 
-                    ? 'text-surface-950' 
-                    : 'text-surface-200 hover:text-white hover:bg-white/5'
+                    ? 'text-white' 
+                    : 'text-text-muted hover:text-text-primary hover:bg-surface-muted'
                 )}
                 initial={{ opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -51,7 +51,7 @@ export function StoreNav({ activeTab, onTabChange, hasDeals }: StoreNavProps) {
                 {isActive && (
                   <motion.div
                     layoutId="store-nav-active"
-                    className="absolute inset-0 rounded-xl bg-gradient-to-r from-gold-400 to-gold-500 shadow-lg shadow-gold-400/20"
+                    className="absolute inset-0 rounded-xl bg-gradient-to-r from-primary-500 to-primary-600 shadow-lg shadow-primary-400/20"
                     transition={{ type: 'spring', stiffness: 400, damping: 30 }}
                   />
                 )}
@@ -80,7 +80,7 @@ export function StoreNav({ activeTab, onTabChange, hasDeals }: StoreNavProps) {
       </div>
 
       {/* Decorative gradient line */}
-      <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-gold-400/30 to-transparent" />
+      <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-primary-200 to-transparent" />
     </div>
   );
 }

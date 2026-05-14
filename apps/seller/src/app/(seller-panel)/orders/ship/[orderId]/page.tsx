@@ -131,6 +131,9 @@ export default function SellerShipOrderPage() {
   const [shipPickupPackages, setShipPickupPackages] = useState<number>(1);
   const [skipPickupAtBooking, setSkipPickupAtBooking] = useState(false);
 
+  const [selfShipAwb, setSelfShipAwb] = useState('');
+  const [selfShipCarrier, setSelfShipCarrier] = useState('');
+
   const [pickupLocations, setPickupLocations] = useState<SellerPickupLocation[]>([]);
   const [selectedPickupLocationId, setSelectedPickupLocationId] = useState<string>('');
   const [pickupPhone, setPickupPhone] = useState('');
@@ -343,7 +346,8 @@ export default function SellerShipOrderPage() {
         shippingMode: mode === 'selfship' ? 'SELF_SHIP' : selectedCourier,
       };
       if (mode === 'selfship') {
-        // no extra fields for selfship
+        if (selfShipCarrier.trim()) body.carrierName = selfShipCarrier.trim();
+        if (selfShipAwb.trim()) body.awbNumber = selfShipAwb.trim();
       } else {
         body.weight = weight ? parseFloat(weight) : undefined;
         body.dimensions = dimensions.trim() || undefined;
@@ -373,6 +377,8 @@ export default function SellerShipOrderPage() {
       shipPickupTime,
       shipPickupPackages,
       selectedPickupLocationId,
+      selfShipAwb,
+      selfShipCarrier,
     ],
   );
 
@@ -408,6 +414,14 @@ export default function SellerShipOrderPage() {
   };
 
   const handleBookSelfShip = async () => {
+    if (!selfShipCarrier.trim()) {
+      toast.error('Enter the carrier name');
+      return;
+    }
+    if (!selfShipAwb.trim()) {
+      toast.error('Enter the AWB / tracking number');
+      return;
+    }
     await submitShipment('selfship');
   };
 
@@ -714,11 +728,8 @@ export default function SellerShipOrderPage() {
                         <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider">Self Ship</h4>
                         <span className="text-[10px] text-gray-400 font-normal">You ship it yourself</span>
                       </div>
-                      <div
-                        className="group flex items-center justify-between rounded-xl border border-gray-200 bg-gradient-to-r from-gray-50/60 to-white p-3.5 hover:border-gray-300 hover:shadow-sm transition-all cursor-pointer"
-                        onClick={handleBookSelfShip}
-                      >
-                        <div className="flex items-center gap-3">
+                      <div className="rounded-xl border border-gray-200 bg-gradient-to-r from-gray-50/60 to-white p-3.5">
+                        <div className="flex items-center gap-3 mb-3">
                           <div className="h-9 w-9 rounded-lg bg-gray-100 flex items-center justify-center">
                             <PackageCheck size={16} className="text-gray-500" />
                           </div>
@@ -727,9 +738,25 @@ export default function SellerShipOrderPage() {
                             <p className="text-xs text-text-muted mt-0.5">You arrange pickup &amp; delivery yourself</p>
                           </div>
                         </div>
-                        <Button size="sm" variant="outline" className="shrink-0 opacity-80 group-hover:opacity-100 transition-opacity" loading={saving}>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mb-3">
+                          <input
+                            type="text"
+                            placeholder="Carrier name (e.g. DTDC, BlueDart) *"
+                            value={selfShipCarrier}
+                            onChange={(e) => setSelfShipCarrier(e.target.value)}
+                            className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-primary-400 focus:ring-1 focus:ring-primary-400 outline-none"
+                          />
+                          <input
+                            type="text"
+                            placeholder="AWB / Tracking number *"
+                            value={selfShipAwb}
+                            onChange={(e) => setSelfShipAwb(e.target.value)}
+                            className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-primary-400 focus:ring-1 focus:ring-primary-400 outline-none"
+                          />
+                        </div>
+                        <Button size="sm" variant="outline" className="w-full" loading={saving} disabled={saving || !selfShipCarrier.trim() || !selfShipAwb.trim()} onClick={handleBookSelfShip}>
                           <ArrowRight size={14} />
-                          Book
+                          Book Self Ship
                         </Button>
                       </div>
                     </div>

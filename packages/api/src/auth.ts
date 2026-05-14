@@ -90,6 +90,13 @@ export async function verifyOtp(phone: string, otp: string): Promise<VerifyOtpRe
   return result;
 }
 
+export async function googleLogin(idToken: string, role: 'customer' | 'seller' = 'customer'): Promise<LoginResponse> {
+  const { data } = await api.post<ApiResponse<LoginResponse>>('/auth/google/token', { idToken, role });
+  const result = data.data;
+  await storeSession(result);
+  return result;
+}
+
 export async function completePhoneRegistration(phone: string, name: string, email: string): Promise<LoginResponse> {
   const { data } = await api.post<ApiResponse<LoginResponse>>('/auth/complete-phone-registration', { phone, name, email });
   const result = data.data;

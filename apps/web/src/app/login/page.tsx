@@ -15,10 +15,9 @@ import {
   Star,
   Loader2,
 } from 'lucide-react';
-import { authApi, setAccessToken } from '@xelnova/api';
+import { authApi } from '@xelnova/api';
 
 const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '';
-const API_BASE = process.env.NEXT_PUBLIC_API_URL?.trim().replace(/\/$/, '') || '/api/v1';
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 90;
 
 const benefits = [
@@ -108,32 +107,17 @@ function LoginPageContent() {
     setGoogleClicked(false);
     setGoogleLoading(true);
     setError('');
-    
+
     try {
-      const res = await fetch(`${API_BASE}/auth/google/token`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-App-Role': 'CUSTOMER' },
-        body: JSON.stringify({ idToken: response.credential, role: 'customer' }),
-      });
-
-      const data = await res.json();
-
-      if (res.ok && data.success) {
-        const { setAccessToken } = await import('@xelnova/api');
-        setAccessToken(data.data.accessToken);
-        localStorage.setItem('xelnova-refresh-token', data.data.refreshToken);
-        localStorage.setItem('xelnova-user', JSON.stringify(data.data.user));
-        localStorage.setItem('xelnova-auth-provider', 'google');
-        document.cookie = `xelnova-token=${data.data.accessToken}; path=/; max-age=${COOKIE_MAX_AGE}`;
-        document.cookie = `xelnova-refresh-token=${data.data.refreshToken}; path=/; max-age=${COOKIE_MAX_AGE}`;
-        window.location.href = redirectTo;
-      } else {
-        console.error('Google sign-in API error:', res.status, data);
-        setError(data.message || `Google sign-in failed (${res.status})`);
-      }
+      const result = await authApi.googleLogin(response.credential, 'customer');
+      localStorage.setItem('xelnova-auth-provider', 'google');
+      document.cookie = `xelnova-token=${result.accessToken}; path=/; max-age=${COOKIE_MAX_AGE}`;
+      document.cookie = `xelnova-refresh-token=${result.refreshToken}; path=/; max-age=${COOKIE_MAX_AGE}`;
+      window.location.href = redirectTo;
     } catch (err) {
-      console.error('Google sign-in network error:', err);
-      setError(err instanceof Error ? err.message : 'Failed to sign in with Google');
+      console.error('Google sign-in error:', err);
+      const e = err as { response?: { data?: { message?: string } }; message?: string };
+      setError(e.response?.data?.message ?? e.message ?? 'Failed to sign in with Google');
     } finally {
       setGoogleLoading(false);
     }

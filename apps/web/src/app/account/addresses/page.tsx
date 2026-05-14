@@ -7,6 +7,8 @@ import { usersApi, setAccessToken } from "@xelnova/api";
 import type { Address } from "@xelnova/api";
 import { lookupPincode } from "@/lib/store/location-store";
 import { INDIAN_STATES } from "@/lib/indian-states";
+import { friendlyError } from "@xelnova/utils";
+import { toast } from "sonner";
 
 type AddressType = "HOME" | "OFFICE" | "OTHER";
 
@@ -140,7 +142,7 @@ export default function AddressesPage() {
       }
       setEditing(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save address");
+      setError(friendlyError(err, "Unable to save address. Please try again."));
     } finally {
       setSaving(false);
     }
@@ -155,7 +157,7 @@ export default function AddressesPage() {
       await usersApi.deleteAddress(id);
       setAddresses((prev) => prev.filter((a) => a.id !== id));
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to delete address");
+      toast.error(friendlyError(err, "Unable to delete address. Please try again."));
     } finally {
       setDeleting(null);
     }
@@ -167,7 +169,7 @@ export default function AddressesPage() {
       await usersApi.setDefaultAddress(id);
       setAddresses((prev) => prev.map((a) => ({ ...a, isDefault: a.id === id })));
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to set default address");
+      toast.error(friendlyError(err, "Unable to set default address. Please try again."));
     }
   };
 

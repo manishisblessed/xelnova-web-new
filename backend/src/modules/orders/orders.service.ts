@@ -138,6 +138,11 @@ export class OrdersService {
         },
         shippingAddress: true,
         shipment: true,
+        returnRequests: {
+          where: { status: { notIn: ['REJECTED'] } },
+          select: { id: true, status: true, kind: true, createdAt: true },
+          orderBy: { createdAt: 'desc' },
+        },
       },
     });
     if (!order || order.userId !== userId) return null;

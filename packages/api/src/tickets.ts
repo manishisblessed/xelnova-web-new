@@ -7,6 +7,7 @@ export interface TicketMessage {
   senderId: string;
   senderRole: 'CUSTOMER' | 'SELLER' | 'ADMIN';
   message: string;
+  attachments?: string[];
   isInternal: boolean;
   isForwarded: boolean;
   createdAt: string;
@@ -62,8 +63,8 @@ export async function getMyTicketDetail(id: string): Promise<Ticket> {
   return data.data;
 }
 
-export async function replyToMyTicket(id: string, message: string): Promise<TicketMessage> {
-  const { data } = await api.post<ApiResponse<TicketMessage>>(`/tickets/my/${id}/reply`, { message });
+export async function replyToMyTicket(id: string, message: string, attachments?: string[]): Promise<TicketMessage> {
+  const { data } = await api.post<ApiResponse<TicketMessage>>(`/tickets/my/${id}/reply`, { message, attachments });
   if (!data.success || !data.data) throw new Error(data.message || 'Failed to send reply');
   return data.data;
 }

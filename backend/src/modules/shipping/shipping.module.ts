@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ShippingController, ShippingRateController } from './shipping.controller';
-import { ShippingWebhookController } from './shipping-webhook.controller';
+import { ShippingWebhookController, DelhiveryWebhookController } from './shipping-webhook.controller';
 import { ShippingService } from './shipping.service';
 import { ShipmentTrackerService } from './shipment-tracker.service';
 import { LabelGeneratorService } from './label-generator.service';
@@ -12,11 +12,12 @@ import { EkartProvider } from './providers/ekart.provider';
 import { XelnovaCourierProvider } from './providers/xelnova-courier.provider';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { WalletModule } from '../wallet/wallet.module';
+import { PaymentModule } from '../payment/payment.module';
 import { InvoiceService } from '../orders/invoice.service';
 
 @Module({
-  imports: [ConfigModule, NotificationsModule, WalletModule],
-  controllers: [ShippingController, ShippingRateController, ShippingWebhookController],
+  imports: [ConfigModule, NotificationsModule, WalletModule, PaymentModule],
+  controllers: [ShippingController, ShippingRateController, ShippingWebhookController, DelhiveryWebhookController],
   providers: [
     ShippingService,
     ShipmentTrackerService,

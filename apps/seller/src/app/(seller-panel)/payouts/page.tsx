@@ -229,44 +229,50 @@ export default function SellerPayoutsPage() {
           </motion.div>
 
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.06 }}>
-            <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className="text-sm text-text-muted">Total Earnings</p>
-                  <p className="text-3xl font-bold text-text-primary mt-1">{loading ? '—' : fmt(data?.netRevenue ?? 0)}</p>
-                  <p className="text-xs text-text-muted mt-1">After commission & courier charges</p>
+            <Link href="/settlement" aria-label="View total earnings" className="block rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40">
+              <div className="rounded-2xl border border-border bg-white p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-card-hover">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-sm text-text-muted">Total Earnings</p>
+                    <p className="text-3xl font-bold text-text-primary mt-1">{loading ? '—' : fmt(data?.netRevenue ?? 0)}</p>
+                    <p className="text-xs text-text-muted mt-1">After commission & courier charges</p>
+                  </div>
+                  <div className="rounded-xl bg-blue-50 p-2.5"><IndianRupee size={20} className="text-blue-600" /></div>
                 </div>
-                <div className="rounded-xl bg-blue-50 p-2.5"><IndianRupee size={20} className="text-blue-600" /></div>
               </div>
-            </div>
+            </Link>
           </motion.div>
 
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.09 }}>
-            <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className="text-sm text-text-muted">Platform Commission</p>
-                  <p className="text-3xl font-bold text-red-500 mt-1">{loading ? '—' : fmt(data?.commission ?? 0)}</p>
-                  <p className="text-xs text-text-muted mt-1">
-                    {commRate > 0 ? `Effective ${commRate.toFixed(2)}% across this period` : 'Set per product when admin approves'}
-                  </p>
+            <Link href="/orders?tab=delivered" aria-label="View commission details" className="block rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40">
+              <div className="rounded-2xl border border-border bg-white p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-card-hover">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-sm text-text-muted">Platform Commission</p>
+                    <p className="text-3xl font-bold text-red-500 mt-1">{loading ? '—' : fmt(data?.commission ?? 0)}</p>
+                    <p className="text-xs text-text-muted mt-1">
+                      {commRate > 0 ? `Effective ${commRate.toFixed(2)}% across this period` : 'Set per product when admin approves'}
+                    </p>
+                  </div>
+                  <div className="rounded-xl bg-red-50 p-2.5"><Percent size={20} className="text-red-500" /></div>
                 </div>
-                <div className="rounded-xl bg-red-50 p-2.5"><Percent size={20} className="text-red-500" /></div>
               </div>
-            </div>
+            </Link>
           </motion.div>
 
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.12 }}>
-            <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className="text-sm text-text-muted">Courier Charges</p>
-                  <p className="text-3xl font-bold text-orange-500 mt-1">{loading ? '—' : fmt(data?.courierDeduction ?? 0)}</p>
-                  <p className="text-xs text-text-muted mt-1">Xelgo shipping deducted from payout</p>
+            <Link href="/shipping" aria-label="View courier charges" className="block rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40">
+              <div className="rounded-2xl border border-border bg-white p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-card-hover">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-sm text-text-muted">Courier Charges</p>
+                    <p className="text-3xl font-bold text-orange-500 mt-1">{loading ? '—' : fmt(data?.courierDeduction ?? 0)}</p>
+                    <p className="text-xs text-text-muted mt-1">Xelgo shipping deducted from payout</p>
+                  </div>
+                  <div className="rounded-xl bg-orange-50 p-2.5"><Truck size={20} className="text-orange-500" /></div>
                 </div>
-                <div className="rounded-xl bg-orange-50 p-2.5"><Truck size={20} className="text-orange-500" /></div>
               </div>
-            </div>
+            </Link>
           </motion.div>
         </div>
 

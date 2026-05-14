@@ -52,28 +52,28 @@ function SearchContent() {
   const hasActiveFilters = !!(category || brand || minRating);
 
   return (
-    <div className="min-h-screen bg-surface-950">
+    <div className="min-h-screen bg-surface">
       <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
         <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-white font-display">
-              {query ? <>Results for &quot;<span className="text-gold-400">{query}</span>&quot;</> : "Browse Products"}
+            <h1 className="text-2xl font-bold text-text-primary font-display">
+              {query ? <>Results for &quot;<span className="text-primary-600">{query}</span>&quot;</> : "Browse Products"}
             </h1>
-            <p className="mt-1 text-sm text-surface-100">
+            <p className="mt-1 text-sm text-text-muted">
               {loading ? "Searching..." : `${results.length} ${results.length === 1 ? "result" : "results"} found`}
             </p>
           </div>
           <div className="flex items-center gap-3">
             <button
               onClick={() => setShowFilters(!showFilters)}
-              className="flex items-center gap-2 rounded-xl border border-surface-300/30 bg-surface-800 px-4 py-2 text-sm text-surface-100 hover:bg-surface-700 transition-colors lg:hidden"
+              className="flex items-center gap-2 rounded-xl border border-border bg-surface-raised px-4 py-2 text-sm text-text-secondary hover:bg-surface-muted transition-colors lg:hidden"
             >
               <SlidersHorizontal size={16} /> Filters
             </button>
             <select
               value={sortBy}
               onChange={(e) => updateParam("sortBy", e.target.value)}
-              className="rounded-xl border border-surface-300/30 bg-surface-800 px-3 py-2 text-sm text-surface-100 focus:outline-none focus:ring-2 focus:ring-gold-400"
+              className="rounded-xl border border-border bg-surface-raised px-3 py-2 text-sm text-text-secondary focus:outline-none focus:ring-2 focus:ring-primary-500"
             >
               {SORT_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -85,11 +85,11 @@ function SearchContent() {
         <div className="flex gap-8">
           {/* Filters sidebar */}
           <aside className={`${showFilters ? "block" : "hidden"} lg:block w-full lg:w-64 shrink-0`}>
-            <div className="sticky top-24 space-y-6 rounded-2xl border border-surface-300/20 bg-surface-900 p-5">
+            <div className="sticky top-24 space-y-6 rounded-2xl border border-border bg-surface-raised p-5">
               <div className="flex items-center justify-between">
-                <h3 className="text-sm font-bold text-white">Filters</h3>
+                <h3 className="text-sm font-bold text-text-primary">Filters</h3>
                 {hasActiveFilters && (
-                  <button onClick={clearFilters} className="text-xs text-gold-400 hover:text-gold-300">
+                  <button onClick={clearFilters} className="text-xs text-primary-600 hover:text-primary-700">
                     Clear all
                   </button>
                 )}
@@ -97,7 +97,7 @@ function SearchContent() {
 
               {availableFilters?.categories && availableFilters.categories.length > 0 && (
                 <div>
-                  <h4 className="text-xs font-semibold text-surface-200 uppercase tracking-wider mb-2">Category</h4>
+                  <h4 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-2">Category</h4>
                   <div className="space-y-1.5 max-h-48 overflow-y-auto">
                     {availableFilters.categories.map((cat: any) => (
                       <button
@@ -105,8 +105,8 @@ function SearchContent() {
                         onClick={() => updateParam("category", category === cat.slug ? "" : cat.slug)}
                         className={`block w-full text-left text-sm px-2.5 py-1.5 rounded-lg transition-colors ${
                           category === cat.slug
-                            ? "bg-gold-400/20 text-gold-300 font-medium"
-                            : "text-surface-100 hover:bg-surface-800"
+                            ? "bg-primary-50 text-primary-700 font-medium"
+                            : "text-text-secondary hover:bg-surface-muted"
                         }`}
                       >
                         {cat.name}
@@ -118,7 +118,7 @@ function SearchContent() {
 
               {availableFilters?.brands && availableFilters.brands.length > 0 && (
                 <div>
-                  <h4 className="text-xs font-semibold text-surface-200 uppercase tracking-wider mb-2">Brand</h4>
+                  <h4 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-2">Brand</h4>
                   <div className="space-y-1.5 max-h-48 overflow-y-auto">
                     {availableFilters.brands.map((b: string) => (
                       <button
@@ -126,8 +126,8 @@ function SearchContent() {
                         onClick={() => updateParam("brand", brand === b ? "" : b)}
                         className={`block w-full text-left text-sm px-2.5 py-1.5 rounded-lg transition-colors ${
                           brand === b
-                            ? "bg-gold-400/20 text-gold-300 font-medium"
-                            : "text-surface-100 hover:bg-surface-800"
+                            ? "bg-primary-50 text-primary-700 font-medium"
+                            : "text-text-secondary hover:bg-surface-muted"
                         }`}
                       >
                         {b}
@@ -138,7 +138,7 @@ function SearchContent() {
               )}
 
               <div>
-                <h4 className="text-xs font-semibold text-surface-200 uppercase tracking-wider mb-2">Rating</h4>
+                <h4 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-2">Rating</h4>
                 <div className="space-y-1.5">
                   {[4, 3, 2].map((r) => (
                     <button
@@ -146,12 +146,12 @@ function SearchContent() {
                       onClick={() => updateParam("minRating", minRating === String(r) ? "" : String(r))}
                       className={`flex items-center gap-1.5 w-full text-left text-sm px-2.5 py-1.5 rounded-lg transition-colors ${
                         minRating === String(r)
-                          ? "bg-gold-400/20 text-gold-300 font-medium"
-                          : "text-surface-100 hover:bg-surface-800"
+                          ? "bg-primary-50 text-primary-700 font-medium"
+                          : "text-text-secondary hover:bg-surface-muted"
                       }`}
                     >
                       {Array.from({ length: r }).map((_, i) => (
-                        <Star key={i} size={12} className="fill-gold-400 text-gold-400" />
+                        <Star key={i} size={12} className="fill-amber-400 text-amber-400" />
                       ))}
                       <span>& up</span>
                     </button>
@@ -166,17 +166,17 @@ function SearchContent() {
             {hasActiveFilters && (
               <div className="flex flex-wrap gap-2 mb-4">
                 {category && (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-gold-400/20 px-3 py-1 text-xs font-medium text-gold-300">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-primary-50 px-3 py-1 text-xs font-medium text-primary-700">
                     {category} <button onClick={() => updateParam("category", "")}><X size={12} /></button>
                   </span>
                 )}
                 {brand && (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-gold-400/20 px-3 py-1 text-xs font-medium text-gold-300">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-primary-50 px-3 py-1 text-xs font-medium text-primary-700">
                     {brand} <button onClick={() => updateParam("brand", "")}><X size={12} /></button>
                   </span>
                 )}
                 {minRating && (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-gold-400/20 px-3 py-1 text-xs font-medium text-gold-300">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-primary-50 px-3 py-1 text-xs font-medium text-primary-700">
                     {minRating}+ stars <button onClick={() => updateParam("minRating", "")}><X size={12} /></button>
                   </span>
                 )}
@@ -185,7 +185,7 @@ function SearchContent() {
 
             {loading ? (
               <div className="flex items-center justify-center py-20">
-                <div className="h-8 w-8 animate-spin rounded-full border-4 border-gold-400 border-t-transparent" />
+                <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary-500 border-t-transparent" />
               </div>
             ) : results.length > 0 ? (
               <div className="grid grid-cols-2 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:gap-5">
@@ -195,26 +195,26 @@ function SearchContent() {
               </div>
             ) : query || hasActiveFilters ? (
               <div className="flex flex-col items-center justify-center py-20 text-center">
-                <div className="rounded-full bg-surface-800 p-6 mb-4 border border-surface-300/30">
-                  <Search size={36} className="text-surface-200" />
+                <div className="rounded-full bg-surface-muted p-6 mb-4 border border-border">
+                  <Search size={36} className="text-text-muted" />
                 </div>
-                <h3 className="text-lg font-semibold text-white">No results found</h3>
-                <p className="mt-1 text-sm text-surface-100 max-w-md">
+                <h3 className="text-lg font-semibold text-text-primary">No results found</h3>
+                <p className="mt-1 text-sm text-text-muted max-w-md">
                   Try different keywords or adjust your filters.
                 </p>
                 {hasActiveFilters && (
-                  <button onClick={clearFilters} className="mt-4 rounded-xl bg-gold-400/20 px-4 py-2 text-sm font-medium text-gold-300 hover:bg-gold-400/30 transition-colors">
+                  <button onClick={clearFilters} className="mt-4 rounded-xl bg-primary-50 px-4 py-2 text-sm font-medium text-primary-700 hover:bg-primary-100 transition-colors">
                     Clear all filters
                   </button>
                 )}
               </div>
             ) : (
               <div className="flex flex-col items-center justify-center py-20 text-center">
-                <div className="rounded-full bg-surface-800 p-6 mb-4 border border-surface-300/30">
-                  <Search size={36} className="text-surface-200" />
+                <div className="rounded-full bg-surface-muted p-6 mb-4 border border-border">
+                  <Search size={36} className="text-text-muted" />
                 </div>
-                <h3 className="text-lg font-semibold text-white">Start searching</h3>
-                <p className="mt-1 text-sm text-surface-100">
+                <h3 className="text-lg font-semibold text-text-primary">Start searching</h3>
+                <p className="mt-1 text-sm text-text-muted">
                   Type a product name, brand, or category to find what you need.
                 </p>
               </div>
@@ -228,7 +228,7 @@ function SearchContent() {
 
 export default function SearchPage() {
   return (
-    <Suspense fallback={<div className="flex min-h-screen items-center justify-center bg-surface-950"><div className="h-8 w-8 animate-spin rounded-full border-4 border-gold-400 border-t-transparent" /></div>}>
+    <Suspense fallback={<div className="flex min-h-screen items-center justify-center bg-surface"><div className="h-8 w-8 animate-spin rounded-full border-4 border-primary-500 border-t-transparent" /></div>}>
       <SearchContent />
     </Suspense>
   );

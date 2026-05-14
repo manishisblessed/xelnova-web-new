@@ -173,7 +173,7 @@ export class TicketsService {
     return { ...ticket, messages, assignedSellerStoreName };
   }
 
-  async customerReply(ticketId: string, customerId: string, message: string) {
+  async customerReply(ticketId: string, customerId: string, message: string, attachments?: string[]) {
     const ticket = await this.prisma.ticket.findUnique({
       where: { id: ticketId },
       select: { id: true, customerId: true, status: true, ticketNumber: true, subject: true },
@@ -187,7 +187,7 @@ export class TicketsService {
 
     const [msg] = await this.prisma.$transaction([
       this.prisma.ticketMessage.create({
-        data: { ticketId, senderId: customerId, senderRole: 'CUSTOMER', message, customerVisible: true, sellerVisible: false },
+        data: { ticketId, senderId: customerId, senderRole: 'CUSTOMER', message, attachments: attachments ?? [], customerVisible: true, sellerVisible: false },
         include: {
           sender: { select: { id: true, name: true, avatar: true, role: true } },
         },

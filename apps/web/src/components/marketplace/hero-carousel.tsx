@@ -35,6 +35,10 @@ function isBigFestiveSaleTitle(title: string): boolean {
   return title.trim().toLowerCase() === 'big festive sale';
 }
 
+function isNewArrivalsTitle(title: string): boolean {
+  return title.trim().toLowerCase() === 'new arrivals';
+}
+
 function resolveBannerImage(bannerImage: string | null | undefined, index: number): string {
   const trimmed = bannerImage?.trim();
   if (trimmed) return trimmed;
@@ -103,6 +107,12 @@ const accentColors = [
   'bg-gradient-to-r from-accent-400 to-accent-500',
 ];
 
+function resolveHref(banner: Banner): string {
+  if (isBigFestiveSaleTitle(banner.title)) return '/products?sort=discount';
+  if (isNewArrivalsTitle(banner.title)) return '/products?sort=newest';
+  return banner.ctaLink || '/products';
+}
+
 function mapBannerToSlide(banner: Banner, index: number): Slide {
   const image = isBigFestiveSaleTitle(banner.title)
     ? BIG_FESTIVE_SALE_BANNER_IMAGE
@@ -114,7 +124,7 @@ function mapBannerToSlide(banner: Banner, index: number): Slide {
     subtitle: banner.subtitle || '',
     badge: banner.ctaText || undefined,
     cta: banner.ctaText || 'Shop Now',
-    href: banner.ctaLink || '/products',
+    href: resolveHref(banner),
     accent: accentColors[index % accentColors.length],
     gradient: fallbackSlides[index % fallbackSlides.length].gradient,
   };

@@ -175,9 +175,11 @@ export function HomeFilterBar({ categories, brands }: HomeFilterBarProps) {
                 if (hasActiveFilters) {
                   setActiveFilters({});
                   router.push('/');
+                } else {
+                  router.push('/products');
                 }
               }}
-              title={hasActiveFilters ? 'Clear all filters' : 'Filters'}
+              title="Filters"
               className={cn(
                 'flex items-center gap-1.5 px-3 py-2 rounded-lg border text-sm font-medium transition-all',
                 hasActiveFilters
@@ -471,7 +473,10 @@ function DropdownFilter({ label, children, isOpen, onToggle }: DropdownFilterPro
       </button>
 
       {isOpen && (
-        <div className="absolute top-full left-0 mt-2 min-w-[180px] bg-white rounded-xl border border-gray-100 shadow-xl shadow-gray-200/50 z-50 py-1.5 animate-in fade-in slide-in-from-top-2 duration-150">
+        <div 
+          className="absolute top-full left-0 mt-2 min-w-[180px] bg-white rounded-xl border border-gray-100 shadow-xl shadow-gray-200/50 z-[100] py-1.5 animate-in fade-in slide-in-from-top-2 duration-150"
+          onClick={(e) => e.stopPropagation()}
+        >
           {children}
         </div>
       )}
@@ -486,11 +491,17 @@ interface DropdownItemProps {
 }
 
 function DropdownItem({ children, onClick, active }: DropdownItemProps) {
+  const handleClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onClick();
+  };
+
   return (
     <button
-      onClick={onClick}
+      onClick={handleClick}
       className={cn(
-        'w-full flex items-center gap-2 px-4 py-2.5 text-sm text-left transition-colors',
+        'w-full flex items-center gap-2 px-4 py-2.5 text-sm text-left transition-colors cursor-pointer',
         active
           ? 'bg-primary-50 text-primary-700 font-medium'
           : 'text-gray-700 hover:bg-gray-50 hover:text-gray-900'

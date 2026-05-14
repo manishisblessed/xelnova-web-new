@@ -94,7 +94,7 @@ export class TicketsController {
     @Body() dto: ReplyTicketDto,
   ) {
     return successResponse(
-      await this.ticketsService.customerReply(id, userId, dto.message),
+      await this.ticketsService.customerReply(id, userId, dto.message, dto.attachments),
       'Reply sent',
     );
   }
