@@ -167,6 +167,7 @@ export function friendlyError(err: unknown, fallback: string = "Something went w
     if (/token|unauthorized|unauthenticated/i.test(msg) || /invalid or expired/i.test(msg)) {
       return "Please sign in to continue.";
     }
+    if (msg) return msg;
   }
   if (status === 429) return "Too many requests. Please wait a moment and try again.";
   if (status >= 500) return "Our servers are having trouble. Please try again shortly.";

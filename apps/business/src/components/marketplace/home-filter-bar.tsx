@@ -474,7 +474,7 @@ function DropdownFilter({ label, children, isOpen, onToggle }: DropdownFilterPro
 
       {isOpen && (
         <div 
-          className="absolute top-full left-0 mt-2 min-w-[180px] bg-white rounded-xl border border-gray-100 shadow-xl shadow-gray-200/50 z-[100] py-1.5 animate-in fade-in slide-in-from-top-2 duration-150"
+          className="absolute top-full left-0 mt-2 min-w-[180px] bg-white rounded-xl border border-gray-100 shadow-xl shadow-gray-200/50 z-[100] py-1.5 animate-fade-in"
           onClick={(e) => e.stopPropagation()}
         >
           {children}

@@ -652,6 +652,95 @@ export default function OrderDetailPage() {
                 <span>{formatCurrency(order.total)}</span>
               </div>
             </div>
+
+            {/* Rate & Review — inline with items */}
+            {["DELIVERED", "RETURNED", "REFUNDED"].includes(order.status.toUpperCase()) && lineItems.length > 0 && (
+              <div className="mt-4 pt-3 border-t border-border space-y-3">
+                <h4 className="text-sm font-bold text-text-primary flex items-center gap-1.5">
+                  <Star size={15} className="text-amber-500" /> Rate &amp; Review
+                </h4>
+                <div className="space-y-2">
+                  {lineItems.map((item) => {
+                    const reviewed = reviewStatus[item.productId];
+                    const isOpen = reviewProductId === item.productId;
+                    return (
+                      <div key={`review-${item.productId}`} className="rounded-xl border border-border p-2.5 space-y-2">
+                        <div className="flex items-center gap-2">
+                          {itemImage(item) && (
+                            <Image src={itemImage(item)!} alt={itemName(item)} width={36} height={36} className="rounded-lg object-cover" />
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-medium text-text-primary truncate">{itemName(item)}</p>
+                            {reviewed ? (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded-full">
+                                <CheckCircle size={10} /> Reviewed ({reviewed.rating}★)
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setReviewProductId(isOpen ? null : item.productId);
+                                  setReviewRating(0);
+                                  setReviewComment("");
+                                }}
+                                className="text-[10px] font-semibold text-primary-600 hover:text-primary-700"
+                              >
+                                {isOpen ? "Cancel" : "Write a Review"}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        {isOpen && !reviewed && (
+                          <div className="space-y-2 pt-1 border-t border-border">
+                            <div className="flex items-center gap-0.5">
+                              {[1, 2, 3, 4, 5].map((star) => (
+                                <button
+                                  key={star}
+                                  type="button"
+                                  onMouseEnter={() => setReviewHover(star)}
+                                  onMouseLeave={() => setReviewHover(0)}
+                                  onClick={() => setReviewRating(star)}
+                                  className="p-0.5"
+                                >
+                                  <Star
+                                    size={20}
+                                    className={cn(
+                                      "transition-colors",
+                                      (reviewHover || reviewRating) >= star
+                                        ? "text-amber-400 fill-amber-400"
+                                        : "text-gray-300",
+                                    )}
+                                  />
+                                </button>
+                              ))}
+                              {reviewRating > 0 && (
+                                <span className="text-xs text-text-muted ml-1">{reviewRating}/5</span>
+                              )}
+                            </div>
+                            <textarea
+                              value={reviewComment}
+                              onChange={(e) => setReviewComment(e.target.value)}
+                              placeholder="Share your experience (optional)"
+                              rows={2}
+                              className="w-full rounded-lg border border-border px-2.5 py-1.5 text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => void handleSubmitReview()}
+                              disabled={reviewSubmitting || reviewRating < 1}
+                              className="w-full rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
+                            >
+                              {reviewSubmitting ? <Loader2 size={12} className="animate-spin" /> : <Star size={12} />}
+                              Submit Review
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </motion.div>
 
           {order.shipment && !isCancelled && (
@@ -746,94 +835,6 @@ export default function OrderDetailPage() {
             </motion.div>
           )}
 
-          {/* Rate & Review */}
-          {order && ["DELIVERED", "RETURNED", "REFUNDED"].includes(order.status.toUpperCase()) && order.items?.length > 0 && (
-            <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.22 }} className="rounded-2xl border border-border bg-white p-3 shadow-card sm:p-4 space-y-3">
-              <h3 className="text-sm font-bold text-text-primary flex items-center gap-1.5">
-                <Star size={15} className="text-amber-500" /> Rate &amp; Review
-              </h3>
-              <div className="space-y-2">
-                {(order.items as ItemRow[]).map((item) => {
-                  const reviewed = reviewStatus[item.productId];
-                  const isOpen = reviewProductId === item.productId;
-                  return (
-                    <div key={item.productId} className="rounded-xl border border-border p-2.5 space-y-2">
-                      <div className="flex items-center gap-2">
-                        {itemImage(item) && (
-                          <Image src={itemImage(item)!} alt={itemName(item)} width={36} height={36} className="rounded-lg object-cover" />
-                        )}
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs font-medium text-text-primary truncate">{itemName(item)}</p>
-                          {reviewed ? (
-                            <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded-full">
-                              <CheckCircle size={10} /> Reviewed ({reviewed.rating}★)
-                            </span>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setReviewProductId(isOpen ? null : item.productId);
-                                setReviewRating(0);
-                                setReviewComment("");
-                              }}
-                              className="text-[10px] font-semibold text-primary-600 hover:text-primary-700"
-                            >
-                              {isOpen ? "Cancel" : "Write a Review"}
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                      {isOpen && !reviewed && (
-                        <div className="space-y-2 pt-1 border-t border-border">
-                          <div className="flex items-center gap-0.5">
-                            {[1, 2, 3, 4, 5].map((star) => (
-                              <button
-                                key={star}
-                                type="button"
-                                onMouseEnter={() => setReviewHover(star)}
-                                onMouseLeave={() => setReviewHover(0)}
-                                onClick={() => setReviewRating(star)}
-                                className="p-0.5"
-                              >
-                                <Star
-                                  size={20}
-                                  className={cn(
-                                    "transition-colors",
-                                    (reviewHover || reviewRating) >= star
-                                      ? "text-amber-400 fill-amber-400"
-                                      : "text-gray-300",
-                                  )}
-                                />
-                              </button>
-                            ))}
-                            {reviewRating > 0 && (
-                              <span className="text-xs text-text-muted ml-1">{reviewRating}/5</span>
-                            )}
-                          </div>
-                          <textarea
-                            value={reviewComment}
-                            onChange={(e) => setReviewComment(e.target.value)}
-                            placeholder="Share your experience (optional)"
-                            rows={2}
-                            className="w-full rounded-lg border border-border px-2.5 py-1.5 text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => void handleSubmitReview()}
-                            disabled={reviewSubmitting || reviewRating < 1}
-                            className="w-full rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
-                          >
-                            {reviewSubmitting ? <Loader2 size={12} className="animate-spin" /> : <Star size={12} />}
-                            Submit Review
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </motion.div>
-          )}
         </div>
 
         {/* Order meta: address, payment, actions */}

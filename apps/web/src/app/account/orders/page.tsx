@@ -16,9 +16,19 @@ import {
   RotateCcw,
   Banknote,
   ShoppingBag,
+  Star,
+  RefreshCw,
 } from "lucide-react";
-import { formatCurrency } from "@xelnova/utils";
-import { ordersApi, setAccessToken, type Order, type OrderItem } from "@xelnova/api";
+import { toast } from "sonner";
+import { formatCurrency, friendlyError } from "@xelnova/utils";
+import {
+  ordersApi,
+  reviewsApi,
+  setAccessToken,
+  type Order,
+  type OrderItem,
+} from "@xelnova/api";
+import { getReturnEligibility } from "@/lib/orders/return-eligibility";
 
 function syncTokenFromCookie() {
   if (typeof document === "undefined") return;
@@ -58,10 +68,15 @@ function statusDisplay(status: string) {
   return statusConfig[key] ?? { icon: AlertCircle, color: "text-text-muted", bg: "bg-gray-100", label: status.replace(/_/g, " ") };
 }
 
+type ReviewedMap = Record<string, { reviewed: true; rating: number; status: string }>;
+
 export default function OrdersPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [reviewedByOrder, setReviewedByOrder] = useState<Record<string, ReviewedMap>>({});
+  const [submittingRating, setSubmittingRating] = useState<string | null>(null);
+  const [hoverRating, setHoverRating] = useState<{ key: string; value: number } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -75,6 +90,55 @@ export default function OrdersPage() {
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, []);
+
+  // Pull review status only for orders that are eligible (delivered family).
+  // Runs once orders are loaded; one tiny request per eligible order.
+  useEffect(() => {
+    if (!orders.length) return;
+    const eligible = orders.filter((o) =>
+      ["DELIVERED", "RETURNED", "REFUNDED"].includes(o.status.toUpperCase()),
+    );
+    if (!eligible.length) return;
+    let cancelled = false;
+    syncTokenFromCookie();
+    Promise.all(
+      eligible.map((o) =>
+        reviewsApi
+          .getOrderReviewStatus(o.orderNumber)
+          .then((status) => [o.orderNumber, status] as const)
+          .catch(() => [o.orderNumber, {} as ReviewedMap] as const),
+      ),
+    ).then((entries) => {
+      if (cancelled) return;
+      setReviewedByOrder((prev) => {
+        const next = { ...prev };
+        for (const [num, status] of entries) next[num] = status;
+        return next;
+      });
+    });
+    return () => { cancelled = true; };
+  }, [orders]);
+
+  const handleQuickRate = async (orderNumber: string, productId: string, rating: number) => {
+    const key = `${orderNumber}:${productId}`;
+    setSubmittingRating(key);
+    try {
+      syncTokenFromCookie();
+      await reviewsApi.createReview({ productId, rating });
+      setReviewedByOrder((prev) => ({
+        ...prev,
+        [orderNumber]: {
+          ...(prev[orderNumber] ?? {}),
+          [productId]: { reviewed: true, rating, status: "PENDING" },
+        },
+      }));
+      toast.success("Thanks for rating! You can add a written review from order details.");
+    } catch (err) {
+      toast.error(friendlyError(err, "Couldn't save your rating. Please try again."));
+    } finally {
+      setSubmittingRating(null);
+    }
+  };
 
   return (
     <div>
@@ -118,6 +182,14 @@ export default function OrdersPage() {
           {orders.map((order, i) => {
             const status = statusDisplay(order.status);
             const StatusIcon = status.icon;
+            const eligibility = getReturnEligibility(order);
+            const reviewed = reviewedByOrder[order.orderNumber] ?? {};
+            const isDeliveredFamily = ["DELIVERED", "RETURNED", "REFUNDED"].includes(
+              order.status.toUpperCase(),
+            );
+            const items = (order.items ?? []) as ItemRow[];
+            const unrated = isDeliveredFamily ? items.filter((it) => !reviewed[it.productId]) : [];
+            const showReturnBar = !!eligibility && (eligibility.canReturn || eligibility.canReplace);
             return (
               <motion.div
                 key={order.id}
@@ -171,6 +243,85 @@ export default function OrdersPage() {
                     );
                   })}
                 </div>
+
+                {/* Quick rate — surfaces stars right on the card so customers don't need to open details */}
+                {isDeliveredFamily && unrated.length > 0 && (
+                  <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50/50 p-3">
+                    <p className="text-xs font-semibold text-amber-800 mb-2 flex items-center gap-1.5">
+                      <Star size={13} className="fill-amber-500 text-amber-500" />
+                      {unrated.length === 1 ? "Rate your purchase" : `Rate ${unrated.length} items from this order`}
+                    </p>
+                    <div className="space-y-1.5">
+                      {unrated.map((it) => {
+                        const key = `${order.orderNumber}:${it.productId}`;
+                        const busy = submittingRating === key;
+                        const hovered = hoverRating?.key === key ? hoverRating.value : 0;
+                        return (
+                          <div key={it.productId} className="flex items-center gap-2">
+                            <span className="text-xs text-text-secondary truncate flex-1 min-w-0">
+                              {itemName(it)}
+                            </span>
+                            <div
+                              className="flex items-center"
+                              onMouseLeave={() => setHoverRating(null)}
+                            >
+                              {[1, 2, 3, 4, 5].map((s) => (
+                                <button
+                                  key={s}
+                                  type="button"
+                                  disabled={busy}
+                                  aria-label={`Rate ${s} star${s > 1 ? "s" : ""}`}
+                                  onMouseEnter={() => setHoverRating({ key, value: s })}
+                                  onClick={() => void handleQuickRate(order.orderNumber, it.productId, s)}
+                                  className="p-0.5 disabled:opacity-50"
+                                >
+                                  <Star
+                                    size={16}
+                                    className={
+                                      hovered >= s
+                                        ? "fill-amber-400 text-amber-400 transition-colors"
+                                        : "text-gray-300 hover:text-amber-300 transition-colors"
+                                    }
+                                  />
+                                </button>
+                              ))}
+                              {busy && <Loader2 size={12} className="ml-1 animate-spin text-amber-600" />}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Return / replacement bar with days-left countdown */}
+                {showReturnBar && eligibility && (
+                  <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-orange-200 bg-orange-50/60 px-3 py-2.5">
+                    <span className="text-[11px] font-semibold text-orange-800">
+                      {eligibility.canReturn
+                        ? `${eligibility.daysLeftToReturn} day${eligibility.daysLeftToReturn === 1 ? "" : "s"} left to return`
+                        : `${eligibility.daysLeftToReplace} day${eligibility.daysLeftToReplace === 1 ? "" : "s"} left to replace`}
+                    </span>
+                    <div className="ml-auto flex items-center gap-1.5">
+                      {eligibility.canReturn && (
+                        <Link
+                          href={`/account/orders/${order.orderNumber}`}
+                          className="inline-flex items-center gap-1 rounded-full bg-white border border-orange-300 px-3 py-1 text-[11px] font-semibold text-orange-700 hover:bg-orange-100 transition-colors"
+                        >
+                          <RotateCcw size={11} /> Return
+                        </Link>
+                      )}
+                      {eligibility.canReplace && (
+                        <Link
+                          href={`/account/orders/${order.orderNumber}`}
+                          className="inline-flex items-center gap-1 rounded-full bg-white border border-indigo-300 px-3 py-1 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-100 transition-colors"
+                        >
+                          <RefreshCw size={11} /> Replace
+                        </Link>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 <div className="flex items-center justify-between border-t border-border-light pt-3">
                   <p className="text-sm font-bold text-text-primary">Total: {formatCurrency(order.total)}</p>

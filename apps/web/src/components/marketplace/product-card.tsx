@@ -309,35 +309,6 @@ export const ProductCard = memo(function ProductCard({ product, index = 0 }: Pro
               )}
             </div>
 
-            {/* Variant Images Preview */}
-            {variantImages.length > 0 && (
-              <div
-                className="-mx-0.5 mt-2 flex snap-x snap-mandatory items-center gap-1.5 overflow-x-auto overscroll-x-contain scroll-smooth px-0.5 pb-0.5 scrollbar-hide"
-                style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-x' }}
-              >
-                {variantImages.slice(0, 8).map((img, idx) => (
-                  <div
-                    key={idx}
-                    className="relative h-10 w-10 shrink-0 snap-start overflow-hidden rounded-lg border border-border/50 bg-surface-raised transition-colors group-hover:border-primary-200 sm:h-9 sm:w-9"
-                  >
-                    <Image
-                      src={img}
-                      alt={`Variant ${idx + 1}`}
-                      fill
-                      sizes="40px"
-                      quality={85}
-                      className="object-cover"
-                    />
-                  </div>
-                ))}
-                {variantImages.length > 8 && (
-                  <span className="shrink-0 snap-start rounded-md border border-border/30 bg-surface-raised px-2 py-1.5 text-[10px] font-semibold text-text-muted">
-                    +{variantImages.length - 8}
-                  </span>
-                )}
-              </div>
-            )}
-
             <div className="mt-auto pt-1.5">
               <div className="flex items-baseline gap-2 flex-wrap">
                 <span className="text-base font-bold text-text-primary">
