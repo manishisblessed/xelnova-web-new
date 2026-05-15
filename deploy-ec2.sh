@@ -150,12 +150,32 @@ deploy_admin() {
   pm2 save
 }
 
+build_shared_packages() {
+  echo ""
+  echo "=== Building shared packages ==="
+  cd "$REPO_ROOT/packages/utils"
+  npm run build
+}
+
 case "$TARGET" in
-  backend)  deploy_backend ;;
-  seller)   deploy_seller ;;
-  web)      deploy_web ;;
-  admin)    deploy_admin ;;
+  backend)
+    build_shared_packages
+    deploy_backend
+    ;;
+  seller)
+    build_shared_packages
+    deploy_seller
+    ;;
+  web)
+    build_shared_packages
+    deploy_web
+    ;;
+  admin)
+    build_shared_packages
+    deploy_admin
+    ;;
   all)
+    build_shared_packages
     deploy_backend
     deploy_seller
     deploy_web
