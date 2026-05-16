@@ -112,7 +112,7 @@ export function Footer() {
     try {
       await contactApi.subscribeNewsletter(normalized);
       toast.success("You're subscribed", {
-        description: 'Confirmations and offers may arrive from info@xelnova.in.',
+        description: 'Look out for offers from the Xelnova marketing team — check spam if it does not appear.',
       });
       setSubscribeEmail('');
     } catch (err: unknown) {

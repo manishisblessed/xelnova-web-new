@@ -11,7 +11,7 @@ import {
   RefreshCw, Lock, ChevronDown, ChevronUp, AlertTriangle, FileText, Store, Ticket, Gift,
 } from "lucide-react";
 import { cn } from "@xelnova/utils";
-import { formatCurrency, formatDate, priceInclusiveOfGst, friendlyError } from "@xelnova/utils";
+import { formatCurrency, formatDate, priceInclusiveOfGst, friendlyError, inferVariantDisplayLabel } from "@xelnova/utils";
 import { useProductBySlug } from "@/lib/api";
 import { reviewsApi, setAccessToken } from "@xelnova/api";
 import { useCartStore } from "@/lib/store/cart-store";
@@ -323,7 +323,10 @@ export default function ProductDetail() {
 
   const activeGallery = variantGallery && variantGallery.length > 0 ? variantGallery : product.images;
   const hasImages = activeGallery.length > 0;
-  const deliveryDate = new Date(Date.now() + 3 * 86400000).toLocaleDateString("en-IN", { weekday: "long", month: "short", day: "numeric" });
+  const deliveryDateObj = new Date(Date.now() + 3 * 86400000);
+  const deliveryDate = deliveryDateObj.toLocaleDateString("en-IN", { weekday: "long", month: "short", day: "numeric" });
+  // Compact form for tight UI surfaces (e.g. variant swatch cards).
+  const deliveryDateShort = deliveryDateObj.toLocaleDateString("en-IN", { weekday: "short", month: "short", day: "numeric" });
 
   // Align return/replacement/warranty copy with consumer PDP (`apps/web`). Business app does not load site-wide return settings yet — treat marketplace gates as permissive (same as web when settings omit overrides).
   const marketplaceReturnsAllowed = true;
@@ -653,15 +656,23 @@ export default function ProductDetail() {
 
               {/* Variants */}
               {augmentedVariants.map((variant) => {
-                const isColor = variant.type === "color" || variant.options.some((o) => o.hex || (o.images && o.images.length > 0));
+                // Strict type-based detection — trust the seller's "Color" / "Size" / "Other"
+                // choice from the inventory form. Don't auto-promote based on attached images,
+                // because size options often carry pre-filled master photos which would otherwise
+                // hijack them into the image-card layout (and the size letter would disappear).
+                const isColor = variant.type === "color";
                 const isSize = variant.type === "size";
                 const hasSizeChart = isSize && variant.sizeChart && variant.sizeChart.length > 0;
+                // Sellers sometimes drop sizes/ages into a "Colour" attribute. Display a smarter
+                // label so the customer never sees `Colour: 2-3 YEAR` — the underlying variant
+                // `type` is left untouched so cart/SKU pricing still works.
+                const displayLabel = inferVariantDisplayLabel(variant.label, variant.options);
 
                 return (
                   <div key={variant.type + variant.label}>
                     <div className="mb-2 flex items-center justify-between">
                       <p className="text-sm font-semibold text-text-primary">
-                        {variant.label}:{" "}
+                        {displayLabel}:{" "}
                         <span className="font-normal text-text-secondary">
                           {selectedVariants[variant.type]
                             ? variant.options.find((o) => o.value === selectedVariants[variant.type])?.label
@@ -670,7 +681,7 @@ export default function ProductDetail() {
                       </p>
                       {hasSizeChart && (
                         <button
-                          onClick={() => setSizeChartModal({ label: variant.label, rows: variant.sizeChart! })}
+                          onClick={() => setSizeChartModal({ label: displayLabel, rows: variant.sizeChart! })}
                           className="flex items-center gap-1 text-xs font-medium text-primary-600 hover:text-primary-700 transition-colors"
                         >
                           <Ruler size={12} />
@@ -702,11 +713,12 @@ export default function ProductDetail() {
                             if (hasAnyImage) handleVariantHover(opt);
                           }}
                           gstRate={gstRate}
-                          deliveryText="FREE Delivery Tomorrow"
+                          deliveryText={`FREE by ${deliveryDateShort}`}
                         />
                       </div>
                     ) : isSize ? (
-                      /* Size variant — chip buttons */
+                      /* Size variant — Amazon-style pills. Solid border = available,
+                         dashed border = unavailable, thicker primary border = selected. */
                       <div className="flex flex-wrap gap-2">
                         {variant.options.map((opt) => {
                           const optDisabled = !opt.available || opt.stock === 0;
@@ -717,18 +729,15 @@ export default function ProductDetail() {
                               disabled={optDisabled}
                               onClick={() => handleVariantSelect(variant.type, opt.value, opt)}
                               className={cn(
-                                "relative min-w-[48px] rounded-lg border-2 px-3.5 py-2 text-sm font-semibold transition-all",
-                                optDisabled && "opacity-40 cursor-not-allowed",
+                                "min-w-[44px] rounded-md border-2 bg-white px-3 py-1.5 text-sm font-semibold transition-colors",
                                 isSelected
-                                  ? "border-primary-500 bg-primary-50 text-primary-700 shadow-sm"
-                                  : "border-border text-text-secondary hover:border-gray-400 bg-white",
-                                optDisabled && !isSelected && "bg-gray-50 line-through",
+                                  ? "border-primary-500 text-text-primary"
+                                  : optDisabled
+                                    ? "border-dashed border-gray-300 text-gray-400 cursor-not-allowed"
+                                    : "border-border text-text-primary hover:border-gray-500",
                               )}
                             >
                               {opt.label}
-                              {opt.stock === 0 && !optDisabled && (
-                                <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-danger-500" />
-                              )}
                             </button>
                           );
                         })}

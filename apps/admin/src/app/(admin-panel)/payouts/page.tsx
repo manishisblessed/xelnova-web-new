@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Column } from '@/components/dashboard/data-table';
-import { apiGetFull, apiUpdate } from '@/lib/api';
+import { apiGetFull, apiPost, apiUpdate } from '@/lib/api';
 import { cn } from '@xelnova/utils';
 
 interface Payout {
@@ -26,20 +26,35 @@ interface Payout {
   requestedAt: string;
   paidAt: string | null;
   courierDeduction?: number;
+  // New: settlement hold + snapshot fields
+  holdUntil?: string | null;
+  releasedAt?: string | null;
+  gross?: number | null;
+  commission?: number | null;
+  xelgoServiceCharge?: number | null;
   seller: { storeName: string; user: { name: string; email: string } | null } | null;
   order?: {
     orderNumber: string;
     total: number;
-    shipment?: { courierCharges: number | null; shippingMode: string } | null;
+    shipment?: {
+      courierCharges: number | null;
+      xelgoServiceCharge?: number | null;
+      returnCourierCharges?: number | null;
+      returnXelgoServiceCharge?: number | null;
+      shippingMode: string;
+    } | null;
   } | null;
 }
 
 interface PayoutSummary {
   totalGross: number;
   totalShippingCharges: number;
+  totalXelgoServiceFee?: number;
+  totalReturnDeductions?: number;
   totalCommission: number;
   commissionAdjustment: number;
   totalNetPayout: number;
+  totalHeld?: number;
   count: number;
 }
 
@@ -47,10 +62,11 @@ const SV: Record<string, 'success' | 'warning' | 'info' | 'danger' | 'default'> 
   PAID: 'success',
   APPROVED: 'info',
   PENDING: 'warning',
+  ON_HOLD: 'default',
   REJECTED: 'danger',
 };
 
-const STATUS_OPTIONS = ['PENDING', 'APPROVED', 'PAID', 'REJECTED'] as const;
+const STATUS_OPTIONS = ['ON_HOLD', 'PENDING', 'APPROVED', 'PAID', 'REJECTED'] as const;
 
 type PeriodPreset = 'all' | 'today' | 'monthly' | 'custom';
 
@@ -153,6 +169,22 @@ export default function PayoutsPage() {
       setRefreshTrigger((t) => t + 1);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Request failed');
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  const handleReleaseNow = async () => {
+    if (!selected) return;
+    if (!confirm('Force-release this settlement now? The seller wallet will be credited immediately.')) return;
+    try {
+      setUpdating(true);
+      await apiPost(`payouts/${selected.id}/release`, {});
+      toast.success('Payout released — wallet credited');
+      setDetailOpen(false);
+      setRefreshTrigger((t) => t + 1);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Release failed');
     } finally {
       setUpdating(false);
     }
@@ -300,30 +332,44 @@ export default function PayoutsPage() {
             <Loader2 size={20} className="animate-spin text-text-muted" />
           </div>
         ) : summary ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
             <SummaryCard
-              label="Total Payouts"
+              label="Gross Settled"
               value={summary.totalGross}
               icon={IndianRupee}
               color="text-blue-600"
               bgColor="bg-blue-50"
             />
             <SummaryCard
-              label="Xelgo Shipping Charges"
+              label="Held (7-day window)"
+              value={summary.totalHeld ?? 0}
+              icon={CalendarDays}
+              color="text-amber-600"
+              bgColor="bg-amber-50"
+            />
+            <SummaryCard
+              label="Xelgo Shipping"
               value={summary.totalShippingCharges}
               icon={Truck}
               color="text-orange-600"
               bgColor="bg-orange-50"
             />
             <SummaryCard
-              label="Commission Adjustments"
-              value={summary.commissionAdjustment}
+              label="Xelgo Service Fee"
+              value={summary.totalXelgoServiceFee ?? 0}
               icon={DollarSign}
               color="text-purple-600"
               bgColor="bg-purple-50"
             />
             <SummaryCard
-              label="Net Payouts"
+              label="Return Deductions"
+              value={summary.totalReturnDeductions ?? 0}
+              icon={Truck}
+              color="text-red-600"
+              bgColor="bg-red-50"
+            />
+            <SummaryCard
+              label="Net Released"
               value={summary.totalNetPayout}
               icon={CalendarDays}
               color="text-green-600"
@@ -371,8 +417,10 @@ export default function PayoutsPage() {
                 <span className="font-medium">{sellerLabel(selected)}</span>
               </div>
               <div>
-                <span className="text-text-muted">Gross Amount:</span>{' '}
-                <span className="font-semibold">{formatCurrency(selected.amount)}</span>
+                <span className="text-text-muted">Status:</span>{' '}
+                <Badge variant={SV[selected.status] ?? 'default'}>
+                  {selected.status.replace('_', ' ')}
+                </Badge>
               </div>
               {selected.order && (
                 <div>
@@ -380,16 +428,8 @@ export default function PayoutsPage() {
                   <span className="font-medium">{selected.order.orderNumber}</span>
                 </div>
               )}
-              {selected.order?.shipment?.shippingMode === 'XELNOVA_COURIER' && (
-                <div>
-                  <span className="text-text-muted">Xelgo Shipping:</span>{' '}
-                  <span className="font-medium text-orange-600">
-                    -{formatCurrency(selected.order.shipment.courierCharges ?? 0)}
-                  </span>
-                </div>
-              )}
               {selected.seller?.user?.email && (
-                <div className="col-span-2">
+                <div>
                   <span className="text-text-muted">Email:</span> {selected.seller.user.email}
                 </div>
               )}
@@ -400,24 +440,70 @@ export default function PayoutsPage() {
                 <span className="text-text-muted">Paid:</span>{' '}
                 {selected.paidAt ? new Date(selected.paidAt).toLocaleString() : '—'}
               </div>
-              <div className="col-span-2 border-t border-border pt-2">
-                <span className="text-text-muted">Net Payout:</span>{' '}
-                <span className="font-bold text-green-700 text-base">
-                  {formatCurrency(
-                    selected.amount -
-                      (selected.order?.shipment?.shippingMode === 'XELNOVA_COURIER'
-                        ? (selected.order.shipment.courierCharges ?? 0)
-                        : 0),
-                  )}
-                </span>
+              {selected.holdUntil && (
+                <div>
+                  <span className="text-text-muted">Holds until:</span>{' '}
+                  <span className="font-medium text-amber-700">
+                    {new Date(selected.holdUntil).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                  </span>
+                </div>
+              )}
+              {selected.releasedAt && (
+                <div>
+                  <span className="text-text-muted">Released:</span>{' '}
+                  <span className="font-medium">{new Date(selected.releasedAt).toLocaleString()}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-lg border border-border bg-surface-muted/40 p-3 text-sm space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-text-muted">Gross</span>
+                <span className="font-medium">{formatCurrency(selected.gross ?? selected.amount)}</span>
+              </div>
+              {(selected.commission ?? 0) > 0 && (
+                <div className="flex items-center justify-between">
+                  <span className="text-text-muted">Commission</span>
+                  <span className="font-medium text-red-600">-{formatCurrency(selected.commission ?? 0)}</span>
+                </div>
+              )}
+              {selected.order?.shipment?.shippingMode === 'XELNOVA_COURIER' && (
+                <div className="flex items-center justify-between">
+                  <span className="text-text-muted">Xelgo Shipping (debited at booking)</span>
+                  <span className="font-medium text-orange-600">
+                    -{formatCurrency(selected.order.shipment.courierCharges ?? 0)}
+                  </span>
+                </div>
+              )}
+              {(selected.xelgoServiceCharge ?? 0) > 0 && (
+                <div className="flex items-center justify-between">
+                  <span className="text-text-muted">Xelgo Service Fee (₹30 flat)</span>
+                  <span className="font-medium text-purple-600">-{formatCurrency(selected.xelgoServiceCharge ?? 0)}</span>
+                </div>
+              )}
+              {((selected.order?.shipment?.returnCourierCharges ?? 0) + (selected.order?.shipment?.returnXelgoServiceCharge ?? 0)) > 0 && (
+                <div className="flex items-center justify-between">
+                  <span className="text-text-muted">Return Deductions</span>
+                  <span className="font-medium text-red-600">
+                    -{formatCurrency(
+                      (selected.order?.shipment?.returnCourierCharges ?? 0) +
+                        (selected.order?.shipment?.returnXelgoServiceCharge ?? 0),
+                    )}
+                  </span>
+                </div>
+              )}
+              <div className="flex items-center justify-between border-t border-border pt-1.5">
+                <span className="font-semibold">Net Payout (wallet credit)</span>
+                <span className="font-bold text-green-700">{formatCurrency(selected.amount)}</span>
               </div>
             </div>
+
             <div className="border-t border-border pt-4 space-y-4">
               <FormField label="Status">
                 <FormSelect value={newStatus} onChange={(e) => setNewStatus(e.target.value)}>
                   {STATUS_OPTIONS.map((s) => (
                     <option key={s} value={s}>
-                      {s}
+                      {s.replace('_', ' ')}
                     </option>
                   ))}
                 </FormSelect>
@@ -425,6 +511,17 @@ export default function PayoutsPage() {
               <FormField label="Note (internal)">
                 <FormTextarea rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional note" />
               </FormField>
+
+              {selected.status === 'ON_HOLD' && (
+                <button
+                  type="button"
+                  onClick={handleReleaseNow}
+                  disabled={updating}
+                  className="w-full rounded-lg bg-amber-500 hover:bg-amber-600 text-white px-3 py-2 text-sm font-semibold disabled:opacity-50"
+                >
+                  Release now (skip remaining hold window)
+                </button>
+              )}
             </div>
           </div>
         )}

@@ -16,15 +16,29 @@ import { FlashDealCard } from '@/components/marketplace/flash-deal-card';
 import { SectionHeader } from '@/components/marketplace/section-header';
 import { CategoryImageOrIcon } from '@/components/marketplace/category-image-or-icon';
 import { BrandTile } from '@/components/marketplace/brand-tile';
-import { useProducts, useFlashDeals, useCategories } from '@/lib/api';
+import { useProducts, useFlashDeals, useCategories, useFreeShippingMin } from '@/lib/api';
 import { priceInclusiveOfGst } from '@xelnova/utils';
 
-const trustFeatures = [
-  { icon: Truck, title: 'Free Delivery', desc: 'On orders over ₹499' },
-  { icon: RotateCcw, title: 'Easy Returns', desc: '7-day hassle-free returns' },
-  { icon: ShieldCheck, title: 'Secure Payments', desc: '100% protected checkout' },
-  { icon: Headphones, title: '24/7 Support', desc: "We're here to help" },
-];
+/**
+ * Builds the trust-feature strip with a dynamic free-delivery line driven by
+ * admin → Settings → Shipping → "Free Shipping Min (₹)".
+ *   - 0 → "On every order"
+ *   - N → "On orders over ₹N"
+ */
+function buildTrustFeatures(freeShippingMin: number) {
+  return [
+    {
+      icon: Truck,
+      title: 'Free Delivery',
+      desc: freeShippingMin <= 0
+        ? 'On every order'
+        : `On orders over ₹${freeShippingMin}`,
+    },
+    { icon: RotateCcw, title: 'Easy Returns', desc: '7-day hassle-free returns' },
+    { icon: ShieldCheck, title: 'Secure Payments', desc: '100% protected checkout' },
+    { icon: Headphones, title: '24/7 Support', desc: "We're here to help" },
+  ];
+}
 
 const reviewColors = [
   'bg-primary-100 text-primary-700',
@@ -61,6 +75,9 @@ export function HomeBelowFold() {
   const { data: productsData } = useProducts({ limit: 50 });
   const { data: flashDeals, loading: flashDealsLoading } = useFlashDeals();
   const { data: categories } = useCategories();
+  // Admin-controlled (Settings → Shipping → Free Shipping Min).
+  const freeShippingMin = useFreeShippingMin();
+  const trustFeatures = buildTrustFeatures(freeShippingMin);
   const [promoBanners, setPromoBanners] = useState<Banner[]>([]);
   const [brands, setBrands] = useState<{ id: string; name: string; slug: string; logo: string | null; featured: boolean }[]>([]);
   const [topReviews, setTopReviews] = useState<{ id: string; rating: number; title: string | null; comment: string | null; helpful: number; createdAt: string; user: { id: string; name: string; avatar: string | null }; product: { name: string; slug: string; images: string[] } }[]>([]);

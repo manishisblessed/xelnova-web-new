@@ -1258,6 +1258,58 @@ export class AdminService {
     return { deleted: true };
   }
 
+  // ─── Newsletter Subscribers ───
+
+  async getNewsletterSubscribers(query: { page: number; limit: number; search?: string }) {
+    const page = Math.max(1, Number(query.page) || 1);
+    const limit = Math.min(200, Math.max(1, Number(query.limit) || 50));
+    const skip = (page - 1) * limit;
+
+    const where = query.search
+      ? {
+          OR: [
+            { email: { contains: query.search, mode: 'insensitive' as const } },
+            { source: { contains: query.search, mode: 'insensitive' as const } },
+          ],
+        }
+      : {};
+
+    const [items, total] = await Promise.all([
+      this.prisma.newsletterSubscriber.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.newsletterSubscriber.count({ where }),
+    ]);
+
+    return { items, total, page, limit };
+  }
+
+  async exportNewsletterSubscribersCsv(): Promise<string> {
+    const rows = await this.prisma.newsletterSubscriber.findMany({
+      orderBy: { createdAt: 'desc' },
+    });
+    const escape = (v: unknown) => {
+      const s = v == null ? '' : String(v);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const header = ['Email', 'Source', 'Subscribed At'];
+    const lines = [header.join(',')];
+    for (const r of rows) {
+      lines.push([escape(r.email), escape(r.source), escape(r.createdAt.toISOString())].join(','));
+    }
+    return lines.join('\n');
+  }
+
+  async deleteNewsletterSubscriber(id: string) {
+    const existing = await this.prisma.newsletterSubscriber.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException('Subscriber not found');
+    await this.prisma.newsletterSubscriber.delete({ where: { id } });
+    return { deleted: true };
+  }
+
   // ─── Categories ───
 
   /**
@@ -1700,7 +1752,15 @@ export class AdminService {
             select: {
               orderNumber: true,
               total: true,
-              shipment: { select: { courierCharges: true, shippingMode: true } },
+              shipment: {
+                select: {
+                  courierCharges: true,
+                  xelgoServiceCharge: true,
+                  returnCourierCharges: true,
+                  returnXelgoServiceCharge: true,
+                  shippingMode: true,
+                },
+              },
             },
           },
         },
@@ -1746,7 +1806,15 @@ export class AdminService {
         order: {
           select: {
             total: true,
-            shipment: { select: { courierCharges: true, shippingMode: true } },
+            shipment: {
+              select: {
+                courierCharges: true,
+                xelgoServiceCharge: true,
+                returnCourierCharges: true,
+                returnXelgoServiceCharge: true,
+                shippingMode: true,
+              },
+            },
           },
         },
       },
@@ -1754,27 +1822,40 @@ export class AdminService {
 
     let totalGross = 0;
     let totalShippingCharges = 0;
+    let totalXelgoServiceFee = 0;
+    let totalReturnDeductions = 0;
     let totalCommission = 0;
     let totalNetPayout = 0;
+    let totalHeld = 0;
 
     for (const payout of payouts) {
-      totalGross += payout.amount;
+      totalGross += payout.gross ?? payout.amount;
       totalNetPayout += payout.amount;
+      totalCommission += payout.commission ?? 0;
+      totalXelgoServiceFee += payout.xelgoServiceCharge ?? 0;
+
+      if (payout.status === 'ON_HOLD') {
+        totalHeld += payout.amount;
+      }
 
       if (payout.order?.shipment?.shippingMode === 'XELNOVA_COURIER') {
         const charges = payout.order.shipment.courierCharges ?? 0;
         totalShippingCharges += charges;
       }
-      const deduction = (payout as any).courierDeduction ?? 0;
-      totalCommission += deduction;
+      totalReturnDeductions +=
+        (payout.order?.shipment?.returnCourierCharges ?? 0) +
+        (payout.order?.shipment?.returnXelgoServiceCharge ?? 0);
     }
 
     return {
       totalGross,
       totalShippingCharges,
+      totalXelgoServiceFee,
+      totalReturnDeductions,
       totalCommission,
       commissionAdjustment: totalShippingCharges,
       totalNetPayout,
+      totalHeld,
       count: payouts.length,
     };
   }

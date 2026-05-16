@@ -8,7 +8,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search, ShoppingCart, Menu, X, Heart, Package, User, LogIn, LogOut,
   Sparkles, Phone, MapPin, ChevronDown, Flame, Download, TrendingUp, Bell, HelpCircle,
-  ArrowRight,
 } from 'lucide-react';
 
 function WhatsAppIcon({ size = 12, className }: { size?: number; className?: string }) {
@@ -533,40 +532,14 @@ export function Header() {
               <span className="hidden lg:inline text-xs font-semibold">Cart</span>
             </Link>
 
-            {/* Sell on Xelnova — premium animated CTA, opens seller portal in new tab */}
             <a
               href="https://seller.xelnova.in"
               target="_blank"
               rel="noopener noreferrer"
-              aria-label="Sell on Xelnova — opens seller portal in a new tab"
-              className="group relative ml-1.5 hidden lg:inline-flex items-center gap-2 overflow-hidden rounded-xl border border-amber-300/80 bg-gradient-to-r from-amber-300 via-yellow-400 to-amber-400 bg-[length:200%_auto] px-3 py-1.5 text-gray-900 shadow-[0_4px_14px_-4px_rgba(245,184,0,0.55)] ring-1 ring-inset ring-white/40 transition-all duration-300 hover:scale-[1.03] hover:shadow-[0_8px_22px_-4px_rgba(245,184,0,0.8)] active:scale-95 animate-gradient shine-effect"
+              className="ml-1.5 hidden lg:flex flex-shrink-0 items-center gap-1 px-3 py-2.5 text-sm font-semibold text-accent-600 hover:bg-accent-50 transition-colors rounded-lg"
             >
-              {/* Pulsing "live" dot — signals an active opportunity */}
-              <span className="relative flex h-2 w-2 shrink-0" aria-hidden="true">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-75" />
-                <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-600 ring-2 ring-white/70" />
-              </span>
-
-              <Sparkles
-                size={14}
-                className="text-gray-900 transition-transform duration-300 group-hover:rotate-12 group-hover:scale-110"
-                aria-hidden="true"
-              />
-
-              <span className="flex flex-col leading-none text-left">
-                <span className="text-[8px] font-extrabold uppercase tracking-[0.12em] text-gray-700/90">
-                  Earn with us
-                </span>
-                <span className="text-xs font-extrabold tracking-tight">
-                  Sell on Xelnova
-                </span>
-              </span>
-
-              <ArrowRight
-                size={12}
-                className="text-gray-900 transition-transform duration-300 group-hover:translate-x-0.5"
-                aria-hidden="true"
-              />
+              <Sparkles size={14} />
+              Sell on Xelnova
             </a>
           </div>
         </div>

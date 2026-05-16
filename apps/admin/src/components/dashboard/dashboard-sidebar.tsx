@@ -36,6 +36,7 @@ import {
   Star,
   RotateCcw,
   Truck,
+  Mail,
 } from 'lucide-react';
 import { cn } from '@xelnova/utils';
 import { useDashboardAuth } from '@/lib/auth-context';
@@ -97,6 +98,7 @@ const NAV_SECTIONS: NavSection[] = [
       { href: '/pricing-flags', label: 'Pricing Flags', icon: AlertTriangle },
       { href: '/abandoned-carts', label: 'Abandoned Carts', icon: ShoppingBag },
       { href: '/fraud-flags', label: 'Fraud Detection', icon: ShieldAlert },
+      { href: '/newsletter', label: 'Newsletter', icon: Mail },
     ],
   },
   {

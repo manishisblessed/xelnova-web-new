@@ -1121,7 +1121,10 @@ export class SellerDashboardService {
       where: {
         productId: { in: productIds },
         order: {
-          status: { notIn: ['CANCELLED', 'RETURNED', 'REFUNDED'] },
+          // We need RETURNED rows too so return-leg charges show up in the
+          // deduction tile. CANCELLED + REFUNDED orders never settle, so we
+          // keep filtering those out.
+          status: { notIn: ['CANCELLED', 'REFUNDED'] },
           ...(Object.keys(dateFilter).length > 0 ? { createdAt: dateFilter } : {}),
         },
       },
@@ -1132,7 +1135,14 @@ export class SellerDashboardService {
             createdAt: true,
             status: true,
             shipment: {
-              select: { shippingMode: true, courierCharges: true, sellerId: true },
+              select: {
+                shippingMode: true,
+                courierCharges: true,
+                xelgoServiceCharge: true,
+                returnCourierCharges: true,
+                returnXelgoServiceCharge: true,
+                sellerId: true,
+              },
             },
           },
         },
@@ -1140,36 +1150,56 @@ export class SellerDashboardService {
       },
     });
 
-    const totalRevenue = orderItems.reduce((s, oi) => s + oi.price * oi.quantity, 0);
-    const totalOrders = new Set(orderItems.map((oi) => oi.orderId)).size;
-    const totalUnits = orderItems.reduce((s, oi) => s + oi.quantity, 0);
+    // Earnings totals exclude returned orders (those orders no longer count as
+    // revenue), but the deduction tile below still needs them.
+    const earnings = orderItems.filter((oi) => oi.order.status !== 'RETURNED');
 
-    const commission = orderItems.reduce((s, oi) => {
+    const totalRevenue = earnings.reduce((s, oi) => s + oi.price * oi.quantity, 0);
+    const totalOrders = new Set(earnings.map((oi) => oi.orderId)).size;
+    const totalUnits = earnings.reduce((s, oi) => s + oi.quantity, 0);
+
+    const commission = earnings.reduce((s, oi) => {
       const rate = oi.product?.commissionRate ?? seller.commissionRate ?? 10;
       return s + oi.price * oi.quantity * (rate / 100);
     }, 0);
 
-    // Aggregate Xelgo courier charges across unique orders for this seller.
-    // Each shipment's courierCharges is allocated to the seller who booked it.
+    // Per-order shipment-level aggregations: each shipment counts once regardless
+    // of how many of its line items belong to this seller.
     const seenOrders = new Set<string>();
     let totalCourierDeduction = 0;
+    let totalXelgoServiceFee = 0;
+    let totalReturnDeduction = 0;
     for (const oi of orderItems) {
       if (seenOrders.has(oi.orderId)) continue;
       seenOrders.add(oi.orderId);
       const shipment = oi.order.shipment;
-      if (
-        shipment &&
-        shipment.shippingMode === 'XELNOVA_COURIER' &&
-        shipment.sellerId === seller.id &&
-        shipment.courierCharges != null &&
-        shipment.courierCharges > 0
-      ) {
-        totalCourierDeduction += shipment.courierCharges;
+      if (!shipment || shipment.sellerId !== seller.id) continue;
+
+      // Skip the courier + service-fee deductions for returned orders so we
+      // don't double-count: those are captured in the return deduction below.
+      if (oi.order.status !== 'RETURNED') {
+        if (
+          shipment.shippingMode === 'XELNOVA_COURIER' &&
+          shipment.courierCharges != null &&
+          shipment.courierCharges > 0
+        ) {
+          totalCourierDeduction += shipment.courierCharges;
+        }
+        if (
+          shipment.shippingMode === 'XELNOVA_COURIER' &&
+          shipment.xelgoServiceCharge != null &&
+          shipment.xelgoServiceCharge > 0
+        ) {
+          totalXelgoServiceFee += shipment.xelgoServiceCharge;
+        }
       }
+
+      totalReturnDeduction +=
+        (shipment.returnCourierCharges ?? 0) + (shipment.returnXelgoServiceCharge ?? 0);
     }
 
     const dailyMap = new Map<string, number>();
-    orderItems.forEach((oi) => {
+    earnings.forEach((oi) => {
       const day = oi.order.createdAt.toISOString().split('T')[0];
       dailyMap.set(day, (dailyMap.get(day) || 0) + oi.price * oi.quantity);
     });
@@ -1177,7 +1207,8 @@ export class SellerDashboardService {
       .map(([date, amount]) => ({ date, amount }))
       .sort((a, b) => a.date.localeCompare(b.date));
 
-    const netRevenue = totalRevenue - commission - totalCourierDeduction;
+    const netRevenue =
+      totalRevenue - commission - totalCourierDeduction - totalXelgoServiceFee - totalReturnDeduction;
     const effectiveCommissionRate =
       totalRevenue > 0 ? Number(((commission / totalRevenue) * 100).toFixed(2)) : 0;
 
@@ -1187,6 +1218,8 @@ export class SellerDashboardService {
       commission,
       commissionRate: effectiveCommissionRate,
       courierDeduction: totalCourierDeduction,
+      xelgoServiceFee: totalXelgoServiceFee,
+      returnDeduction: totalReturnDeduction,
       totalOrders,
       totalUnits,
       dailyRevenue,
@@ -1701,7 +1734,14 @@ export class SellerDashboardService {
             total: true,
             returnRequests: { select: { status: true, reverseCourierCharge: true } },
             shipment: {
-              select: { shippingMode: true, courierCharges: true, sellerId: true },
+              select: {
+                shippingMode: true,
+                courierCharges: true,
+                xelgoServiceCharge: true,
+                returnCourierCharges: true,
+                returnXelgoServiceCharge: true,
+                sellerId: true,
+              },
             },
           },
         },
@@ -1726,22 +1766,28 @@ export class SellerDashboardService {
 
       // Courier deduction: only for Xelgo shipments belonging to this seller
       let courierDeduction = 0;
+      let xelgoServiceFee = 0;
       const shipment = oi.order.shipment;
       if (
         !refunded &&
         shipment &&
         shipment.shippingMode === 'XELNOVA_COURIER' &&
-        shipment.sellerId === seller.id &&
-        shipment.courierCharges != null &&
-        shipment.courierCharges > 0
+        shipment.sellerId === seller.id
       ) {
         const orderGross = orderGrossMap.get(oi.orderId) ?? gross;
-        courierDeduction = orderGross > 0
-          ? Math.round((gross / orderGross) * shipment.courierCharges * 100) / 100
-          : 0;
+        const allocRatio = orderGross > 0 ? gross / orderGross : 1;
+        if (shipment.courierCharges != null && shipment.courierCharges > 0) {
+          courierDeduction = Math.round(allocRatio * shipment.courierCharges * 100) / 100;
+        }
+        if (shipment.xelgoServiceCharge != null && shipment.xelgoServiceCharge > 0) {
+          xelgoServiceFee = Math.round(allocRatio * shipment.xelgoServiceCharge * 100) / 100;
+        }
       }
 
-      // Reverse courier charge: ₹100 flat deducted from seller per approved return
+      // Reverse courier charge: a flat amount (set on the ReturnRequest) deducted
+      // from the seller per approved return. We also surface the platform's
+      // ₹30 Xelgo return service fee on the shipment row so both lines are
+      // visible in the seller's history.
       const returnReqs = oi.order.returnRequests || [];
       const totalReverseCourier = returnReqs.reduce(
         (sum, r) => sum + (r.reverseCourierCharge ?? 0),
@@ -1752,9 +1798,15 @@ export class SellerDashboardService {
         !refunded && totalReverseCourier > 0 && orderGrossForReverse > 0
           ? Math.round((gross / orderGrossForReverse) * totalReverseCourier * 100) / 100
           : 0;
+      const returnXelgoFee =
+        !refunded && shipment?.returnXelgoServiceCharge && orderGrossForReverse > 0
+          ? Math.round((gross / orderGrossForReverse) * shipment.returnXelgoServiceCharge * 100) / 100
+          : 0;
 
       const shippingMode = shipment?.shippingMode ?? 'SELF_SHIP';
-      const net = refunded ? 0 : gross - commission - courierDeduction - reverseCourierDeduction;
+      const net = refunded
+        ? 0
+        : gross - commission - courierDeduction - xelgoServiceFee - reverseCourierDeduction - returnXelgoFee;
       return {
         orderNumber: oi.order.orderNumber,
         date: oi.order.createdAt.toISOString().split('T')[0],
@@ -1766,7 +1818,9 @@ export class SellerDashboardService {
         commissionPercent: refunded ? 0 : Number(lineRate.toFixed(2)),
         commission,
         courierDeduction,
+        xelgoServiceFee,
         reverseCourierDeduction,
+        returnXelgoFee,
         shippingMode,
         net,
         orderStatus: refunded ? 'REFUNDED' : oi.order.status,
@@ -1780,10 +1834,20 @@ export class SellerDashboardService {
         gross: acc.gross + r.gross,
         commission: acc.commission + r.commission,
         courierDeduction: acc.courierDeduction + r.courierDeduction,
+        xelgoServiceFee: acc.xelgoServiceFee + r.xelgoServiceFee,
         reverseCourierDeduction: acc.reverseCourierDeduction + r.reverseCourierDeduction,
+        returnXelgoFee: acc.returnXelgoFee + r.returnXelgoFee,
         net: acc.net + r.net,
       }),
-      { gross: 0, commission: 0, courierDeduction: 0, reverseCourierDeduction: 0, net: 0 },
+      {
+        gross: 0,
+        commission: 0,
+        courierDeduction: 0,
+        xelgoServiceFee: 0,
+        reverseCourierDeduction: 0,
+        returnXelgoFee: 0,
+        net: 0,
+      },
     );
 
     const effectiveCommissionRate =
@@ -1794,18 +1858,22 @@ export class SellerDashboardService {
 
   async getSettlementCsv(userId: string, query: SettlementQueryDto): Promise<string> {
     const report = await this.getSettlementReport(userId, query);
-    const header = 'Order Number,Date,Product,SKU,Qty,Unit Price,Gross,Commission %,Commission,Shipping Mode,Courier Charge,Return Courier,Net,Status,Payment Method';
+    const header = 'Order Number,Date,Product,SKU,Qty,Unit Price,Gross,Commission %,Commission,Shipping Mode,Courier Charge,Xelgo Service Fee,Return Courier,Return Xelgo Fee,Net,Status,Payment Method';
     const lines = report.rows.map((r) =>
       [
         r.orderNumber, r.date, `"${r.productName}"`, r.sku, r.quantity,
         r.unitPrice.toFixed(2), r.gross.toFixed(2), r.commissionPercent,
         r.commission.toFixed(2), r.shippingMode, r.courierDeduction.toFixed(2),
+        r.xelgoServiceFee.toFixed(2),
         r.reverseCourierDeduction.toFixed(2),
+        r.returnXelgoFee.toFixed(2),
         r.net.toFixed(2), r.orderStatus, r.paymentMethod,
       ].join(','),
     );
     lines.push('');
-    lines.push(`,,,,,Total,${report.totals.gross.toFixed(2)},,${report.totals.commission.toFixed(2)},,${report.totals.courierDeduction.toFixed(2)},${report.totals.reverseCourierDeduction.toFixed(2)},${report.totals.net.toFixed(2)},,`);
+    lines.push(
+      `,,,,,Total,${report.totals.gross.toFixed(2)},,${report.totals.commission.toFixed(2)},,${report.totals.courierDeduction.toFixed(2)},${report.totals.xelgoServiceFee.toFixed(2)},${report.totals.reverseCourierDeduction.toFixed(2)},${report.totals.returnXelgoFee.toFixed(2)},${report.totals.net.toFixed(2)},,`,
+    );
     return [header, ...lines].join('\n');
   }
 

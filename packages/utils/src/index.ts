@@ -157,6 +157,49 @@ export function formatNumber(num: number): string {
 }
 
 /**
+ * Picks a sensible display label for a product variant group, defending the UI
+ * against sellers who pick the wrong attribute type at upload time (e.g. a
+ * "Colour" attribute containing age values like "2-3 YEAR"). Heuristic:
+ *
+ *  - If any option carries an explicit `hex`, treat as a real colour attribute
+ *    and keep the seller's label as-is.
+ *  - Otherwise inspect the option labels for size/age/dimension patterns and
+ *    return a better label ("Age", "Size", "Capacity") instead of the
+ *    misleading seller-provided one.
+ *
+ * The original label is preserved when it doesn't conflict with the inferred
+ * intent — we only override generic "Colour"/"Color"/"Variant" labels.
+ */
+export function inferVariantDisplayLabel(
+  sellerLabel: string,
+  options: Array<{ label: string; hex?: string | null }>,
+): string {
+  const trimmed = (sellerLabel || "").trim();
+  const hasHex = options.some((o) => !!o.hex);
+  if (hasHex) return trimmed || "Colour";
+
+  const joined = options.map((o) => o.label).join(" ").toLowerCase();
+
+  const looksGeneric = /^(colou?r|variant|option|type)$/i.test(trimmed);
+
+  const inferred = (() => {
+    if (/\b(year|yr|yrs|month|mo|age)\b/.test(joined)) return "Age";
+    if (/\b(xs|s|m|l|xl|xxl|xxxl|small|medium|large)\b/.test(joined)) return "Size";
+    if (/\b(\d+(\.\d+)?\s*(cm|mm|inch|in|ft|m)\b)/.test(joined)) return "Size";
+    if (/\b(\d+(\.\d+)?\s*(ml|l|litre|liter|oz|gallon|gal)\b)/.test(joined)) return "Capacity";
+    if (/\b(\d+(\.\d+)?\s*(g|gm|gram|kg|grams|kilogram)\b)/.test(joined)) return "Weight";
+    if (/\b(\d+\s*(gb|tb|mb))\b/.test(joined)) return "Storage";
+    return null;
+  })();
+
+  if (inferred && (looksGeneric || /colou?r/i.test(trimmed))) {
+    return inferred;
+  }
+
+  return trimmed || "Variant";
+}
+
+/**
  * Maps raw API / network errors to user-friendly messages.
  * Pass a contextual `fallback` for the specific action (e.g. "Unable to save address").
  */

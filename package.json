@@ -25,6 +25,7 @@
   "devDependencies": {
     "eslint": "^8.57.1",
     "eslint-config-next": "^15.5.14",
+    "expo-router": "~6.0.13",
     "turbo": "^2.4.0"
   },
   "packageManager": "npm@11.9.0",

@@ -862,6 +862,11 @@ export interface PayoutHistoryItem {
   isAdvance: boolean;
   requestedAt: string;
   paidAt: string | null;
+  holdUntil?: string | null;
+  releasedAt?: string | null;
+  gross?: number | null;
+  commission?: number | null;
+  xelgoServiceCharge?: number | null;
 }
 
 export async function apiGetPayoutHistory(page = 1, limit = 20) {
@@ -870,6 +875,29 @@ export async function apiGetPayoutHistory(page = 1, limit = 20) {
   return handleResponse<{
     payouts: PayoutHistoryItem[];
     pagination: { page: number; limit: number; total: number; totalPages: number };
+  }>(res);
+}
+
+// ─── Held Payouts (settlements still in the 7-business-day window) ───
+
+export interface HeldPayoutItem {
+  id: string;
+  orderId: string | null;
+  orderNumber: string | null;
+  amount: number;
+  gross: number | null;
+  commission: number | null;
+  xelgoServiceCharge: number | null;
+  holdUntil: string | null;
+  requestedAt: string;
+  note: string | null;
+}
+
+export async function apiGetHeldPayouts() {
+  const res = await fetchWithRefresh(`${API_URL}/seller/payouts/held`, { headers: authHeaders() });
+  return handleResponse<{
+    payouts: HeldPayoutItem[];
+    totalHeld: number;
   }>(res);
 }
 

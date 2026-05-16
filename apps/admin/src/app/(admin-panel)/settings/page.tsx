@@ -191,9 +191,36 @@ export default function SettingsPage() {
         </SettingsSection>
 
         <SettingsSection title="Shipping" delay={0.1}>
+          <div className="rounded-xl bg-info-50 border border-info-100 px-3 py-2.5 mb-4 text-xs text-text-secondary">
+            <strong className="text-text-primary">Free Shipping Min</strong> controls both
+            <em> what customers pay at checkout</em> and <em>when the &ldquo;Free delivery&rdquo; badge appears on product cards</em>.
+            Set it to <strong>0</strong> to offer free delivery on every order &mdash; the badge will then show on every product across web, business app and store pages.
+          </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <FormField label="Free Shipping Min (₹)"><FormInput type="number" value={data.shipping.freeShippingMin} onChange={e => setData(d => d ? { ...d, shipping: { ...d.shipping, freeShippingMin: +e.target.value } } : null)} /></FormField>
-            <FormField label="Default Rate (₹)"><FormInput type="number" value={data.shipping.defaultRate} onChange={e => setData(d => d ? { ...d, shipping: { ...d.shipping, defaultRate: +e.target.value } } : null)} /></FormField>
+            <FormField label="Free Shipping Min (₹)">
+              <FormInput
+                type="number"
+                min={0}
+                value={data.shipping.freeShippingMin}
+                onChange={e => setData(d => d ? { ...d, shipping: { ...d.shipping, freeShippingMin: Math.max(0, +e.target.value) } } : null)}
+              />
+              <p className="text-[10px] text-text-muted mt-1">
+                {data.shipping.freeShippingMin <= 0
+                  ? 'Currently: free delivery on ALL orders. “Free delivery” badge will appear on every product.'
+                  : `Currently: orders ≥ ₹${data.shipping.freeShippingMin} ship free. Badge shows on products priced ≥ ₹${data.shipping.freeShippingMin}.`}
+              </p>
+            </FormField>
+            <FormField label="Default Rate (₹)">
+              <FormInput
+                type="number"
+                min={0}
+                value={data.shipping.defaultRate}
+                onChange={e => setData(d => d ? { ...d, shipping: { ...d.shipping, defaultRate: Math.max(0, +e.target.value) } } : null)}
+              />
+              <p className="text-[10px] text-text-muted mt-1">
+                Charged when the cart subtotal is below the free-shipping minimum. Ignored when the minimum is 0.
+              </p>
+            </FormField>
             <FormField label="Express Rate (₹)"><FormInput type="number" value={data.shipping.expressRate} onChange={e => setData(d => d ? { ...d, shipping: { ...d.shipping, expressRate: +e.target.value } } : null)} /></FormField>
             <FormToggle label="Enable COD" checked={data.shipping.codEnabled} onChange={v => setData(d => d ? { ...d, shipping: { ...d.shipping, codEnabled: v } } : null)} />
             <FormField label="COD Fee (₹)"><FormInput type="number" value={data.shipping.codFee} onChange={e => setData(d => d ? { ...d, shipping: { ...d.shipping, codFee: +e.target.value } } : null)} /></FormField>

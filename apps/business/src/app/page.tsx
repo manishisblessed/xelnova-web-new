@@ -12,7 +12,7 @@ import type { Banner } from '@xelnova/api';
 import { HeroCarousel } from '@/components/marketplace/hero-carousel';
 import { CategoryCard } from '@/components/marketplace/category-card';
 import { HomeFilterBar } from '@/components/marketplace/home-filter-bar';
-import { useCategories } from '@/lib/api';
+import { useCategories, useFreeShippingMin } from '@/lib/api';
 
 const HomeBelowFold = dynamic(
   () => import('@/components/marketplace/home-below-fold').then((m) => m.HomeBelowFold),
@@ -40,11 +40,10 @@ function formatStatValue(key: string, val: number): string {
   return '0';
 }
 
-const statLabels: Record<string, string> = {
+const STATIC_STAT_LABELS: Record<string, string> = {
   products: 'Products',
   sellers: 'Trusted Sellers',
   customers: 'Happy Customers',
-  orders: 'Delivery over ₹499',
 };
 
 /** Horizontal category icon strip under the hero. Set `true` when you want it visible. */
@@ -52,15 +51,27 @@ const SHOW_HOME_CATEGORY_STRIP = false;
 
 export default function HomePage() {
   const { data: categories } = useCategories();
+  // Admin-controlled (Settings → Shipping → Free Shipping Min).
+  // 0 → free delivery on every order.
+  const freeShippingMin = useFreeShippingMin();
+  const ordersLabel = freeShippingMin <= 0 ? 'On every order' : `Delivery over ₹${freeShippingMin}`;
   const [trendingSearches, setTrendingSearches] = useState(fallbackSearches);
   const [stats, setStats] = useState<{ icon: typeof Package; value: string; label: string }[]>([
     { icon: Package, value: '...', label: 'Products' },
     { icon: Store, value: '...', label: 'Trusted Sellers' },
     { icon: Users, value: '...', label: 'Happy Customers' },
-    { icon: Truck, value: 'FREE', label: 'Delivery over ₹499' },
+    { icon: Truck, value: 'FREE', label: ordersLabel },
   ]);
   const [sidePromos, setSidePromos] = useState(defaultSidePromos);
   const [brands, setBrands] = useState<{ id: string; name: string; slug: string }[]>([]);
+
+  // Keep the "orders" stat label in sync with admin's free-shipping setting
+  // regardless of whether the stats API has resolved yet.
+  useEffect(() => {
+    setStats((prev) =>
+      prev.map((s, i) => (i === 3 ? { ...s, label: ordersLabel } : s)),
+    );
+  }, [ordersLabel]);
 
   useEffect(() => {
     let cancelled = false;
@@ -80,7 +91,7 @@ export default function HomePage() {
         setStats(keys.map((key, i) => ({
           icon: statIcons[i],
           value: key === 'orders' ? 'FREE' : formatStatValue(key, data[key]),
-          label: statLabels[key],
+          label: key === 'orders' ? ordersLabel : STATIC_STAT_LABELS[key],
         })));
       }
       if (bannersResult.status === 'fulfilled') {
@@ -106,6 +117,9 @@ export default function HomePage() {
       }
     });
     return () => { cancelled = true; };
+    // ordersLabel only affects the orders stat label which is also patched by a
+    // separate effect; we intentionally don't re-trigger the stats fetch when it changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (

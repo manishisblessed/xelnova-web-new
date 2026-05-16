@@ -580,6 +580,55 @@ export async function apiScheduleReversePickup(returnId: string, body: { courier
   return handleResponse(res);
 }
 
+// ─── Newsletter Subscribers ───
+
+export type NewsletterSubscriber = {
+  id: string;
+  email: string;
+  source: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export async function apiGetNewsletterSubscribers(params: { page?: number; limit?: number; search?: string } = {}) {
+  const qs = new URLSearchParams();
+  if (params.page) qs.set('page', String(params.page));
+  if (params.limit) qs.set('limit', String(params.limit));
+  if (params.search) qs.set('search', params.search);
+  const url = `${API_URL}/admin/newsletter-subscribers${qs.toString() ? `?${qs}` : ''}`;
+  const res = await fetchWithRefresh(url, { headers: authHeaders() });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text.slice(0, 200) || `Request failed (${res.status})`);
+  }
+  const json = (await res.json()) as {
+    success: boolean;
+    data: NewsletterSubscriber[];
+    message?: string;
+    meta?: { page: number; limit: number; total: number; totalPages: number };
+  };
+  if (!json.success) throw new Error(json.message || 'Failed to load subscribers');
+  return {
+    items: json.data || [],
+    total: json.meta?.total ?? json.data?.length ?? 0,
+    page: json.meta?.page ?? 1,
+    limit: json.meta?.limit ?? 50,
+    totalPages: json.meta?.totalPages ?? 1,
+  };
+}
+
+export async function apiDeleteNewsletterSubscriber(id: string) {
+  const res = await fetchWithRefresh(`${API_URL}/admin/newsletter-subscribers/${id}`, {
+    method: 'DELETE',
+    headers: authHeaders(),
+  });
+  return handleResponse(res);
+}
+
+export function newsletterSubscribersCsvUrl(): string {
+  return `${API_URL}/admin/newsletter-subscribers/csv`;
+}
+
 // ─── Abandoned Cart ───
 
 export async function apiGetAbandonedCarts(hours = 24) {

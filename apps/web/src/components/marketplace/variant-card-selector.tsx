@@ -2,8 +2,7 @@
 
 import Image from "next/image";
 import { Check, Truck } from "lucide-react";
-import { cn } from "@xelnova/utils";
-import { priceInclusiveOfGst } from "@xelnova/utils";
+import { cn, priceInclusiveOfGst } from "@xelnova/utils";
 
 interface VariantOption {
   value: string;
@@ -14,6 +13,7 @@ interface VariantOption {
   compareAtPrice?: number;
   stock?: number;
   hex?: string;
+  onHover?: () => void;
 }
 
 interface VariantCardSelectorProps {
@@ -21,10 +21,22 @@ interface VariantCardSelectorProps {
   selectedValue: string | undefined;
   onSelect: (value: string, option: VariantOption) => void;
   gstRate?: number | null;
+  /**
+   * Free-form delivery label rendered under the price block. Keep it short
+   * (≤ ~26 chars) so it doesn't truncate. Parent should already have the
+   * computed delivery date — pass e.g. `FREE by Thu, 21 May`.
+   */
   deliveryText?: string;
   className?: string;
 }
 
+/**
+ * Rich variant card — combines an Amazon-style swatch with the full
+ * fulfillment context (label, price, MRP, discount %, delivery, selection
+ * state). Each card is a single tappable button so the entire surface meets
+ * the 44px touch target rule and screen-readers get one logical control per
+ * variant.
+ */
 export function VariantCardSelector({
   options,
   selectedValue,
@@ -33,115 +45,160 @@ export function VariantCardSelector({
   deliveryText = "FREE Delivery Tomorrow",
   className,
 }: VariantCardSelectorProps) {
-  const displayPriceIncl = (exclusive: number) => priceInclusiveOfGst(exclusive, gstRate);
+  const displayPriceIncl = (exclusive: number) =>
+    priceInclusiveOfGst(exclusive, gstRate);
 
   return (
-    <div className={cn("flex gap-3 overflow-x-auto pb-2", className)}>
-      {options.map((opt) => {
+    <div
+      role="radiogroup"
+      aria-label="Select variant"
+      className={cn(
+        "flex gap-3 overflow-x-auto pb-2 -mx-1 px-1 snap-x snap-mandatory scroll-smooth",
+        className,
+      )}
+    >
+      {options.map((opt, i) => {
         const optDisabled = !opt.available || opt.stock === 0;
         const isSelected = selectedValue === opt.value;
         const thumbImg = opt.images?.[0];
         const price = opt.price != null ? displayPriceIncl(opt.price) : null;
-        const compareAtPrice = opt.compareAtPrice != null ? displayPriceIncl(opt.compareAtPrice) : null;
-        const hasDiscount = compareAtPrice != null && price != null && compareAtPrice > price;
+        const mrp =
+          opt.compareAtPrice != null
+            ? displayPriceIncl(opt.compareAtPrice)
+            : null;
+        const hasDiscount = mrp != null && price != null && mrp > price;
+        const discountPct = hasDiscount
+          ? Math.round(((mrp! - price!) / mrp!) * 100)
+          : 0;
+        const isLowStock =
+          opt.stock != null && opt.stock > 0 && opt.stock <= 5;
 
         return (
           <button
             key={opt.value}
+            type="button"
+            role="radio"
+            aria-checked={isSelected}
+            aria-label={`${opt.label}${price != null ? `, ₹${price.toLocaleString("en-IN")}` : ""}${
+              hasDiscount ? `, ${discountPct}% off` : ""
+            }${optDisabled ? ", out of stock" : ""}`}
             disabled={optDisabled}
+            onMouseEnter={opt.onHover}
+            onFocus={opt.onHover}
             onClick={() => !optDisabled && onSelect(opt.value, opt)}
             className={cn(
-              "group relative flex flex-col min-w-[140px] max-w-[160px] rounded-lg border-2 transition-all bg-white hover:shadow-md",
-              optDisabled && "opacity-50 cursor-not-allowed",
+              "group relative flex w-[144px] shrink-0 snap-start flex-col overflow-hidden rounded-lg border-2 bg-white text-left transition-all duration-150",
+              "hover:-translate-y-0.5 hover:shadow-md",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2",
+              optDisabled &&
+                "opacity-60 cursor-not-allowed hover:translate-y-0 hover:shadow-none",
               isSelected
-                ? "border-primary-500 ring-2 ring-primary-500/20 shadow-md"
+                ? "border-primary-500 ring-2 ring-primary-500/20 shadow-sm"
                 : "border-border hover:border-gray-300",
             )}
           >
-            {/* Image Section */}
-            <div className="relative w-full aspect-square rounded-t-lg overflow-hidden bg-gray-50">
+            {/* Image / swatch */}
+            <div className="relative aspect-square w-full overflow-hidden bg-gray-50">
               {thumbImg ? (
                 <Image
                   src={thumbImg}
                   alt={opt.label}
                   fill
-                  sizes="160px"
+                  sizes="144px"
+                  priority={i === 0}
                   className={cn(
-                    "object-contain p-2",
-                    optDisabled && "grayscale opacity-60"
+                    "object-contain p-2 transition-transform duration-200 group-hover:scale-105",
+                    optDisabled && "grayscale",
                   )}
                 />
               ) : opt.hex ? (
                 <div className="flex h-full items-center justify-center">
                   <span
-                    className="h-16 w-16 rounded-full border-2 border-gray-200 shadow-inner"
+                    className="h-16 w-16 rounded-full border border-gray-200 shadow-inner"
                     style={{ background: opt.hex }}
                   />
                 </div>
               ) : (
                 <div className="flex h-full items-center justify-center">
-                  <span className="text-2xl font-bold text-gray-300">{opt.label.slice(0, 2)}</span>
-                </div>
-              )}
-              
-              {/* Selected Checkmark */}
-              {isSelected && (
-                <div className="absolute top-2 right-2 h-6 w-6 rounded-full bg-primary-600 flex items-center justify-center shadow-lg">
-                  <Check size={14} className="text-white" strokeWidth={3} />
+                  <span className="text-2xl font-bold text-gray-300">
+                    {opt.label.slice(0, 2).toUpperCase()}
+                  </span>
                 </div>
               )}
 
-              {/* Sold Out Overlay */}
+              {hasDiscount && !optDisabled && (
+                <span className="absolute left-1.5 top-1.5 rounded-md bg-green-600 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white shadow-sm">
+                  {discountPct}% OFF
+                </span>
+              )}
+
+              {isSelected && (
+                <span
+                  aria-hidden
+                  className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-primary-600 shadow-sm ring-2 ring-white"
+                >
+                  <Check size={12} strokeWidth={3} className="text-white" />
+                </span>
+              )}
+
               {opt.stock === 0 && (
-                <div className="absolute inset-0 flex items-center justify-center bg-white/80 backdrop-blur-[2px]">
-                  <span className="text-xs font-bold text-danger-600 bg-white px-2 py-1 rounded shadow-sm">
-                    Temporarily out of stock
+                <div className="absolute inset-0 flex items-center justify-center bg-white/75 backdrop-blur-[1px]">
+                  <span className="rounded bg-white px-2 py-0.5 text-[10px] font-bold text-danger-600 shadow">
+                    Out of stock
                   </span>
                 </div>
               )}
             </div>
 
-            {/* Content Section */}
-            <div className="flex flex-col p-3 gap-1.5 text-left border-t border-border/50">
-              {/* Variant Label */}
-              <p className={cn(
-                "text-xs font-medium truncate",
-                isSelected ? "text-primary-700" : "text-text-secondary"
-              )}>
+            {/* Content */}
+            <div className="flex flex-col gap-0.5 px-2 pt-1.5 pb-2">
+              <p
+                className={cn(
+                  "truncate text-[13px] font-semibold leading-tight",
+                  isSelected ? "text-primary-700" : "text-text-primary",
+                )}
+                title={opt.label}
+              >
                 {opt.label}
               </p>
 
-              {/* Price Section */}
               {price != null && (
-                <div className="flex flex-col gap-0.5">
-                  <div className="flex items-baseline gap-1">
-                    <span className="text-[10px] text-text-muted">₹</span>
-                    <span className="text-sm font-bold text-text-primary">
+                <>
+                  <div className="flex items-baseline gap-0.5">
+                    <span className="text-[10px] font-medium text-text-primary">
+                      ₹
+                    </span>
+                    <span className="text-[15px] font-bold leading-none text-text-primary">
                       {price.toLocaleString("en-IN")}
                     </span>
                   </div>
-                  
+
                   {hasDiscount && (
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[11px] text-text-muted line-through">
-                        ₹{compareAtPrice!.toLocaleString("en-IN")}
+                    <div className="flex items-center gap-1 text-[10px] leading-tight">
+                      <span className="text-text-muted line-through">
+                        ₹{mrp!.toLocaleString("en-IN")}
                       </span>
-                      <span className="text-[10px] font-semibold text-danger-600">
-                        {Math.round(((compareAtPrice! - price) / compareAtPrice!) * 100)}% off
+                      <span className="font-semibold text-green-700">
+                        {discountPct}% off
                       </span>
                     </div>
                   )}
-                </div>
+                </>
               )}
 
-              {/* Delivery Info */}
               {!optDisabled && (
-                <div className="flex items-center gap-1 mt-0.5">
-                  <Truck size={11} className="text-green-600 shrink-0" />
-                  <span className="text-[10px] font-medium text-green-600 truncate">
+                <div className="mt-1 flex items-center gap-1 border-t border-border/60 pt-1">
+                  <Truck size={11} className="shrink-0 text-green-600" />
+                  <span className="truncate text-[10px] font-medium text-green-700">
                     {deliveryText}
                   </span>
                 </div>
+              )}
+
+              {isLowStock && !optDisabled && (
+                <span className="mt-0.5 inline-flex w-fit rounded bg-amber-50 px-1 py-0.5 text-[9px] font-semibold text-amber-700">
+                  Only {opt.stock} left
+                </span>
               )}
             </div>
           </button>

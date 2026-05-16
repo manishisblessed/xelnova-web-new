@@ -1,7 +1,22 @@
 import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
+import { BusinessDaysService } from '../../common/services/business-days.service';
 import Razorpay from 'razorpay';
+
+/**
+ * Flat platform service fee charged once per Xelgo (XELNOVA_COURIER) shipment.
+ * Deducted from the seller's settlement payout — NOT debited from the wallet at
+ * booking time (the actual courier rate already is, see ShippingService).
+ */
+export const XELGO_SERVICE_FEE = 30;
+
+/**
+ * Number of business days a settlement is held after an order is delivered before
+ * the wallet is credited and the seller can withdraw. Business days skip Sundays
+ * + entries in the `Holiday` table (admin-managed).
+ */
+export const SETTLEMENT_HOLD_BUSINESS_DAYS = 7;
 
 @Injectable()
 export class SplitPaymentService {
@@ -11,6 +26,7 @@ export class SplitPaymentService {
   constructor(
     private readonly config: ConfigService,
     private readonly prisma: PrismaService,
+    private readonly businessDays: BusinessDaysService,
   ) {
     const keyId = this.config.get('RAZORPAY_KEY_ID') || '';
     const keySecret = this.config.get('RAZORPAY_KEY_SECRET') || '';
@@ -65,16 +81,19 @@ export class SplitPaymentService {
   }
 
   /**
-   * After an order is paid, compute seller shares and create pending payouts.
+   * After an order is paid, compute each seller's net share.
    *
-   * Commission is per-product: every approved product carries its own
-   * `commissionRate` (set by admin at approval time). For backwards
-   * compatibility with legacy products that pre-date the per-product model
-   * we fall back to the seller's stored `commissionRate`, then to a final
-   * 10% safety net so a missing rate never silently zeros the platform fee.
+   * Settlement math (per policy):
+   *   net = gross − commission − xelgoServiceFee
    *
-   * The per-seller `commissionRate` reported in the share is the gross-
-   * weighted effective rate across that seller's items in this order.
+   *  - Commission is per-product (`Product.commissionRate`), falling back to the
+   *    seller's stored `commissionRate`, then 10% as a final safety net.
+   *  - The flat ₹30 Xelgo platform service fee is added once per Xelgo shipment
+   *    and allocated proportionally across sellers when an order has multiple.
+   *  - The carrier rate itself is NOT subtracted here — it is already debited
+   *    from the seller's wallet at booking time (see ShippingService Xelgo
+   *    booking flow). Settlement only handles the things that have NOT yet hit
+   *    the wallet.
    */
   async computeSellerShares(orderId: string) {
     const order = await this.prisma.order.findUnique({
@@ -119,18 +138,15 @@ export class SplitPaymentService {
     }
 
     const isXelgoCourier = order.shipment?.shippingMode === 'XELNOVA_COURIER';
-    const orderCourierCharge = isXelgoCourier
-      ? (order.shipment?.courierCharges ?? 0)
-      : 0;
     const totalGross = Array.from(sellerMap.values()).reduce((s, d) => s + d.gross, 0);
 
     const shares = Array.from(sellerMap.entries()).map(([sellerId, data]) => {
-      // Allocate courier charge proportionally when multiple sellers share an order
-      const courierDeduction =
-        orderCourierCharge > 0 && totalGross > 0
-          ? Math.round((data.gross / totalGross) * orderCourierCharge * 100) / 100
-          : 0;
-      const net = data.gross - data.commission - courierDeduction;
+      // ₹30 service fee is allocated proportionally across sellers when an order
+      // has multiple sellers; single-seller orders just absorb the full ₹30.
+      const xelgoServiceFee = isXelgoCourier && totalGross > 0
+        ? Math.round((data.gross / totalGross) * XELGO_SERVICE_FEE * 100) / 100
+        : 0;
+      const net = Math.max(0, data.gross - data.commission - xelgoServiceFee);
       const effectiveRate = data.gross > 0 ? (data.commission / data.gross) * 100 : 0;
       return {
         sellerId,
@@ -138,7 +154,7 @@ export class SplitPaymentService {
         gross: data.gross,
         commissionRate: Number(effectiveRate.toFixed(2)),
         commission: data.commission,
-        courierDeduction,
+        xelgoServiceFee,
         net,
       };
     });
@@ -147,11 +163,30 @@ export class SplitPaymentService {
   }
 
   /**
-   * Create settlement payouts for all sellers in an order.
-   * Called after order is delivered and payment confirmed.
+   * Create ON_HOLD settlement payouts for every seller in this order. The hold
+   * window is 7 business days from the shipment's `deliveredAt` (or now() as a
+   * fallback). The daily payout-release cron lifts the hold once it expires and
+   * credits the seller wallet at that point — this method does NOT touch the
+   * wallet on its own.
+   *
+   * Idempotent: if a payout already exists for `(sellerId, orderId, isAdvance=false)`
+   * we skip it (avoids duplicates on webhook retries).
    */
   async settleOrder(orderId: string) {
     const { shares, orderNumber } = await this.computeSellerShares(orderId);
+
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: {
+        shipment: { select: { deliveredAt: true, shippingMode: true } },
+      },
+    });
+    const deliveredAt = order?.shipment?.deliveredAt ?? new Date();
+    const holdUntil = await this.businessDays.addBusinessDays(
+      deliveredAt,
+      SETTLEMENT_HOLD_BUSINESS_DAYS,
+    );
+
     const payouts: Array<{
       id: string; sellerId: string; amount: number; status: string;
       method: string; note: string | null; orderId: string | null;
@@ -163,23 +198,27 @@ export class SplitPaymentService {
       });
       if (existing) continue;
 
-      const courierNote = share.courierDeduction > 0
-        ? `, courier: ₹${share.courierDeduction.toFixed(2)}`
+      const xelgoNote = share.xelgoServiceFee > 0
+        ? `, Xelgo service fee: ₹${share.xelgoServiceFee.toFixed(2)}`
         : '';
       const payout = await this.prisma.payout.create({
         data: {
           sellerId: share.sellerId,
           amount: share.net,
-          status: 'PENDING',
+          status: 'ON_HOLD',
           method: 'bank_transfer',
-          note: `Settlement for order ${orderNumber} (gross: ₹${share.gross.toFixed(2)}, commission: ₹${share.commission.toFixed(2)}${courierNote})`,
+          note: `Settlement for order ${orderNumber} (gross ₹${share.gross.toFixed(2)} − commission ₹${share.commission.toFixed(2)}${xelgoNote}). Unlocks ${holdUntil.toISOString().split('T')[0]}.`,
           orderId,
           isAdvance: false,
+          holdUntil,
+          gross: share.gross,
+          commission: share.commission,
+          xelgoServiceCharge: share.xelgoServiceFee,
         },
       });
       payouts.push(payout);
     }
 
-    return { settled: payouts.length, payouts };
+    return { settled: payouts.length, payouts, holdUntil };
   }
 }

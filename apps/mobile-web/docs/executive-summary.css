@@ -1,0 +1,283 @@
+/* ─────────────────────────────────────────────────────────────────
+ * Xelnova executive-summary print theme.
+ * Designed for A4 portrait, single page, brand mint accent #11ab3a.
+ * ──────────────────────────────────────────────────────────────── */
+
+@page {
+  size: A4 portrait;
+  margin: 8mm 11mm 8mm 11mm;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue",
+    Arial, sans-serif;
+  font-size: 8.6pt;
+  line-height: 1.32;
+  color: #1a1a2e;
+  margin: 0;
+  padding: 0;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+/* ─── Cover header ─── */
+.cover {
+  margin-bottom: 2mm;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.6mm;
+  padding-bottom: 1.4mm;
+  border-bottom: 1pt solid #11ab3a;
+}
+.brand .logo {
+  font-size: 15pt;
+  font-weight: 800;
+  color: #0c831f;
+  letter-spacing: -0.4pt;
+}
+.brand .badge {
+  font-size: 7.5pt;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.8pt;
+  color: #0c831f;
+  background: #ecfdf3;
+  padding: 1.5pt 7pt;
+  border-radius: 999pt;
+  border: 0.6pt solid #a3e8b3;
+}
+
+h1 {
+  font-size: 16pt;
+  margin: 0 0 0.4mm 0;
+  font-weight: 800;
+  letter-spacing: -0.4pt;
+  color: #0c831f;
+}
+h2 {
+  font-size: 9.6pt;
+  font-weight: 600;
+  margin: 0 0 1.6mm 0;
+  color: #5a6478;
+}
+
+.meta {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1.2mm 4mm;
+  margin-top: 1mm;
+}
+.meta > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3mm;
+}
+.meta-label {
+  font-size: 7pt;
+  text-transform: uppercase;
+  letter-spacing: 0.6pt;
+  color: #8d95a5;
+  font-weight: 600;
+}
+.meta-value {
+  font-size: 8.8pt;
+  color: #1a1a2e;
+  font-weight: 500;
+}
+.meta-value.status-ok::before {
+  content: "● ";
+  color: #11ab3a;
+}
+
+hr {
+  display: none;
+}
+
+body > h2 {
+  font-size: 10pt;
+  color: #1a1a2e;
+  margin: 1.8mm 0 0.8mm 0;
+  font-weight: 700;
+  letter-spacing: -0.2pt;
+  position: relative;
+  padding-left: 3mm;
+}
+body > h2::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 1mm;
+  bottom: 1mm;
+  width: 1.1mm;
+  background: #11ab3a;
+  border-radius: 1pt;
+}
+
+p {
+  margin: 0 0 1mm 0;
+}
+
+strong {
+  font-weight: 700;
+  color: #1a1a2e;
+}
+code {
+  font-family: "Menlo", "Consolas", monospace;
+  font-size: 8.5pt;
+  background: #f1f5f9;
+  padding: 0.5pt 3pt;
+  border-radius: 2pt;
+  color: #0c831f;
+}
+
+/* ─── Feature grid ─── */
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.6mm;
+  margin: 0.3mm 0 0.6mm 0;
+}
+.feature {
+  background: #fafbfc;
+  border: 0.4pt solid #e2e8f0;
+  border-radius: 1.4mm;
+  padding: 1.6mm 2mm;
+  border-top: 0.9pt solid #11ab3a;
+}
+.feature h4 {
+  font-size: 8.4pt;
+  font-weight: 700;
+  margin: 0 0 0.4mm 0;
+  color: #0c831f;
+  letter-spacing: -0.1pt;
+}
+.feature p {
+  font-size: 7.4pt;
+  line-height: 1.28;
+  color: #334155;
+  margin: 0;
+}
+
+/* ─── Two-column block ─── */
+.two-col {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 5mm;
+  margin: 0.5mm 0 1mm 0;
+}
+.two-col p,
+.two-col ul {
+  margin: 0 0 1.4mm 0;
+  font-size: 8.4pt;
+}
+.two-col strong {
+  display: block;
+  font-size: 7.6pt;
+  text-transform: uppercase;
+  letter-spacing: 0.5pt;
+  color: #5a6478;
+  margin-bottom: 0.4mm;
+}
+
+ul.check-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.5mm;
+}
+ul.check-list li {
+  font-size: 8.2pt;
+  padding-left: 4mm;
+  position: relative;
+  color: #1a1a2e;
+}
+ul.check-list li::before {
+  content: "✓";
+  position: absolute;
+  left: 0;
+  top: 0;
+  color: #11ab3a;
+  font-weight: 700;
+}
+
+/* ─── Timeline ─── */
+.timeline {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.6mm;
+  margin: 0.5mm 0 1mm 0;
+  background: #fafbfc;
+  border: 0.4pt solid #e2e8f0;
+  border-radius: 1.6mm;
+  padding: 2mm 2.6mm;
+}
+.t-row {
+  display: grid;
+  grid-template-columns: 20mm 1fr;
+  align-items: center;
+  gap: 3mm;
+  padding: 0.4mm 0;
+  border-bottom: 0.3pt dashed #e2e8f0;
+}
+.t-row:last-child {
+  border-bottom: none;
+}
+.t-week {
+  font-size: 7.6pt;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5pt;
+  color: #0c831f;
+  background: #ecfdf3;
+  padding: 0.7pt 4pt;
+  border-radius: 999pt;
+  text-align: center;
+}
+.t-task {
+  font-size: 8.4pt;
+  color: #1a1a2e;
+}
+.t-row.launch {
+  background: linear-gradient(90deg, #ecfdf3 0%, transparent 100%);
+  margin: 0.6mm -2.6mm -2mm -2.6mm;
+  padding: 1.4mm 2.6mm;
+  border-radius: 0 0 1.6mm 1.6mm;
+  border-bottom: none;
+}
+.t-row.launch .t-week {
+  background: #11ab3a;
+  color: #fff;
+}
+.t-row.launch .t-task {
+  font-weight: 700;
+  color: #0c831f;
+}
+
+/* ─── Footer ─── */
+.footer {
+  margin-top: 2mm;
+  padding-top: 1.4mm;
+  border-top: 0.4pt solid #e2e8f0;
+  text-align: center;
+  font-size: 8.4pt;
+  color: #5a6478;
+  letter-spacing: 0.2pt;
+}
+
+/* Avoid awkward orphans on a one-pager */
+h2,
+.feature-grid,
+.two-col,
+.timeline {
+  break-inside: avoid;
+}

@@ -21,6 +21,7 @@ import { VerificationModule } from './modules/verification/verification.module';
 import { SellerOnboardingModule } from './modules/seller-onboarding/seller-onboarding.module';
 import { ShippingModule } from './modules/shipping/shipping.module';
 import { WalletModule } from './modules/wallet/wallet.module';
+import { PayoutModule } from './modules/payout/payout.module';
 import { ReturnsModule } from './modules/returns/returns.module';
 import { TicketsModule } from './modules/tickets/tickets.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
@@ -57,6 +58,7 @@ import { CommonModule } from './common/common.module';
     SellerOnboardingModule,
     ShippingModule,
     WalletModule,
+    PayoutModule,
     ReturnsModule,
     TicketsModule,
     NotificationsModule,

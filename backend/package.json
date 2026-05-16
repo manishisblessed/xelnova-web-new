@@ -14,7 +14,8 @@
     "db:seed:ecommerce": "npx tsx prisma/seed-ecommerce-content.ts",
     "db:studio": "npx prisma studio",
     "db:reset": "npx prisma migrate reset",
-    "db:migrate-prices-to-inclusive": "npx tsx prisma/migrate-prices-to-inclusive.ts"
+    "db:migrate-prices-to-inclusive": "npx tsx prisma/migrate-prices-to-inclusive.ts",
+    "db:migrate-fix-duplicate-variant-groups": "npx tsx prisma/migrate-fix-duplicate-variant-groups.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.0.2",

@@ -122,6 +122,25 @@ export class WalletService {
     return { wallet: updatedWallet, transaction };
   }
 
+  /**
+   * Reference types that are allowed to push the wallet into a negative balance.
+   *
+   * These are platform-driven adjustments (return reversals, return-leg shipping,
+   * Xelgo return service fee) that MUST hit the ledger even if the seller has
+   * already withdrawn their balance. The seller's next settlement will offset
+   * the negative position automatically.
+   *
+   * Seller-initiated debits (PAYOUT, TRANSFER, RECHARGE, BILL_PAYMENT,
+   * SHIPPING_PAYMENT) continue to throw on insufficient balance.
+   */
+  private static readonly NEGATIVE_ALLOWED_REFERENCE_TYPES = new Set<string>([
+    'RETURN_REVERSAL',
+    'RETURN_SHIPPING',
+    'XELGO_SERVICE_FEE',
+    'COMMISSION',
+    'MANUAL',
+  ]);
+
   async debit(
     walletId: string,
     amount: number,
@@ -139,7 +158,8 @@ export class WalletService {
       throw new HttpException('Wallet not found', HttpStatus.NOT_FOUND);
     }
 
-    if (wallet.balance < amount) {
+    const allowsNegative = WalletService.NEGATIVE_ALLOWED_REFERENCE_TYPES.has(referenceType);
+    if (!allowsNegative && wallet.balance < amount) {
       throw new HttpException('Insufficient balance', HttpStatus.BAD_REQUEST);
     }
 

@@ -1,15 +1,35 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
+import { useSearchParams } from 'next/navigation';
+import { motion } from 'framer-motion';
 import { Badge, Button } from '@xelnova/ui';
-import { AdminListPage } from '@/components/dashboard/admin-list-page';
+import { DashboardHeader } from '@/components/dashboard/dashboard-header';
 import { ActionModal } from '@/components/dashboard/action-modal';
 import { ConfirmDialog } from '@/components/dashboard/confirm-dialog';
 import { FormField, FormSelect, FormToggle, FormTextarea } from '@/components/dashboard/form-field';
-import { Pencil, Trash2, CheckCircle, XCircle, Clock, AlertTriangle, Eye, Loader2, Layers } from 'lucide-react';
+import { AdminActionsDropdown } from '@/components/dashboard/admin-actions-dropdown';
+import {
+  Pencil,
+  Trash2,
+  CheckCircle,
+  XCircle,
+  Clock,
+  AlertTriangle,
+  Eye,
+  Loader2,
+  Layers,
+  Package,
+  ImageOff,
+  TrendingDown,
+  Search,
+  RefreshCw,
+  X,
+  type LucideIcon,
+} from 'lucide-react';
 import { toast } from 'sonner';
-import type { Column } from '@/components/dashboard/data-table';
-import { apiDelete, apiUpdate, apiPost, apiGetAdminProduct } from '@/lib/api';
+import { apiDelete, apiUpdate, apiPost, apiGet, apiGetAdminProduct } from '@/lib/api';
 import { ProductVariantsExpansion } from '@/components/product-variants-expansion';
 
 const STATUS_OPTIONS = [
@@ -900,8 +920,256 @@ function hasVariantDiff(
   return false;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// UI helpers for the revamped Products page
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Debounces a value by `delay` ms. Used so we can update the visible search
+ * input on every keystroke (responsive) but only re-filter the large product
+ * list a few times per second (smooth).
+ */
+function useDebouncedValue<T>(value: T, delay = 200): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(t);
+  }, [value, delay]);
+  return debounced;
+}
+
+/**
+ * Renders a product thumbnail with a floating large-preview on hover. Admins
+ * spend most of their time eyeballing images, so being able to peek without
+ * opening the full modal saves a ton of clicks.
+ */
+function HoverThumbnail({
+  src,
+  alt,
+  fallback,
+}: {
+  src: string | null;
+  alt: string;
+  fallback?: ReactNode;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const [coords, setCoords] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  return (
+    <div
+      onMouseEnter={(e) => {
+        const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        setCoords({ x: r.right + 8, y: r.top });
+        setHovered(true);
+      }}
+      onMouseLeave={() => setHovered(false)}
+      className="relative h-12 w-12 rounded-lg bg-surface-muted overflow-hidden shrink-0 border border-border"
+    >
+      {src ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={src} alt={alt} className="h-full w-full object-cover" />
+      ) : (
+        fallback ?? (
+          <div className="h-full w-full flex items-center justify-center text-text-muted">
+            <Package size={16} />
+          </div>
+        )
+      )}
+      {hovered && src && typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            className="fixed z-[300] pointer-events-none rounded-xl border border-border bg-surface p-1 shadow-elevated"
+            style={{
+              left: Math.min(coords.x, (typeof window !== 'undefined' ? window.innerWidth : 1024) - 220),
+              top: Math.max(
+                8,
+                Math.min(
+                  coords.y - 60,
+                  (typeof window !== 'undefined' ? window.innerHeight : 768) - 220,
+                ),
+              ),
+            }}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={src} alt="" className="h-48 w-48 object-cover rounded-lg" />
+          </div>,
+          document.body,
+        )}
+    </div>
+  );
+}
+
+type StatTone = 'neutral' | 'warning' | 'danger' | 'success';
+
+/**
+ * Compact KPI tile that doubles as a one-click filter. Clicking it tells the
+ * page which "view" to apply (e.g. only flagged images) and visually highlights
+ * itself so the admin always knows what they're looking at.
+ */
+function ProductStatCard({
+  label,
+  value,
+  icon: Icon,
+  tone = 'neutral',
+  active,
+  onClick,
+}: {
+  label: string;
+  value: number;
+  icon: LucideIcon;
+  tone?: StatTone;
+  active?: boolean;
+  onClick?: () => void;
+}) {
+  const toneClasses: Record<StatTone, string> = {
+    neutral: 'bg-primary-50 text-primary-600',
+    warning: 'bg-warning-50 text-warning-600',
+    danger: 'bg-danger-50 text-danger-600',
+    success: 'bg-success-50 text-success-600',
+  };
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`text-left rounded-2xl border bg-surface p-4 shadow-card transition-all hover:shadow-card-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 ${
+        active ? 'border-primary-500 ring-2 ring-primary-500/20' : 'border-border hover:border-primary-300'
+      }`}
+    >
+      <div className="flex items-center justify-between">
+        <p className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">{label}</p>
+        <span className={`rounded-lg p-1.5 ${toneClasses[tone]}`}>
+          <Icon className="h-4 w-4" />
+        </span>
+      </div>
+      <p className="mt-2 text-2xl font-bold text-text-primary font-display tabular-nums">
+        {value.toLocaleString()}
+      </p>
+    </button>
+  );
+}
+
+/** Pill-shaped status tab with a count badge — replaces the legacy dropdown. */
+function TabPill({
+  label,
+  count,
+  active,
+  tone = 'neutral',
+  onClick,
+}: {
+  label: string;
+  count: number;
+  active?: boolean;
+  tone?: StatTone;
+  onClick: () => void;
+}) {
+  const inactiveBadgeTone: Record<StatTone, string> = {
+    neutral: 'bg-surface-muted text-text-muted',
+    warning: 'bg-warning-100 text-warning-700',
+    danger: 'bg-danger-100 text-danger-700',
+    success: 'bg-success-100 text-success-700',
+  };
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex shrink-0 items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+        active
+          ? 'bg-primary-600 text-white shadow-sm'
+          : 'bg-surface text-text-secondary border border-border hover:bg-surface-muted hover:text-text-primary'
+      }`}
+    >
+      {label}
+      <span
+        className={`rounded-full px-1.5 py-px text-[10px] font-bold tabular-nums ${
+          active ? 'bg-white/25 text-white' : inactiveBadgeTone[tone]
+        }`}
+      >
+        {count}
+      </span>
+    </button>
+  );
+}
+
+function tabToneForStatus(s: ProductStatus): StatTone {
+  switch (s) {
+    case 'ACTIVE':
+      return 'success';
+    case 'PENDING':
+    case 'PENDING_BRAND_AUTHORIZATION':
+    case 'ON_HOLD':
+      return 'warning';
+    case 'REJECTED':
+      return 'danger';
+    default:
+      return 'neutral';
+  }
+}
+
+/** Single source of truth for "is this listing waiting for an admin decision?" */
+function isPendingStatus(s: ProductStatus): boolean {
+  return s === 'PENDING' || s === 'PENDING_BRAND_AUTHORIZATION';
+}
+
+/** Tiny presentational pill used in the status cell for things like "Changes" / "Images flagged". */
+function MiniPill({
+  tone,
+  icon,
+  children,
+  title,
+}: {
+  tone: 'warning' | 'danger' | 'info';
+  icon?: ReactNode;
+  children: ReactNode;
+  title?: string;
+}) {
+  const toneClasses = {
+    warning: 'bg-warning-100 text-warning-800',
+    danger: 'bg-danger-50 text-danger-700',
+    info: 'bg-primary-50 text-primary-700',
+  }[tone];
+  return (
+    <span
+      title={title}
+      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${toneClasses}`}
+    >
+      {icon}
+      {children}
+    </span>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export default function ProductsPage() {
+  const searchParams = useSearchParams();
+  const initialSearch = searchParams?.get('search') ?? '';
+  const initialStatus = searchParams?.get('status') ?? '';
+  const initialPendingChanges = searchParams?.get('hasPendingChanges') === 'true';
+
+  // ─── Data / load ──────────────────────────────────────────────────────────
+  const [data, setData] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(true);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+
+  // ─── Filters ──────────────────────────────────────────────────────────────
+  const [search, setSearch] = useState(initialSearch);
+  const debouncedSearch = useDebouncedValue(search, 200);
+  const [statusFilter, setStatusFilter] = useState<string>(initialStatus);
+  const [view, setView] = useState<'all' | 'changes' | 'flagged' | 'low-stock'>(
+    initialPendingChanges ? 'changes' : 'all',
+  );
+
+  // ─── Selection ────────────────────────────────────────────────────────────
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  // ─── Bulk modals ──────────────────────────────────────────────────────────
+  const [bulkApproveOpen, setBulkApproveOpen] = useState(false);
+  const [bulkRejectOpen, setBulkRejectOpen] = useState(false);
+  const [bulkCommission, setBulkCommission] = useState('10');
+  const [bulkRejectReason, setBulkRejectReason] = useState('');
+  const [bulkSubmitting, setBulkSubmitting] = useState(false);
+
+  // ─── Existing per-row modals (state unchanged) ────────────────────────────
   const [modalOpen, setModalOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [rejectOpen, setRejectOpen] = useState(false);
@@ -944,6 +1212,191 @@ export default function ProductsPage() {
     isReplaceable: false,
     replacementWindow: 7 as ReplacementWindow,
   });
+
+  // ─── Data fetching ────────────────────────────────────────────────────────
+  const fetchData = useCallback(async () => {
+    try {
+      const result = await apiGet<Product[]>('products');
+      setData(Array.isArray(result) ? result : []);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to load products');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void fetchData();
+  }, [fetchData, refreshTrigger]);
+
+  // Keep URL-driven filters in sync when the admin navigates here from
+  // another page (e.g. a "needs review" deep-link).
+  useEffect(() => {
+    setSearch(searchParams?.get('search') ?? '');
+  }, [searchParams]);
+  useEffect(() => {
+    const s = searchParams?.get('status') ?? '';
+    setStatusFilter(s);
+  }, [searchParams]);
+  useEffect(() => {
+    if (searchParams?.get('hasPendingChanges') === 'true') setView('changes');
+  }, [searchParams]);
+
+  // Drop stale selections whenever the dataset changes (e.g. after refresh).
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      if (prev.size === 0) return prev;
+      const ids = new Set(data.map((p) => p.id));
+      const next = new Set<string>();
+      prev.forEach((id) => {
+        if (ids.has(id)) next.add(id);
+      });
+      return next.size === prev.size ? prev : next;
+    });
+  }, [data]);
+
+  // ─── Derived: counts + filtered list ──────────────────────────────────────
+  const counts = useMemo(() => {
+    let pending = 0;
+    let changes = 0;
+    let flagged = 0;
+    let lowStock = 0;
+    const byStatus: Record<string, number> = {};
+    for (const p of data) {
+      if (isPendingStatus(p.status)) pending++;
+      if (p.hasPendingChanges) changes++;
+      if (p.imageRejectionReason) flagged++;
+      if (p.stock < 10) lowStock++;
+      byStatus[p.status] = (byStatus[p.status] ?? 0) + 1;
+    }
+    return { total: data.length, pending, changes, flagged, lowStock, byStatus };
+  }, [data]);
+
+  const filtered = useMemo(() => {
+    let rows = data;
+    if (statusFilter) rows = rows.filter((p) => p.status === statusFilter);
+    if (view === 'changes') rows = rows.filter((p) => p.hasPendingChanges);
+    if (view === 'flagged') rows = rows.filter((p) => !!p.imageRejectionReason);
+    if (view === 'low-stock') rows = rows.filter((p) => p.stock < 10);
+    const q = debouncedSearch.toLowerCase().trim();
+    if (q) {
+      rows = rows.filter((p) => {
+        const haystack = [
+          p.name,
+          p.slug,
+          p.xelnovaProductId,
+          p.seller?.storeName,
+          p.category?.name,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        return haystack.includes(q);
+      });
+    }
+    return rows;
+  }, [data, statusFilter, view, debouncedSearch]);
+
+  const selectedProducts = useMemo(
+    () => data.filter((p) => selectedIds.has(p.id)),
+    [data, selectedIds],
+  );
+  const selectedPendingCount = useMemo(
+    () => selectedProducts.filter((p) => isPendingStatus(p.status)).length,
+    [selectedProducts],
+  );
+
+  const allOnPageSelected =
+    filtered.length > 0 && filtered.every((p) => selectedIds.has(p.id));
+  const someOnPageSelected = filtered.some((p) => selectedIds.has(p.id));
+
+  const toggleAll = () => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allOnPageSelected) {
+        filtered.forEach((p) => next.delete(p.id));
+      } else {
+        filtered.forEach((p) => next.add(p.id));
+      }
+      return next;
+    });
+  };
+
+  const toggleOne = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  // ─── Bulk actions ─────────────────────────────────────────────────────────
+  const handleBulkApprove = async () => {
+    const rate = Number(bulkCommission.trim());
+    if (!Number.isFinite(rate) || rate < 0 || rate > 100) {
+      toast.error('Commission must be between 0 and 100');
+      return;
+    }
+    const eligible = selectedProducts.filter((p) => isPendingStatus(p.status));
+    if (eligible.length === 0) {
+      toast.error('None of the selected products are pending');
+      return;
+    }
+    setBulkSubmitting(true);
+    let ok = 0;
+    let fail = 0;
+    await Promise.all(
+      eligible.map(async (p) => {
+        try {
+          await apiPost(`products/${p.id}/approve`, {
+            commissionRate: rate,
+            returnPolicyPreset: 'EASY_RETURN_7_DAYS',
+            replacementWindow: null,
+            isReplaceable: false,
+          });
+          ok++;
+        } catch {
+          fail++;
+        }
+      }),
+    );
+    if (ok) toast.success(`Approved ${ok} product${ok === 1 ? '' : 's'} at ${rate}%`);
+    if (fail) toast.error(`Failed to approve ${fail} product${fail === 1 ? '' : 's'}`);
+    setBulkApproveOpen(false);
+    setSelectedIds(new Set());
+    setRefreshTrigger((n) => n + 1);
+    setBulkSubmitting(false);
+  };
+
+  const handleBulkReject = async () => {
+    const reason = bulkRejectReason.trim();
+    if (!reason) {
+      toast.error('Add a rejection message so sellers know what to fix');
+      return;
+    }
+    if (selectedProducts.length === 0) return;
+    setBulkSubmitting(true);
+    let ok = 0;
+    let fail = 0;
+    await Promise.all(
+      selectedProducts.map(async (p) => {
+        try {
+          await apiPost(`products/${p.id}/reject`, { rejectionReason: reason });
+          ok++;
+        } catch {
+          fail++;
+        }
+      }),
+    );
+    if (ok) toast.success(`Rejected ${ok} product${ok === 1 ? '' : 's'}`);
+    if (fail) toast.error(`Failed to reject ${fail} product${fail === 1 ? '' : 's'}`);
+    setBulkRejectOpen(false);
+    setBulkRejectReason('');
+    setSelectedIds(new Set());
+    setRefreshTrigger((n) => n + 1);
+    setBulkSubmitting(false);
+  };
 
   const openEdit = (p: Product) => {
     setEditing(p);
@@ -1241,254 +1694,524 @@ export default function ProductsPage() {
     }
   };
 
-  const columns: Column<Product>[] = [
-    {
-      key: 'name',
-      header: 'Product',
-      className: 'min-w-[280px] max-w-[320px]',
-      render: (r) => {
-        const thumb = pickProductThumbnail(r);
-        return (
-          <div className="flex items-center gap-3">
-            <div className="h-11 w-11 rounded-lg bg-surface-muted overflow-hidden shrink-0 border border-border">
-              {thumb ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={thumb} alt="" className="h-full w-full object-cover" />
-              ) : (
-                <div className="h-full w-full flex items-center justify-center text-text-muted">
-                  <Clock size={16} />
-                </div>
-              )}
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="font-medium text-text-primary line-clamp-2 leading-tight" title={r.name}>
-                {r.name}
-              </p>
-            </div>
-          </div>
+  // Keyboard shortcuts while the preview modal is open: A=approve, R=reject,
+  // ←/→ cycle through the gallery. Skipped when typing in a text field.
+  useEffect(() => {
+    if (!viewOpen || !viewing) return;
+    const gallery = collectProductGallery(viewing);
+    const isEditableTarget = (t: EventTarget | null) => {
+      if (!(t instanceof HTMLElement)) return false;
+      const tag = t.tagName;
+      return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t.isContentEditable;
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (isEditableTarget(e.target)) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (gallery.length > 1 && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+        e.preventDefault();
+        setViewImageIdx((i) =>
+          e.key === 'ArrowLeft'
+            ? (i - 1 + gallery.length) % gallery.length
+            : (i + 1) % gallery.length,
         );
-      },
-    },
-    {
-      key: 'xelnovaProductId',
-      header: 'Xel ID',
-      className: 'whitespace-nowrap w-[100px]',
-      render: (r) =>
-        r.xelnovaProductId ? (
-          <code className="text-[11px] font-mono text-text-secondary">{r.xelnovaProductId}</code>
-        ) : (
-          <span className="text-text-muted">—</span>
-        ),
-    },
-    {
-      key: 'category',
-      header: 'Category',
-      className: 'whitespace-nowrap',
-      render: (r) => (
-        <span className="text-text-secondary">{r.category?.name ?? '—'}</span>
-      ),
-    },
-    {
-      key: 'seller',
-      header: 'Seller',
-      className: 'whitespace-nowrap',
-      render: (r) => (
-        <span className="text-text-secondary">{r.seller?.storeName ?? '—'}</span>
-      ),
-    },
-    {
-      key: 'price',
-      header: 'Price',
-      className: 'whitespace-nowrap text-right',
-      render: (r) => (
-        <div className="text-right">
-          <span className="font-medium">₹{r.price.toLocaleString()}</span>
-          {r.compareAtPrice != null && r.compareAtPrice > r.price && (
-            <span className="ml-1 text-xs text-text-muted line-through">₹{r.compareAtPrice.toLocaleString()}</span>
-          )}
-        </div>
-      ),
-    },
-    {
-      key: 'stock',
-      header: 'Stock',
-      className: 'whitespace-nowrap text-center w-[70px]',
-      render: (r) => (
-        <span className={`font-medium ${r.stock < 10 ? 'text-danger-500' : 'text-text-primary'}`}>
-          {r.stock}
-        </span>
-      ),
-    },
-    {
-      key: 'variants',
-      header: 'Variants',
-      className: 'whitespace-nowrap text-center w-[100px]',
-      render: (r) => {
-        if (!isVariantArray(r.variants) || r.variants.length === 0) {
-          return <span className="text-text-muted">—</span>;
+        return;
+      }
+      if (!isPendingStatus(viewing.status)) return;
+      if (e.key === 'a' || e.key === 'A') {
+        const blockedByBrand = viewing.brandRecord && !viewing.brandRecord.approved;
+        if (blockedByBrand) {
+          toast.error(`Brand "${viewing.brandRecord!.name}" must be approved first`);
+          return;
         }
-        const totalOptions = r.variants.reduce((acc, g) => acc + (g.options?.length ?? 0), 0);
-        return (
-          <span
-            className="inline-flex items-center gap-1 rounded-full bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-700"
-            title={`${r.variants.length} group${r.variants.length === 1 ? '' : 's'} · ${totalOptions} option${totalOptions === 1 ? '' : 's'}`}
-          >
-            <Layers className="h-3 w-3" />
-            {totalOptions}
-          </span>
-        );
-      },
-    },
-    {
-      key: 'status',
-      header: 'Status',
-      className: 'whitespace-nowrap',
-      render: (r) => (
-        <div className="flex items-center gap-1.5">
-          <StatusIcon status={r.status} />
-          <Badge variant={statusBadgeVariant(r.status)}>
-            {formatProductStatusLabel(r.status)}
-          </Badge>
-        </div>
-      ),
-    },
-    {
-      key: 'isFeatured',
-      header: 'Flags',
-      className: 'whitespace-nowrap',
-      render: (r) => (
-        <div className="flex items-center gap-1">
-          {r.isFeatured && <Badge variant="info">Featured</Badge>}
-          {r.isTrending && <Badge variant="warning">Trending</Badge>}
-          {r.isFlashDeal && <Badge variant="danger">Flash</Badge>}
-          {!r.isFeatured && !r.isTrending && !r.isFlashDeal && (
-            <span className="text-text-muted">—</span>
-          )}
-        </div>
-      ),
-    },
-    {
-      key: 'rating',
-      header: 'Rating',
-      className: 'whitespace-nowrap w-[90px]',
-      render: (r) => (
-        <div className="flex items-center gap-1">
-          <span className="font-medium text-amber-500">{r.rating.toFixed(1)}</span>
-          <span className="text-amber-500">★</span>
-          <span className="text-text-muted text-xs">({r.reviewCount})</span>
-        </div>
-      ),
-    },
-    {
-      key: 'hasPendingChanges',
-      header: 'Changes',
-      className: 'whitespace-nowrap text-center w-[100px]',
-      render: (r) =>
-        r.hasPendingChanges ? (
-          <Badge variant="warning">Pending Review</Badge>
-        ) : (
-          <span className="text-text-muted">—</span>
-        ),
-    },
-    {
-      key: 'imageRejectionReason',
-      header: 'Image rejection',
-      className: 'min-w-[200px]',
-      render: (r) =>
-        r.imageRejectionReason ? (
-          <div className="flex flex-col gap-1 max-w-[260px]">
-            <Badge variant="warning">Images flagged</Badge>
-            <span
-              className="text-xs text-text-secondary line-clamp-2"
-              title={r.imageRejectionReason}
-            >
-              {r.imageRejectionReason}
-            </span>
-          </div>
-        ) : (
-          <span className="text-text-muted">—</span>
-        ),
-    },
-    {
-      key: 'commissionRate',
-      header: 'Commission',
-      className: 'whitespace-nowrap w-[110px] text-right',
-      render: (r) =>
-        r.commissionRate != null ? (
-          <span className="font-semibold text-text-primary">{Number(r.commissionRate).toFixed(2)}%</span>
-        ) : (
-          <span className="text-text-muted text-xs">Seller default</span>
-        ),
-    },
-  ];
+        e.preventDefault();
+        void handleApprove(viewing, { closeView: true });
+      } else if (e.key === 'r' || e.key === 'R') {
+        e.preventDefault();
+        const p = viewing;
+        setViewOpen(false);
+        setViewing(null);
+        openReject(p);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewOpen, viewing]);
 
+  // Row-action overflow items for the actions cell.
+  const rowMenuItems = (r: Product) => {
+    const items = [] as Array<{
+      key: string;
+      label: string;
+      icon: ReactNode;
+      onClick: () => void;
+      danger?: boolean;
+    }>;
+    if (isPendingStatus(r.status)) {
+      items.push({
+        key: 'reject',
+        label: 'Reject…',
+        icon: <XCircle size={14} />,
+        onClick: () => openReject(r),
+        danger: true,
+      });
+    }
+    items.push({
+      key: 'edit',
+      label: 'Edit flags…',
+      icon: <Pencil size={14} />,
+      onClick: () => openEdit(r),
+    });
+    items.push({
+      key: 'delete',
+      label: 'Delete',
+      icon: <Trash2 size={14} />,
+      onClick: () => {
+        setEditing(r);
+        setDeleteOpen(true);
+      },
+      danger: true,
+    });
+    return items;
+  };
+
+  // ─── Render ───────────────────────────────────────────────────────────────
   return (
     <>
-      <AdminListPage<Product>
-        title="Products"
-        section="products"
-        columns={columns}
-        keyExtractor={(r) => r.id}
-        searchKeys={['name', 'slug', 'sku', 'xelnovaProductId']}
-        filterKey="status"
-        filterOptions={[...STATUS_OPTIONS]}
-        refreshTrigger={refreshTrigger}
-        actionsClassName="min-w-[148px] text-right"
-        renderActions={(r) => (
-          <div className="flex items-center justify-end gap-0.5 flex-wrap">
-            <button
-              type="button"
-              onClick={() => openView(r)}
-              className="p-1.5 rounded-md hover:bg-primary-50 text-text-muted hover:text-primary-600 transition-colors"
-              title="View details & images"
-            >
-              <Eye size={16} />
-            </button>
-            {(r.status === 'PENDING' || r.status === 'PENDING_BRAND_AUTHORIZATION') && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => {
-                    toast.info('Review product images before approval');
-                    void openView(r);
-                  }}
-                  className="p-1.5 rounded-md hover:bg-success-50 text-success-600 hover:text-success-700 disabled:opacity-50 transition-colors"
-                  title="Review before approve"
-                >
-                  <CheckCircle size={16} />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => openReject(r)}
-                  className="p-1.5 rounded-md hover:bg-danger-50 text-danger-600 hover:text-danger-700 transition-colors"
-                  title="Reject"
-                >
-                  <XCircle size={16} />
-                </button>
-              </>
+      <DashboardHeader title="Products" />
+      <div className="p-6 space-y-5">
+        {/* KPI strip — each tile is a one-click filter for the workload below. */}
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3"
+        >
+          <ProductStatCard
+            label="Total"
+            value={counts.total}
+            icon={Package}
+            tone="neutral"
+            active={!statusFilter && view === 'all'}
+            onClick={() => {
+              setStatusFilter('');
+              setView('all');
+            }}
+          />
+          <ProductStatCard
+            label="Pending review"
+            value={counts.pending}
+            icon={Clock}
+            tone="warning"
+            active={statusFilter === 'PENDING' && view === 'all'}
+            onClick={() => {
+              setStatusFilter('PENDING');
+              setView('all');
+            }}
+          />
+          <ProductStatCard
+            label="Changes pending"
+            value={counts.changes}
+            icon={AlertTriangle}
+            tone="warning"
+            active={view === 'changes'}
+            onClick={() => {
+              setStatusFilter('');
+              setView('changes');
+            }}
+          />
+          <ProductStatCard
+            label="Images flagged"
+            value={counts.flagged}
+            icon={ImageOff}
+            tone="danger"
+            active={view === 'flagged'}
+            onClick={() => {
+              setStatusFilter('');
+              setView('flagged');
+            }}
+          />
+          <ProductStatCard
+            label="Low stock"
+            value={counts.lowStock}
+            icon={TrendingDown}
+            tone="danger"
+            active={view === 'low-stock'}
+            onClick={() => {
+              setStatusFilter('');
+              setView('low-stock');
+            }}
+          />
+        </motion.div>
+
+        {/* Search + refresh */}
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2 flex-1 min-w-[220px] max-w-md focus-within:border-primary-400 focus-within:ring-2 focus-within:ring-primary-500/20">
+            <Search size={18} className="text-text-muted shrink-0" />
+            <input
+              type="text"
+              placeholder="Search by name, slug, Xel ID, seller, category..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="flex-1 bg-transparent text-sm text-text-primary outline-none placeholder:text-text-muted"
+            />
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch('')}
+                className="rounded-md p-0.5 text-text-muted hover:bg-surface-muted hover:text-text-primary"
+                aria-label="Clear search"
+              >
+                <X size={14} />
+              </button>
             )}
-            <button
-              type="button"
-              onClick={() => openEdit(r)}
-              className="p-1.5 rounded-md hover:bg-primary-50 text-text-muted hover:text-primary-600 transition-colors"
-              title="Edit"
-            >
-              <Pencil size={15} />
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setEditing(r);
-                setDeleteOpen(true);
-              }}
-              className="p-1.5 rounded-md hover:bg-danger-50 text-text-muted hover:text-danger-600 transition-colors"
-              title="Delete"
-            >
-              <Trash2 size={15} />
-            </button>
           </div>
+          <button
+            onClick={() => {
+              setLoading(true);
+              void fetchData();
+            }}
+            className="flex items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2 text-sm text-text-secondary hover:bg-surface-muted hover:text-text-primary transition-colors"
+            title="Refresh"
+          >
+            <RefreshCw size={16} />
+            <span className="hidden sm:inline">Refresh</span>
+          </button>
+          <div className="ml-auto text-xs text-text-muted">
+            Showing <span className="font-semibold text-text-primary">{filtered.length}</span>{' '}
+            of {counts.total}
+          </div>
+        </div>
+
+        {/* Status segmented tabs with live counts */}
+        <div className="-mx-1 overflow-x-auto">
+          <div className="flex items-center gap-1.5 px-1 pb-1 min-w-min">
+            <TabPill
+              label="All"
+              count={counts.total}
+              active={!statusFilter}
+              onClick={() => setStatusFilter('')}
+            />
+            {STATUS_OPTIONS.map((s) => (
+              <TabPill
+                key={s}
+                label={formatProductStatusLabel(s)}
+                count={counts.byStatus[s] ?? 0}
+                active={statusFilter === s}
+                tone={tabToneForStatus(s)}
+                onClick={() => setStatusFilter(s)}
+              />
+            ))}
+          </div>
+        </div>
+
+        {/* Bulk actions bar — only renders when at least one row is selected. */}
+        {selectedIds.size > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="sticky top-2 z-20 flex flex-wrap items-center gap-3 rounded-xl border border-primary-300 bg-primary-50/90 px-4 py-2.5 shadow-card backdrop-blur"
+          >
+            <span className="text-sm font-semibold text-primary-900">
+              {selectedIds.size} selected
+            </span>
+            {selectedPendingCount > 0 && (
+              <span className="hidden sm:inline-flex items-center gap-1 rounded-full bg-warning-100 px-2 py-0.5 text-[11px] font-semibold text-warning-800">
+                <Clock className="h-3 w-3" />
+                {selectedPendingCount} pending
+              </span>
+            )}
+            <div className="ml-auto flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                onClick={() => {
+                  setBulkCommission('10');
+                  setBulkApproveOpen(true);
+                }}
+                disabled={selectedPendingCount === 0}
+                title={
+                  selectedPendingCount === 0
+                    ? 'None of the selected rows are pending review'
+                    : `Approve ${selectedPendingCount} pending product${selectedPendingCount === 1 ? '' : 's'}`
+                }
+              >
+                <CheckCircle size={14} /> Approve…
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setBulkRejectReason('');
+                  setBulkRejectOpen(true);
+                }}
+              >
+                <XCircle size={14} /> Reject…
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setSelectedIds(new Set())}
+              >
+                Clear
+              </Button>
+            </div>
+          </motion.div>
         )}
-      />
+
+        {/* Table */}
+        <div className="rounded-2xl border border-border bg-surface shadow-card overflow-hidden">
+          <div className="overflow-x-auto max-h-[72vh] overflow-y-auto">
+            <table className="w-full min-w-[960px] text-sm border-collapse">
+              <thead className="sticky top-0 z-10 bg-surface">
+                <tr className="border-b border-border bg-surface-muted/60">
+                  <th className="w-10 px-3 py-3 text-left">
+                    <input
+                      type="checkbox"
+                      checked={allOnPageSelected}
+                      ref={(el) => {
+                        if (el) el.indeterminate = !allOnPageSelected && someOnPageSelected;
+                      }}
+                      onChange={toggleAll}
+                      className="h-4 w-4 rounded border-border text-primary-600 focus:ring-primary-500/30 cursor-pointer"
+                      aria-label="Select all rows on this page"
+                      disabled={loading || filtered.length === 0}
+                    />
+                  </th>
+                  <th className="text-left px-4 py-3 font-semibold text-text-muted text-[11px] uppercase tracking-wider min-w-[300px]">
+                    Product
+                  </th>
+                  <th className="text-right px-4 py-3 font-semibold text-text-muted text-[11px] uppercase tracking-wider w-[140px]">
+                    Price · Stock
+                  </th>
+                  <th className="text-center px-4 py-3 font-semibold text-text-muted text-[11px] uppercase tracking-wider w-[90px]">
+                    Variants
+                  </th>
+                  <th className="text-left px-4 py-3 font-semibold text-text-muted text-[11px] uppercase tracking-wider min-w-[200px]">
+                    Status
+                  </th>
+                  <th className="text-right px-4 py-3 font-semibold text-text-muted text-[11px] uppercase tracking-wider w-[110px]">
+                    Commission
+                  </th>
+                  <th className="text-right px-4 py-3 font-semibold text-text-muted text-[11px] uppercase tracking-wider w-[180px]">
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border-light">
+                {loading &&
+                  Array.from({ length: 8 }).map((_, i) => (
+                    <tr key={`sk-${i}`}>
+                      <td className="px-3 py-3">
+                        <div className="h-4 w-4 rounded bg-surface-muted animate-pulse" />
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-3">
+                          <div className="h-12 w-12 rounded-lg bg-surface-muted animate-pulse" />
+                          <div className="flex-1 space-y-1.5">
+                            <div className="h-3 w-3/4 rounded bg-surface-muted animate-pulse" />
+                            <div className="h-2.5 w-1/2 rounded bg-surface-muted animate-pulse" />
+                          </div>
+                        </div>
+                      </td>
+                      {Array.from({ length: 5 }).map((_, j) => (
+                        <td key={j} className="px-4 py-3">
+                          <div className="h-3 w-3/4 max-w-[100px] rounded bg-surface-muted animate-pulse ml-auto" />
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                {!loading && filtered.length === 0 && (
+                  <tr>
+                    <td colSpan={7} className="py-16 text-center">
+                      <div className="flex flex-col items-center gap-2 text-text-muted">
+                        <Package size={28} className="opacity-40" />
+                        <p className="text-sm font-medium">No products match your filters</p>
+                        {(search || statusFilter || view !== 'all') && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSearch('');
+                              setStatusFilter('');
+                              setView('all');
+                            }}
+                            className="text-xs font-semibold text-primary-600 hover:text-primary-700"
+                          >
+                            Clear all filters
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )}
+                {!loading &&
+                  filtered.map((p) => {
+                    const selected = selectedIds.has(p.id);
+                    const thumb = pickProductThumbnail(p);
+                    const pending = isPendingStatus(p.status);
+                    const variantCount = isVariantArray(p.variants) ? p.variants.length : 0;
+                    const totalOptions = isVariantArray(p.variants)
+                      ? p.variants.reduce((a, g) => a + (g.options?.length ?? 0), 0)
+                      : 0;
+                    const stockTone =
+                      p.stock < 10
+                        ? 'text-danger-500'
+                        : p.stock < 25
+                          ? 'text-warning-600'
+                          : 'text-text-muted';
+                    return (
+                      <tr
+                        key={p.id}
+                        className={`transition-colors ${
+                          selected ? 'bg-primary-50/40' : 'hover:bg-surface-muted/40'
+                        }`}
+                      >
+                        <td className="px-3 py-3 align-middle">
+                          <input
+                            type="checkbox"
+                            checked={selected}
+                            onChange={() => toggleOne(p.id)}
+                            className="h-4 w-4 rounded border-border text-primary-600 focus:ring-primary-500/30 cursor-pointer"
+                            aria-label={`Select ${p.name}`}
+                          />
+                        </td>
+                        <td className="px-4 py-3 align-middle">
+                          <div className="flex items-start gap-3">
+                            <HoverThumbnail src={thumb} alt={p.name} />
+                            <div className="min-w-0 flex-1">
+                              <button
+                                type="button"
+                                onClick={() => void openView(p)}
+                                className="text-left font-medium text-text-primary hover:text-primary-600 line-clamp-2 leading-tight transition-colors"
+                                title={p.name}
+                              >
+                                {p.name}
+                              </button>
+                              <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-text-muted">
+                                {p.xelnovaProductId && (
+                                  <code className="font-mono text-text-secondary bg-surface-muted/70 px-1.5 py-px rounded">
+                                    {p.xelnovaProductId}
+                                  </code>
+                                )}
+                                <span className="truncate max-w-[140px]" title={p.category?.name ?? ''}>
+                                  {p.category?.name ?? '—'}
+                                </span>
+                                <span className="text-border">·</span>
+                                <span className="truncate max-w-[160px]" title={p.seller?.storeName ?? ''}>
+                                  {p.seller?.storeName ?? '—'}
+                                </span>
+                                {p.reviewCount > 0 && (
+                                  <span className="flex items-center gap-0.5 text-amber-500 font-medium">
+                                    ★ {p.rating.toFixed(1)}
+                                    <span className="text-text-muted font-normal">({p.reviewCount})</span>
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 align-middle text-right whitespace-nowrap">
+                          <div className="font-semibold text-text-primary tabular-nums">
+                            ₹{p.price.toLocaleString()}
+                          </div>
+                          {p.compareAtPrice != null && p.compareAtPrice > p.price && (
+                            <div className="text-[11px] text-text-muted line-through tabular-nums">
+                              ₹{p.compareAtPrice.toLocaleString()}
+                            </div>
+                          )}
+                          <div className={`mt-0.5 text-[11px] font-medium ${stockTone}`}>
+                            {p.stock} in stock
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 align-middle text-center">
+                          {variantCount > 0 ? (
+                            <span
+                              className="inline-flex items-center gap-1 rounded-full bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-700"
+                              title={`${variantCount} group${variantCount === 1 ? '' : 's'} · ${totalOptions} option${totalOptions === 1 ? '' : 's'}`}
+                            >
+                              <Layers className="h-3 w-3" />
+                              {totalOptions}
+                            </span>
+                          ) : (
+                            <span className="text-text-muted text-[11px]">Single</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 align-middle">
+                          <div className="flex flex-col gap-1">
+                            <div className="flex items-center gap-1.5">
+                              <StatusIcon status={p.status} />
+                              <Badge variant={statusBadgeVariant(p.status)}>
+                                {formatProductStatusLabel(p.status)}
+                              </Badge>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-1">
+                              {p.isFeatured && <MiniPill tone="info">Featured</MiniPill>}
+                              {p.isTrending && <MiniPill tone="warning">Trending</MiniPill>}
+                              {p.isFlashDeal && <MiniPill tone="danger">Flash</MiniPill>}
+                              {p.hasPendingChanges && (
+                                <MiniPill
+                                  tone="warning"
+                                  icon={<span className="h-1.5 w-1.5 rounded-full bg-warning-500 animate-pulse" />}
+                                  title="Seller has submitted changes awaiting review"
+                                >
+                                  Changes
+                                </MiniPill>
+                              )}
+                              {p.imageRejectionReason && (
+                                <MiniPill
+                                  tone="danger"
+                                  icon={<ImageOff className="h-3 w-3" />}
+                                  title={p.imageRejectionReason}
+                                >
+                                  Images
+                                </MiniPill>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 align-middle text-right whitespace-nowrap">
+                          {p.commissionRate != null ? (
+                            <span className="font-semibold text-text-primary tabular-nums">
+                              {Number(p.commissionRate).toFixed(2)}%
+                            </span>
+                          ) : (
+                            <span className="text-text-muted text-[11px]">Seller default</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 align-middle text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            {pending ? (
+                              <Button
+                                type="button"
+                                variant="primary"
+                                size="sm"
+                                onClick={() => void openView(p)}
+                              >
+                                <Eye size={14} /> Review
+                              </Button>
+                            ) : (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => void openView(p)}
+                              >
+                                <Eye size={14} /> View
+                              </Button>
+                            )}
+                            <AdminActionsDropdown items={rowMenuItems(p)} />
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
       <ActionModal
         open={viewOpen}
         onClose={() => {
@@ -2163,34 +2886,44 @@ export default function ProductsPage() {
                   )}
                 </div>
 
-                <div className="flex flex-wrap gap-2 justify-end">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      const p = viewing;
-                      setViewOpen(false);
-                      setViewing(null);
-                      openReject(p);
-                    }}
-                  >
-                    Reject…
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    loading={approving === viewing.id}
-                    onClick={() => handleApprove(viewing, { closeView: true })}
-                    disabled={!!(viewing.brandRecord && !viewing.brandRecord.approved)}
-                    title={
-                      viewing.brandRecord && !viewing.brandRecord.approved
-                        ? `Brand "${viewing.brandRecord.name}" must be approved first`
-                        : undefined
-                    }
-                  >
-                    Approve & publish
-                  </Button>
+                <div className="sticky bottom-0 -mx-6 -mb-4 mt-4 flex flex-wrap items-center gap-2 border-t border-border bg-surface/95 px-6 py-3 backdrop-blur z-10">
+                  <div className="hidden md:flex items-center gap-2 text-[11px] text-text-muted">
+                    <kbd className="rounded border border-border bg-surface-muted/60 px-1.5 py-0.5 font-mono text-[10px] text-text-secondary">A</kbd>
+                    <span>Approve</span>
+                    <kbd className="rounded border border-border bg-surface-muted/60 px-1.5 py-0.5 font-mono text-[10px] text-text-secondary">R</kbd>
+                    <span>Reject</span>
+                    <kbd className="rounded border border-border bg-surface-muted/60 px-1.5 py-0.5 font-mono text-[10px] text-text-secondary">←/→</kbd>
+                    <span>Gallery</span>
+                  </div>
+                  <div className="ml-auto flex flex-wrap gap-2 justify-end">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        const p = viewing;
+                        setViewOpen(false);
+                        setViewing(null);
+                        openReject(p);
+                      }}
+                    >
+                      Reject…
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      loading={approving === viewing.id}
+                      onClick={() => handleApprove(viewing, { closeView: true })}
+                      disabled={!!(viewing.brandRecord && !viewing.brandRecord.approved)}
+                      title={
+                        viewing.brandRecord && !viewing.brandRecord.approved
+                          ? `Brand "${viewing.brandRecord.name}" must be approved first`
+                          : undefined
+                      }
+                    >
+                      Approve & publish
+                    </Button>
+                  </div>
                 </div>
               </div>
             )}
@@ -2368,6 +3101,69 @@ export default function ProductsPage() {
         title="Delete Product"
         message={`Delete "${editing?.name}"? This cannot be undone.`}
       />
+
+      {/* Bulk approve */}
+      <ActionModal
+        open={bulkApproveOpen}
+        onClose={() => setBulkApproveOpen(false)}
+        title={`Approve ${selectedPendingCount} pending product${selectedPendingCount === 1 ? '' : 's'}`}
+        onSubmit={handleBulkApprove}
+        loading={bulkSubmitting}
+        submitLabel={`Approve ${selectedPendingCount}`}
+        submitDisabled={selectedPendingCount === 0}
+        submitDisabledReason="None of the selected rows are pending"
+      >
+        <p className="text-sm text-text-secondary">
+          {selectedPendingCount} of {selectedIds.size} selected listing{selectedIds.size === 1 ? '' : 's'}{' '}
+          {selectedPendingCount === 1 ? 'is' : 'are'} pending review and will be approved with the
+          shared commission below. Other selections will be skipped.
+        </p>
+        <FormField
+          label="Commission % for this batch"
+          hint="Applied to every approved product. Fine-tune individual products later from their edit screen."
+        >
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              min={0}
+              max={100}
+              step={0.5}
+              value={bulkCommission}
+              onChange={(e) => setBulkCommission(e.target.value)}
+              className="w-32 rounded-lg border border-border bg-surface px-3 py-2 text-sm font-semibold text-text-primary outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/30"
+            />
+            <span className="text-sm font-semibold text-text-muted">%</span>
+          </div>
+        </FormField>
+        <p className="text-[11px] text-text-muted">
+          Default policy applied: <strong>7 Days Easy Return</strong>, replacement disabled. Adjust
+          individual products afterwards if needed.
+        </p>
+      </ActionModal>
+
+      {/* Bulk reject */}
+      <ActionModal
+        open={bulkRejectOpen}
+        onClose={() => setBulkRejectOpen(false)}
+        title={`Reject ${selectedIds.size} product${selectedIds.size === 1 ? '' : 's'}`}
+        onSubmit={handleBulkReject}
+        loading={bulkSubmitting}
+        submitLabel={`Reject ${selectedIds.size}`}
+        submitVariant="danger"
+      >
+        <p className="text-sm text-text-secondary">
+          Every selected seller will receive the same rejection message and their listing will be
+          marked <strong>Rejected</strong>. They can edit and resubmit afterwards.
+        </p>
+        <FormField label="Shared rejection reason">
+          <FormTextarea
+            value={bulkRejectReason}
+            onChange={(e) => setBulkRejectReason(e.target.value)}
+            placeholder="e.g., Cover image is blurry. Please re-upload at 1024x1024 on a white background."
+            rows={4}
+          />
+        </FormField>
+      </ActionModal>
     </>
   );
 }

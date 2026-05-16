@@ -11,7 +11,6 @@ import { DataTable, type Column } from '@/components/dashboard/data-table';
 import { Badge, Button, Input, Modal } from '@xelnova/ui';
 import {
   apiCreateProduct,
-  apiDeleteProduct,
   apiGetAvailableBrands,
   apiGetBrandListingHint,
   apiGetProduct,
@@ -98,6 +97,25 @@ function validateMainProductCommerce(
 }
 
 function validateVariantRowsCommerce(rows: FormVariantRow[]): string | null {
+  // Catch the duplicate-Colour / duplicate-Size mistake early with a clear
+  // message. Without this, two "Colour" rows used to silently corrupt the
+  // order-line snapshot (each colour ended up as its own group whose
+  // options were the SIZES — the snapshot then displayed every colour's
+  // matching size, e.g. "Chikoo: S" AND "Off- White: S" on a single line).
+  const kindCounts: Record<'color' | 'size', number> = { color: 0, size: 0 };
+  for (const row of rows) {
+    if (!row.label.trim()) continue;
+    if (row.kind === 'color' || row.kind === 'size') {
+      kindCounts[row.kind] += 1;
+    }
+  }
+  if (kindCounts.color > 1) {
+    return 'You have more than one Colour variant group. Combine all colours into a single Colour row (add each colour as a separate value within that row).';
+  }
+  if (kindCounts.size > 1) {
+    return 'You have more than one Size variant group. Combine all sizes into a single Size row (add each size as a separate value within that row).';
+  }
+
   for (const row of rows) {
     for (const val of row.values) {
       if (!val.label.trim()) continue;
@@ -495,14 +513,12 @@ function InlineProductExpansion({
   product,
   onEdit,
   onToggleHold,
-  onDelete,
   canHold,
   onStockUpdate,
 }: {
   product: SellerProduct;
   onEdit: () => void;
   onToggleHold: () => void;
-  onDelete: () => void;
   canHold: boolean;
   onStockUpdate: (id: string, stock: number, price: number) => void;
 }) {
@@ -646,9 +662,6 @@ function InlineProductExpansion({
               {product.status === 'ON_HOLD' ? <><Play size={12} /> Activate</> : <><Pause size={12} /> Hold</>}
             </button>
           )}
-          <button type="button" onClick={onDelete} className="inline-flex items-center gap-1.5 rounded-md border border-red-300 bg-white px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 shadow-sm transition-colors">
-            <Trash2 size={12} /> Delete
-          </button>
         </div>
       </div>
 
@@ -1993,7 +2006,6 @@ export default function SellerInventoryPage() {
 
   const [createOpen, setCreateOpen] = useState(false);
   const [editProduct, setEditProduct] = useState<SellerProduct | null>(null);
-  const [deleteProduct, setDeleteProduct] = useState<SellerProduct | null>(null);
   const [saving, setSaving] = useState(false);
   const [editLoading, setEditLoading] = useState(false);
   const [togglingHoldId, setTogglingHoldId] = useState<string | null>(null);
@@ -2559,11 +2571,17 @@ export default function SellerInventoryPage() {
 
   const addVariantValue = (rowId: string) => {
     setFormVariantRows((prev) =>
-      prev.map((r) =>
-        r.id === rowId
-          ? { ...r, values: [...r.values, newFormValue(formImages.map((img) => img.url))] }
-          : r,
-      ),
+      prev.map((r) => {
+        if (r.id !== rowId) return r;
+        // For color rows, only the first value represents the master and gets the
+        // master images pre-filled. Additional colors start with an empty image
+        // grid so the seller's first uploaded photo becomes the main (slot 1) —
+        // otherwise the master photos would stay in slot 1 and show up as the
+        // swatch thumbnail for a color they don't actually depict.
+        const isAdditionalColor = r.kind === 'color' && r.values.length > 0;
+        const seedImages = isAdditionalColor ? [] : formImages.map((img) => img.url);
+        return { ...r, values: [...r.values, newFormValue(seedImages)] };
+      }),
     );
   };
 
@@ -3096,21 +3114,6 @@ export default function SellerInventoryPage() {
     }
   };
 
-  const confirmDelete = async () => {
-    if (!deleteProduct) return;
-    setSaving(true);
-    try {
-      await apiDeleteProduct(deleteProduct.id);
-      toast.success('Product deleted');
-      setDeleteProduct(null);
-      loadProducts();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to delete product');
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const toggleHold = async (product: SellerProduct) => {
     if (
       product.status === 'PENDING' ||
@@ -3350,15 +3353,6 @@ export default function SellerInventoryPage() {
                 )}
               </button>
             )}
-            <button
-              type="button"
-              onClick={() => setDeleteProduct(row)}
-              disabled={isToggling}
-              title="Delete"
-              className="inline-flex items-center justify-center h-8 w-8 rounded-lg border border-danger-200 text-danger-500 hover:text-danger-600 hover:bg-danger-50 transition-colors"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </button>
           </div>
         );
       },
@@ -4691,7 +4685,6 @@ export default function SellerInventoryPage() {
                 product={row}
                 onEdit={() => openEdit(row)}
                 onToggleHold={() => toggleHold(row)}
-                onDelete={() => setDeleteProduct(row)}
                 canHold={canToggleHold(row)}
                 onStockUpdate={(id, stock, price) => {
                   setProducts((prev) =>
@@ -4778,21 +4771,6 @@ export default function SellerInventoryPage() {
           </Button>
           <Button type="button" onClick={submitEdit} disabled={saving || uploading || editLoading || uploadingBrandCertificate || uploadingVideo}>
             {saving ? 'Saving…' : 'Save changes'}
-          </Button>
-        </div>
-      </Modal>
-
-      <Modal open={!!deleteProduct} onClose={() => !saving && setDeleteProduct(null)} title="Delete product?" size="sm">
-        <p className="text-secondary-300 text-sm">
-          This will permanently remove{' '}
-          <span className="text-white font-medium">{deleteProduct?.name}</span> from your catalog.
-        </p>
-        <div className="flex justify-end gap-2 mt-6">
-          <Button type="button" variant="outline" onClick={() => setDeleteProduct(null)} disabled={saving}>
-            Cancel
-          </Button>
-          <Button type="button" variant="danger" onClick={confirmDelete} disabled={saving}>
-            {saving ? 'Deleting…' : 'Delete'}
           </Button>
         </div>
       </Modal>

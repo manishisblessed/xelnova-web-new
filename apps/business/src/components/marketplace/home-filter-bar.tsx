@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import {
   ChevronDown,
@@ -453,9 +454,43 @@ interface DropdownFilterProps {
 }
 
 function DropdownFilter({ label, children, isOpen, onToggle }: DropdownFilterProps) {
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [mounted, setMounted] = useState(false);
+  const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setPosition(null);
+      return;
+    }
+    const updatePosition = () => {
+      if (!buttonRef.current) return;
+      const rect = buttonRef.current.getBoundingClientRect();
+      const dropdownWidth = 180;
+      const viewportWidth = window.innerWidth;
+      let left = rect.left;
+      if (left + dropdownWidth > viewportWidth - 8) {
+        left = Math.max(8, viewportWidth - dropdownWidth - 8);
+      }
+      setPosition({ top: rect.bottom + 8, left });
+    };
+    updatePosition();
+    window.addEventListener('scroll', updatePosition, true);
+    window.addEventListener('resize', updatePosition);
+    return () => {
+      window.removeEventListener('scroll', updatePosition, true);
+      window.removeEventListener('resize', updatePosition);
+    };
+  }, [isOpen]);
+
   return (
     <div className="relative flex-shrink-0">
       <button
+        ref={buttonRef}
         onClick={onToggle}
         className={cn(
           'flex items-center gap-1 px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-full text-xs sm:text-sm font-medium border transition-all whitespace-nowrap',
@@ -472,13 +507,15 @@ function DropdownFilter({ label, children, isOpen, onToggle }: DropdownFilterPro
         />
       </button>
 
-      {isOpen && (
-        <div 
-          className="absolute top-full left-0 mt-2 min-w-[180px] bg-white rounded-xl border border-gray-100 shadow-xl shadow-gray-200/50 z-[100] py-1.5 animate-fade-in"
+      {mounted && isOpen && position && createPortal(
+        <div
+          style={{ position: 'fixed', top: position.top, left: position.left }}
+          className="min-w-[180px] bg-white rounded-xl border border-gray-100 shadow-xl shadow-gray-200/50 z-[100] py-1.5 animate-fade-in"
           onClick={(e) => e.stopPropagation()}
         >
           {children}
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

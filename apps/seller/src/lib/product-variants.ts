@@ -175,9 +175,55 @@ export function newSizeChartColumn(): SizeChartColumn {
 
 // ─── Serialization: form → JSON ───
 
+/**
+ * Merge rows that share the same canonical `kind` (`color` / `size`) into a
+ * single row, preserving order and deduping values by their slugified label.
+ *
+ * Sellers occasionally added a second "Colour" row instead of adding a new
+ * value inside the existing one — that produced a `variants` JSON with two
+ * `type: "color"` (and `"color-1"`) groups, each holding the size options
+ * inside. The order-line snapshot then emitted phantom attribute entries
+ * like `{ Chikoo: "S", "Off- White": "S" }` because both groups matched the
+ * same size token. Auto-merging here is the safety net that prevents the
+ * malformed shape from ever reaching the API again.
+ */
+export function mergeDuplicateKindRows(rows: FormVariantRow[]): FormVariantRow[] {
+  const indexByKind = new Map<'color' | 'size', number>();
+  const out: FormVariantRow[] = [];
+
+  for (const row of rows) {
+    if (row.kind === 'color' || row.kind === 'size') {
+      const existingIdx = indexByKind.get(row.kind);
+      if (existingIdx === undefined) {
+        indexByKind.set(row.kind, out.length);
+        out.push({ ...row, values: [...row.values] });
+      } else {
+        const existing = out[existingIdx]!;
+        const seenValues = new Set(
+          existing.values
+            .map((v) => v.label.trim().toLowerCase())
+            .filter(Boolean),
+        );
+        const mergedValues = [...existing.values];
+        for (const v of row.values) {
+          const key = v.label.trim().toLowerCase();
+          if (!key || seenValues.has(key)) continue;
+          seenValues.add(key);
+          mergedValues.push(v);
+        }
+        out[existingIdx] = { ...existing, values: mergedValues };
+      }
+    } else {
+      out.push(row);
+    }
+  }
+
+  return out;
+}
+
 export function formRowsToVariantGroups(rows: FormVariantRow[]): VariantGroupJson[] {
   const usedTypes = new Set<string>();
-  return rows
+  return mergeDuplicateKindRows(rows)
     .filter((r) => r.label.trim() && r.values.some((v) => v.label.trim()))
     .map((r) => {
       let type = r.kind === 'other' ? slugify(r.label) : r.kind;
@@ -254,9 +300,145 @@ export function formRowsToVariantGroups(rows: FormVariantRow[]): VariantGroupJso
 
 // ─── Deserialization: JSON → form ───
 
+/**
+ * Strips the `-1`, `-2` ... dedup suffix the serializer appends to duplicate
+ * `kind` types so deserialization can group them back together.
+ */
+function canonicalGroupKind(rawType: string): 'color' | 'size' | 'other' {
+  const stripped = rawType.replace(/-\d+$/, '');
+  if (stripped === 'color') return 'color';
+  if (stripped === 'size') return 'size';
+  return 'other';
+}
+
+/**
+ * Mirror of `mergeDuplicateKindRows` for the raw JSON shape — used on read
+ * so a seller editing a legacy product whose `variants` JSON contains two
+ * `type: "color"` groups sees ONE consolidated Colour row (with the colour
+ * names from each source group as values) plus a derived Size row built
+ * from the inner options. Without this the form would render two Colour
+ * rows and the new validation would (correctly) block saving until the
+ * seller fixed it by hand — silently healing here is much better UX and
+ * matches what the seller almost certainly intended in the first place.
+ */
+function repairLegacyDuplicateKindGroups(raw: unknown[]): unknown[] {
+  type RepairBucket = {
+    kind: 'color' | 'size';
+    /** Source group labels (e.g. colour names) become outer options. */
+    outerOptions: Array<Record<string, unknown>>;
+    /** Union of inner options across the duplicate groups. */
+    innerOptions: Array<Record<string, unknown>>;
+    /** Position of the first occurrence so we preserve order. */
+    firstIdx: number;
+  };
+
+  const buckets = new Map<'color' | 'size', RepairBucket>();
+  const passthroughs: Array<{ idx: number; value: unknown }> = [];
+
+  raw.forEach((v, idx) => {
+    if (!v || typeof v !== 'object') {
+      passthroughs.push({ idx, value: v });
+      return;
+    }
+    const o = v as Record<string, unknown>;
+    const kind = canonicalGroupKind(String(o.type ?? ''));
+    if (kind === 'other') {
+      passthroughs.push({ idx, value: v });
+      return;
+    }
+    let bucket = buckets.get(kind);
+    if (!bucket) {
+      bucket = {
+        kind,
+        outerOptions: [],
+        innerOptions: [],
+        firstIdx: idx,
+      };
+      buckets.set(kind, bucket);
+    }
+    bucket.outerOptions.push({
+      label: String(o.label ?? ''),
+      value: String(o.label ?? '').toLowerCase().replace(/\s+/g, '-'),
+      hex: typeof o.hex === 'string' ? o.hex : undefined,
+      images: Array.isArray(o.images) ? o.images : undefined,
+      // Pull SKU/price/stock from the first inner option of the source
+      // group (that is where sellers attached colour-level metadata).
+      ...(Array.isArray(o.options) && o.options[0] && typeof o.options[0] === 'object'
+        ? (() => {
+            const meta = o.options[0] as Record<string, unknown>;
+            const out: Record<string, unknown> = {};
+            if (typeof meta.sku === 'string' && meta.sku.trim()) out.sku = meta.sku;
+            if (typeof meta.price === 'number') out.price = meta.price;
+            if (typeof meta.compareAtPrice === 'number') out.compareAtPrice = meta.compareAtPrice;
+            if (typeof meta.stock === 'number') out.stock = meta.stock;
+            return out;
+          })()
+        : {}),
+    });
+    if (Array.isArray(o.options)) {
+      for (const opt of o.options) {
+        if (!opt || typeof opt !== 'object') continue;
+        const ok = opt as Record<string, unknown>;
+        const valueKey = String(ok.value ?? ok.label ?? '').toLowerCase();
+        if (!valueKey) continue;
+        if (!bucket.innerOptions.some((p) => String(p.value ?? '').toLowerCase() === valueKey)) {
+          bucket.innerOptions.push({ ...ok });
+        }
+      }
+    }
+  });
+
+  const hasDuplicates = Array.from(buckets.values()).some((b) => b.outerOptions.length > 1);
+  if (!hasDuplicates) return raw;
+
+  const repaired: Array<{ idx: number; value: unknown }> = [...passthroughs];
+  for (const bucket of buckets.values()) {
+    if (bucket.outerOptions.length <= 1) {
+      // Single original group — keep as-is at its original position.
+      const original = raw.find(
+        (v) =>
+          v &&
+          typeof v === 'object' &&
+          canonicalGroupKind(String((v as Record<string, unknown>).type ?? '')) === bucket.kind,
+      );
+      if (original) repaired.push({ idx: bucket.firstIdx, value: original });
+      continue;
+    }
+
+    const outerLabel = bucket.kind === 'color' ? 'Colour' : 'Size';
+    repaired.push({
+      idx: bucket.firstIdx,
+      value: {
+        type: bucket.kind,
+        label: outerLabel,
+        options: bucket.outerOptions,
+      },
+    });
+    if (bucket.innerOptions.length > 0) {
+      // For a duplicate "color" parent the inner dimension is almost
+      // always size; fall back to a neutral label otherwise.
+      const innerKind = bucket.kind === 'color' ? 'size' : 'other';
+      const innerLabel = innerKind === 'size' ? 'Size' : 'Option';
+      repaired.push({
+        idx: bucket.firstIdx + 0.5,
+        value: {
+          type: innerKind,
+          label: innerLabel,
+          options: bucket.innerOptions,
+        },
+      });
+    }
+  }
+
+  return repaired
+    .sort((a, b) => a.idx - b.idx)
+    .map((r) => r.value);
+}
+
 export function variantGroupsToFormRows(raw: unknown): FormVariantRow[] {
   if (!Array.isArray(raw) || raw.length === 0) return [];
-  return raw.map((v: unknown, i: number) => {
+  const healed = repairLegacyDuplicateKindGroups(raw);
+  return healed.map((v: unknown, i: number) => {
     if (!v || typeof v !== 'object') {
       return {
         id: `vr-${i}`, label: '', defaultLabel: '', kind: 'other' as const, values: [],

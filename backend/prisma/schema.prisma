@@ -94,6 +94,11 @@ enum PaymentStatus {
 }
 
 enum PayoutStatus {
+  /// Settlement created but still inside the 7-business-day hold window after delivery.
+  /// Wallet has NOT been credited yet; seller cannot withdraw this amount.
+  ON_HOLD
+  /// Hold expired and wallet credited. Either auto-released by the cron, or seller
+  /// has actively requested a manual/advance payout and is waiting for transfer.
   PENDING
   APPROVED
   PAID
@@ -947,12 +952,26 @@ model Payout {
   orderId            String?
   order              Order?  @relation(fields: [orderId], references: [id])
 
+  /// 7 business days from `Shipment.deliveredAt` (skipping Sundays + Holidays).
+  /// Only set on settlement payouts (`isAdvance = false`, status `ON_HOLD`).
+  /// When `now() >= holdUntil` a daily cron releases the hold and credits the wallet.
+  holdUntil DateTime?
+  /// Timestamp when the hold was lifted and the wallet credited.
+  releasedAt DateTime?
+
+  /// Snapshot of the per-seller math at the time of settlement so the seller's
+  /// payout history stays stable even if commission rates change later.
+  gross              Float?
+  commission         Float?
+  xelgoServiceCharge Float?
+
   requestedAt DateTime  @default(now())
   paidAt      DateTime?
 
   @@index([sellerId])
   @@index([status])
   @@index([orderId])
+  @@index([holdUntil])
   @@map("payouts")
 }
 
@@ -1187,6 +1206,15 @@ model Shipment {
   weight          Float?
   dimensions      String?
   courierCharges  Float?
+  /// Flat ₹30 platform service fee charged once per Xelgo (XELNOVA_COURIER) shipment.
+  /// Subtracted from settlement (not debited from wallet at booking). NULL/0 for self-ship
+  /// and direct carrier bookings.
+  xelgoServiceCharge Float?
+  /// Reverse-leg courier charge debited from the seller's wallet when the parcel is
+  /// returned back to them (RTO_DELIVERED). Populated by `onOrderReturnedToSeller`.
+  returnCourierCharges     Float?
+  /// Flat ₹30 platform service fee on the return leg (only if original was Xelgo).
+  returnXelgoServiceCharge Float?
   statusHistory   Json           @default("[]")
 
   /// Which seller pickup location this shipment was booked from. Null
@@ -1331,6 +1359,12 @@ enum WalletReferenceType {
   RECHARGE
   BILL_PAYMENT
   ORDER_SETTLEMENT
+  /// ₹30 Xelgo platform service fee debited on return leg.
+  XELGO_SERVICE_FEE
+  /// Reverse the credited settlement when a customer returns the order after release.
+  RETURN_REVERSAL
+  /// Reverse-leg courier charge debited from seller when parcel comes back.
+  RETURN_SHIPPING
 }
 
 enum BankTransferStatus {
@@ -1601,6 +1635,23 @@ model NotificationLog {
   @@index([channel])
   @@index([createdAt])
   @@map("notification_logs")
+}
+
+/// Public-holiday calendar used by the payout-release cron.
+/// A day counts as "non-business" if it falls on a Sunday OR appears here with isActive=true.
+/// Admin can add/remove entries from the admin panel.
+model Holiday {
+  id        String   @id @default(cuid())
+  /// Calendar date (00:00 IST). Stored as the start-of-day in UTC equivalent.
+  date      DateTime @unique @db.Date
+  name      String
+  isActive  Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([date])
+  @@map("holidays")
 }
 
 /// Lightweight audit trail for moderation actions (reviews, coupons, etc.).

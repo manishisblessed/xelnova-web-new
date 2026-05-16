@@ -2631,6 +2631,11 @@ export class ShippingService implements OnModuleInit {
           weight: dto.weight,
           dimensions: dto.dimensions,
           courierCharges: result.charges,
+          // ₹30 platform service fee is locked in once at booking for Xelgo
+          // shipments. It is NOT debited from the wallet here — instead, it is
+          // subtracted from the seller's settlement payout (see SplitPaymentService).
+          xelgoServiceCharge:
+            shippingMode === ShippingMode.XELNOVA_COURIER ? 30 : null,
           pickupLocationId: pickupLocation.id,
           statusHistory: pickupAt
             ? [
@@ -3728,41 +3733,146 @@ export class ShippingService implements OnModuleInit {
       );
 
       if (orderStatus === OrderStatus.DELIVERED) {
-        this.settleAndCreditSellers(orderId).catch((err) =>
+        this.createHeldPayouts(orderId).catch((err) =>
           this.logger.warn(`Auto-settlement failed for order ${orderId}: ${err.message}`),
+        );
+      }
+
+      if (shipmentStatus === ShipmentStatus.RTO_DELIVERED) {
+        this.onOrderReturnedToSeller(orderId).catch((err) =>
+          this.logger.warn(`Return reversal failed for order ${orderId}: ${err.message}`),
         );
       }
     }
   }
 
-  private async settleAndCreditSellers(orderId: string) {
-    const { payouts } = await this.splitPaymentService.settleOrder(orderId);
+  /**
+   * On DELIVERED we create ON_HOLD payout rows snapshotted with gross/commission/
+   * xelgo-service-fee and `holdUntil = deliveredAt + 7 business days`. The wallet
+   * is NOT credited here — the daily release cron will lift the hold once the
+   * 7-business-day window elapses, allowing the seller (or admin) to withdraw.
+   */
+  private async createHeldPayouts(orderId: string) {
+    const { payouts, holdUntil } = await this.splitPaymentService.settleOrder(orderId);
+    this.logger.log(
+      `Created ${payouts.length} ON_HOLD payout(s) for order ${orderId}, releasing on ${holdUntil.toISOString()}`,
+    );
+  }
+
+  /**
+   * Called when a return parcel is delivered back to the seller (RTO_DELIVERED).
+   *
+   * Two things happen here:
+   *  1. Reverse the settlement
+   *     - If the Payout is still `ON_HOLD` → mark it `REJECTED` (nothing to claw back).
+   *     - If already released (`PENDING`/`APPROVED`/`PAID`) → debit the seller's
+   *       wallet by the released `amount` (allowed to go negative).
+   *  2. Charge return-leg costs
+   *     - Return courier charge (best-effort: from ReturnRequest.reverseCourierCharge
+   *       if present, else original Xelgo `courierCharges`).
+   *     - Flat ₹30 Xelgo platform service fee (only if original shipment was Xelgo).
+   *
+   * All debits use reference types in the "negative allowed" allow-list so they
+   * succeed even if the seller has already withdrawn everything.
+   */
+  private async onOrderReturnedToSeller(orderId: string) {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: {
+        shipment: true,
+        returnRequests: { orderBy: { createdAt: 'desc' }, take: 1 },
+      },
+    });
+    if (!order || !order.shipment) return;
+
+    const isXelgoOriginal = order.shipment.shippingMode === 'XELNOVA_COURIER';
+
+    const returnCourierCharge =
+      order.returnRequests?.[0]?.reverseCourierCharge ??
+      (isXelgoOriginal ? order.shipment.courierCharges ?? 0 : 0);
+    const returnXelgoFee = isXelgoOriginal ? 30 : 0;
+
+    await this.prisma.shipment.update({
+      where: { id: order.shipment.id },
+      data: {
+        returnCourierCharges: returnCourierCharge || null,
+        returnXelgoServiceCharge: returnXelgoFee || null,
+      },
+    });
+
+    const payouts = await this.prisma.payout.findMany({
+      where: { orderId, isAdvance: false },
+    });
 
     for (const payout of payouts) {
       const seller = await this.prisma.sellerProfile.findUnique({
         where: { id: payout.sellerId },
         select: { userId: true, storeName: true },
       });
-      if (!seller?.userId) {
-        this.logger.warn(`Seller ${payout.sellerId} has no userId; skipping wallet credit for payout ${payout.id}`);
-        continue;
-      }
-
+      if (!seller?.userId) continue;
       const wallet = await this.walletService.getOrCreateWallet(seller.userId, 'SELLER');
 
-      await this.walletService.credit(
-        wallet.id,
-        payout.amount,
-        `Order settlement: ${payout.note || orderId}`,
-        undefined,
-        'ORDER_SETTLEMENT',
-        payout.id,
-      );
+      // 1. Reverse the settlement if it was already credited.
+      if (payout.status !== 'ON_HOLD' && payout.status !== 'REJECTED' && payout.amount > 0) {
+        try {
+          await this.walletService.debit(
+            wallet.id,
+            payout.amount,
+            `Return reversal for order ${order.orderNumber} (settlement clawback)`,
+            undefined,
+            'RETURN_REVERSAL',
+            payout.id,
+          );
+        } catch (err: any) {
+          this.logger.warn(
+            `Failed to reverse settlement debit for payout ${payout.id}: ${err.message}`,
+          );
+        }
+      }
 
       await this.prisma.payout.update({
         where: { id: payout.id },
-        data: { status: 'PAID' },
+        data: {
+          status: 'REJECTED',
+          note: `${payout.note || ''}\nReversed on return delivery (RTO_DELIVERED)`.trim(),
+        },
       });
+
+      // 2. Charge return-leg costs (per seller, allocated proportionally for
+      //    multi-seller orders by reusing the existing payout split).
+      const sellerShare = payouts.length > 0 ? 1 / payouts.length : 1;
+      const returnCharge = Math.round(returnCourierCharge * sellerShare * 100) / 100;
+      const returnFee = Math.round(returnXelgoFee * sellerShare * 100) / 100;
+
+      if (returnCharge > 0) {
+        try {
+          await this.walletService.debit(
+            wallet.id,
+            returnCharge,
+            `Return-leg courier charge for order ${order.orderNumber}`,
+            undefined,
+            'RETURN_SHIPPING',
+            order.shipment.id,
+          );
+        } catch (err: any) {
+          this.logger.warn(`Failed to debit return shipping for ${payout.id}: ${err.message}`);
+        }
+      }
+
+      if (returnFee > 0) {
+        try {
+          await this.walletService.debit(
+            wallet.id,
+            returnFee,
+            `Xelgo return service fee for order ${order.orderNumber}`,
+            undefined,
+            'XELGO_SERVICE_FEE',
+            order.shipment.id,
+          );
+        } catch (err: any) {
+          this.logger.warn(`Failed to debit Xelgo return fee for ${payout.id}: ${err.message}`);
+        }
+      }
     }
   }
 

@@ -242,6 +242,42 @@ export class AdminController {
     return successResponse(await this.service.deleteCustomer(id, adminId, audit), 'Customer deleted');
   }
 
+  // ─── Newsletter Subscribers ───
+  @Get('newsletter-subscribers')
+  @ApiOperation({ summary: 'List newsletter subscribers (footer "Stay in the loop" form)' })
+  @ApiQuery({ name: 'page', required: false })
+  @ApiQuery({ name: 'limit', required: false })
+  @ApiQuery({ name: 'search', required: false, description: 'Match against email or source' })
+  async getNewsletterSubscribers(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('search') search?: string,
+  ) {
+    const { items, total, page: p, limit: l } = await this.service.getNewsletterSubscribers({
+      page: page ? parseInt(page, 10) : 1,
+      limit: limit ? parseInt(limit, 10) : 50,
+      search,
+    });
+    return paginatedResponse(items, total, p, l, 'Newsletter subscribers fetched');
+  }
+
+  @Get('newsletter-subscribers/csv')
+  @ApiOperation({ summary: 'Export newsletter subscribers as CSV (for marketing follow-up)' })
+  async exportNewsletterSubscribers(@Res() res?: Response) {
+    const csv = await this.service.exportNewsletterSubscribersCsv();
+    res!.set({
+      'Content-Type': 'text/csv',
+      'Content-Disposition': `attachment; filename="newsletter-subscribers-${new Date().toISOString().slice(0, 10)}.csv"`,
+    });
+    res!.send(csv);
+  }
+
+  @Delete('newsletter-subscribers/:id')
+  @ApiOperation({ summary: 'Remove a newsletter subscriber' })
+  async deleteNewsletterSubscriber(@Param('id') id: string) {
+    return successResponse(await this.service.deleteNewsletterSubscriber(id), 'Newsletter subscriber removed');
+  }
+
   // ─── Categories ───
   @Get('categories')
   @ApiOperation({ summary: 'List categories' })

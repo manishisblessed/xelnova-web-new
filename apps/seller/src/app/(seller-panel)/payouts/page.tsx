@@ -16,7 +16,8 @@ import { Badge, Button } from '@xelnova/ui';
 import {
   apiGetRevenue, apiGetOrders, apiGetWalletBalance, apiGetBankDetails,
   apiRequestManualPayout, apiRequestAdvancePayout, apiGetPayoutHistory,
-  type BankDetails, type PayoutHistoryItem,
+  apiGetHeldPayouts,
+  type BankDetails, type PayoutHistoryItem, type HeldPayoutItem,
 } from '@/lib/api';
 
 interface RevenueResponse {
@@ -25,6 +26,8 @@ interface RevenueResponse {
   commission: number;
   commissionRate: number;
   courierDeduction?: number;
+  xelgoServiceFee?: number;
+  returnDeduction?: number;
   totalOrders: number;
   totalUnits?: number;
   dailyRevenue: { date: string; amount: number }[];
@@ -82,6 +85,10 @@ export default function SellerPayoutsPage() {
   const [payoutHistory, setPayoutHistory] = useState<PayoutHistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(true);
 
+  // Held payouts (delivered but inside the 7-business-day hold window)
+  const [heldPayouts, setHeldPayouts] = useState<HeldPayoutItem[]>([]);
+  const [heldTotal, setHeldTotal] = useState(0);
+
   // Payout modal state
   const [payoutModal, setPayoutModal] = useState<PayoutModalType>(null);
   const [bankDetails, setBankDetails] = useState<BankDetails | null>(null);
@@ -105,6 +112,14 @@ export default function SellerPayoutsPage() {
     finally { setHistoryLoading(false); }
   }, []);
 
+  const loadHeldPayouts = useCallback(async () => {
+    try {
+      const res = await apiGetHeldPayouts();
+      setHeldPayouts(res.payouts || []);
+      setHeldTotal(res.totalHeld || 0);
+    } catch { /* held payouts are an enhancement; failures shouldn't break the page */ }
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -119,8 +134,9 @@ export default function SellerPayoutsPage() {
       .finally(() => { if (!cancelled) { setLoading(false); setWalletLoading(false); } });
 
     loadPayoutHistory();
+    loadHeldPayouts();
     return () => { cancelled = true; };
-  }, [loadPayoutHistory]);
+  }, [loadPayoutHistory, loadHeldPayouts]);
 
   const chartData = data?.dailyRevenue?.map((d) => ({ name: d.date.slice(5), value: d.amount })) ?? [];
 
@@ -131,9 +147,19 @@ export default function SellerPayoutsPage() {
 
   const commRate = data?.commissionRate ?? 0;
   const deliveredNet = deliveredTotal - (deliveredTotal * commRate / 100);
-  const pendingNet = pendingTotal - (pendingTotal * commRate / 100);
+  const inTransitNet = pendingTotal - (pendingTotal * commRate / 100);
+  // Combined "pending settlement" = in-transit (not yet delivered) + delivered-but-held
+  // (delivered, inside the 7-business-day hold window). The held bucket is authoritative
+  // because it comes from snapshotted Payout rows on the server.
+  const pendingNet = inTransitNet + heldTotal;
+  const earliestUnlock = heldPayouts
+    .map((p) => p.holdUntil)
+    .filter((d): d is string => !!d)
+    .sort()[0];
   const payoutCycles: PayoutCycle[] = buildPayoutCycles(deliveredOrders, commRate);
   const advanceAmount = Math.floor((walletBalance * advancePercentage) / 100);
+  const xelgoFeeAmount = data?.xelgoServiceFee ?? 0;
+  const returnDeductionAmount = data?.returnDeduction ?? 0;
 
   // ─── Payout modal handlers ───
 
@@ -191,7 +217,7 @@ export default function SellerPayoutsPage() {
       <DashboardHeader title="Payouts & Settlements" />
       <div className="p-6 space-y-6">
         {/* Summary cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
             <Link
               href="/wallet"
@@ -202,11 +228,19 @@ export default function SellerPayoutsPage() {
                 <div className="flex items-start justify-between">
                   <div>
                     <p className="text-sm text-text-muted">Available Balance</p>
-                    <p className="text-3xl font-bold text-emerald-600 mt-1">{walletLoading ? '—' : fmtDec(walletBalance)}</p>
-                    <p className="text-xs text-text-muted mt-1">Ready to withdraw</p>
+                    <p className={`text-3xl font-bold mt-1 ${walletBalance < 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                      {walletLoading ? '—' : fmtDec(walletBalance)}
+                    </p>
+                    <p className="text-xs text-text-muted mt-1">
+                      {walletBalance < 0
+                        ? 'Adjusted after returns — next settlement will offset'
+                        : earliestUnlock && walletBalance < 100
+                          ? `Next unlock: ${new Date(earliestUnlock).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`
+                          : 'Ready to withdraw after 7 business days'}
+                    </p>
                   </div>
-                  <div className="rounded-xl bg-emerald-50 p-2.5">
-                    <Wallet size={20} className="text-emerald-600" />
+                  <div className={`rounded-xl p-2.5 ${walletBalance < 0 ? 'bg-red-50' : 'bg-emerald-50'}`}>
+                    <Wallet size={20} className={walletBalance < 0 ? 'text-red-600' : 'text-emerald-600'} />
                   </div>
                 </div>
               </div>
@@ -214,13 +248,24 @@ export default function SellerPayoutsPage() {
           </motion.div>
 
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.03 }}>
-            <Link href="/orders?tab=in_transit" aria-label="Open in-transit orders" className="block rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40">
+            <Link
+              href="/orders?tab=in_transit"
+              aria-label="Open in-transit and held orders"
+              className="block rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40"
+              title={[
+                `${pendingSettlement.length} in-transit · ${fmt(inTransitNet)}`,
+                `${heldPayouts.length} delivered (7-day hold) · ${fmt(heldTotal)}`,
+                earliestUnlock ? `Next unlock: ${new Date(earliestUnlock).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}` : '',
+              ].filter(Boolean).join('\n')}
+            >
               <div className="rounded-2xl border border-border bg-white p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-card-hover">
                 <div className="flex items-start justify-between">
-                  <div>
+                  <div className="min-w-0">
                     <p className="text-sm text-text-muted">Pending Settlement</p>
                     <p className="text-3xl font-bold text-amber-600 mt-1">{loading ? '—' : fmt(pendingNet)}</p>
-                    <p className="text-xs text-text-muted mt-1">From {pendingSettlement.length} in-transit orders</p>
+                    <p className="text-xs text-text-muted mt-1 truncate">
+                      {pendingSettlement.length} in-transit + {heldPayouts.length} on hold
+                    </p>
                   </div>
                   <div className="rounded-xl bg-amber-50 p-2.5"><Clock size={20} className="text-amber-600" /></div>
                 </div>
@@ -235,7 +280,7 @@ export default function SellerPayoutsPage() {
                   <div>
                     <p className="text-sm text-text-muted">Total Earnings</p>
                     <p className="text-3xl font-bold text-text-primary mt-1">{loading ? '—' : fmt(data?.netRevenue ?? 0)}</p>
-                    <p className="text-xs text-text-muted mt-1">After commission & courier charges</p>
+                    <p className="text-xs text-text-muted mt-1">Gross − Commission − Courier − ₹30 Xelgo fee</p>
                   </div>
                   <div className="rounded-xl bg-blue-50 p-2.5"><IndianRupee size={20} className="text-blue-600" /></div>
                 </div>
@@ -267,14 +312,74 @@ export default function SellerPayoutsPage() {
                   <div>
                     <p className="text-sm text-text-muted">Courier Charges</p>
                     <p className="text-3xl font-bold text-orange-500 mt-1">{loading ? '—' : fmt(data?.courierDeduction ?? 0)}</p>
-                    <p className="text-xs text-text-muted mt-1">Xelgo shipping deducted from payout</p>
+                    <p className="text-xs text-text-muted mt-1">Xelgo carrier rate (debited at booking)</p>
                   </div>
                   <div className="rounded-xl bg-orange-50 p-2.5"><Truck size={20} className="text-orange-500" /></div>
                 </div>
               </div>
             </Link>
           </motion.div>
+
+          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>
+            <Link href="/settlement" aria-label="View Xelgo service fee details" className="block rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40">
+              <div className="rounded-2xl border border-border bg-white p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-card-hover">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-sm text-text-muted">Xelgo Service Fee</p>
+                    <p className="text-3xl font-bold text-purple-600 mt-1">{loading ? '—' : fmt(xelgoFeeAmount)}</p>
+                    <p className="text-xs text-text-muted mt-1">₹30 flat per Xelgo shipment</p>
+                  </div>
+                  <div className="rounded-xl bg-purple-50 p-2.5"><Banknote size={20} className="text-purple-600" /></div>
+                </div>
+              </div>
+            </Link>
+          </motion.div>
         </div>
+
+        {/* Return deductions banner (only when there are any) */}
+        {returnDeductionAmount > 0 && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="rounded-xl border border-red-200 bg-red-50/60 px-4 py-3 flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-red-100 text-red-600">
+              <AlertCircle size={18} />
+            </div>
+            <div className="flex-1 text-sm">
+              <span className="font-semibold text-red-700">Return deductions: {fmt(returnDeductionAmount)}</span>
+              <span className="text-text-muted ml-2">Return courier + ₹30 Xelgo fee for returned orders.</span>
+            </div>
+          </motion.div>
+        )}
+
+        {/* Held cycles strip — visible only when there are payouts waiting to release */}
+        {heldPayouts.length > 0 && (
+          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.18 }}
+            className="rounded-2xl border border-amber-200 bg-amber-50/40 p-4"
+          >
+            <div className="flex items-start justify-between mb-3 gap-2">
+              <div>
+                <p className="text-sm font-bold text-amber-700 flex items-center gap-1.5"><Clock size={14} />Settlements on 7-day hold</p>
+                <p className="text-xs text-amber-700/80 mt-0.5">Funds unlock automatically the 7th business day after delivery (skipping Sundays + holidays).</p>
+              </div>
+              <p className="text-sm font-semibold text-amber-700 whitespace-nowrap">{fmtDec(heldTotal)}</p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+              {heldPayouts.slice(0, 6).map((p) => (
+                <div key={p.id} className="rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium text-text-primary truncate">{p.orderNumber || p.orderId?.slice(0, 8) || '—'}</span>
+                    <span className="font-semibold text-emerald-600">{fmtDec(p.amount)}</span>
+                  </div>
+                  <div className="flex items-center justify-between mt-0.5 text-text-muted">
+                    <span>Gross {fmt(p.gross ?? 0)}</span>
+                    <span>Unlocks {p.holdUntil ? new Date(p.holdUntil).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {heldPayouts.length > 6 && (
+              <p className="text-[11px] text-amber-700/80 mt-2">+ {heldPayouts.length - 6} more held settlements</p>
+            )}
+          </motion.div>
+        )}
 
         {/* ─── Request Payout Section ─── */}
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.14 }}>
@@ -435,12 +540,34 @@ export default function SellerPayoutsPage() {
                   </div>
                 </div>
               )}
+              {xelgoFeeAmount > 0 && (
+                <div>
+                  <div className="flex justify-between text-sm mb-1">
+                    <span className="text-text-muted flex items-center gap-1.5"><Banknote size={13} /> Xelgo Service Fee (₹30 / Xelgo order)</span>
+                    <span className="font-semibold text-purple-600">-{fmt(xelgoFeeAmount)}</span>
+                  </div>
+                  <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
+                    <div className="h-full bg-purple-400 rounded-full" style={{ width: `${Math.min(100, (data?.totalRevenue ?? 0) > 0 ? (xelgoFeeAmount / (data?.totalRevenue ?? 1)) * 100 : 0)}%` }} />
+                  </div>
+                </div>
+              )}
+              {returnDeductionAmount > 0 && (
+                <div>
+                  <div className="flex justify-between text-sm mb-1">
+                    <span className="text-text-muted flex items-center gap-1.5"><AlertCircle size={13} /> Return Deductions</span>
+                    <span className="font-semibold text-red-500">-{fmt(returnDeductionAmount)}</span>
+                  </div>
+                  <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
+                    <div className="h-full bg-red-400 rounded-full" style={{ width: `${Math.min(100, (data?.totalRevenue ?? 0) > 0 ? (returnDeductionAmount / (data?.totalRevenue ?? 1)) * 100 : 0)}%` }} />
+                  </div>
+                </div>
+              )}
               <div className="pt-3 border-t border-border">
                 <div className="flex justify-between text-sm">
                   <span className="font-bold text-text-primary">Net Earnings</span>
                   <span className="font-bold text-emerald-600">{fmt(data?.netRevenue ?? 0)}</span>
                 </div>
-                <p className="text-[10px] text-text-muted mt-1">Net = Gross − Commission − Courier Charges</p>
+                <p className="text-[10px] text-text-muted mt-1">Net = Gross − Commission − Courier − Xelgo Service Fee − Return Deductions</p>
               </div>
               <div className="pt-3 border-t border-border space-y-2">
                 <div className="flex justify-between text-sm">
@@ -512,9 +639,9 @@ export default function SellerPayoutsPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {[
               { step: '1', title: 'Order Delivered', desc: 'Customer receives the product and delivery is confirmed', icon: Package },
-              { step: '2', title: '7-Day Hold', desc: 'Funds are held for return/refund window protection', icon: Clock },
-              { step: '3', title: 'Settlement Calculated', desc: 'Platform commission & Xelgo courier charges are deducted', icon: Percent },
-              { step: '4', title: 'Payout Released', desc: 'Net amount transferred to your bank via Axis Bank / Cashfree / PayU', icon: Banknote },
+              { step: '2', title: '7 Business-Day Hold', desc: 'Funds are held for the return window (Sundays + holidays excluded)', icon: Clock },
+              { step: '3', title: 'Wallet Credited', desc: 'On day 7, Net = Gross − Commission − ₹30 Xelgo fee is credited to your wallet', icon: Percent },
+              { step: '4', title: 'Withdraw', desc: 'Request payout to your verified bank via Axis / Cashfree / PayU', icon: Banknote },
             ].map((item) => (
               <div key={item.step} className="flex gap-3">
                 <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary-600 text-white text-sm font-bold flex items-center justify-center">{item.step}</div>

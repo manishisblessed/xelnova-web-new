@@ -9,6 +9,7 @@ import { cn, formatCurrency, priceInclusiveOfGst } from '@xelnova/utils';
 import type { Product } from '@/lib/data/products';
 import { useCartStore } from '@/lib/store/cart-store';
 import { useWishlistStore } from '@/lib/store/wishlist-store';
+import { useFreeShippingMin } from '@/lib/api';
 
 interface StoreProductCardEnhancedProps {
   product: Product;
@@ -84,6 +85,11 @@ export const StoreProductCardEnhanced = memo(function StoreProductCardEnhanced({
   const variantSummary = getVariantSummary(product.variants);
   const variantImages = getVariantImages(product.variants);
   const hasVariants = variantImages.length > 0;
+  // Driven by admin → Settings → Shipping → "Free Shipping Min (₹)".
+  // 0 = free delivery on every order, so the badge shows on every product.
+  const freeShippingMin = useFreeShippingMin();
+  const qualifiesForFreeDelivery =
+    freeShippingMin <= 0 || product.price >= freeShippingMin;
 
   const handleAddToCart = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -320,7 +326,7 @@ export const StoreProductCardEnhanced = memo(function StoreProductCardEnhanced({
                 )}
               </div>
               
-              {product.price >= 499 && (
+              {qualifiesForFreeDelivery && (
                 <p className="flex items-center gap-1.5 text-[10px] text-emerald-600 font-bold bg-emerald-50 px-2.5 py-1.5 rounded-lg w-fit border border-emerald-100">
                   <Truck className="w-3 h-3 flex-shrink-0" />
                   Free Delivery

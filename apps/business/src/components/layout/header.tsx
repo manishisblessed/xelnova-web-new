@@ -334,8 +334,9 @@ export function Header() {
               href="https://seller.xelnova.in"
               target="_blank"
               rel="noopener noreferrer"
-              className="hover:text-white transition-colors"
+              className="flex items-center gap-1 font-semibold text-amber-300 hover:text-amber-200 transition-colors"
             >
+              <Sparkles size={11} />
               Sell on Xelnova
             </a>
             <span className="text-white/45">|</span>

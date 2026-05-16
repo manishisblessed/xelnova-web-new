@@ -1,0 +1,438 @@
+/* ─────────────────────────────────────────────────────────────────
+ * Xelnova detailed-roadmap print theme.
+ * A4 portrait, multi-page, brand mint accent #11ab3a, with a
+ * diagonal repeating "SHAH WORKS" watermark on every page.
+ *
+ * The watermark uses an SVG `background-image` set on the <html> element
+ * (so it slices cleanly across pages) with `repeat`. Chromium's PDF
+ * print renderer paints this on every page when `printBackground: true`.
+ * ──────────────────────────────────────────────────────────────── */
+
+@page {
+  size: A4 portrait;
+  margin: 16mm 16mm 14mm 16mm;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* ─── Watermark ─────────────────────────────────────────────────── */
+/* Tiled SVG, ~28pt text, rotated -28°, very low opacity green.   */
+
+/* Watermark.
+ *
+ * Chromium's PDF renderer tiles a `body` background-image across every
+ * printed page when `printBackground: true` is passed to `page.pdf()`.
+ * We apply the same image to `html` as well so viewport screenshots
+ * (used for previews) also pick it up.
+ *
+ * The SVG is inlined as a data URL so the document is fully self-contained.
+ */
+html, body {
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="500" height="240" viewBox="0 0 500 240"><g transform="rotate(-28 250 120)"><text x="250" y="130" font-family="Arial, sans-serif" font-size="46" font-weight="800" letter-spacing="6" fill="rgba(17,171,58,0.09)" text-anchor="middle">SHAH WORKS</text><line x1="80" y1="130" x2="220" y2="130" stroke="rgba(17,171,58,0.09)" stroke-width="1.5" /><line x1="280" y1="130" x2="420" y2="130" stroke="rgba(17,171,58,0.09)" stroke-width="1.5" /></g></svg>');
+  background-repeat: repeat;
+  background-size: 500px 240px;
+  background-position: 0 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue",
+    Arial, sans-serif;
+  font-size: 9.6pt;
+  line-height: 1.5;
+  color: #1a1a2e;
+  margin: 0;
+  padding: 0;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+  position: relative;
+}
+
+/* ─── Page break helpers ───────────────────────────────────────── */
+.page-break {
+  page-break-after: always;
+  break-after: page;
+}
+
+/* ─── Cover page ───────────────────────────────────────────────── */
+.cover-page {
+  min-height: 235mm;
+  display: flex;
+  flex-direction: column;
+  page-break-after: always;
+}
+
+.cover-brand {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 4mm;
+  margin-bottom: 22mm;
+  border-bottom: 2pt solid #11ab3a;
+}
+.cover-logo {
+  font-size: 22pt;
+  font-weight: 800;
+  color: #0c831f;
+  letter-spacing: -0.5pt;
+}
+.cover-badge {
+  font-size: 9pt;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1.2pt;
+  color: #0c831f;
+  background: #ecfdf3;
+  padding: 3pt 10pt;
+  border-radius: 999pt;
+  border: 0.7pt solid #a3e8b3;
+}
+
+.cover-headline {
+  margin-bottom: 18mm;
+}
+.cover-headline h1 {
+  font-size: 38pt;
+  font-weight: 800;
+  letter-spacing: -1pt;
+  color: #0c831f;
+  margin: 0 0 2mm 0;
+  line-height: 1.1;
+}
+.cover-headline h2 {
+  font-size: 16pt;
+  font-weight: 500;
+  color: #5a6478;
+  margin: 0;
+  letter-spacing: -0.2pt;
+}
+
+.cover-meta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5mm 12mm;
+  margin-bottom: 18mm;
+}
+.cover-meta > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6mm;
+}
+.cover-meta .meta-k {
+  font-size: 8pt;
+  text-transform: uppercase;
+  letter-spacing: 0.8pt;
+  color: #8d95a5;
+  font-weight: 600;
+}
+.cover-meta .meta-v {
+  font-size: 10.5pt;
+  color: #1a1a2e;
+  font-weight: 500;
+}
+.cover-meta .meta-v.ok::before {
+  content: "● ";
+  color: #11ab3a;
+}
+
+.cover-toc {
+  background: rgba(236, 253, 243, 0.7);
+  border: 0.5pt solid #a3e8b3;
+  border-radius: 3mm;
+  padding: 5mm 6mm;
+  font-size: 10pt;
+  margin-bottom: auto;
+}
+.cover-toc p {
+  margin: 0 0 2mm 0;
+  font-weight: 700;
+  font-size: 10pt;
+  color: #0c831f;
+  text-transform: uppercase;
+  letter-spacing: 0.7pt;
+}
+.cover-toc ol {
+  margin: 0;
+  padding-left: 5mm;
+  list-style: decimal;
+}
+.cover-toc li {
+  margin-bottom: 0.6mm;
+  color: #1a1a2e;
+}
+
+.cover-footer {
+  font-style: italic;
+  color: #5a6478;
+  text-align: center;
+  font-size: 10pt;
+  letter-spacing: 0.4pt;
+  padding-top: 6mm;
+  border-top: 0.4pt solid #cbd5e0;
+  margin-top: 8mm;
+}
+
+/* ─── Headings ────────────────────────────────────────────────── */
+h1 {
+  font-size: 22pt;
+  margin: 0 0 4mm 0;
+  font-weight: 800;
+  color: #0c831f;
+  letter-spacing: -0.4pt;
+}
+
+h2 {
+  font-size: 16pt;
+  margin: 4mm 0 3mm 0;
+  font-weight: 800;
+  color: #1a1a2e;
+  letter-spacing: -0.3pt;
+  position: relative;
+  padding-left: 5mm;
+  border-bottom: 0.6pt solid #cbd5e0;
+  padding-bottom: 1.4mm;
+  break-after: avoid;
+}
+h2::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 1.4mm;
+  bottom: 4mm;
+  width: 2pt;
+  background: #11ab3a;
+  border-radius: 1pt;
+}
+
+h3 {
+  font-size: 12pt;
+  margin: 4mm 0 1.6mm 0;
+  font-weight: 700;
+  color: #0c831f;
+  letter-spacing: -0.1pt;
+  break-after: avoid;
+}
+
+h4 {
+  font-size: 10pt;
+  margin: 3mm 0 1mm 0;
+  font-weight: 700;
+  color: #1a1a2e;
+}
+
+/* ─── Body copy ──────────────────────────────────────────────── */
+p {
+  margin: 0 0 2.4mm 0;
+}
+
+strong {
+  font-weight: 700;
+  color: #0c831f;
+}
+
+code {
+  font-family: "Menlo", "Consolas", monospace;
+  font-size: 8.6pt;
+  background: rgba(241, 245, 249, 0.8);
+  padding: 0.6pt 3pt;
+  border-radius: 2pt;
+  color: #0c831f;
+  border: 0.3pt solid #e2e8f0;
+}
+
+pre {
+  background: #0f172a;
+  color: #cbd5e0;
+  padding: 3mm 4mm;
+  border-radius: 1.6mm;
+  font-family: "Menlo", "Consolas", monospace;
+  font-size: 8.4pt;
+  line-height: 1.45;
+  overflow: hidden;
+  border-left: 3pt solid #11ab3a;
+  margin: 2mm 0 3mm 0;
+  break-inside: avoid;
+}
+pre code {
+  background: transparent;
+  border: none;
+  color: inherit;
+  padding: 0;
+  font-size: inherit;
+}
+
+ul, ol {
+  margin: 0 0 2.4mm 0;
+  padding-left: 5mm;
+}
+li {
+  margin-bottom: 0.6mm;
+}
+
+a {
+  color: #0c831f;
+  text-decoration: none;
+}
+
+hr {
+  border: none;
+  border-top: 0.5pt solid #cbd5e0;
+  margin: 6mm 0;
+}
+
+/* ─── Tables ─────────────────────────────────────────────────── */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1mm 0 3mm 0;
+  font-size: 8.8pt;
+  break-inside: avoid;
+  background: rgba(255, 255, 255, 0.85);
+}
+thead th {
+  background: #ecfdf3;
+  color: #0c831f;
+  font-weight: 700;
+  text-align: left;
+  text-transform: uppercase;
+  letter-spacing: 0.4pt;
+  font-size: 7.8pt;
+  padding: 2mm 2.4mm;
+  border-bottom: 1pt solid #11ab3a;
+}
+tbody td {
+  padding: 1.6mm 2.4mm;
+  border-bottom: 0.4pt solid #e2e8f0;
+  vertical-align: top;
+}
+tbody tr:last-child td {
+  border-bottom: none;
+}
+
+/* Tables without a thead (markdown's "no-header table" pattern) */
+table:not(:has(thead tr)) td {
+  background: rgba(250, 251, 252, 0.85);
+}
+table:not(:has(thead tr)) td:first-child {
+  font-weight: 700;
+  color: #0c831f;
+  width: 32%;
+}
+
+/* ─── Two-column block ───────────────────────────────────────── */
+.two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6mm;
+  margin: 2mm 0 3mm 0;
+}
+.two-col p {
+  font-size: 9.4pt;
+}
+.two-col strong {
+  display: block;
+  font-size: 8.4pt;
+  text-transform: uppercase;
+  letter-spacing: 0.7pt;
+  color: #0c831f;
+  margin-bottom: 0.6mm;
+  font-weight: 700;
+}
+
+/* ─── Diagram blocks ─────────────────────────────────────────── */
+.diagram {
+  margin: 2mm 0 4mm 0;
+  text-align: center;
+  page-break-inside: avoid;
+  break-inside: avoid;
+  background: rgba(255, 255, 255, 0.92);
+  padding: 4mm;
+  border-radius: 2mm;
+  border: 0.4pt solid #e2e8f0;
+}
+.diagram img {
+  max-width: 100%;
+  max-height: 130mm;
+  height: auto;
+  display: inline-block;
+}
+.diagram.tall img {
+  max-height: 210mm;
+}
+
+/* ─── Timeline ─────────────────────────────────────────────── */
+.timeline {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.6mm;
+  margin: 2mm 0 3mm 0;
+  background: rgba(250, 251, 252, 0.92);
+  border: 0.5pt solid #e2e8f0;
+  border-radius: 2mm;
+  padding: 4mm 5mm;
+}
+.t-row {
+  display: grid;
+  grid-template-columns: 24mm 1fr;
+  align-items: start;
+  gap: 5mm;
+  padding: 1.4mm 0;
+  border-bottom: 0.3pt dashed #cbd5e0;
+}
+.t-row:last-child {
+  border-bottom: none;
+}
+.t-week {
+  font-size: 8.6pt;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.7pt;
+  color: #0c831f;
+  background: #ecfdf3;
+  padding: 1.4pt 6pt;
+  border-radius: 999pt;
+  text-align: center;
+}
+.t-task {
+  font-size: 9.4pt;
+  color: #1a1a2e;
+  line-height: 1.5;
+}
+.t-row.launch {
+  background: linear-gradient(90deg, #ecfdf3 0%, transparent 80%);
+  margin: 1.5mm -5mm -4mm -5mm;
+  padding: 3mm 5mm;
+  border-radius: 0 0 2mm 2mm;
+  border-bottom: none;
+}
+.t-row.launch .t-week {
+  background: #11ab3a;
+  color: #fff;
+}
+.t-row.launch .t-task {
+  font-weight: 600;
+}
+
+/* ─── End mark ───────────────────────────────────────────────── */
+.end-mark {
+  text-align: center;
+  margin-top: 8mm;
+  padding-top: 4mm;
+  font-size: 8.6pt;
+  color: #5a6478;
+  letter-spacing: 0.5pt;
+  border-top: 0.5pt solid #cbd5e0;
+}
+.end-mark strong {
+  display: block;
+  font-size: 11pt;
+  color: #0c831f;
+  margin-bottom: 1mm;
+  letter-spacing: 0.2pt;
+}
+
+/* ─── Print niceties ────────────────────────────────────────── */
+h2, h3, h4, .timeline, .two-col, .diagram, table {
+  break-inside: avoid;
+}

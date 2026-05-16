@@ -3,6 +3,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { productsApi, categoriesApi, searchApi } from '@xelnova/api';
 import type { Product as ApiProduct, Category as ApiCategory } from '@xelnova/api';
+
+type MarketplacePolicy = Awaited<ReturnType<typeof productsApi.getMarketplacePolicy>>;
 import type { Product, ProductReview } from './data/products';
 import type { Category } from './data/categories';
 import { FALLBACK_CATEGORIES } from './data/fallback-categories';
@@ -225,6 +227,62 @@ export function useFlashDeals() {
     const products = await deduplicatedFetch('flashDeals', () => productsApi.getFlashDeals());
     return products.map(mapProduct);
   }, []);
+}
+
+/**
+ * Marketplace policy hook — lead time, free-shipping threshold and return
+ * policy used across the storefront. Cached for the session because the
+ * values rarely change and a stale fallback is harmless.
+ */
+let _cachedPolicy: MarketplacePolicy | null = null;
+let _policyPromise: Promise<MarketplacePolicy> | null = null;
+export function useMarketplacePolicy() {
+  return useFetch(async () => {
+    if (_cachedPolicy) return _cachedPolicy;
+    const policy = await deduplicatedFetch('marketplacePolicy', () => productsApi.getMarketplacePolicy());
+    _cachedPolicy = policy;
+    return policy;
+  }, []);
+}
+
+/**
+ * Lightweight hook for components that only need the marketplace
+ * free-shipping threshold (e.g. product cards). Reads the module-level
+ * cache synchronously on every render — once one consumer has triggered
+ * the fetch, every other consumer mounts with the correct value already
+ * in place.
+ *
+ * Convention:
+ *   - `0`  → free shipping on every order (badge shows on every product)
+ *   - `N`  → free shipping at or above ₹N (badge shows when price ≥ N)
+ */
+export function useFreeShippingMin(fallback = 0): number {
+  const [value, setValue] = useState<number>(_cachedPolicy?.freeShippingMin ?? fallback);
+  useEffect(() => {
+    if (_cachedPolicy) {
+      if (_cachedPolicy.freeShippingMin !== value) setValue(_cachedPolicy.freeShippingMin);
+      return;
+    }
+    if (!_policyPromise) {
+      _policyPromise = deduplicatedFetch('marketplacePolicy', () =>
+        productsApi.getMarketplacePolicy(),
+      ).then((p) => {
+        _cachedPolicy = p;
+        return p;
+      });
+    }
+    let active = true;
+    _policyPromise
+      .then((p) => {
+        if (active && p.freeShippingMin !== value) setValue(p.freeShippingMin);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return value;
 }
 
 // ─── Category hooks ───
